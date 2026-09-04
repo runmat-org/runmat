@@ -337,13 +337,17 @@ impl ProcedureStep {
         )
     }
 
-    pub fn thermal_static(step_id: impl Into<String>) -> Self {
+    pub fn thermal_transient(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
             PhysicsFamily::Thermal,
-            AnalysisProcedure::Static,
+            AnalysisProcedure::TransientResponse,
             SolutionSpace::Direct,
-            IndependentDomain::Static,
+            IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end: 1.0,
+            },
             vec![state("thermal", StateKind::Thermal)],
         )
     }
@@ -366,14 +370,17 @@ impl ProcedureStep {
         )
     }
 
-    pub fn electromagnetic_static(step_id: impl Into<String>) -> Self {
+    pub fn electromagnetic_harmonic(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
             PhysicsFamily::Electromagnetic,
-            AnalysisProcedure::Static,
+            AnalysisProcedure::HarmonicResponse,
             SolutionSpace::Direct,
-            IndependentDomain::Static,
-            vec![state("electromagnetic", StateKind::ElectromagneticStatic)],
+            IndependentDomain::FrequencyHertz(vec![60.0]),
+            vec![state(
+                "electromagnetic_complex",
+                StateKind::ElectromagneticComplex,
+            )],
         )
     }
 
@@ -468,5 +475,41 @@ fn state(id: &str, kind: StateKind) -> StateOutput {
         kind,
         completeness: StateCompleteness::Complete,
         persistence: StatePersistence::UntilDependentsComplete,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thermal_template_names_its_transient_equation_and_domain() {
+        let step = ProcedureStep::thermal_transient("thermal");
+        assert_eq!(step.family, PhysicsFamily::Thermal);
+        assert_eq!(step.procedure, AnalysisProcedure::TransientResponse);
+        assert_eq!(
+            step.independent_domain,
+            IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end: 1.0,
+            }
+        );
+        assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);
+    }
+
+    #[test]
+    fn electromagnetic_template_names_harmonic_complex_equation() {
+        let step = ProcedureStep::electromagnetic_harmonic("em");
+        assert_eq!(step.family, PhysicsFamily::Electromagnetic);
+        assert_eq!(step.procedure, AnalysisProcedure::HarmonicResponse);
+        assert_eq!(
+            step.independent_domain,
+            IndependentDomain::FrequencyHertz(vec![60.0])
+        );
+        assert_eq!(
+            step.state_outputs[0].kind,
+            StateKind::ElectromagneticComplex
+        );
     }
 }

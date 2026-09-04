@@ -106,7 +106,7 @@ impl StructuralDofLayout {
         Self { node_sets, rows }
     }
 
-    pub fn legacy_translational_rows(dof_count: usize) -> Self {
+    pub fn reduced_translational_rows(dof_count: usize) -> Self {
         if dof_count == 0 {
             return Self::from_node_sets(Vec::new());
         }
@@ -213,8 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_translational_layout_preserves_existing_row_count() {
-        let layout = StructuralDofLayout::legacy_translational_rows(5);
+    fn reduced_translational_layout_preserves_requested_row_count() {
+        let layout = StructuralDofLayout::reduced_translational_rows(5);
 
         assert_eq!(layout.total_dof_count(), 5);
         assert_eq!(layout.node_count(), 2);

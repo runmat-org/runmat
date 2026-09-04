@@ -1,4 +1,4 @@
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, AnalysisProcedure, FormulationRequirement};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -379,6 +379,7 @@ impl std::fmt::Display for SolverPreconditioner {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaRunResult {
+    pub identity: crate::admission::AnalysisRunIdentity,
     pub requested_backend: ComputeBackend,
     pub execution_backend: ExecutionBackend,
     pub solver_backend: LinearAlgebraBackendKind,
@@ -485,6 +486,7 @@ pub struct FeaContactInterfaceContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub solver_mesh_artifact_path: Option<String>,
@@ -497,6 +499,7 @@ pub struct LinearStaticSolveOptions {
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             solver_mesh_artifact_path: None,
@@ -510,6 +513,7 @@ impl Default for LinearStaticSolveOptions {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
     pub mode_count: usize,
     pub solver_mesh: Option<SolverMeshArtifact>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
@@ -519,6 +523,7 @@ pub struct ModalSolveOptions {
 impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
             mode_count: 3,
             solver_mesh: None,
             thermo_mechanical_context: None,
@@ -603,6 +608,8 @@ pub struct FeaElectromagneticRunResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ElectromagneticSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
+    pub procedure: AnalysisProcedure,
     pub residual_target: f64,
     pub harmonic_tolerance: f64,
     pub harmonic_max_iterations: usize,
@@ -612,6 +619,8 @@ pub struct ElectromagneticSolveOptions {
 impl Default for ElectromagneticSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
+            procedure: AnalysisProcedure::HarmonicResponse,
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
@@ -622,6 +631,8 @@ impl Default for ElectromagneticSolveOptions {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
+    pub procedure: AnalysisProcedure,
     pub step_count: usize,
     pub time_step_s: f64,
     pub residual_target: f64,
@@ -632,6 +643,8 @@ pub struct ThermalSolveOptions {
 impl Default for ThermalSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
+            procedure: AnalysisProcedure::TransientResponse,
             step_count: 10,
             time_step_s: 1.0e-2,
             residual_target: 1.0e-4,
@@ -680,6 +693,10 @@ pub enum FeaRunError {
     InvalidModel(String),
     #[error("FEA_ASSEMBLY_FAILED: {0}")]
     Assembly(String),
+    #[error(transparent)]
+    FormulationAdmission(#[from] crate::admission::FormulationAdmissionRejection),
+    #[error(transparent)]
+    FormulationAvailability(#[from] crate::admission::FormulationAvailabilityRejection),
     #[error("FEA_CANCELLED: execution cancelled by user")]
     Cancelled,
 }

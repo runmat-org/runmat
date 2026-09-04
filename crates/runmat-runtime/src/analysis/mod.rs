@@ -8,12 +8,11 @@ use std::time::Instant;
 use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisBoundary, AnalysisConstraint, AnalysisField,
-    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisRunIdentity,
-    AnalysisSequence, AnalysisValidationError, BoundaryOperator, CoordinateFrame,
-    CoupledPhysicsFamily, EvidenceConfidence, ExcitationAction, FluidConstraint,
-    FluidConstraintKind, FormulationImplementation, MagneticConstraint, MagneticConstraintKind,
-    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
-    PhysicsFamily, PrescribedValue, Pressure, ProcedureStep, RegionTarget, SolutionSpace,
+    AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
+    AnalysisValidationError, BoundaryOperator, CoordinateFrame, CoupledPhysicsFamily,
+    EvidenceConfidence, ExcitationAction, FluidConstraint, FluidConstraintKind, MagneticConstraint,
+    MagneticConstraintKind, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, PhysicsFamily, PrescribedValue, Pressure, ProcedureStep, RegionTarget,
     StructuralConstraint, StructuralConstraintKind, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -28,12 +27,13 @@ use runmat_analysis_fea::{
     fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
     run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
-    ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend, FeaProgressHandler, FeaRunError,
-    FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions, SolverMethod, SolverPreconditioner,
-    ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    AnalysisRunIdentity, ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend,
+    FeaProgressHandler, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions, SolverMethod,
+    SolverPreconditioner, ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PHASE, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, FEA_FIELD_CFD_PRESSURE,
+    FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
@@ -44,7 +44,7 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::operations::{
@@ -73,18 +73,23 @@ use policy::{
 mod contracts;
 mod excitation_authoring;
 mod excitation_query;
+mod execution_dispatch;
+mod execution_error;
 mod fea_document;
 mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
+mod formulation_admission;
 mod mesh_summary;
 pub(crate) mod meshing;
 mod policy;
 mod promotion;
+mod result_policy;
 mod solver_mesh_artifact;
 mod solver_mesh_flow_topology;
 pub mod storage;
 mod study_authoring;
+mod study_execution;
 
 use excitation_authoring::{
     append_constant_excitation, append_electric_potential_history, append_temperature_history,
@@ -94,6 +99,11 @@ use excitation_query::{
     cfd_velocity_scales, electric_potential_scales, has_nonzero_electromagnetic_source,
     pressure_sources, thermo_temperature_scales,
 };
+use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
+use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
+use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
+use result_policy::{classify_run_status, evaluate_production_publication};
+use study_execution::execute_study_step;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -176,20 +186,21 @@ pub use contracts::{
     analysis_runtime_model_template_catalog, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
     AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload,
     AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
-    AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor,
-    AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind, AnalysisFieldLocation,
-    AnalysisFieldPageResult, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
-    AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisModalRunOptions,
-    AnalysisModelTemplate, AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata,
-    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisFieldDescriptor, AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPagingDescriptor,
+    AnalysisFieldRequestOptions, AnalysisFieldStorage, AnalysisFieldStorageRef,
+    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
+    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
+    AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
     AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
-    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
-    AnalysisStudyDiagramObservation, AnalysisStudyIssue, AnalysisStudyPlanData,
-    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
+    AnalysisSolverOptions, AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence,
+    AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation, AnalysisStudyIssue,
+    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
@@ -198,10 +209,11 @@ pub use contracts::{
     ElectroThermalCouplingOptions, ElectromagneticResultsData, FallbackEvent, FallbackReason,
     FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    QualityGate, QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, TransientIntegrationMethod,
-    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
+    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalCouplingOptions,
+    ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
+    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
     ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND, ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION,
@@ -227,6 +239,7 @@ pub use mesh_summary::{
     AnalysisMeshBoundaryRegion, AnalysisMeshPhysicalRegion, AnalysisMeshRegionSummary,
     AnalysisMeshSummary, AnalysisMeshTopologySummary, ANALYSIS_MESH_SUMMARY_SCHEMA_VERSION,
 };
+pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use study_authoring::analysis_author_study_op;
 
@@ -248,26 +261,6 @@ const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "fea.run_study_sweep";
 const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "fea.run_study_sweep/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "fea.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "fea.validate/v1";
-const ANALYSIS_RUN_OPERATION: &str = "fea.run_linear_static";
-const ANALYSIS_RUN_OP_VERSION: &str = "fea.run_linear_static/v1";
-const ANALYSIS_RUN_MODAL_OPERATION: &str = "fea.run_modal";
-const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "fea.run_modal/v1";
-const ANALYSIS_RUN_ACOUSTIC_OPERATION: &str = "fea.run_acoustic";
-const ANALYSIS_RUN_ACOUSTIC_OP_VERSION: &str = "fea.run_acoustic/v1";
-const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "fea.run_transient";
-const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "fea.run_transient/v1";
-const ANALYSIS_RUN_THERMAL_OPERATION: &str = "fea.run_thermal";
-const ANALYSIS_RUN_THERMAL_OP_VERSION: &str = "fea.run_thermal/v1";
-const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "fea.run_nonlinear";
-const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "fea.run_nonlinear/v1";
-const ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION: &str = "fea.run_electromagnetic";
-const ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION: &str = "fea.run_electromagnetic/v1";
-const ANALYSIS_RUN_CFD_OPERATION: &str = "fea.run_cfd";
-const ANALYSIS_RUN_CFD_OP_VERSION: &str = "fea.run_cfd/v1";
-const ANALYSIS_RUN_CHT_OPERATION: &str = "fea.run_cht";
-const ANALYSIS_RUN_CHT_OP_VERSION: &str = "fea.run_cht/v1";
-const ANALYSIS_RUN_FSI_OPERATION: &str = "fea.run_fsi";
-const ANALYSIS_RUN_FSI_OP_VERSION: &str = "fea.run_fsi/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "fea.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "fea.results/v1";
 const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "fea.results_compare";
@@ -275,79 +268,6 @@ const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "fea.results_compare/v1";
 const ANALYSIS_TRENDS_OPERATION: &str = "fea.trends";
 const ANALYSIS_TRENDS_OP_VERSION: &str = "fea.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
-
-fn map_fea_run_error(
-    operation: &str,
-    op_version: &str,
-    default_error_code: &'static str,
-    cancel_error_code: &'static str,
-    model: &AnalysisModel,
-    context: &OperationContext,
-    err: FeaRunError,
-) -> OperationErrorEnvelope {
-    match err {
-        FeaRunError::Cancelled => operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: cancel_error_code,
-                error_type: OperationErrorType::Cancelled,
-                retryable: false,
-                severity: OperationErrorSeverity::Warning,
-            },
-            "FEA run cancelled by user",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ),
-        FeaRunError::InvalidModel(message) => operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: default_error_code,
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            message,
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ),
-        FeaRunError::Assembly(message) => operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: assembly_error_code(operation),
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            message,
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
-        ),
-    }
-}
-
-fn assembly_error_code(operation: &str) -> &'static str {
-    match operation {
-        ANALYSIS_RUN_MODAL_OPERATION => "RM.FEA.RUN_MODAL.ASSEMBLY_FAILED",
-        ANALYSIS_RUN_CHT_OPERATION => "RM.FEA.RUN_CHT.ASSEMBLY_FAILED",
-        ANALYSIS_RUN_THERMAL_OPERATION => "RM.FEA.RUN_THERMAL.ASSEMBLY_FAILED",
-        ANALYSIS_RUN_TRANSIENT_OPERATION => "RM.FEA.RUN_TRANSIENT.ASSEMBLY_FAILED",
-        ANALYSIS_RUN_NONLINEAR_OPERATION => "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED",
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION => "RM.FEA.RUN_ELECTROMAGNETIC.ASSEMBLY_FAILED",
-        _ => "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
-    }
-}
 
 fn reject_moment_loads_for_run_family(
     model: &AnalysisModel,
@@ -557,7 +477,7 @@ pub fn analysis_create_model_op(
     }
     if matches!(
         intent.template,
-        AnalysisModelTemplate::ElectromagneticStatic | AnalysisModelTemplate::ElectroThermalCoupled
+        AnalysisModelTemplate::ElectromagneticHarmonic
     ) {
         for material in &mut inferred_materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel::default());
@@ -588,29 +508,13 @@ pub fn analysis_create_model_op(
                 AnalysisProcedure::TransientResponse,
             )],
         ),
-        AnalysisModelTemplate::ElectroThermalCoupled => (
-            magnetic_ground_condition("bc_default_electro_thermal_ground", fixed_region_id),
-            Some((
-                "excitation_default_electro_thermal_current",
-                ConstantExcitation::ElectricCurrent {
-                    real_amperes: 50.0,
-                    imaginary_amperes: 0.0,
-                    frequency_hz: Some(60.0),
-                },
-            )),
-            vec![ProcedureStep::coupled(
-                "step_default_electro_thermal",
-                CoupledPhysicsFamily::Electrothermal,
-                AnalysisProcedure::TransientResponse,
-            )],
-        ),
-        AnalysisModelTemplate::ThermalStandalone => (
+        AnalysisModelTemplate::ThermalTransient => (
             fixed_condition("bc_default_fixed", fixed_region_id),
             Some((
                 "excitation_default_heat_generation",
                 ConstantExcitation::HeatGeneration(1.0),
             )),
-            vec![ProcedureStep::thermal_static(
+            vec![ProcedureStep::thermal_transient(
                 "step_default_thermal".to_string(),
             )],
         ),
@@ -651,17 +555,17 @@ pub fn analysis_create_model_op(
                 "step_default_nonlinear".to_string(),
             )],
         ),
-        AnalysisModelTemplate::ElectromagneticStatic => (
+        AnalysisModelTemplate::ElectromagneticHarmonic => (
             magnetic_ground_condition("bc_default_em_ground", fixed_region_id),
             Some((
                 "excitation_default_em_current",
                 ConstantExcitation::ElectricCurrent {
                     real_amperes: 100.0,
                     imaginary_amperes: 0.0,
-                    frequency_hz: None,
+                    frequency_hz: Some(60.0),
                 },
             )),
-            vec![ProcedureStep::electromagnetic_static(
+            vec![ProcedureStep::electromagnetic_harmonic(
                 "step_default_electromagnetic".to_string(),
             )],
         ),
@@ -741,7 +645,7 @@ pub fn analysis_create_model_op(
         _ => None,
     };
     let electromagnetic = match intent.template {
-        AnalysisModelTemplate::ElectromagneticStatic => {
+        AnalysisModelTemplate::ElectromagneticHarmonic => {
             Some(runmat_analysis_core::ElectromagneticDomain {
                 enabled: true,
                 reference_frequency_hz: 60.0,
@@ -762,7 +666,7 @@ pub fn analysis_create_model_op(
                 temperature_signal_id: None,
             })
         }
-        AnalysisModelTemplate::ThermalStandalone => {
+        AnalysisModelTemplate::ThermalTransient => {
             Some(runmat_analysis_core::ThermoMechanicalDomain {
                 enabled: true,
                 reference_temperature_k: 293.15,
@@ -784,18 +688,7 @@ pub fn analysis_create_model_op(
         }),
         _ => None,
     };
-    let electro_thermal = match intent.template {
-        AnalysisModelTemplate::ElectroThermalCoupled => {
-            Some(runmat_analysis_core::ElectroThermalDomain {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_voltage_v: 24.0,
-                region_conductivity_scales: Vec::new(),
-                electric_potential_signal_id: None,
-            })
-        }
-        _ => None,
-    };
+    let electro_thermal = None;
 
     let mut conditions = vec![default_bc];
     if matches!(
@@ -973,7 +866,24 @@ pub fn analysis_validate_study_op(
     spec: &AnalysisStudySpec,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
-    let issue_codes = validate_study_issue_codes(spec);
+    let mut issue_codes = validate_study_issue_codes(spec);
+    if spec.model.is_none()
+        && !issue_codes.iter().any(|code| {
+            matches!(
+                code.as_str(),
+                "RM.FEA.STUDY.GEOMETRY_MESHES_EMPTY"
+                    | "RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED"
+                    | "RM.FEA.STUDY.MODEL_ID_EMPTY"
+            )
+        })
+    {
+        let model = resolve_study_model(spec, &context)?;
+        if spec.execution.validate_against(&model.sequence).is_err() {
+            issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
+        }
+    }
+    issue_codes.sort();
+    issue_codes.dedup();
     let issues: Vec<AnalysisStudyIssue> = issue_codes
         .iter()
         .map(|code| AnalysisStudyIssue {
@@ -992,7 +902,7 @@ pub fn analysis_validate_study_op(
             "valid": issue_codes.is_empty(),
             "issue_codes": issue_codes.clone(),
             "issues": issues.clone(),
-            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
+            "execution": spec.execution,
         }),
     )
     .map_err(|err| {
@@ -1043,10 +953,48 @@ pub fn analysis_plan_study_op(
             BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
         ));
     }
+    if spec.execution.steps.len() != 1 {
+        return Err(single_step_executor_error(
+            ANALYSIS_PLAN_STUDY_OPERATION,
+            ANALYSIS_PLAN_STUDY_OP_VERSION,
+            "RM.FEA.PLAN_STUDY.MULTI_STEP_UNSUPPORTED",
+            spec,
+            &context,
+        ));
+    }
 
     let study_fingerprint = study_fingerprint(spec);
-    let run_operation = run_operation_for_kind(spec.run_kind).to_string();
-    let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
+    let model = resolve_study_model(spec, &context)?;
+    spec.execution
+        .validate_against(&model.sequence)
+        .map_err(|message| {
+            operation_error(
+                ANALYSIS_PLAN_STUDY_OPERATION,
+                ANALYSIS_PLAN_STUDY_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.PLAN_STUDY.INVALID_EXECUTION",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message,
+                BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
+            )
+        })?;
+    let execution = spec
+        .execution
+        .steps
+        .first()
+        .expect("validated single-step study must have one execution entry");
+    let procedure_step = spec
+        .execution
+        .procedure_step(&model.sequence, execution)
+        .expect("validated execution plan must resolve its procedure step");
+    let operation = execution_operation(execution, procedure_step)
+        .expect("resolved execution must select a supported solver operation");
+    let run_operation = operation.name().to_string();
+    let run_op_version = operation.version().to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -1055,9 +1003,8 @@ pub fn analysis_plan_study_op(
             "schema_version": "fea_study_plan_artifact/v1",
             "study_id": spec.study_id.clone(),
             "model_id": spec.create_model_intent.model_id.clone(),
-            "run_kind": spec.run_kind,
-            "backend": spec.backend,
-            "run_options": study_run_options_json(spec),
+            "procedure_step": procedure_step,
+            "execution": execution,
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
             "run_operation": run_operation.clone(),
@@ -1086,10 +1033,8 @@ pub fn analysis_plan_study_op(
         AnalysisStudyPlanData {
             study_id: spec.study_id.clone(),
             model_id: spec.create_model_intent.model_id.clone(),
-            run_kind: spec.run_kind,
-            backend: spec.backend,
-            electromagnetic_run_options: spec.electromagnetic_run_options.clone(),
-            run_options: study_run_options_json(spec),
+            procedure_step: procedure_step.clone(),
+            execution: execution.clone(),
             operation_sequence,
             run_operation,
             run_op_version,
@@ -1119,22 +1064,48 @@ pub fn analysis_run_study_op(
             BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
         ));
     }
+    if spec.execution.steps.len() != 1 {
+        return Err(single_step_executor_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            "RM.FEA.RUN_STUDY.MULTI_STEP_UNSUPPORTED",
+            spec,
+            &context,
+        ));
+    }
 
     let study_fingerprint = study_fingerprint(spec);
-    let run_operation = run_operation_for_kind(spec.run_kind).to_string();
-    let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
-    let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let mut model = match &spec.model {
-        Some(model) => model.clone(),
-        None => {
-            analysis_create_model_op(
-                &spec.geometry,
-                spec.create_model_intent.clone(),
-                context.clone(),
-            )?
-            .data
-        }
-    };
+    let mut model = resolve_study_model(spec, &context)?;
+    spec.execution
+        .validate_against(&model.sequence)
+        .map_err(|message| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.INVALID_EXECUTION",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message,
+                BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
+            )
+        })?;
+    let authored_execution = spec
+        .execution
+        .steps
+        .first()
+        .expect("validated single-step study must have one execution entry");
+    let procedure_step = spec
+        .execution
+        .procedure_step(&model.sequence, authored_execution)
+        .expect("validated execution plan must resolve its procedure step")
+        .clone();
+    let planned_operation = execution_operation(authored_execution, &procedure_step)
+        .expect("resolved execution must select a supported solver operation");
+    let operation_sequence = study_operation_sequence(spec, planned_operation.version());
     let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
         operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
@@ -1159,145 +1130,93 @@ pub fn analysis_run_study_op(
         context.clone(),
     )?;
     meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
-    let (run_envelope, resolved_run_options, resolved_electromagnetic_run_options) =
-        match spec.run_kind {
-            AnalysisRunKind::LinearStatic => {
-                let mut options = spec.linear_static_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let initial_run = analysis_run_linear_static_with_options(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((initial_run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Modal => {
-                let mut options = spec.modal_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_modal_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Acoustic => {
-                let options = spec.acoustic_run_options.clone().unwrap_or_default();
-                let run = analysis_run_acoustic_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Thermal => {
-                let mut options = spec.thermal_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_thermal_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Transient => {
-                let mut options = spec.transient_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_transient_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Cfd => {
-                let mut options = spec.cfd_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_cfd_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Cht => {
-                let mut options = spec.cht_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_cht_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Fsi => {
-                let mut options = spec.fsi_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_fsi_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Nonlinear => {
-                let mut options = spec.nonlinear_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_nonlinear_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), None))
-            }
-            AnalysisRunKind::Electromagnetic => {
-                let mut options = spec.electromagnetic_run_options.clone().unwrap_or_default();
-                attach_solver_mesh_artifact_path(
-                    &mut options.solver_mesh_artifact_path,
-                    solver_mesh_artifact_path.as_deref(),
-                );
-                let run = analysis_run_electromagnetic_with_options_op(
-                    &model,
-                    spec.backend,
-                    options.clone(),
-                    context.clone(),
-                )?;
-                Ok((run, run_options_to_json(&options), Some(options)))
-            }
-        }?;
+    let (run_envelope, resolved_solver_options) = execute_study_step(
+        &model,
+        authored_execution,
+        solver_mesh_artifact_path.as_deref(),
+        &context,
+    )?;
+    let actual_identity = &run_envelope.data.run.identity;
+    if actual_identity.family() != procedure_step.family
+        || actual_identity.procedure() != procedure_step.procedure
+        || actual_identity.solution_space() != procedure_step.solution_space
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.RESULT_IDENTITY_MISMATCH",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "solver result identity does not match the requested procedure step",
+            BTreeMap::from([
+                (
+                    "requested_identity".to_string(),
+                    format!("{procedure_step:?}"),
+                ),
+                (
+                    "actual_identity".to_string(),
+                    format!("{actual_identity:?}"),
+                ),
+            ]),
+        ));
+    }
+    let run_operation = run_envelope.operation.clone();
+    let run_op_version = run_envelope.op_version.clone();
+    let expected_operation = run_operation_for_identity(actual_identity).ok_or_else(|| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.RESULT_IDENTITY_UNSUPPORTED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "solver returned an admitted identity without a runtime operation",
+            BTreeMap::from([(
+                "actual_identity".to_string(),
+                format!("{actual_identity:?}"),
+            )]),
+        )
+    })?;
+    if run_operation != expected_operation.name() || run_op_version != expected_operation.version()
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.OPERATION_IDENTITY_MISMATCH",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "solver operation name or version does not match the result identity",
+            BTreeMap::from([
+                ("run_operation".to_string(), run_operation.clone()),
+                ("run_op_version".to_string(), run_op_version.clone()),
+                (
+                    "identity_operation".to_string(),
+                    expected_operation.name().to_string(),
+                ),
+                (
+                    "identity_op_version".to_string(),
+                    expected_operation.version().to_string(),
+                ),
+            ]),
+        ));
+    }
+    let resolved_execution = AnalysisExecutionStep {
+        step_id: authored_execution.step_id.clone(),
+        backend: authored_execution.backend,
+        requirement: authored_execution.requirement,
+        solver_options: resolved_solver_options,
+    };
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
         "run",
@@ -1306,22 +1225,23 @@ pub fn analysis_run_study_op(
             "study_id": spec.study_id.clone(),
             "model_id": model.model_id.0.clone(),
             "model_template": spec.create_model_intent.template,
-            "run_kind": spec.run_kind,
-            "backend": spec.backend,
+            "procedure_step": procedure_step,
+            "execution": resolved_execution,
+            "identity": run_envelope.data.run.identity.clone(),
             "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
             "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
-            "run_options": resolved_run_options.clone(),
-            "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
             "run_operation": run_operation.clone(),
             "run_op_version": run_op_version.clone(),
             "run_id": run_envelope.data.run_id.clone(),
             "run_status": run_envelope.data.run_status,
-            "publishable": run_envelope.data.publishable,
+            "numerically_acceptable": run_envelope.data.numerically_acceptable,
+            "production_publishable": run_envelope.data.production_publishable,
             "solver_convergence": run_envelope.data.solver_convergence,
             "result_quality": run_envelope.data.result_quality,
             "quality_reasons": run_envelope.data.quality_reasons.clone(),
+            "production_publication_reasons": run_envelope.data.production_publication_reasons.clone(),
             "provenance": run_envelope.data.provenance.clone(),
         }),
     )
@@ -1352,22 +1272,23 @@ pub fn analysis_run_study_op(
             study_id: spec.study_id.clone(),
             model_id: model.model_id.0.clone(),
             model_template: spec.create_model_intent.template,
-            run_kind: spec.run_kind,
-            backend: spec.backend,
-            electromagnetic_run_options: resolved_electromagnetic_run_options,
+            procedure_step,
+            execution: resolved_execution,
+            identity: run_envelope.data.run.identity.clone(),
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
-            run_options: resolved_run_options,
             study_fingerprint,
             operation_sequence,
             run_operation,
             run_op_version,
             run_id: run_envelope.data.run_id,
             run_status: run_envelope.data.run_status,
-            publishable: run_envelope.data.publishable,
+            numerically_acceptable: run_envelope.data.numerically_acceptable,
+            production_publishable: run_envelope.data.production_publishable,
             solver_convergence: run_envelope.data.solver_convergence,
             result_quality: run_envelope.data.result_quality,
             quality_reasons: run_envelope.data.quality_reasons,
+            production_publication_reasons: run_envelope.data.production_publication_reasons,
             provenance: run_envelope.data.provenance,
             evidence_artifact_path,
         },
@@ -1442,10 +1363,8 @@ pub fn analysis_plan_study_sweep_op(
         plan_entries.push(AnalysisStudySweepPlanEntry {
             study_id: planned.data.study_id,
             model_id: planned.data.model_id,
-            run_kind: planned.data.run_kind,
-            backend: planned.data.backend,
-            electromagnetic_run_options: planned.data.electromagnetic_run_options,
-            run_options: planned.data.run_options,
+            procedure_step: planned.data.procedure_step,
+            execution: planned.data.execution,
             operation_sequence: planned.data.operation_sequence,
             run_operation: planned.data.run_operation,
             run_op_version: planned.data.run_op_version,
@@ -1706,10 +1625,14 @@ pub fn analysis_run_study_sweep_op(
         };
         run_entries.push(AnalysisStudySweepRunEntry {
             study_id: run.data.study_id,
-            run_kind: run.data.run_kind,
+            procedure_step: run.data.procedure_step,
+            execution: run.data.execution,
+            identity: run.data.identity,
             run_id: run.data.run_id,
             run_status: run.data.run_status,
-            publishable: run.data.publishable,
+            numerically_acceptable: run.data.numerically_acceptable,
+            production_publishable: run.data.production_publishable,
+            production_publication_reasons: run.data.production_publication_reasons,
             run_operation: run.data.run_operation,
             run_op_version: run.data.run_op_version,
         });
@@ -1817,7 +1740,13 @@ pub fn analysis_run_linear_static_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_options(model, backend, AnalysisRunOptions::default(), context)
+    analysis_run_linear_static_with_options(
+        model,
+        backend,
+        FormulationRequirement::Production,
+        AnalysisRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_modal_op(
@@ -1825,7 +1754,13 @@ pub fn analysis_run_modal_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_modal_with_options_op(model, backend, AnalysisModalRunOptions::default(), context)
+    analysis_run_modal_with_options_op(
+        model,
+        backend,
+        FormulationRequirement::Production,
+        AnalysisModalRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_acoustic_op(
@@ -1836,6 +1771,7 @@ pub fn analysis_run_acoustic_op(
     analysis_run_acoustic_with_options_op(
         model,
         backend,
+        FormulationRequirement::Production,
         AnalysisAcousticRunOptions::default(),
         context,
     )
@@ -1844,6 +1780,7 @@ pub fn analysis_run_acoustic_op(
 pub fn analysis_run_modal_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisModalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -1854,8 +1791,8 @@ pub fn analysis_run_modal_with_options_op(
     });
     if !has_modal_step {
         return Err(operation_error(
-            ANALYSIS_RUN_MODAL_OPERATION,
-            ANALYSIS_RUN_MODAL_OP_VERSION,
+            AnalysisOperation::Modal.name(),
+            AnalysisOperation::Modal.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_MODAL.INVALID_MODEL",
@@ -1873,8 +1810,8 @@ pub fn analysis_run_modal_with_options_op(
 
     if options.mode_count == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_MODAL_OPERATION,
-            ANALYSIS_RUN_MODAL_OP_VERSION,
+            AnalysisOperation::Modal.name(),
+            AnalysisOperation::Modal.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
@@ -1890,15 +1827,15 @@ pub fn analysis_run_modal_with_options_op(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_MODAL_OPERATION,
-        ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisOperation::Modal.name(),
+        AnalysisOperation::Modal.version(),
         &context,
     )?;
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_MODAL_OPERATION,
-                ANALYSIS_RUN_MODAL_OP_VERSION,
+                AnalysisOperation::Modal.name(),
+                AnalysisOperation::Modal.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
@@ -1915,13 +1852,12 @@ pub fn analysis_run_modal_with_options_op(
     if let Some(electro_options) = electro_options.as_ref() {
         if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_MODAL_OPERATION,
-                ANALYSIS_RUN_MODAL_OP_VERSION,
+                AnalysisOperation::Modal.name(),
+                AnalysisOperation::Modal.version(),
                 &context,
                 OperationErrorSpec {
-                    error_code: electro_thermal_invalid_options_error_code(
-                        ANALYSIS_RUN_MODAL_OPERATION,
-                    ),
+                    error_code: AnalysisOperation::Modal
+                        .invalid_electro_thermal_options_error_code(),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -1935,8 +1871,8 @@ pub fn analysis_run_modal_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_MODAL_OPERATION,
-        ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisOperation::Modal.name(),
+        AnalysisOperation::Modal.version(),
         "RM.FEA.RUN_MODAL.SOLVER_MESH_INVALID",
         &context,
     )?;
@@ -1944,23 +1880,14 @@ pub fn analysis_run_modal_with_options_op(
         model,
         backend,
         ModalSolveOptions {
+            formulation_requirement,
             mode_count: options.mode_count,
             solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_MODAL_OPERATION,
-            ANALYSIS_RUN_MODAL_OP_VERSION,
-            "RM.FEA.RUN_MODAL.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_MODAL.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
 
     let mut run = modal_run.run;
     let mut fallback_events = Vec::new();
@@ -2048,7 +1975,7 @@ pub fn analysis_run_modal_with_options_op(
 
     let frequency_basis = ModalFrequencyBasis::NativeEigenSolve;
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -2069,13 +1996,9 @@ pub fn analysis_run_modal_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -2085,11 +2008,6 @@ pub fn analysis_run_modal_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: structural_run_identity(
-            model,
-            AnalysisProcedure::ModalExtraction,
-            FormulationImplementation::LinearizedStructuralModes,
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: Some(ModalResultsData {
@@ -2108,8 +2026,10 @@ pub fn analysis_run_modal_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -2127,12 +2047,13 @@ pub fn analysis_run_modal_with_options_op(
 
     if let Some(nonlinear) = result.nonlinear_results.as_ref() {
         let event = format!(
-            "fea.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
+            "fea.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} numerically_acceptable={} production_publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
             result.run_id,
             model.model_id.0,
             backend,
             result.run_status,
-            result.publishable,
+            result.numerically_acceptable,
+            result.production_publishable,
             nonlinear.failed_increments,
             nonlinear
                 .iteration_counts
@@ -2165,16 +2086,16 @@ pub fn analysis_run_modal_with_options_op(
     }
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_MODAL_OPERATION,
-        ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisOperation::Modal.name(),
+        AnalysisOperation::Modal.version(),
         "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_MODAL_OPERATION,
-        ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisOperation::Modal.name(),
+        AnalysisOperation::Modal.version(),
         &context,
         result,
     ))
@@ -2183,6 +2104,7 @@ pub fn analysis_run_modal_with_options_op(
 pub fn analysis_run_acoustic_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisAcousticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2193,8 +2115,8 @@ pub fn analysis_run_acoustic_with_options_op(
     });
     if !has_acoustic_harmonic_step {
         return Err(operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_MODEL",
@@ -2215,8 +2137,8 @@ pub fn analysis_run_acoustic_with_options_op(
         .any(|material| material.acoustic.is_some())
     {
         return Err(operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_MATERIAL",
@@ -2236,8 +2158,8 @@ pub fn analysis_run_acoustic_with_options_op(
     }
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        AnalysisOperation::Acoustic.name(),
+        AnalysisOperation::Acoustic.version(),
         "RM.FEA.RUN_ACOUSTIC.INVALID_ACOUSTIC_SOURCE",
         "acoustic",
         &context,
@@ -2247,8 +2169,8 @@ pub fn analysis_run_acoustic_with_options_op(
         .any(|(_, magnitude)| magnitude.is_finite() && magnitude.abs() > 0.0)
     {
         return Err(operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_SOURCE",
@@ -2275,8 +2197,8 @@ pub fn analysis_run_acoustic_with_options_op(
         )
     }) {
         return Err(operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ACOUSTIC.MISSING_ACOUSTIC_BOUNDARY",
@@ -2297,8 +2219,8 @@ pub fn analysis_run_acoustic_with_options_op(
 
     if options.mode_count == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ACOUSTIC_OPERATION,
-            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
@@ -2314,15 +2236,15 @@ pub fn analysis_run_acoustic_with_options_op(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        AnalysisOperation::Acoustic.name(),
+        AnalysisOperation::Acoustic.version(),
         &context,
     )?;
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_ACOUSTIC_OPERATION,
-                ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+                AnalysisOperation::Acoustic.name(),
+                AnalysisOperation::Acoustic.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
@@ -2339,13 +2261,12 @@ pub fn analysis_run_acoustic_with_options_op(
     if let Some(electro_options) = electro_options.as_ref() {
         if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_ACOUSTIC_OPERATION,
-                ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+                AnalysisOperation::Acoustic.name(),
+                AnalysisOperation::Acoustic.version(),
                 &context,
                 OperationErrorSpec {
-                    error_code: electro_thermal_invalid_options_error_code(
-                        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-                    ),
+                    error_code: AnalysisOperation::Acoustic
+                        .invalid_electro_thermal_options_error_code(),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -2358,10 +2279,21 @@ pub fn analysis_run_acoustic_with_options_op(
 
     let render_topology = None;
 
+    let identity = admit_runtime_proxy_for_operation(
+        PhysicsFamily::Acoustic,
+        AnalysisProcedure::HarmonicResponse,
+        formulation_requirement,
+        RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
+        AnalysisOperation::Acoustic,
+        model,
+        &context,
+    )?;
+
     let solve_start = Instant::now();
     let mut run = solve_acoustic_harmonic(
         model,
         backend,
+        identity,
         options.mode_count,
         options.residual_warn_threshold,
     );
@@ -2434,7 +2366,7 @@ pub fn analysis_run_acoustic_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -2449,13 +2381,9 @@ pub fn analysis_run_acoustic_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -2465,12 +2393,6 @@ pub fn analysis_run_acoustic_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Acoustic,
-            AnalysisProcedure::HarmonicResponse,
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedAcousticHelmholtz],
-        ),
         run,
         render_topology,
         modal_results: None,
@@ -2482,8 +2404,10 @@ pub fn analysis_run_acoustic_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -2500,16 +2424,16 @@ pub fn analysis_run_acoustic_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        AnalysisOperation::Acoustic.name(),
+        AnalysisOperation::Acoustic.version(),
         "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        AnalysisOperation::Acoustic.name(),
+        AnalysisOperation::Acoustic.version(),
         &context,
         result,
     ))
@@ -2518,6 +2442,7 @@ pub fn analysis_run_acoustic_with_options_op(
 fn solve_acoustic_harmonic(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    identity: AnalysisRunIdentity,
     mode_count: usize,
     residual_warn_threshold: f64,
 ) -> FeaRunResult {
@@ -2659,6 +2584,7 @@ fn solve_acoustic_harmonic(
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     };
     FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -4433,6 +4359,7 @@ fn solve_cfd_finite_volume_run(
     model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
     backend: ComputeBackend,
+    identity: AnalysisRunIdentity,
     options: &AnalysisCfdRunOptions,
     solver_mesh: Option<&SolverMeshArtifact>,
 ) -> FeaRunResult {
@@ -4475,6 +4402,7 @@ fn solve_cfd_finite_volume_run(
         runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     };
     FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -5817,6 +5745,7 @@ pub fn analysis_run_transient_op(
     analysis_run_transient_with_options_op(
         model,
         backend,
+        FormulationRequirement::Production,
         AnalysisTransientRunOptions::default(),
         context,
     )
@@ -5827,25 +5756,39 @@ pub fn analysis_run_cfd_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cfd_with_options_op(model, backend, AnalysisCfdRunOptions::default(), context)
+    analysis_run_cfd_with_options_op(
+        model,
+        backend,
+        FormulationRequirement::Production,
+        AnalysisCfdRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_cfd_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisCfdRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_cfd_step = model
+    let cfd_steps = model
         .sequence
         .steps
         .iter()
-        .any(|step| step.family == PhysicsFamily::Fluid);
-    if !has_cfd_step {
+        .filter(|step| {
+            step.family == PhysicsFamily::Fluid
+                && matches!(
+                    step.procedure,
+                    AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
+                )
+        })
+        .collect::<Vec<_>>();
+    let [cfd_step] = cfd_steps.as_slice() else {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_MODEL",
@@ -5853,18 +5796,19 @@ pub fn analysis_run_cfd_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one cfd step for fea.run_cfd",
+            "FEA model must include exactly one supported cfd step for fea.run_cfd",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ));
-    }
+    };
+    let cfd_procedure = cfd_step.procedure;
 
     let Some(cfd_domain) = model.cfd.as_ref() else {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_MODEL",
@@ -5876,11 +5820,36 @@ pub fn analysis_run_cfd_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
+    let expected_cfd_procedure = match cfd_domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
+        runmat_analysis_core::CfdSolveFamily::Transient => AnalysisProcedure::TransientResponse,
+    };
+    if cfd_procedure != expected_cfd_procedure {
+        return Err(operation_error(
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CFD.PROCEDURE_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "cfd procedure step does not match model.cfd.solve_family",
+            BTreeMap::from([
+                ("procedure".to_string(), format!("{cfd_procedure:?}")),
+                (
+                    "expected_procedure".to_string(),
+                    format!("{expected_cfd_procedure:?}"),
+                ),
+            ]),
+        ));
+    }
 
     if !cfd_domain.enabled {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -5896,8 +5865,8 @@ pub fn analysis_run_cfd_with_options_op(
         || cfd_domain.reference_density_kg_per_m3 <= 0.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -5914,8 +5883,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -5932,8 +5901,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -5953,8 +5922,8 @@ pub fn analysis_run_cfd_with_options_op(
         || cfd_domain.turbulence_intensity > 1.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -5971,16 +5940,16 @@ pub fn analysis_run_cfd_with_options_op(
     }
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_CFD_OPERATION,
-        ANALYSIS_RUN_CFD_OP_VERSION,
+        AnalysisOperation::Cfd.name(),
+        AnalysisOperation::Cfd.version(),
         "RM.FEA.RUN_CFD.INVALID_LOAD",
         "CFD",
         &context,
     )?;
     if let Err(detail) = validate_authored_cfd_boundary_conditions(model) {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS",
@@ -5998,8 +5967,8 @@ pub fn analysis_run_cfd_with_options_op(
 
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -6013,8 +5982,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if options.step_count == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -6028,8 +5997,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if options.max_linear_iters == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -6046,8 +6015,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -6061,8 +6030,8 @@ pub fn analysis_run_cfd_with_options_op(
     }
     if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CFD_OPERATION,
-            ANALYSIS_RUN_CFD_OP_VERSION,
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
@@ -6081,14 +6050,32 @@ pub fn analysis_run_cfd_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_CFD_OPERATION,
-        ANALYSIS_RUN_CFD_OP_VERSION,
+        AnalysisOperation::Cfd.name(),
+        AnalysisOperation::Cfd.version(),
         "RM.FEA.RUN_CFD.SOLVER_MESH_INVALID",
         &context,
     )?;
+    let identity = admit_runtime_proxy_for_operation(
+        PhysicsFamily::Fluid,
+        cfd_procedure,
+        formulation_requirement,
+        RuntimeProxyFormulation::Domain {
+            topology: RuntimeDomainTopology::from_solver_mesh(solver_mesh.as_ref()),
+            source: RuntimeDomainSource::OrdinalProfile,
+        },
+        AnalysisOperation::Cfd,
+        model,
+        &context,
+    )?;
     let solve_start = Instant::now();
-    let mut run =
-        solve_cfd_finite_volume_run(model, cfd_domain, backend, &options, solver_mesh.as_ref());
+    let mut run = solve_cfd_finite_volume_run(
+        model,
+        cfd_domain,
+        backend,
+        identity,
+        &options,
+        solver_mesh.as_ref(),
+    );
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -6203,7 +6190,7 @@ pub fn analysis_run_cfd_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -6216,13 +6203,9 @@ pub fn analysis_run_cfd_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -6232,17 +6215,6 @@ pub fn analysis_run_cfd_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Fluid,
-            match cfd_domain.solve_family {
-                runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
-                runmat_analysis_core::CfdSolveFamily::Transient => {
-                    AnalysisProcedure::TransientResponse
-                }
-            },
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedIncompressibleFlow],
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -6254,8 +6226,10 @@ pub fn analysis_run_cfd_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -6272,16 +6246,16 @@ pub fn analysis_run_cfd_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_CFD_OPERATION,
-        ANALYSIS_RUN_CFD_OP_VERSION,
+        AnalysisOperation::Cfd.name(),
+        AnalysisOperation::Cfd.version(),
         "RM.FEA.RUN_CFD.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_CFD_OPERATION,
-        ANALYSIS_RUN_CFD_OP_VERSION,
+        AnalysisOperation::Cfd.name(),
+        AnalysisOperation::Cfd.version(),
         &context,
         result,
     ))
@@ -6295,6 +6269,7 @@ pub fn analysis_run_thermal_op(
     analysis_run_thermal_with_options_op(
         model,
         backend,
+        FormulationRequirement::Production,
         AnalysisThermalRunOptions::default(),
         context,
     )
@@ -6305,23 +6280,39 @@ pub fn analysis_run_cht_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cht_with_options_op(model, backend, AnalysisChtRunOptions::default(), context)
+    analysis_run_cht_with_options_op(
+        model,
+        backend,
+        FormulationRequirement::Production,
+        AnalysisChtRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_cht_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_cht_step = model.sequence.steps.iter().any(|step| {
-        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-    });
-    if !has_cht_step {
+    let cht_steps = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| {
+            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+                && matches!(
+                    step.procedure,
+                    AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
+                )
+        })
+        .collect::<Vec<_>>();
+    let [cht_step] = cht_steps.as_slice() else {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
@@ -6329,17 +6320,18 @@ pub fn analysis_run_cht_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include a conjugate-heat-transfer procedure for fea.run_cht",
+            "FEA model must include exactly one supported conjugate-heat-transfer procedure for fea.run_cht",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ));
-    }
+    };
+    let cht_procedure = cht_step.procedure;
     let Some(cfd_domain) = model.cfd.as_ref() else {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_MODEL",
@@ -6351,10 +6343,35 @@ pub fn analysis_run_cht_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
+    let expected_cht_procedure = match cfd_domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
+        runmat_analysis_core::CfdSolveFamily::Transient => AnalysisProcedure::TransientResponse,
+    };
+    if cht_procedure != expected_cht_procedure {
+        return Err(operation_error(
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CHT.PROCEDURE_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "CHT procedure step does not match model.cfd.solve_family",
+            BTreeMap::from([
+                ("procedure".to_string(), format!("{cht_procedure:?}")),
+                (
+                    "expected_procedure".to_string(),
+                    format!("{expected_cht_procedure:?}"),
+                ),
+            ]),
+        ));
+    }
     if !cfd_domain.enabled {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6370,8 +6387,8 @@ pub fn analysis_run_cht_with_options_op(
         || cfd_domain.reference_density_kg_per_m3 <= 0.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6388,8 +6405,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6406,8 +6423,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6427,8 +6444,8 @@ pub fn analysis_run_cht_with_options_op(
         || cfd_domain.turbulence_intensity > 1.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6445,16 +6462,16 @@ pub fn analysis_run_cht_with_options_op(
     }
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisOperation::Cht.name(),
+        AnalysisOperation::Cht.version(),
         "RM.FEA.RUN_CHT.INVALID_LOAD",
         "CHT",
         &context,
     )?;
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6468,8 +6485,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if options.step_count == 0 || options.max_linear_iters == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6483,8 +6500,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6498,8 +6515,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6518,14 +6535,14 @@ pub fn analysis_run_cht_with_options_op(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisOperation::Cht.name(),
+        AnalysisOperation::Cht.version(),
         &context,
     )?;
     let Some(thermo_options) = thermo_options else {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6539,8 +6556,8 @@ pub fn analysis_run_cht_with_options_op(
     };
     if let Err((detail, metadata)) = validate_thermo_coupling_options(model, &thermo_options) {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
@@ -6554,8 +6571,8 @@ pub fn analysis_run_cht_with_options_op(
     }
     if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "CHT") {
         return Err(operation_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
@@ -6573,15 +6590,29 @@ pub fn analysis_run_cht_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisOperation::Cht.name(),
+        AnalysisOperation::Cht.version(),
         "RM.FEA.RUN_CHT.SOLVER_MESH_INVALID",
+        &context,
+    )?;
+    let identity = admit_runtime_proxy_for_operation(
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+        cht_procedure,
+        formulation_requirement,
+        RuntimeProxyFormulation::Domain {
+            topology: RuntimeDomainTopology::from_solver_mesh(solver_mesh.as_ref()),
+            source: RuntimeDomainSource::OrdinalProfile,
+        },
+        AnalysisOperation::Cht,
+        model,
         &context,
     )?;
     let thermal_run = run_thermal_with_options(
         model,
         backend,
         ThermalSolveOptions {
+            formulation_requirement,
+            procedure: AnalysisProcedure::TransientResponse,
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
@@ -6591,17 +6622,7 @@ pub fn analysis_run_cht_with_options_op(
             )),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_CHT_OPERATION,
-            ANALYSIS_RUN_CHT_OP_VERSION,
-            "RM.FEA.RUN_CHT.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_CHT.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::Cht, model, &context, err))?;
 
     let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let node_count = topology.node_count;
@@ -6637,6 +6658,7 @@ pub fn analysis_run_cht_with_options_op(
         options.tolerance,
     );
     let mut run = thermal_run.run.clone();
+    run.identity = identity;
     run.solver_method = SolverMethod::ChtConjugateProjection;
     run.preconditioner = SolverPreconditioner::ThermalCfdProjection;
     run.fields.extend(cht_fields);
@@ -6851,7 +6873,7 @@ pub fn analysis_run_cht_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -6864,13 +6886,9 @@ pub fn analysis_run_cht_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -6880,17 +6898,6 @@ pub fn analysis_run_cht_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
-            match cfd_domain.solve_family {
-                runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
-                runmat_analysis_core::CfdSolveFamily::Transient => {
-                    AnalysisProcedure::TransientResponse
-                }
-            },
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedConjugateHeatTransfer],
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -6913,8 +6920,10 @@ pub fn analysis_run_cht_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -6931,16 +6940,16 @@ pub fn analysis_run_cht_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisOperation::Cht.name(),
+        AnalysisOperation::Cht.version(),
         "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_CHT_OPERATION,
-        ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisOperation::Cht.name(),
+        AnalysisOperation::Cht.version(),
         &context,
         result,
     ))
@@ -6951,24 +6960,36 @@ pub fn analysis_run_fsi_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_fsi_with_options_op(model, backend, AnalysisFsiRunOptions::default(), context)
+    analysis_run_fsi_with_options_op(
+        model,
+        backend,
+        FormulationRequirement::Production,
+        AnalysisFsiRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_fsi_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_fsi_step = model.sequence.steps.iter().any(|step| {
-        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
-            && step.procedure == AnalysisProcedure::TransientResponse
-    });
-    if !has_fsi_step {
+    let fsi_steps = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| {
+            step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
+                && step.procedure == AnalysisProcedure::TransientResponse
+        })
+        .collect::<Vec<_>>();
+    if !matches!(fsi_steps.as_slice(), [_]) {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
@@ -6976,7 +6997,7 @@ pub fn analysis_run_fsi_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include a transient fluid-structure-interaction procedure for fea.run_fsi",
+            "FEA model must include exactly one transient fluid-structure-interaction procedure for fea.run_fsi",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
@@ -6985,8 +7006,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     let Some(cfd_domain) = model.cfd.as_ref() else {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_MODEL",
@@ -6998,10 +7019,25 @@ pub fn analysis_run_fsi_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
+    if cfd_domain.solve_family != runmat_analysis_core::CfdSolveFamily::Transient {
+        return Err(operation_error(
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_FSI.PROCEDURE_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "transient FSI requires model.cfd.solve_family=transient",
+            BTreeMap::new(),
+        ));
+    }
     if !cfd_domain.enabled {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7017,8 +7053,8 @@ pub fn analysis_run_fsi_with_options_op(
         || cfd_domain.reference_density_kg_per_m3 <= 0.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7035,8 +7071,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7053,8 +7089,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7074,8 +7110,8 @@ pub fn analysis_run_fsi_with_options_op(
         || cfd_domain.turbulence_intensity > 1.0
     {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7092,16 +7128,16 @@ pub fn analysis_run_fsi_with_options_op(
     }
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_FSI_OPERATION,
-        ANALYSIS_RUN_FSI_OP_VERSION,
+        AnalysisOperation::Fsi.name(),
+        AnalysisOperation::Fsi.version(),
         "RM.FEA.RUN_FSI.INVALID_LOAD",
         "FSI",
         &context,
     )?;
     if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7115,8 +7151,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if options.step_count == 0 || options.max_linear_iters == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7130,8 +7166,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7145,8 +7181,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
@@ -7163,8 +7199,8 @@ pub fn analysis_run_fsi_with_options_op(
     }
     if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "FSI") {
         return Err(operation_error(
-            ANALYSIS_RUN_FSI_OPERATION,
-            ANALYSIS_RUN_FSI_OP_VERSION,
+            AnalysisOperation::Fsi.name(),
+            AnalysisOperation::Fsi.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
@@ -7180,9 +7216,21 @@ pub fn analysis_run_fsi_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_FSI_OPERATION,
-        ANALYSIS_RUN_FSI_OP_VERSION,
+        AnalysisOperation::Fsi.name(),
+        AnalysisOperation::Fsi.version(),
         "RM.FEA.RUN_FSI.SOLVER_MESH_INVALID",
+        &context,
+    )?;
+    let identity = admit_runtime_proxy_for_operation(
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+        AnalysisProcedure::TransientResponse,
+        formulation_requirement,
+        RuntimeProxyFormulation::Domain {
+            topology: RuntimeDomainTopology::from_solver_mesh(solver_mesh.as_ref()),
+            source: RuntimeDomainSource::OrdinalProfile,
+        },
+        AnalysisOperation::Fsi,
+        model,
         &context,
     )?;
     let solve_start = Instant::now();
@@ -7224,6 +7272,7 @@ pub fn analysis_run_fsi_with_options_op(
     );
     let max_interface_residual = fsi_interface_closure.max_interface_residual;
     let mut run = FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -7438,7 +7487,7 @@ pub fn analysis_run_fsi_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -7451,13 +7500,9 @@ pub fn analysis_run_fsi_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -7467,12 +7512,6 @@ pub fn analysis_run_fsi_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-            AnalysisProcedure::TransientResponse,
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedFluidStructureInteraction],
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -7484,8 +7523,10 @@ pub fn analysis_run_fsi_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -7502,16 +7543,16 @@ pub fn analysis_run_fsi_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_FSI_OPERATION,
-        ANALYSIS_RUN_FSI_OP_VERSION,
+        AnalysisOperation::Fsi.name(),
+        AnalysisOperation::Fsi.version(),
         "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_FSI_OPERATION,
-        ANALYSIS_RUN_FSI_OP_VERSION,
+        AnalysisOperation::Fsi.name(),
+        AnalysisOperation::Fsi.version(),
         &context,
         result,
     ))
@@ -7520,17 +7561,24 @@ pub fn analysis_run_fsi_with_options_op(
 pub fn analysis_run_thermal_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisThermalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_thermal_step = model.sequence.steps.iter().any(|step| {
-        step.family == PhysicsFamily::Thermal && step.procedure == AnalysisProcedure::Static
-    });
-    if !has_thermal_step {
+    let thermal_steps = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| {
+            step.family == PhysicsFamily::Thermal
+                && step.procedure == AnalysisProcedure::TransientResponse
+        })
+        .collect::<Vec<_>>();
+    let [thermal_step] = thermal_steps.as_slice() else {
         return Err(operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_THERMAL.INVALID_MODEL",
@@ -7538,26 +7586,27 @@ pub fn analysis_run_thermal_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one thermal step for fea.run_thermal",
+            "FEA model must include exactly one supported thermal step for fea.run_thermal",
             BTreeMap::from([
                 ("analysis_model_id".to_string(), model.model_id.0.clone()),
                 ("geometry_id".to_string(), model.geometry_id.clone()),
             ]),
         ));
-    }
+    };
+    let thermal_procedure = thermal_step.procedure;
     validate_thermal_run_model(model, &context)?;
 
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisOperation::Thermal.name(),
+        AnalysisOperation::Thermal.version(),
         &context,
     )?;
     let Some(thermo_options) = thermo_options else {
         return Err(operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
@@ -7571,8 +7620,8 @@ pub fn analysis_run_thermal_with_options_op(
     };
     if let Err((detail, metadata)) = validate_thermo_coupling_options(model, &thermo_options) {
         return Err(operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
@@ -7588,8 +7637,8 @@ pub fn analysis_run_thermal_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisOperation::Thermal.name(),
+        AnalysisOperation::Thermal.version(),
         "RM.FEA.RUN_THERMAL.SOLVER_MESH_INVALID",
         &context,
     )?;
@@ -7597,6 +7646,8 @@ pub fn analysis_run_thermal_with_options_op(
         model,
         backend,
         ThermalSolveOptions {
+            formulation_requirement,
+            procedure: thermal_procedure,
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
@@ -7604,17 +7655,7 @@ pub fn analysis_run_thermal_with_options_op(
             thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
-            "RM.FEA.RUN_THERMAL.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_THERMAL.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::Thermal, model, &context, err))?;
 
     let mut run = thermal_run.run;
     let mut fallback_events = Vec::new();
@@ -7672,7 +7713,7 @@ pub fn analysis_run_thermal_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -7686,13 +7727,9 @@ pub fn analysis_run_thermal_with_options_op(
         }
         QualityPolicy::Exploratory => true,
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -7703,12 +7740,6 @@ pub fn analysis_run_thermal_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Thermal,
-            AnalysisProcedure::TransientResponse,
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedThermalDiffusion],
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -7731,8 +7762,10 @@ pub fn analysis_run_thermal_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -7749,16 +7782,16 @@ pub fn analysis_run_thermal_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisOperation::Thermal.name(),
+        AnalysisOperation::Thermal.version(),
         "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisOperation::Thermal.name(),
+        AnalysisOperation::Thermal.version(),
         &context,
         result,
     ))
@@ -7775,8 +7808,8 @@ fn validate_thermal_run_model(
             || material.thermal.specific_heat_j_per_kgk <= 0.0
     }) {
         return Err(operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
@@ -7802,8 +7835,8 @@ fn validate_thermal_run_model(
 
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_THERMAL_OPERATION,
-        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisOperation::Thermal.name(),
+        AnalysisOperation::Thermal.version(),
         "RM.FEA.RUN_THERMAL.INVALID_THERMAL_SOURCE",
         "thermal",
         context,
@@ -7844,8 +7877,8 @@ fn validate_thermal_run_model(
     });
     if let Some(boundary_id) = invalid_constraint.or(invalid_boundary) {
         return Err(operation_error(
-            ANALYSIS_RUN_THERMAL_OPERATION,
-            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
@@ -7867,6 +7900,7 @@ fn validate_thermal_run_model(
 pub fn analysis_run_transient_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisTransientRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -7877,13 +7911,12 @@ pub fn analysis_run_transient_with_options_op(
                 step.family,
                 PhysicsFamily::Structural
                     | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
-                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal)
             )
     });
     if !has_transient_step {
         return Err(operation_error(
-            ANALYSIS_RUN_TRANSIENT_OPERATION,
-            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            AnalysisOperation::Transient.name(),
+            AnalysisOperation::Transient.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_TRANSIENT.INVALID_MODEL",
@@ -7902,15 +7935,15 @@ pub fn analysis_run_transient_with_options_op(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_TRANSIENT_OPERATION,
-        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        AnalysisOperation::Transient.name(),
+        AnalysisOperation::Transient.version(),
         &context,
     )?;
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_TRANSIENT_OPERATION,
-                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+                AnalysisOperation::Transient.name(),
+                AnalysisOperation::Transient.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS",
@@ -7927,13 +7960,12 @@ pub fn analysis_run_transient_with_options_op(
     if let Some(electro_options) = electro_options.as_ref() {
         if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_TRANSIENT_OPERATION,
-                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+                AnalysisOperation::Transient.name(),
+                AnalysisOperation::Transient.version(),
                 &context,
                 OperationErrorSpec {
-                    error_code: electro_thermal_invalid_options_error_code(
-                        ANALYSIS_RUN_TRANSIENT_OPERATION,
-                    ),
+                    error_code: AnalysisOperation::Transient
+                        .invalid_electro_thermal_options_error_code(),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -7947,8 +7979,8 @@ pub fn analysis_run_transient_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_TRANSIENT_OPERATION,
-        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        AnalysisOperation::Transient.name(),
+        AnalysisOperation::Transient.version(),
         "RM.FEA.RUN_TRANSIENT.SOLVER_MESH_INVALID",
         &context,
     )?;
@@ -7956,6 +7988,7 @@ pub fn analysis_run_transient_with_options_op(
         model,
         backend,
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
+            formulation_requirement,
             time_step_s: options.time_step_s,
             min_time_step_s: options.min_time_step_s,
             max_time_step_s: options.max_time_step_s,
@@ -7971,23 +8004,13 @@ pub fn analysis_run_transient_with_options_op(
             adapt_retry_growth_cap: options.adapt_retry_growth_cap,
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
-            progress_operation: ANALYSIS_RUN_TRANSIENT_OPERATION.to_string(),
+            progress_operation: AnalysisOperation::Transient.name().to_string(),
             solver_mesh: solver_mesh.clone(),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_TRANSIENT_OPERATION,
-            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
-            "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_TRANSIENT.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::Transient, model, &context, err))?;
 
     let mut run = transient_run.run;
     let mut fallback_events = Vec::new();
@@ -8205,7 +8228,7 @@ pub fn analysis_run_transient_with_options_op(
             detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -8230,13 +8253,9 @@ pub fn analysis_run_transient_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -8247,11 +8266,6 @@ pub fn analysis_run_transient_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: structural_run_identity(
-            model,
-            AnalysisProcedure::TransientResponse,
-            FormulationImplementation::ReducedStructuralTransient,
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -8294,8 +8308,10 @@ pub fn analysis_run_transient_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -8312,16 +8328,16 @@ pub fn analysis_run_transient_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_TRANSIENT_OPERATION,
-        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        AnalysisOperation::Transient.name(),
+        AnalysisOperation::Transient.version(),
         "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_TRANSIENT_OPERATION,
-        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        AnalysisOperation::Transient.name(),
+        AnalysisOperation::Transient.version(),
         &context,
         result,
     ))
@@ -8335,6 +8351,7 @@ pub fn analysis_run_nonlinear_op(
     analysis_run_nonlinear_with_options_op(
         model,
         backend,
+        FormulationRequirement::Production,
         AnalysisNonlinearRunOptions::default(),
         context,
     )
@@ -8343,6 +8360,7 @@ pub fn analysis_run_nonlinear_op(
 pub fn analysis_run_nonlinear_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisNonlinearRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -8353,13 +8371,12 @@ pub fn analysis_run_nonlinear_with_options_op(
                 step.family,
                 PhysicsFamily::Structural
                     | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
-                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal)
             )
     });
     if !has_nonlinear_step {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_MODEL",
@@ -8377,8 +8394,8 @@ pub fn analysis_run_nonlinear_with_options_op(
 
     if options.increment_count == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8395,8 +8412,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     if options.max_newton_iters == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8413,8 +8430,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     if options.tolerance <= 0.0 || !options.tolerance.is_finite() {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8428,8 +8445,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     if options.increment_norm_tolerance <= 0.0 || !options.increment_norm_tolerance.is_finite() {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8447,8 +8464,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     if options.residual_convergence_factor < 1.0 || !options.residual_convergence_factor.is_finite()
     {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8468,8 +8485,8 @@ pub fn analysis_run_nonlinear_with_options_op(
         || !options.line_search_reduction.is_finite()
     {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8486,8 +8503,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     if options.tangent_refresh_interval == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            AnalysisOperation::Nonlinear.name(),
+            AnalysisOperation::Nonlinear.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8506,15 +8523,15 @@ pub fn analysis_run_nonlinear_with_options_op(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_NONLINEAR_OPERATION,
-        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        AnalysisOperation::Nonlinear.name(),
+        AnalysisOperation::Nonlinear.version(),
         &context,
     )?;
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_NONLINEAR_OPERATION,
-                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                AnalysisOperation::Nonlinear.name(),
+                AnalysisOperation::Nonlinear.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8531,13 +8548,12 @@ pub fn analysis_run_nonlinear_with_options_op(
     if let Some(electro_options) = electro_options.as_ref() {
         if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_NONLINEAR_OPERATION,
-                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                AnalysisOperation::Nonlinear.name(),
+                AnalysisOperation::Nonlinear.version(),
                 &context,
                 OperationErrorSpec {
-                    error_code: electro_thermal_invalid_options_error_code(
-                        ANALYSIS_RUN_NONLINEAR_OPERATION,
-                    ),
+                    error_code: AnalysisOperation::Nonlinear
+                        .invalid_electro_thermal_options_error_code(),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -8553,8 +8569,8 @@ pub fn analysis_run_nonlinear_with_options_op(
             validate_plasticity_constitutive_options(plasticity_options)
         {
             return Err(operation_error(
-                ANALYSIS_RUN_NONLINEAR_OPERATION,
-                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                AnalysisOperation::Nonlinear.name(),
+                AnalysisOperation::Nonlinear.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8571,8 +8587,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     if let Some(contact_options) = contact_options.as_ref() {
         if let Err((detail, metadata)) = validate_contact_interface_options(contact_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_NONLINEAR_OPERATION,
-                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                AnalysisOperation::Nonlinear.name(),
+                AnalysisOperation::Nonlinear.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
@@ -8589,8 +8605,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_NONLINEAR_OPERATION,
-        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        AnalysisOperation::Nonlinear.name(),
+        AnalysisOperation::Nonlinear.version(),
         "RM.FEA.RUN_NONLINEAR.SOLVER_MESH_INVALID",
         &context,
     )?;
@@ -8598,6 +8614,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         model,
         backend,
         runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
+            formulation_requirement,
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
             tolerance: options.tolerance,
@@ -8614,17 +8631,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             contact_context: to_fea_contact_interface_context(contact_options),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_NONLINEAR_OPERATION,
-            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
-            "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_NONLINEAR.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::Nonlinear, model, &context, err))?;
 
     let mut run = nonlinear_run.run;
     let mut fallback_events = Vec::new();
@@ -8876,7 +8883,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -8905,13 +8912,9 @@ pub fn analysis_run_nonlinear_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -8922,11 +8925,6 @@ pub fn analysis_run_nonlinear_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: structural_run_identity(
-            model,
-            AnalysisProcedure::Nonlinear,
-            FormulationImplementation::ReducedStructuralNonlinear,
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -8978,8 +8976,10 @@ pub fn analysis_run_nonlinear_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -8996,16 +8996,16 @@ pub fn analysis_run_nonlinear_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_NONLINEAR_OPERATION,
-        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        AnalysisOperation::Nonlinear.name(),
+        AnalysisOperation::Nonlinear.version(),
         "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_NONLINEAR_OPERATION,
-        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        AnalysisOperation::Nonlinear.name(),
+        AnalysisOperation::Nonlinear.version(),
         &context,
         result,
     ))
@@ -9014,6 +9014,7 @@ pub fn analysis_run_nonlinear_with_options_op(
 pub fn analysis_run_linear_static_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -9021,15 +9022,15 @@ pub fn analysis_run_linear_static_with_options(
     let thermo_options = resolve_thermo_coupling_options(
         model,
         model_thermo_coupling_options(model),
-        ANALYSIS_RUN_OPERATION,
-        ANALYSIS_RUN_OP_VERSION,
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
         &context,
     )?;
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_OPERATION,
-                ANALYSIS_RUN_OP_VERSION,
+                AnalysisOperation::LinearStatic.name(),
+                AnalysisOperation::LinearStatic.version(),
                 &context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
@@ -9046,11 +9047,12 @@ pub fn analysis_run_linear_static_with_options(
     if let Some(electro_options) = electro_options.as_ref() {
         if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
             return Err(operation_error(
-                ANALYSIS_RUN_OPERATION,
-                ANALYSIS_RUN_OP_VERSION,
+                AnalysisOperation::LinearStatic.name(),
+                AnalysisOperation::LinearStatic.version(),
                 &context,
                 OperationErrorSpec {
-                    error_code: electro_thermal_invalid_options_error_code(ANALYSIS_RUN_OPERATION),
+                    error_code: AnalysisOperation::LinearStatic
+                        .invalid_electro_thermal_options_error_code(),
                     error_type: OperationErrorType::Input,
                     retryable: false,
                     severity: OperationErrorSeverity::Error,
@@ -9080,8 +9082,8 @@ pub fn analysis_run_linear_static_with_options(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_OPERATION,
-        ANALYSIS_RUN_OP_VERSION,
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
         "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
         &context,
     )?;
@@ -9089,6 +9091,7 @@ pub fn analysis_run_linear_static_with_options(
         model,
         backend,
         LinearStaticSolveOptions {
+            formulation_requirement,
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
             solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
@@ -9098,17 +9101,7 @@ pub fn analysis_run_linear_static_with_options(
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
     )
-    .map_err(|err| {
-        map_fea_run_error(
-            ANALYSIS_RUN_OPERATION,
-            ANALYSIS_RUN_OP_VERSION,
-            "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MODEL_INVALID",
-            "RM.FEA.RUN_LINEAR_STATIC.CANCELLED",
-            model,
-            &context,
-            err,
-        )
-    })?;
+    .map_err(|err| map_fea_run_error(AnalysisOperation::LinearStatic, model, &context, err))?;
 
     let mut run = run;
     let mut fallback_events = Vec::new();
@@ -9207,7 +9200,7 @@ pub fn analysis_run_linear_static_with_options(
             detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -9220,13 +9213,9 @@ pub fn analysis_run_linear_static_with_options(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -9236,11 +9225,6 @@ pub fn analysis_run_linear_static_with_options(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: structural_run_identity(
-            model,
-            AnalysisProcedure::Static,
-            FormulationImplementation::LinearElasticStructural,
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -9252,8 +9236,10 @@ pub fn analysis_run_linear_static_with_options(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -9270,16 +9256,16 @@ pub fn analysis_run_linear_static_with_options(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_OPERATION,
-        ANALYSIS_RUN_OP_VERSION,
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
         "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_OPERATION,
-        ANALYSIS_RUN_OP_VERSION,
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
         &context,
         result,
     ))
@@ -9570,6 +9556,7 @@ pub fn analysis_run_electromagnetic_op(
     analysis_run_electromagnetic_with_options_op(
         model,
         backend,
+        FormulationRequirement::Production,
         AnalysisElectromagneticRunOptions::default(),
         context,
     )
@@ -9578,21 +9565,24 @@ pub fn analysis_run_electromagnetic_op(
 pub fn analysis_run_electromagnetic_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
     options: AnalysisElectromagneticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let has_electromagnetic_step = model.sequence.steps.iter().any(|step| {
-        step.family == PhysicsFamily::Electromagnetic
-            && matches!(
-                step.procedure,
-                AnalysisProcedure::Static | AnalysisProcedure::HarmonicResponse
-            )
-    });
-    if !has_electromagnetic_step {
+    let electromagnetic_steps = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| {
+            step.family == PhysicsFamily::Electromagnetic
+                && step.procedure == AnalysisProcedure::HarmonicResponse
+        })
+        .collect::<Vec<_>>();
+    let [electromagnetic_step] = electromagnetic_steps.as_slice() else {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.REQUIRES_STEP",
@@ -9600,15 +9590,16 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "FEA model must include at least one electromagnetic step for fea.run_electromagnetic",
+            "FEA model must include exactly one supported electromagnetic step for fea.run_electromagnetic",
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
-    }
+    };
+    let electromagnetic_procedure = electromagnetic_step.procedure;
 
     let Some(em_domain) = model.electromagnetic.as_ref() else {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_MODEL",
@@ -9622,8 +9613,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     };
     if !em_domain.enabled {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9637,8 +9628,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if !em_domain.reference_frequency_hz.is_finite() || em_domain.reference_frequency_hz <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9655,8 +9646,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if !em_domain.applied_current_a.is_finite() || em_domain.applied_current_a <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9673,8 +9664,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9691,8 +9682,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9709,8 +9700,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     if options.harmonic_max_iterations == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9734,8 +9725,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     )
     .ok_or_else(|| {
         operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
@@ -9750,12 +9741,14 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        AnalysisOperation::Electromagnetic.name(),
+        AnalysisOperation::Electromagnetic.version(),
         "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MESH_INVALID",
         &context,
     )?;
     let solve_options = ElectromagneticSolveOptions {
+        formulation_requirement,
+        procedure: electromagnetic_procedure,
         residual_target: options.residual_target,
         harmonic_tolerance: options.harmonic_tolerance,
         harmonic_max_iterations: options.harmonic_max_iterations,
@@ -9772,15 +9765,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         let sweep_run =
             run_electromagnetic_with_options(&sweep_model, backend, solve_options.clone())
                 .map_err(|err| {
-                    map_fea_run_error(
-                        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-                        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
-                        "RM.FEA.RUN_ELECTROMAGNETIC.SOLVER_MODEL_INVALID",
-                        "RM.FEA.RUN_ELECTROMAGNETIC.CANCELLED",
-                        model,
-                        &context,
-                        err,
-                    )
+                    map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, err)
                 })?;
         sweep_peak_flux_density.push(peak_abs_field_value(
             &sweep_run.magnetic_flux_density_magnitude_field,
@@ -10318,7 +10303,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
         });
     }
 
-    let publishable = match options.quality_policy {
+    let numerically_acceptable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
@@ -10331,13 +10316,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let run_status = if publishable {
-        RunStatus::Publishable
-    } else if result_quality == QualityGate::Fail {
-        RunStatus::Rejected
-    } else {
-        RunStatus::Degraded
-    };
+    let (production_publishable, production_publication_reasons) =
+        evaluate_production_publication(&run, numerically_acceptable);
+    let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
@@ -10347,20 +10328,6 @@ pub fn analysis_run_electromagnetic_with_options_op(
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
-        identity: AnalysisRunIdentity::experimental(
-            PhysicsFamily::Electromagnetic,
-            if model
-                .electromagnetic
-                .as_ref()
-                .is_some_and(|domain| domain.reference_frequency_hz > 0.0)
-            {
-                AnalysisProcedure::HarmonicResponse
-            } else {
-                AnalysisProcedure::Static
-            },
-            SolutionSpace::Direct,
-            [FormulationImplementation::ReducedElectromagneticPotential],
-        ),
         run,
         render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
         modal_results: None,
@@ -10403,8 +10370,10 @@ pub fn analysis_run_electromagnetic_with_options_op(
         solver_convergence,
         result_quality,
         run_status,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         quality_reasons,
+        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -10421,16 +10390,16 @@ pub fn analysis_run_electromagnetic_with_options_op(
     };
 
     persist_fea_run_result_with_progress(
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        AnalysisOperation::Electromagnetic.name(),
+        AnalysisOperation::Electromagnetic.version(),
         "RM.FEA.RUN_ELECTROMAGNETIC.ARTIFACT_STORE_FAILED",
         &context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        AnalysisOperation::Electromagnetic.name(),
+        AnalysisOperation::Electromagnetic.version(),
         &context,
         result,
     ))
@@ -10469,8 +10438,8 @@ fn validate_electromagnetic_run_model(
         })
     }) {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_MATERIAL",
@@ -10493,8 +10462,8 @@ fn validate_electromagnetic_run_model(
         .count();
     if electrical_material_count == 0 {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
@@ -10522,8 +10491,8 @@ fn validate_electromagnetic_run_model(
         !electrical_material_by_id.contains(assignment.assigned_material_id.as_str())
     }) {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_MATERIAL",
@@ -10545,8 +10514,8 @@ fn validate_electromagnetic_run_model(
 
     reject_moment_loads_for_run_family(
         model,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        AnalysisOperation::Electromagnetic.name(),
+        AnalysisOperation::Electromagnetic.version(),
         "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTROMAGNETIC_SOURCE",
         "electromagnetic",
         context,
@@ -10555,8 +10524,8 @@ fn validate_electromagnetic_run_model(
     let has_electromagnetic_source = has_nonzero_electromagnetic_source(model);
     if !has_electromagnetic_source {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
@@ -10588,8 +10557,8 @@ fn validate_electromagnetic_run_model(
         });
     if !has_electromagnetic_boundary {
         return Err(operation_error(
-            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
             context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
@@ -11970,7 +11939,7 @@ pub fn analysis_results_op(
     };
 
     let data = AnalysisResultsData {
-        identity: run_result.identity.clone(),
+        identity: run_result.run.identity.clone(),
         field_descriptors,
         fields,
         modal_results,
@@ -11996,8 +11965,10 @@ pub fn analysis_results_op(
             None
         },
         run_status: run_result.run_status,
-        publishable: run_result.publishable,
+        numerically_acceptable: run_result.numerically_acceptable,
+        production_publishable: run_result.production_publishable,
         quality_reasons: run_result.quality_reasons.clone(),
+        production_publication_reasons: run_result.production_publication_reasons.clone(),
         provenance: run_result.provenance.clone(),
         summary,
     };
@@ -12161,7 +12132,10 @@ pub fn analysis_results_compare_op(
     let data = AnalysisResultsCompareData {
         baseline_run_id: baseline.run_id,
         candidate_run_id: candidate.run_id,
-        publishable_changed: baseline.publishable != candidate.publishable,
+        numerically_acceptable_changed: baseline.numerically_acceptable
+            != candidate.numerically_acceptable,
+        production_publishable_changed: baseline.production_publishable
+            != candidate.production_publishable,
         run_status_changed: baseline.run_status != candidate.run_status,
         quality_reason_count_delta: candidate.quality_reasons.len() as i64
             - baseline.quality_reasons.len() as i64,
@@ -12205,7 +12179,10 @@ pub fn analysis_trends_op(
 
     let mut grouped: HashMap<AnalysisRunIdentity, Vec<AnalysisRunResult>> = HashMap::new();
     for run in runs {
-        grouped.entry(run.identity.clone()).or_default().push(run);
+        grouped
+            .entry(run.run.identity.clone())
+            .or_default()
+            .push(run);
     }
 
     let window = query.window_size.max(1);
@@ -12213,7 +12190,7 @@ pub fn analysis_trends_op(
     let mut grouped = grouped.into_iter().collect::<Vec<_>>();
     grouped.sort_by_key(|(identity, _)| format!("{identity:?}"));
     for (identity, mut entries) in grouped {
-        let kind = run_kind(&entries[0]);
+        let is_electromagnetic = identity.family() == PhysicsFamily::Electromagnetic;
         entries.sort_by(|a, b| b.run_id.cmp(&a.run_id));
         if entries.len() > window {
             entries.truncate(window);
@@ -12231,10 +12208,18 @@ pub fn analysis_trends_op(
         solve_samples.sort_by(|a, b| a.total_cmp(b));
         let median_solve_ms = percentile(&solve_samples, 0.5);
         let p95_solve_ms = percentile(&solve_samples, 0.95);
-        let publishable_rate =
-            entries.iter().filter(|run| run.publishable).count() as f64 / sample_count as f64;
+        let numerically_acceptable_rate = entries
+            .iter()
+            .filter(|run| run.numerically_acceptable)
+            .count() as f64
+            / sample_count as f64;
+        let production_publishable_rate = entries
+            .iter()
+            .filter(|run| run.production_publishable)
+            .count() as f64
+            / sample_count as f64;
 
-        let failed_increment_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let failed_increment_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             let failed = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12244,7 +12229,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let mean_spike_count = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let mean_spike_count = if identity.procedure() == AnalysisProcedure::Nonlinear {
             let values = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12254,7 +12239,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let mean_stall_count = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let mean_stall_count = if identity.procedure() == AnalysisProcedure::Nonlinear {
             let values = entries
                 .iter()
                 .filter_map(|run| run.nonlinear_results.as_ref())
@@ -12278,12 +12263,12 @@ pub fn analysis_trends_op(
             }
         };
         let thermo_transient_warn_rate =
-            if identity.procedure == AnalysisProcedure::TransientResponse {
+            if identity.procedure() == AnalysisProcedure::TransientResponse {
                 diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
             } else {
                 None
             };
-        let thermo_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let thermo_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_TM_NONLINEAR")
         } else {
             None
@@ -12328,37 +12313,37 @@ pub fn analysis_trends_op(
             }
         };
         let electro_transient_warn_rate =
-            if identity.procedure == AnalysisProcedure::TransientResponse {
+            if identity.procedure() == AnalysisProcedure::TransientResponse {
                 diagnostic_warning_rate(&entries, "FEA_ET_TRANSIENT")
             } else {
                 None
             };
-        let electro_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let electro_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_ET_NONLINEAR")
         } else {
             None
         };
-        let plastic_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let plastic_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_PLASTIC_NONLINEAR")
         } else {
             None
         };
-        let contact_nonlinear_warn_rate = if identity.procedure == AnalysisProcedure::Nonlinear {
+        let contact_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_CONTACT_NONLINEAR")
         } else {
             None
         };
-        let thermal_stability_warn_rate = if identity.family == PhysicsFamily::Thermal {
+        let thermal_stability_warn_rate = if identity.family() == PhysicsFamily::Thermal {
             diagnostic_warning_rate(&entries, "FEA_THERMAL_STABILITY")
         } else {
             None
         };
-        let thermal_constitutive_warn_rate = if identity.family == PhysicsFamily::Thermal {
+        let thermal_constitutive_warn_rate = if identity.family() == PhysicsFamily::Thermal {
             diagnostic_warning_rate(&entries, "FEA_THERMAL_CONSTITUTIVE")
         } else {
             None
         };
-        let thermal_spread_breach_rate = if identity.family == PhysicsFamily::Thermal {
+        let thermal_spread_breach_rate = if identity.family() == PhysicsFamily::Thermal {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12373,12 +12358,12 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_solve_warn_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_solve_warn_rate = if is_electromagnetic {
             Some(diagnostic_warning_rate(&entries, "FEA_EM_STATIC").unwrap_or(0.0))
         } else {
             None
         };
-        let electromagnetic_spread_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_spread_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12393,8 +12378,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_heterogeneity_breach_rate = if kind == AnalysisRunKind::Electromagnetic
-        {
+        let electromagnetic_heterogeneity_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12409,7 +12393,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_coverage_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_coverage_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12424,7 +12408,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_contrast_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_contrast_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12439,7 +12423,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_conditioning_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_conditioning_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12454,56 +12438,52 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_source_realization_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "source_realization_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_SOURCE_REALIZATION_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_source_region_coverage_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "source_region_coverage_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_SOURCE_REGION_COVERAGE_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_source_material_alignment_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "source_material_alignment_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_source_overlap_breach_rate = if kind == AnalysisRunKind::Electromagnetic
-        {
+        let electromagnetic_source_realization_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "source_realization_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_SOURCE_REALIZATION_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_source_region_coverage_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "source_region_coverage_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_SOURCE_REGION_COVERAGE_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_source_material_alignment_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "source_material_alignment_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_source_overlap_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12518,87 +12498,82 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_source_interference_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "source_interference_index",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_greater_than(&values, EM_SOURCE_INTERFERENCE_MAX_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_boundary_anchor_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "boundary_anchor_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_BOUNDARY_ANCHOR_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_boundary_localization_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "boundary_condition_localization_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_ground_effectiveness_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "ground_anchor_effectiveness_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_GROUND_EFFECTIVENESS_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_insulation_leakage_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "insulation_leakage_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_greater_than(&values, EM_INSULATION_LEAKAGE_MAX_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_divergence_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+        let electromagnetic_source_interference_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "source_interference_index",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_SOURCE_INTERFERENCE_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_boundary_anchor_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "boundary_anchor_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_BOUNDARY_ANCHOR_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_boundary_localization_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "boundary_condition_localization_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_ground_effectiveness_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "ground_anchor_effectiveness_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_GROUND_EFFECTIVENESS_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_insulation_leakage_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "insulation_leakage_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_INSULATION_LEAKAGE_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_divergence_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12613,72 +12588,67 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_energy_imbalance_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "energy_imbalance_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_greater_than(&values, EM_ENERGY_IMBALANCE_MAX_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_boundary_energy_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "boundary_energy_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_BOUNDARY_ENERGY_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_boundary_penalty_contribution_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "boundary_penalty_conditioning_contribution",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_greater_than(&values, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_source_region_energy_consistency_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SOURCE_ENERGY",
-                            "source_region_energy_consistency_ratio",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED)
-            } else {
-                None
-            };
-        let electromagnetic_real_residual_breach_rate = if kind == AnalysisRunKind::Electromagnetic
-        {
+        let electromagnetic_energy_imbalance_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "energy_imbalance_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_ENERGY_IMBALANCE_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_boundary_energy_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "boundary_energy_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_BOUNDARY_ENERGY_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_boundary_penalty_contribution_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "boundary_penalty_conditioning_contribution",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_source_region_energy_consistency_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SOURCE_ENERGY",
+                        "source_region_energy_consistency_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_real_residual_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12689,8 +12659,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_imag_residual_breach_rate = if kind == AnalysisRunKind::Electromagnetic
-        {
+        let electromagnetic_imag_residual_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12701,8 +12670,7 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_sweep_coverage_breach_rate = if kind == AnalysisRunKind::Electromagnetic
-        {
+        let electromagnetic_sweep_coverage_breach_rate = if is_electromagnetic {
             let values = entries
                 .iter()
                 .filter_map(|run| {
@@ -12713,29 +12681,29 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_resonance_sharpness_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_SWEEP",
-                            "resonance_quality_factor",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                breach_rate_less_than(&values, EM_RESONANCE_Q_MIN_BALANCED)
-            } else {
-                None
-            };
+        let electromagnetic_resonance_sharpness_breach_rate = if is_electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_SWEEP",
+                        "resonance_quality_factor",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_RESONANCE_Q_MIN_BALANCED)
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             identity,
             sample_count,
             median_solve_ms,
             p95_solve_ms,
-            publishable_rate,
+            numerically_acceptable_rate,
+            production_publishable_rate,
             failed_increment_rate,
             mean_spike_count,
             mean_stall_count,
@@ -12790,119 +12758,6 @@ pub fn analysis_trends_op(
     ))
 }
 
-fn structural_run_identity(
-    model: &AnalysisModel,
-    procedure: AnalysisProcedure,
-    structural_formulation: FormulationImplementation,
-) -> AnalysisRunIdentity {
-    if model
-        .thermo_mechanical
-        .as_ref()
-        .is_some_and(|domain| domain.enabled)
-    {
-        AnalysisRunIdentity::experimental(
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
-            procedure,
-            SolutionSpace::Direct,
-            [
-                structural_formulation,
-                FormulationImplementation::ReducedThermomechanical,
-            ],
-        )
-    } else if model
-        .electro_thermal
-        .as_ref()
-        .is_some_and(|domain| domain.enabled)
-    {
-        AnalysisRunIdentity::experimental(
-            PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal),
-            procedure,
-            SolutionSpace::Direct,
-            [
-                structural_formulation,
-                FormulationImplementation::ReducedElectrothermal,
-            ],
-        )
-    } else {
-        AnalysisRunIdentity::experimental(
-            PhysicsFamily::Structural,
-            procedure,
-            SolutionSpace::Direct,
-            [structural_formulation],
-        )
-    }
-}
-
-fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
-    match (run.identity.family, run.identity.procedure) {
-        (PhysicsFamily::Structural, AnalysisProcedure::Static) => AnalysisRunKind::LinearStatic,
-        (PhysicsFamily::Structural, AnalysisProcedure::ModalExtraction) => AnalysisRunKind::Modal,
-        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
-            AnalysisRunKind::Transient
-        }
-        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => AnalysisRunKind::Nonlinear,
-        (PhysicsFamily::Thermal, _) => AnalysisRunKind::Thermal,
-        (PhysicsFamily::Electromagnetic, _) => AnalysisRunKind::Electromagnetic,
-        (PhysicsFamily::Acoustic, _) => AnalysisRunKind::Acoustic,
-        (PhysicsFamily::Fluid, _) => AnalysisRunKind::Cfd,
-        (PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer), _) => {
-            AnalysisRunKind::Cht
-        }
-        (PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction), _) => {
-            AnalysisRunKind::Fsi
-        }
-        (
-            PhysicsFamily::Coupled(
-                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
-            ),
-            AnalysisProcedure::Nonlinear,
-        ) => AnalysisRunKind::Nonlinear,
-        (
-            PhysicsFamily::Coupled(
-                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
-            ),
-            AnalysisProcedure::TransientResponse,
-        ) => AnalysisRunKind::Transient,
-        (
-            PhysicsFamily::Coupled(
-                CoupledPhysicsFamily::Thermomechanical | CoupledPhysicsFamily::Electrothermal,
-            ),
-            AnalysisProcedure::ModalExtraction,
-        ) => AnalysisRunKind::Modal,
-        _ => AnalysisRunKind::LinearStatic,
-    }
-}
-
-fn run_operation_version_for_kind(kind: AnalysisRunKind) -> &'static str {
-    match kind {
-        AnalysisRunKind::LinearStatic => ANALYSIS_RUN_OP_VERSION,
-        AnalysisRunKind::Modal => ANALYSIS_RUN_MODAL_OP_VERSION,
-        AnalysisRunKind::Acoustic => ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
-        AnalysisRunKind::Thermal => ANALYSIS_RUN_THERMAL_OP_VERSION,
-        AnalysisRunKind::Transient => ANALYSIS_RUN_TRANSIENT_OP_VERSION,
-        AnalysisRunKind::Cfd => ANALYSIS_RUN_CFD_OP_VERSION,
-        AnalysisRunKind::Cht => ANALYSIS_RUN_CHT_OP_VERSION,
-        AnalysisRunKind::Fsi => ANALYSIS_RUN_FSI_OP_VERSION,
-        AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OP_VERSION,
-        AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
-    }
-}
-
-fn run_operation_for_kind(kind: AnalysisRunKind) -> &'static str {
-    match kind {
-        AnalysisRunKind::LinearStatic => ANALYSIS_RUN_OPERATION,
-        AnalysisRunKind::Modal => ANALYSIS_RUN_MODAL_OPERATION,
-        AnalysisRunKind::Acoustic => ANALYSIS_RUN_ACOUSTIC_OPERATION,
-        AnalysisRunKind::Thermal => ANALYSIS_RUN_THERMAL_OPERATION,
-        AnalysisRunKind::Transient => ANALYSIS_RUN_TRANSIENT_OPERATION,
-        AnalysisRunKind::Cfd => ANALYSIS_RUN_CFD_OPERATION,
-        AnalysisRunKind::Cht => ANALYSIS_RUN_CHT_OPERATION,
-        AnalysisRunKind::Fsi => ANALYSIS_RUN_FSI_OPERATION,
-        AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OPERATION,
-        AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
-    }
-}
-
 fn sanitize_study_sweep_id(sweep_id: &str) -> String {
     sweep_id
         .chars()
@@ -12914,6 +12769,49 @@ fn sanitize_study_sweep_id(sweep_id: &str) -> String {
             }
         })
         .collect()
+}
+
+fn resolve_study_model(
+    spec: &AnalysisStudySpec,
+    context: &OperationContext,
+) -> Result<AnalysisModel, OperationErrorEnvelope> {
+    match &spec.model {
+        Some(model) => Ok(model.clone()),
+        None => analysis_create_model_op(
+            &spec.geometry,
+            spec.create_model_intent.clone(),
+            context.clone(),
+        )
+        .map(|envelope| envelope.data),
+    }
+}
+
+fn single_step_executor_error(
+    operation: &'static str,
+    op_version: &'static str,
+    error_code: &'static str,
+    spec: &AnalysisStudySpec,
+    context: &OperationContext,
+) -> OperationErrorEnvelope {
+    operation_error(
+        operation,
+        op_version,
+        context,
+        OperationErrorSpec {
+            error_code,
+            error_type: OperationErrorType::Contract,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        "the current local study executor supports exactly one procedure step",
+        BTreeMap::from([
+            ("study_id".to_string(), spec.study_id.clone()),
+            (
+                "execution_step_count".to_string(),
+                spec.execution.steps.len().to_string(),
+            ),
+        ]),
+    )
 }
 
 fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
@@ -12931,8 +12829,8 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     if spec.geometry.units == UnitSystem::Unspecified {
         issue_codes.push("RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED".to_string());
     }
-    if !template_supports_run_kind(spec.create_model_intent.template, spec.run_kind) {
-        issue_codes.push("RM.FEA.STUDY.RUN_KIND_PROFILE_MISMATCH".to_string());
+    if spec.execution.steps.is_empty() {
+        issue_codes.push("RM.FEA.STUDY.EXECUTION_EMPTY".to_string());
     }
     if let Some(model) = &spec.model {
         if model.geometry_id != spec.geometry.geometry_id
@@ -12945,26 +12843,13 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
         {
             issue_codes.push("RM.FEA.STUDY.MODEL_INVALID".to_string());
         }
+        if spec.execution.validate_against(&model.sequence).is_err() {
+            issue_codes.push("RM.FEA.STUDY.EXECUTION_PLAN_INVALID".to_string());
+        }
     }
-    if spec.electromagnetic_run_options.is_some()
-        && spec.run_kind != AnalysisRunKind::Electromagnetic
-    {
-        issue_codes.push("RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH".to_string());
-    }
-    if spec.linear_static_run_options.is_some() && spec.run_kind != AnalysisRunKind::LinearStatic
-        || spec.modal_run_options.is_some() && spec.run_kind != AnalysisRunKind::Modal
-        || spec.acoustic_run_options.is_some() && spec.run_kind != AnalysisRunKind::Acoustic
-        || spec.thermal_run_options.is_some() && spec.run_kind != AnalysisRunKind::Thermal
-        || spec.transient_run_options.is_some() && spec.run_kind != AnalysisRunKind::Transient
-        || spec.cfd_run_options.is_some() && spec.run_kind != AnalysisRunKind::Cfd
-        || spec.cht_run_options.is_some() && spec.run_kind != AnalysisRunKind::Cht
-        || spec.fsi_run_options.is_some() && spec.run_kind != AnalysisRunKind::Fsi
-        || spec.nonlinear_run_options.is_some() && spec.run_kind != AnalysisRunKind::Nonlinear
-    {
-        issue_codes.push("RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH".to_string());
-    }
-    if spec.run_kind == AnalysisRunKind::Electromagnetic {
-        if let Some(options) = spec.electromagnetic_run_options.as_ref() {
+    for execution in &spec.execution.steps {
+        if let AnalysisSolverOptions::ElectromagneticPotential(options) = &execution.solver_options
+        {
             if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
                 issue_codes
                     .push("RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".to_string());
@@ -13001,34 +12886,28 @@ fn study_issue_message(code: &str) -> &'static str {
         "RM.FEA.STUDY.GEOMETRY_UNITS_UNSPECIFIED" => {
             "geometry.units must be specified (not unspecified)"
         }
-        "RM.FEA.STUDY.RUN_KIND_PROFILE_MISMATCH" => {
-            "model.template selects the solver; run kind must match the selected template when supplied"
+        "RM.FEA.STUDY.EXECUTION_EMPTY" => "execution must contain at least one typed procedure step",
+        "RM.FEA.STUDY.EXECUTION_PLAN_INVALID" => {
+            "execution must map each canonical model procedure step to exactly one compatible solver"
         }
         "RM.FEA.STUDY.MODEL_GEOMETRY_MISMATCH" => {
             "resolved model geometry id or revision does not match the study geometry"
         }
         "RM.FEA.STUDY.MODEL_INVALID" => "resolved model failed FEA validation",
-        "RM.FEA.STUDY.RUN_OPTIONS_KIND_MISMATCH" => {
-            "run options are only valid for the solver selected by model.template"
-        }
         "RM.FEA.STUDY.ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
-            "electromagnetic_run_options.residual_target must be finite and positive"
+            "electromagnetic execution options.residual_target must be finite and positive"
         }
         "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID" => {
-            "electromagnetic_run_options.harmonic_tolerance must be finite and positive"
+            "electromagnetic execution options.harmonic_tolerance must be finite and positive"
         }
         "RM.FEA.STUDY.ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID" => {
-            "electromagnetic_run_options.harmonic_max_iterations must be greater than zero"
+            "electromagnetic execution options.harmonic_max_iterations must be greater than zero"
         }
         "RM.FEA.STUDY.ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID" => {
-            "electromagnetic_run_options.sweep_frequency_hz must contain finite positive values when sweep_enabled is true"
+            "electromagnetic execution options.sweep_frequency_hz must contain finite positive values when sweep_enabled is true"
         }
         _ => "unrecognized study validation issue",
     }
-}
-
-fn template_supports_run_kind(template: AnalysisModelTemplate, run_kind: AnalysisRunKind) -> bool {
-    template.derived_run_kind() == run_kind
 }
 
 fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
@@ -13046,35 +12925,6 @@ fn study_operation_sequence(spec: &AnalysisStudySpec, run_op_version: &str) -> V
     operation_sequence.push(ANALYSIS_VALIDATE_OP_VERSION.to_string());
     operation_sequence.push(run_op_version.to_string());
     operation_sequence
-}
-
-fn study_run_options_json(spec: &AnalysisStudySpec) -> serde_json::Value {
-    match spec.run_kind {
-        AnalysisRunKind::LinearStatic => serde_json::to_value(&spec.linear_static_run_options),
-        AnalysisRunKind::Modal => serde_json::to_value(&spec.modal_run_options),
-        AnalysisRunKind::Acoustic => serde_json::to_value(&spec.acoustic_run_options),
-        AnalysisRunKind::Thermal => serde_json::to_value(&spec.thermal_run_options),
-        AnalysisRunKind::Transient => serde_json::to_value(&spec.transient_run_options),
-        AnalysisRunKind::Cfd => serde_json::to_value(&spec.cfd_run_options),
-        AnalysisRunKind::Cht => serde_json::to_value(&spec.cht_run_options),
-        AnalysisRunKind::Fsi => serde_json::to_value(&spec.fsi_run_options),
-        AnalysisRunKind::Nonlinear => serde_json::to_value(&spec.nonlinear_run_options),
-        AnalysisRunKind::Electromagnetic => serde_json::to_value(&spec.electromagnetic_run_options),
-    }
-    .unwrap_or(serde_json::Value::Null)
-}
-
-fn run_options_to_json<T: Serialize>(options: &T) -> serde_json::Value {
-    serde_json::to_value(options).unwrap_or(serde_json::Value::Null)
-}
-
-fn attach_solver_mesh_artifact_path(
-    artifact_path: &mut Option<String>,
-    solver_mesh_artifact_path: Option<&str>,
-) {
-    if artifact_path.is_none() {
-        *artifact_path = solver_mesh_artifact_path.map(str::to_string);
-    }
 }
 
 fn resolve_solver_mesh_artifact(
@@ -13574,17 +13424,6 @@ fn to_fea_contact_interface_context(
         max_penetration_ratio: contact.max_penetration_ratio,
         friction_coefficient: contact.friction_coefficient,
     })
-}
-
-fn electro_thermal_invalid_options_error_code(operation: &str) -> &'static str {
-    match operation {
-        ANALYSIS_RUN_MODAL_OPERATION => "RM.FEA.RUN_MODAL.INVALID_ELECTRO_THERMAL_OPTIONS",
-        ANALYSIS_RUN_ACOUSTIC_OPERATION => "RM.FEA.RUN_ACOUSTIC.INVALID_ELECTRO_THERMAL_OPTIONS",
-        ANALYSIS_RUN_TRANSIENT_OPERATION => "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
-        ANALYSIS_RUN_NONLINEAR_OPERATION => "RM.FEA.RUN_NONLINEAR.INVALID_ELECTRO_THERMAL_OPTIONS",
-        ANALYSIS_RUN_OPERATION => "RM.FEA.RUN_LINEAR_STATIC.INVALID_ELECTRO_THERMAL_OPTIONS",
-        _ => "RM.FEA.RUN.INVALID_ELECTRO_THERMAL_OPTIONS",
-    }
 }
 
 fn validate_thermo_coupling_options(

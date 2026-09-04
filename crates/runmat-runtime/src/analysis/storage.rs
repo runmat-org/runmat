@@ -10,7 +10,7 @@ use chrono::Utc;
 use runmat_filesystem::{DirEntry, FsFileType};
 use serde::{Deserialize, Serialize};
 
-use runmat_analysis_core::AnalysisRunIdentity;
+use runmat_analysis_fea::AnalysisRunIdentity;
 
 use super::contracts::{AnalysisArtifactRecord, AnalysisRunResult};
 
@@ -72,8 +72,8 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
-            identity: run.identity.clone(),
-            op_version: run_operation_version(run),
+            identity: run.run.identity.clone(),
+            op_version: run_operation_version(run)?,
             field_ids: super::analysis_run_field_ids(run),
         })
     }
@@ -117,7 +117,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             fs_create_dir_all(parent)
                 .map_err(|err| format!("failed to create artifact directory: {err}"))?;
         }
-        let op_version = run_operation_version(run);
+        let op_version = run_operation_version(run)?;
         let persisted = PersistedRunArtifact {
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
             created_at: Utc::now().to_rfc3339(),
@@ -132,7 +132,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
             created_at: Utc::now().to_rfc3339(),
-            identity: run.identity.clone(),
+            identity: run.run.identity.clone(),
             op_version,
             field_ids: super::analysis_run_field_ids(run),
         })
@@ -184,15 +184,38 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
     }
 }
 
-fn run_operation_version(run: &AnalysisRunResult) -> String {
-    run.identity.operation_version()
+fn run_operation_version(run: &AnalysisRunResult) -> Result<String, String> {
+    super::run_operation_for_identity(&run.run.identity)
+        .map(|operation| operation.version().to_string())
+        .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())
 }
 
 fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
-    run.identity
-        .validate()
-        .map_err(|message| format!("invalid analysis run identity: {message}"))?;
-    if !run.provenance.fallback_events.is_empty() && !run.identity.permits_fallback() {
+    let identity = &run.run.identity;
+    super::run_operation_for_identity(identity)
+        .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())?;
+    let (expected_publishable, expected_publication_reasons) =
+        super::result_policy::evaluate_production_publication(&run.run, run.numerically_acceptable);
+    if run.production_publishable != expected_publishable {
+        return Err(
+            "production publication must require both numerical acceptance and a production-qualified formulation"
+                .to_string(),
+        );
+    }
+    if run.production_publication_reasons != expected_publication_reasons {
+        return Err(
+            "production publication reasons do not match the failed publication gates".to_string(),
+        );
+    }
+    let expected_status =
+        super::result_policy::classify_run_status(run.result_quality, run.numerically_acceptable);
+    if run.run_status != expected_status {
+        return Err(format!(
+            "analysis run status {:?} does not match numerical outcome {:?}",
+            run.run_status, expected_status
+        ));
+    }
+    if !run.provenance.fallback_events.is_empty() && !identity.permits_fallback() {
         return Err(
             "analysis run identity forbids the execution fallbacks recorded by provenance"
                 .to_string(),
@@ -234,7 +257,7 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
         let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
         let identity = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
             Ok(persisted) if persisted.schema_version == ARTIFACT_SCHEMA_VERSION => {
-                persisted.run.identity
+                persisted.run.run.identity
             }
             _ => continue,
         };

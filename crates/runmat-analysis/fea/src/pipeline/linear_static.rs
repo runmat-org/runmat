@@ -1,5 +1,5 @@
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, StructuralConstraintKind,
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
 };
 
 use crate::{
@@ -40,6 +40,11 @@ pub fn run_linear_static_with_options(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
 ) -> Result<FeaRunResult, FeaRunError> {
+    let execution_step = super::admission::require_structural(
+        model,
+        AnalysisProcedure::Static,
+        options.formulation_requirement,
+    )?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::RegionResolution,
@@ -76,6 +81,11 @@ pub fn run_linear_static_with_options(
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let identity = super::admission::admit_structural(
+        &summary,
+        execution_step,
+        options.formulation_requirement,
+    )?;
     super::validate_rotational_dof_targets(model, &summary)?;
     let solver_mesh_present = options.solver_mesh.is_some();
     if options.require_solver_mesh_for_solid
@@ -308,6 +318,7 @@ pub fn run_linear_static_with_options(
     );
 
     Ok(FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
             solve_result.solver_backend,

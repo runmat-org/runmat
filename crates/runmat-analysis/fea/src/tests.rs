@@ -1,5 +1,4 @@
 use crate::{
-    fea_electro_thermal_temperature_field_id, fea_electro_thermal_thermal_residual_field_id,
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
@@ -15,29 +14,28 @@ use crate::{
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id,
     fixtures::{
-        fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
-        FixtureId,
+        fixture_model, replace_fixture_excitations, replace_fixture_with_electric_current,
+        FixtureExcitation, FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext,
     FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
-    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
-    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
-    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
-    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
-    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
+    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
+    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
+    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
+    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
+    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
 fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisConstraint {
@@ -55,6 +53,81 @@ use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel, Proce
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
+
+fn experimental_linear_static_options() -> LinearStaticSolveOptions {
+    LinearStaticSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..LinearStaticSolveOptions::default()
+    }
+}
+
+fn experimental_modal_options() -> ModalSolveOptions {
+    ModalSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..ModalSolveOptions::default()
+    }
+}
+
+fn experimental_thermal_options() -> ThermalSolveOptions {
+    ThermalSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..ThermalSolveOptions::default()
+    }
+}
+
+fn experimental_electromagnetic_options() -> ElectromagneticSolveOptions {
+    ElectromagneticSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..ElectromagneticSolveOptions::default()
+    }
+}
+
+fn experimental_transient_options() -> TransientSolveOptions {
+    TransientSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..TransientSolveOptions::default()
+    }
+}
+
+fn experimental_nonlinear_options() -> NonlinearSolveOptions {
+    NonlinearSolveOptions {
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        ..NonlinearSolveOptions::default()
+    }
+}
+
+#[test]
+fn production_requirement_rejects_before_structural_solver_progress() {
+    use std::sync::{Arc, Mutex};
+
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+    let _guard = crate::replace_fea_progress_context(
+        Some(Arc::new(move |event| {
+            captured.lock().expect("progress lock").push(event);
+        })),
+        None,
+    );
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+    .expect_err("no current structural realization is production-qualified");
+
+    assert!(matches!(
+        error,
+        crate::FeaRunError::FormulationAvailability(ref rejection)
+            if rejection.reason
+                == runmat_analysis_core::FormulationAdmissionRejectionReason::ProductionQualificationMissing
+    ));
+    assert!(events.lock().expect("progress lock").is_empty());
+}
 
 fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
     result.field(field_id).expect("field should be present")
@@ -76,7 +149,7 @@ fn run_linear_static_with_single_tetrahedron_mesh(
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(model)),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..LinearStaticSolveOptions::default()
+            ..experimental_linear_static_options()
         },
     )
 }
@@ -118,6 +191,19 @@ fn canonical_cantilever_benchmark_runs() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
+
+    assert_eq!(
+        result.identity.qualification(),
+        runmat_analysis_core::FormulationMaturity::Experimental
+    );
+    assert_eq!(
+        result.identity.family(),
+        runmat_analysis_core::PhysicsFamily::Structural
+    );
+    assert_eq!(
+        result.identity.realization().components[0].topologies,
+        vec![runmat_analysis_core::TopologyImplementation::CanonicalSolverMeshTet4]
+    );
 
     assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count(),
@@ -181,13 +267,15 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
 
+    let mut modal_model = model.clone();
+    modal_model.sequence.steps = vec![ProcedureStep::structural_modal("modal")];
     let modal = crate::run_modal_with_options(
-        &model,
+        &modal_model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
             mode_count: 2,
             solver_mesh: Some(mesh.clone()),
-            ..ModalSolveOptions::default()
+            ..experimental_modal_options()
         },
     )
     .expect("modal solve should consume the canonical mesh");
@@ -208,31 +296,35 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..ThermalSolveOptions::default()
+            ..experimental_thermal_options()
         },
     )
     .expect("thermal solve should consume the canonical mesh");
     assert_eq!(thermal.temperature_snapshots[0].shape, vec![4]);
 
+    let mut transient_model = model.clone();
+    transient_model.sequence.steps = vec![ProcedureStep::structural_transient("transient")];
     let transient = crate::run_transient_with_options(
-        &model,
+        &transient_model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
             step_count: 2,
             solver_mesh: Some(mesh.clone()),
-            ..TransientSolveOptions::default()
+            ..experimental_transient_options()
         },
     )
     .expect("transient solve should consume the canonical mesh");
     assert_eq!(transient.displacement_snapshots[0].shape, vec![4, 3]);
 
+    let mut nonlinear_model = model.clone();
+    nonlinear_model.sequence.steps = vec![ProcedureStep::structural_nonlinear("nonlinear")];
     let nonlinear = crate::run_nonlinear_with_options(
-        &model,
+        &nonlinear_model,
         ComputeBackend::Cpu,
         NonlinearSolveOptions {
             increment_count: 2,
             solver_mesh: Some(mesh.clone()),
-            ..NonlinearSolveOptions::default()
+            ..experimental_nonlinear_options()
         },
     )
     .expect("nonlinear solve should consume the canonical mesh");
@@ -252,7 +344,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         ComputeBackend::Cpu,
         ElectromagneticSolveOptions {
             solver_mesh: Some(mesh),
-            ..ElectromagneticSolveOptions::default()
+            ..experimental_electromagnetic_options()
         },
     )
     .expect("electromagnetic solve should consume the canonical mesh");
@@ -290,8 +382,12 @@ fn moment_loads_require_rotational_dofs() {
         }],
     );
 
-    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect_err("moment loads should require rotational DOFs");
+    let err = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("moment loads should require rotational DOFs");
     let message = err.to_string();
     assert!(message.contains("moment loads require rotational-DOF structural elements"));
     assert!(message.contains("use a wrench load"));
@@ -319,8 +415,12 @@ fn prescribed_rotations_require_rotational_dofs() {
         },
     )];
 
-    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect_err("prescribed rotations should require rotational DOFs");
+    let err = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("prescribed rotations should require rotational DOFs");
     let message = err.to_string();
     assert!(message.contains("prescribed rotations require rotational-DOF structural elements"));
     assert!(message.contains("constraint_id=tip_rotation"));
@@ -329,8 +429,14 @@ fn prescribed_rotations_require_rotational_dofs() {
 #[test]
 fn canonical_constant_signal_drives_prescribed_translation_assembly() {
     let inline_model = fixture_model(FixtureId::TransientShock);
-    let inline = crate::assembly::assemble_linear_system(&inline_model, None, None, None)
-        .expect("inline prescribed value should assemble");
+    let inline = crate::assembly::assemble_structural_system(
+        &inline_model,
+        None,
+        None,
+        None,
+        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .expect("inline prescribed value should assemble");
 
     let mut signal_model = inline_model.clone();
     signal_model
@@ -371,36 +477,38 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         }
     }
 
-    let referenced = crate::assembly::assemble_linear_system(&signal_model, None, None, None)
-        .expect("signal-backed prescribed value should assemble");
+    let referenced = crate::assembly::assemble_structural_system(
+        &signal_model,
+        None,
+        None,
+        None,
+        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+    )
+    .expect("signal-backed prescribed value should assemble");
     assert_eq!(referenced.operator.constrained, inline.operator.constrained);
     assert_eq!(referenced.operator.rhs, inline.operator.rhs);
 }
 
 #[test]
 fn assembly_summary_reports_structural_dof_layout_metrics() {
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    replace_fixture_excitations(
-        &mut model,
-        vec![FixtureExcitation {
-            id: "tip_load".into(),
-            region_id: "tip".into(),
-            kind: FixtureExcitationKind::Moment([0.0, 0.0, 125.0]),
-        }],
-    );
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        None,
+        None,
+        None,
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("beam system should assemble");
 
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None)
-        .expect("synthetic test operator should assemble");
-
-    assert_eq!(summary.dof_count, 3);
-    assert_eq!(summary.structural_node_count, 1);
-    assert_eq!(summary.structural_translational_dof_count, 3);
-    assert_eq!(summary.structural_rotational_dof_count, 0);
-    assert_eq!(summary.structural_rotation_node_count, 0);
+    assert_eq!(summary.dof_count, 12);
+    assert_eq!(summary.structural_node_count, 2);
+    assert_eq!(summary.structural_translational_dof_count, 6);
+    assert_eq!(summary.structural_rotational_dof_count, 6);
+    assert_eq!(summary.structural_rotation_node_count, 2);
     assert_eq!(summary.structural_moment_load_count, 1);
-    assert_eq!(summary.structural_direct_rotational_moment_load_count, 0);
-    assert_eq!(summary.structural_rotational_constraint_count, 0);
-    assert_eq!(summary.structural_beam_element_count, 0);
+    assert_eq!(summary.structural_direct_rotational_moment_load_count, 1);
+    assert_eq!(summary.structural_beam_element_count, 1);
     assert_eq!(summary.structural_shell_element_count, 0);
     assert_eq!(summary.structural_solid_element_count, 0);
 }
@@ -408,8 +516,14 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
 #[test]
 fn beam_assembly_uses_lumped_rotational_inertia() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let summary = crate::assembly::assemble_linear_system(&model, None, None, None)
-        .expect("beam operator should assemble");
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        None,
+        None,
+        None,
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("beam operator should assemble");
     let layout = &summary.structural_dof_layout;
     let node = 0usize;
     let mass = &summary.operator.mass_diag;
@@ -460,8 +574,12 @@ fn beam_assembly_uses_lumped_rotational_inertia() {
 fn shell_moment_solves_rotation_and_reaction_moment() {
     let model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
 
-    let result = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect("shell moment solve should run");
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("shell moment solve should run");
     assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
         vec![3, 3]
@@ -560,8 +678,12 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
         }],
     );
 
-    let result = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect("beam moment solve should run");
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("beam moment solve should run");
     assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
         vec![2, 3]
@@ -679,7 +801,12 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
 
 #[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
-    let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_static",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::Static,
+    )];
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -695,10 +822,51 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..LinearStaticSolveOptions::default()
+            ..experimental_linear_static_options()
         },
     )
     .expect("thermo-mechanical linear static solve should succeed");
+
+    assert_eq!(
+        result.identity.family(),
+        runmat_analysis_core::PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        )
+    );
+    assert_eq!(
+        result.identity.realization().coupling,
+        runmat_analysis_core::CouplingImplementation::OnePassPrescribedThermomechanicalProfile
+    );
+    assert_eq!(
+        result.identity.realization().temporals,
+        vec![
+            runmat_analysis_core::TemporalImplementation::StructuralStaticLinearSolve,
+            runmat_analysis_core::TemporalImplementation::PrescribedThermomechanicalProfileApplication,
+        ]
+    );
+    assert_eq!(
+        result.identity.realization().components[1].spatial_operator,
+        runmat_analysis_core::SpatialOperatorImplementation::PrescribedThermalCouplingProfile
+    );
+    assert_eq!(
+        result.identity.realization().components[1].sources,
+        vec![runmat_analysis_core::SourceImplementation::PrescribedTemperatureDeltaProfile]
+    );
+    assert!(!result
+        .identity
+        .realization()
+        .boundary_transfers
+        .contains(&runmat_analysis_core::BoundaryTransferImplementation::NotApplicable));
+    assert_eq!(
+        result.identity.family(),
+        runmat_analysis_core::PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        )
+    );
+    assert_eq!(
+        result.identity.procedure(),
+        runmat_analysis_core::AnalysisProcedure::Static
+    );
 
     assert_eq!(
         field(&result, &fea_thermo_mechanical_temperature_field_id(0)).field_id,
@@ -734,6 +902,102 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
     );
     assert_thermo_mechanical_consistency_diagnostic(&result.diagnostics);
     assert_thermo_mechanical_temperature_field_diagnostic(&result.diagnostics);
+}
+
+#[test]
+fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 65.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                sampled_time_profile: Vec::new(),
+            }),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect_err("a structural step must not silently execute coupled assembly math");
+
+    let message = error.to_string();
+    assert!(message.contains("requests Structural"));
+    assert!(message.contains("realizes Coupled(Thermomechanical)"));
+}
+
+#[test]
+fn transient_rejects_thermomechanical_step_without_coupled_assembly() {
+    let mut model = fixture_model(FixtureId::TransientLong);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_transient_without_context",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::TransientResponse,
+    )];
+    let error = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_transient_options(),
+    )
+    .expect_err("a thermomechanical step must realize coupled assembly math");
+
+    let message = error.to_string();
+    assert!(message.contains("requests Coupled(Thermomechanical)"));
+    assert!(message.contains("realizes Structural"));
+}
+
+#[test]
+fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_explicit_nonlinear",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::Nonlinear,
+    )];
+    let error = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 65.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                sampled_time_profile: Vec::new(),
+            }),
+            ..experimental_nonlinear_options()
+        },
+    )
+    .expect_err("explicit connectivity must not silently drop thermomechanical coupling");
+
+    let message = error.to_string();
+    assert!(message.contains("requests Coupled(Thermomechanical)"));
+    assert!(message.contains("realizes Structural"));
+}
+
+#[test]
+fn structural_pipeline_rejects_ambiguous_procedure_steps() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model
+        .sequence
+        .steps
+        .push(ProcedureStep::structural_static("static_duplicate"));
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("a structural pipeline must resolve one canonical procedure step");
+
+    assert!(error.to_string().contains("multiple steps were found"));
 }
 
 #[test]
@@ -775,7 +1039,7 @@ fn solid_continuum_requires_solver_mesh_when_requested() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             require_solver_mesh_for_solid: true,
-            ..LinearStaticSolveOptions::default()
+            ..experimental_linear_static_options()
         },
     )
     .expect_err("solid continuum solve should require a solver mesh");
@@ -792,7 +1056,7 @@ fn explicit_beam_topology_does_not_require_solver_mesh() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             require_solver_mesh_for_solid: true,
-            ..LinearStaticSolveOptions::default()
+            ..experimental_linear_static_options()
         },
     )
     .expect("explicit beam topology should not require a solid solver mesh");
@@ -812,7 +1076,7 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh()),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..LinearStaticSolveOptions::default()
+            ..experimental_linear_static_options()
         },
     )
     .expect("analysis-mesh-backed linear static solve should succeed");
@@ -961,8 +1225,12 @@ fn cpu_gpu_parity_respects_tolerance_policy() {
 #[test]
 fn fixture_missing_materials_is_rejected() {
     let model = fixture_model(FixtureId::MissingMaterials);
-    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect_err("fixture should fail validation");
+    let err = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("fixture should fail validation");
     assert!(err
         .to_string()
         .contains("ANALYSIS_VALIDATION_MISSING_MATERIALS"));
@@ -971,8 +1239,12 @@ fn fixture_missing_materials_is_rejected() {
 #[test]
 fn thermal_pipeline_rejects_moment_loads_before_assembly() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let err = crate::run_thermal(&model, ComputeBackend::Cpu)
-        .expect_err("thermal solve should reject structural moment loads");
+    let err = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_thermal_options(),
+    )
+    .expect_err("thermal solve should reject structural moment loads");
     let message = err.to_string();
 
     assert!(message.contains("moment loads are structural loads"));
@@ -983,8 +1255,12 @@ fn thermal_pipeline_rejects_moment_loads_before_assembly() {
 #[test]
 fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let err = crate::run_electromagnetic(&model, ComputeBackend::Cpu)
-        .expect_err("electromagnetic solve should reject structural moment loads");
+    let err = crate::run_electromagnetic_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_electromagnetic_options(),
+    )
+    .expect_err("electromagnetic solve should reject structural moment loads");
     let message = err.to_string();
 
     assert!(message.contains("moment loads are structural loads"));
@@ -993,10 +1269,47 @@ fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
 }
 
 #[test]
+fn electromagnetic_pipeline_consumes_electric_current_without_structural_admission() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 4.0,
+    });
+    for material in &mut model.materials {
+        material.electrical = Some(MaterialElectricalModel::default());
+    }
+
+    let result = crate::run_electromagnetic_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_electromagnetic_options(),
+    )
+    .expect("electromagnetic admission must own the electric-current source");
+
+    assert_eq!(
+        result.run.identity.family(),
+        runmat_analysis_core::PhysicsFamily::Electromagnetic
+    );
+    assert!(result
+        .run
+        .identity
+        .realization()
+        .components
+        .iter()
+        .any(|component| component
+            .sources
+            .contains(&runmat_analysis_core::SourceImplementation::OrdinalDistribution)));
+}
+
+#[test]
 fn modal_solver_emits_modes_for_modal_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
-    let result = crate::run_modal(&model, ComputeBackend::Cpu).expect("modal solve should succeed");
+    let result =
+        crate::run_modal_with_options(&model, ComputeBackend::Cpu, experimental_modal_options())
+            .expect("modal solve should succeed");
 
     assert!(!result.frequencies_hz.is_empty());
     assert_eq!(result.frequencies_hz.len(), result.mode_shapes.len());
@@ -1062,8 +1375,12 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "transient_1".to_string(),
     )];
-    let result =
-        crate::run_transient(&model, ComputeBackend::Cpu).expect("transient solve should succeed");
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_transient_options(),
+    )
+    .expect("transient solve should succeed");
 
     assert!(!result.time_points_s.is_empty());
     assert_eq!(
@@ -1144,8 +1461,12 @@ fn transient_beam_moment_emits_rotational_snapshots() {
     model.sequence.steps = vec![ProcedureStep::structural_transient(
         "beam_moment_transient".to_string(),
     )];
-    let result =
-        crate::run_transient(&model, ComputeBackend::Cpu).expect("transient beam solve should run");
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_transient_options(),
+    )
+    .expect("transient beam solve should run");
 
     assert_eq!(result.time_points_s.len(), result.rotation_snapshots.len());
     assert_eq!(
@@ -1206,7 +1527,7 @@ fn thermal_solver_emits_heat_transfer_fields() {
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..ThermalSolveOptions::default()
+            ..experimental_thermal_options()
         },
     )
     .expect("thermal solve should succeed");
@@ -1277,6 +1598,7 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             mode_count: 8,
             solver_mesh: None,
             thermo_mechanical_context: None,
@@ -1312,7 +1634,7 @@ fn transient_long_fixture_emits_stability_diagnostics() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             step_count: 24,
-            ..TransientSolveOptions::default()
+            ..experimental_transient_options()
         },
     )
     .expect("transient long fixture should solve");
@@ -1338,7 +1660,7 @@ fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             step_count: 48,
-            ..TransientSolveOptions::default()
+            ..experimental_transient_options()
         },
     )
     .expect("transient shock fixture should solve");
@@ -1358,7 +1680,12 @@ fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
 
 #[test]
 fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
-    let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_transient",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::TransientResponse,
+    )];
     let result = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -1373,7 +1700,7 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..TransientSolveOptions::default()
+            ..experimental_transient_options()
         },
     )
     .expect("thermo-mechanical transient solve should succeed");
@@ -1460,9 +1787,9 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
 }
 
 #[test]
-fn electro_thermal_transient_emits_coupled_fields() {
+fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
     let model = fixture_model(FixtureId::ElectroThermalJouleBenign);
-    let result = crate::run_transient_with_options(
+    let error = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
@@ -1476,75 +1803,13 @@ fn electro_thermal_transient_emits_coupled_fields() {
                 region_conductivity_scales: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..TransientSolveOptions::default()
+            ..experimental_transient_options()
         },
     )
-    .expect("electro-thermal transient solve should succeed");
-
-    assert!(result
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL)
-        .is_some());
-    assert!(result
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD)
-        .is_some());
-    assert!(result
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY)
-        .is_some());
-    assert!(result
-        .run
-        .field(FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT)
-        .is_some());
-    let electric_field = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD);
-    let current_density = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY);
-    let joule_heat = field(&result.run, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT);
-    assert_eq!(electric_field.shape.len(), 2);
-    assert_eq!(electric_field.shape[1], 3);
-    assert_eq!(current_density.shape, electric_field.shape);
-    assert_eq!(joule_heat.shape, vec![electric_field.shape[0]]);
-    assert_eq!(
-        result.electro_thermal_temperature_snapshots.len(),
-        result.time_points_s.len()
-    );
-    assert_eq!(
-        result.electro_thermal_thermal_residual_snapshots.len(),
-        result.time_points_s.len()
-    );
-    assert_eq!(
-        result.electro_thermal_temperature_snapshots[0].field_id,
-        fea_electro_thermal_temperature_field_id(0)
-    );
-    assert_eq!(
-        result.electro_thermal_thermal_residual_snapshots[0].field_id,
-        fea_electro_thermal_thermal_residual_field_id(0)
-    );
-    let coupling = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_ET_COUPLING")
-        .expect("electro-thermal coupling diagnostic should be present");
-    assert!(coupling.message.contains("electrical_power_in_w="));
-    assert!(coupling.message.contains("integrated_joule_heat_w="));
-    assert!(coupling.message.contains("power_balance_ratio="));
-    assert!(coupling.message.contains("conservation_residual="));
-    let conduction_conservation = result
-        .run
-        .diagnostics
-        .iter()
-        .find(|diag| diag.code == "FEA_ET_CONDUCTION_CONSERVATION")
-        .expect("electro-thermal conduction conservation diagnostic should be present");
-    assert!(conduction_conservation
-        .message
-        .contains("ohms_law_residual_ratio="));
-    assert!(conduction_conservation
-        .message
-        .contains("joule_heat_balance_ratio="));
-    assert!(conduction_conservation
-        .message
-        .contains("conduction_graph_coverage_ratio="));
+    .expect_err("structural transient must not relabel its profile math as electrothermal");
+    assert!(error
+        .to_string()
+        .contains("do not implement an electrothermal formulation"));
 }
 
 #[test]
@@ -1553,8 +1818,12 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "nonlinear_1".to_string(),
     )];
-    let result =
-        crate::run_nonlinear(&model, ComputeBackend::Cpu).expect("nonlinear solve should succeed");
+    let result = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_nonlinear_options(),
+    )
+    .expect("nonlinear solve should succeed");
 
     assert!(!result.load_factors.is_empty());
     assert_eq!(result.load_factors.len(), result.residual_norms.len());
@@ -1670,8 +1939,12 @@ fn nonlinear_beam_moment_emits_rotation_snapshots() {
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
         "beam_moment_nonlinear".to_string(),
     )];
-    let result = crate::run_nonlinear(&model, ComputeBackend::Cpu)
-        .expect("nonlinear beam moment solve should succeed");
+    let result = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_nonlinear_options(),
+    )
+    .expect("nonlinear beam moment solve should succeed");
 
     assert_eq!(result.load_factors.len(), result.rotation_snapshots.len());
     assert_eq!(
@@ -1710,7 +1983,7 @@ fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
             max_penetration_ratio: 0.01,
             friction_coefficient: 0.0,
         }),
-        ..NonlinearSolveOptions::default()
+        ..experimental_nonlinear_options()
     };
     let model = fixture_model(FixtureId::NonlinearContactFrictionlessReference);
     let result = crate::run_nonlinear_with_options(&model, ComputeBackend::Cpu, options)
@@ -1762,7 +2035,12 @@ fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
 
 #[test]
 fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
-    let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    let mut model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_nonlinear",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::Nonlinear,
+    )];
     let result = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -1776,7 +2054,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
-            ..NonlinearSolveOptions::default()
+            ..experimental_nonlinear_options()
         },
     )
     .expect("thermo-mechanical nonlinear solve should succeed");
@@ -1857,8 +2135,12 @@ fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
         FixtureId::NonlinearLoadPathMix,
     ] {
         let model = fixture_model(fixture);
-        let result = crate::run_nonlinear(&model, ComputeBackend::Cpu)
-            .expect("hard nonlinear fixture solves");
+        let result = crate::run_nonlinear_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            experimental_nonlinear_options(),
+        )
+        .expect("hard nonlinear fixture solves");
         assert!(!result.load_factors.is_empty());
         assert!(result.backtrack_burst_count > 0);
         assert!(result.iteration_spike_count > 0);
@@ -1996,8 +2278,12 @@ fn structural_beam_moment_reference_fixtures_emit_closed_form_checks() {
             "cantilever_force_and_moment",
         ),
     ] {
-        let result = crate::run_linear_static(&fixture_model(fixture), ComputeBackend::Cpu)
-            .expect("beam moment reference should solve");
+        let result = crate::run_linear_static_with_options(
+            &fixture_model(fixture),
+            ComputeBackend::Cpu,
+            experimental_linear_static_options(),
+        )
+        .expect("beam moment reference should solve");
         assert_eq!(
             field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
             vec![2, 3]
@@ -2039,9 +2325,10 @@ fn structural_beam_moment_reference_fixtures_emit_closed_form_checks() {
 
 #[test]
 fn structural_invalid_moment_without_rotational_dofs_fixture_is_typed() {
-    let err = crate::run_linear_static(
+    let err = crate::run_linear_static_with_options(
         &fixture_model(FixtureId::StructuralInvalidMomentWithoutRotationalDofs),
         ComputeBackend::Cpu,
+        experimental_linear_static_options(),
     )
     .expect_err("moment on displacement-only fixture should fail");
     assert!(err
@@ -2058,12 +2345,17 @@ fn moment_load_region_must_resolve_to_rotational_dofs() {
         target.region_id = "node:99".to_string();
     }
 
-    let err = crate::run_linear_static(&model, ComputeBackend::Cpu)
-        .expect_err("unresolved beam moment target should fail");
+    let err = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("unresolved beam moment target should fail");
     assert!(err
         .to_string()
-        .contains("moment loads require rotational-DOF structural elements"));
+        .contains("does not resolve to the selected discretization"));
     assert!(err.to_string().contains("region_id=node:99"));
+    assert!(err.to_string().contains("load_kind=moment"));
 }
 
 #[test]

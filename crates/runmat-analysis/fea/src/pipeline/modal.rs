@@ -1,4 +1,4 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
 
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
@@ -28,6 +28,11 @@ pub fn run_modal_with_options(
     backend: ComputeBackend,
     options: ModalSolveOptions,
 ) -> Result<FeaModalRunResult, FeaRunError> {
+    let execution_step = super::admission::require_structural(
+        model,
+        AnalysisProcedure::ModalExtraction,
+        options.formulation_requirement,
+    )?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -64,6 +69,11 @@ pub fn run_modal_with_options(
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let identity = super::admission::admit_structural(
+        &summary,
+        execution_step,
+        options.formulation_requirement,
+    )?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_modal",
@@ -138,6 +148,7 @@ pub fn run_modal_with_options(
     run_fields.extend(modal_fields);
 
     let run = FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
             modal.solver_backend,

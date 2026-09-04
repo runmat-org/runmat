@@ -436,6 +436,10 @@ mod tests {
             structural_beam_recovery: Vec::new(),
             structural_shell_recovery: Vec::new(),
             structural_formulation: None,
+            structural_sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
+            structural_boundary_transfers: vec![
+                runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
+            ],
             constrained_dof_count: 0,
             load_count: 1,
             structural_material: StructuralMaterialSummary {

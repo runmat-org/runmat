@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 
 use runmat_analysis_core::{
     AnalysisBoundary, AnalysisConnector, AnalysisConstraint, AnalysisInterface, AnalysisModel,
-    AnalysisModelId, AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel,
-    CfdDomain, CoordinateFrame, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
-    ExcitationAction, ExcitationCase, ExcitationTarget, InitialCondition, MaterialAcousticModel,
-    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily, RegionTarget,
+    AnalysisModelId, AnalysisSequence, BeamElementModel, BeamSectionModel, CfdDomain,
+    CoordinateFrame, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
+    ExcitationAction, ExcitationCase, ExcitationTarget, FormulationRequirement, InitialCondition,
+    MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, RegionTarget,
     ResponseSpectrum, ShellElementModel, ShellSectionModel, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode, ThermoMechanicalDomain,
 };
@@ -15,14 +15,13 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
 use runmat_geometry_io::GeometryImportOptions;
 use runmat_meshing_core::{ElementOrder, MeshingRequestSettings};
-use serde::Deserialize;
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{
-    analysis_create_model_op, AnalysisAcousticRunOptions, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
-    AnalysisNonlinearRunOptions, AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec,
-    AnalysisStudySweepSpec, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
+    analysis_create_model_op, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisModelTemplate, AnalysisSolverOptions, AnalysisStudySpec,
+    AnalysisStudySweepSpec,
 };
 use crate::operations::OperationContext;
 
@@ -58,7 +57,7 @@ struct FeaStudyDocument {
     id: String,
     geometry: FeaGeometryDocument,
     model: FeaModelDocument,
-    run: FeaRunDocument,
+    execution: Vec<FeaExecutionDocument>,
     #[serde(default)]
     mesh: Option<FeaMeshDocument>,
     #[serde(default)]
@@ -149,7 +148,57 @@ enum FeaModelDefaultsMode {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeaRegionDocument {
-    selector: String,
+    selector: FeaRegionSelector,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeaRegionSelector {
+    Id(String),
+    Tag(String),
+    Name(String),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaRegionSelectorRepresentation {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+impl Serialize for FeaRegionSelector {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
+        match self {
+            Self::Id(value) => map.serialize_entry("id", value)?,
+            Self::Tag(value) => map.serialize_entry("tag", value)?,
+            Self::Name(value) => map.serialize_entry("name", value)?,
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for FeaRegionSelector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let representation = FeaRegionSelectorRepresentation::deserialize(deserializer)?;
+        match (representation.id, representation.tag, representation.name) {
+            (Some(value), None, None) => Ok(Self::Id(value)),
+            (None, Some(value), None) => Ok(Self::Tag(value)),
+            (None, None, Some(value)) => Ok(Self::Name(value)),
+            _ => Err(serde::de::Error::custom(
+                "region selector must contain exactly one of `id`, `tag`, or `name`",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,33 +324,83 @@ struct FeaDomainsDocument {
     cfd: Option<CfdDomain>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FeaRunDocument {
-    #[serde(default = "default_backend")]
+#[derive(Debug)]
+struct FeaExecutionDocument {
+    step: String,
     backend: ComputeBackend,
-    #[serde(default)]
-    solver: Option<FeaSolverOptionsDocument>,
+    requirement: FormulationRequirement,
+    solver_options: Option<AnalysisSolverOptions>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(
-    tag = "procedure",
-    content = "options",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-enum FeaSolverOptionsDocument {
-    LinearStatic(AnalysisRunOptions),
-    Modal(AnalysisModalRunOptions),
-    Acoustic(AnalysisAcousticRunOptions),
-    Thermal(AnalysisThermalRunOptions),
-    Transient(AnalysisTransientRunOptions),
-    Cfd(AnalysisCfdRunOptions),
-    Cht(AnalysisChtRunOptions),
-    Fsi(AnalysisFsiRunOptions),
-    Nonlinear(AnalysisNonlinearRunOptions),
-    Electromagnetic(AnalysisElectromagneticRunOptions),
+#[derive(Deserialize)]
+struct FeaExecutionDocumentFields {
+    step: String,
+    #[serde(default = "default_backend")]
+    backend: ComputeBackend,
+    #[serde(default = "default_formulation_requirement")]
+    requirement: FormulationRequirement,
+}
+
+impl<'de> Deserialize<'de> for FeaExecutionDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        validate_execution_object(&value).map_err(serde::de::Error::custom)?;
+        let solver_options =
+            parse_execution_solver_options(&value).map_err(serde::de::Error::custom)?;
+        let fields: FeaExecutionDocumentFields =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            step: fields.step,
+            backend: fields.backend,
+            requirement: fields.requirement,
+            solver_options,
+        })
+    }
+}
+
+pub(super) fn validate_execution_object(value: &serde_json::Value) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "execution entry must be an object".to_string())?;
+    for key in object.keys() {
+        if !matches!(
+            key.as_str(),
+            "step" | "backend" | "requirement" | "solver" | "options"
+        ) {
+            return Err(format!("unknown field `{key}` in execution entry"));
+        }
+    }
+    if object.contains_key("solver") != object.contains_key("options") {
+        return Err("execution `solver` and `options` must be provided together".into());
+    }
+    Ok(())
+}
+
+pub(super) fn parse_execution_solver_options(
+    value: &serde_json::Value,
+) -> Result<Option<AnalysisSolverOptions>, String> {
+    validate_execution_object(value)?;
+    let object = value
+        .as_object()
+        .expect("validated execution entry must be an object");
+    let Some(solver) = object.get("solver") else {
+        return Ok(None);
+    };
+    let mut tagged = serde_json::Map::new();
+    tagged.insert("solver".into(), solver.clone());
+    tagged.insert(
+        "options".into(),
+        object
+            .get("options")
+            .expect("validated solver must have options")
+            .clone(),
+    );
+    serde_json::from_value(tagged.into())
+        .map(Some)
+        .map_err(|error| format!("invalid execution solver/options: {error}"))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -333,8 +432,7 @@ pub async fn parse_and_resolve_fea_document(
     input: &str,
     base_dir: &Path,
 ) -> Result<FeaResolvedDocument, String> {
-    let raw = serde_yaml::from_str::<RawFeaDocument>(input)
-        .map_err(|err| format!("failed to parse FEA YAML: {err}"))?;
+    let raw = parse_raw_fea_document(input)?;
     match raw {
         RawFeaDocument::Study(study) => {
             let resolved = resolve_study(*study, base_dir).await?;
@@ -342,6 +440,19 @@ pub async fn parse_and_resolve_fea_document(
         }
         RawFeaDocument::Sweep(sweep) => resolve_sweep(sweep, base_dir).await,
     }
+}
+
+fn parse_raw_fea_document(input: &str) -> Result<RawFeaDocument, String> {
+    let yaml = serde_yaml::from_str::<serde_yaml::Value>(input)
+        .map_err(|err| format!("failed to parse FEA YAML: {err}"))?;
+    parse_raw_fea_value(yaml)
+}
+
+fn parse_raw_fea_value(yaml: serde_yaml::Value) -> Result<RawFeaDocument, String> {
+    let canonical = serde_json::to_value(yaml)
+        .map_err(|err| format!("FEA YAML is not JSON-compatible: {err}"))?;
+    serde_json::from_value(canonical)
+        .map_err(|err| format!("failed to parse canonical FEA document: {err}"))
 }
 
 async fn resolve_sweep(
@@ -383,39 +494,31 @@ async fn resolve_study(
         template: study.model.template,
     };
     let model = resolve_model(&study, &geometry, &intent)?;
-    let run_kind = resolve_run_kind(&study.sequence)?;
-    let run_options = resolve_run_options(&study.run, run_kind)?;
-    let meshing_settings = resolve_meshing_settings(study.mesh.as_ref(), run_kind)?;
+    let execution = resolve_execution(&study.execution, &study.sequence)?;
+    let meshing_settings = resolve_meshing_settings(study.mesh.as_ref(), &execution)?;
     let spec = AnalysisStudySpec {
         study_id: study.id,
         geometry,
         create_model_intent: intent,
         model,
-        run_kind,
-        backend: study.run.backend,
+        execution,
         meshing_settings,
-        outputs: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
-        linear_static_run_options: run_options.linear_static,
-        modal_run_options: run_options.modal,
-        acoustic_run_options: run_options.acoustic,
-        thermal_run_options: run_options.thermal,
-        transient_run_options: run_options.transient,
-        cfd_run_options: run_options.cfd,
-        cht_run_options: run_options.cht,
-        fsi_run_options: run_options.fsi,
-        nonlinear_run_options: run_options.nonlinear,
-        electromagnetic_run_options: run_options.electromagnetic,
     };
     Ok(ResolvedStudyParts { spec })
 }
 
 fn resolve_meshing_settings(
     mesh: Option<&FeaMeshDocument>,
-    run_kind: AnalysisRunKind,
+    execution: &AnalysisExecutionPlan,
 ) -> Result<Option<MeshingRequestSettings>, String> {
-    let required = matches!(run_kind, AnalysisRunKind::LinearStatic);
+    let required = execution.steps.iter().any(|entry| {
+        matches!(
+            entry.solver_options,
+            AnalysisSolverOptions::StructuralLinear(_)
+        )
+    });
     let Some(mesh) = mesh else {
         return Ok(required.then(MeshingRequestSettings::default));
     };
@@ -477,12 +580,6 @@ fn resolve_model(
     geometry: &GeometryAsset,
     intent: &AnalysisCreateModelIntentSpec,
 ) -> Result<Option<AnalysisModel>, String> {
-    if !has_explicit_model_data(study)
-        && study.model.defaults == FeaModelDefaultsMode::TemplateScaffold
-    {
-        return Ok(None);
-    }
-
     let mut model = match study.model.defaults {
         FeaModelDefaultsMode::TemplateScaffold => {
             analysis_create_model_op(geometry, intent.clone(), OperationContext::new(None, None))
@@ -673,122 +770,42 @@ fn resolve_shell_section(
     })
 }
 
-#[derive(Debug, Default)]
-struct ResolvedRunOptions {
-    linear_static: Option<AnalysisRunOptions>,
-    modal: Option<AnalysisModalRunOptions>,
-    acoustic: Option<AnalysisAcousticRunOptions>,
-    thermal: Option<AnalysisThermalRunOptions>,
-    transient: Option<AnalysisTransientRunOptions>,
-    cfd: Option<AnalysisCfdRunOptions>,
-    cht: Option<AnalysisChtRunOptions>,
-    fsi: Option<AnalysisFsiRunOptions>,
-    nonlinear: Option<AnalysisNonlinearRunOptions>,
-    electromagnetic: Option<AnalysisElectromagneticRunOptions>,
-}
-
-fn resolve_run_kind(sequence: &AnalysisSequence) -> Result<AnalysisRunKind, String> {
-    let [step] = sequence.steps.as_slice() else {
-        return Err(format!(
-            "version 1 FEA execution requires exactly one procedure step; sequence `{}` contains {}",
-            sequence.sequence_id,
-            sequence.steps.len()
-        ));
-    };
-    match (step.family, step.procedure) {
-        (PhysicsFamily::Structural, AnalysisProcedure::Static) => Ok(AnalysisRunKind::LinearStatic),
-        (
-            PhysicsFamily::Structural,
-            AnalysisProcedure::ModalExtraction | AnalysisProcedure::PrestressedModalExtraction,
-        ) => Ok(AnalysisRunKind::Modal),
-        (PhysicsFamily::Structural, AnalysisProcedure::TransientResponse) => {
-            Ok(AnalysisRunKind::Transient)
-        }
-        (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => Ok(AnalysisRunKind::Nonlinear),
-        (PhysicsFamily::Thermal, AnalysisProcedure::Static) => Ok(AnalysisRunKind::Thermal),
-        (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static | AnalysisProcedure::HarmonicResponse) => {
-            Ok(AnalysisRunKind::Electromagnetic)
-        }
-        (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse) => Ok(AnalysisRunKind::Acoustic),
-        (PhysicsFamily::Fluid, AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
-            Ok(AnalysisRunKind::Cfd)
-        }
-        (
-            PhysicsFamily::Coupled(
-                runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical
-                | runmat_analysis_core::CoupledPhysicsFamily::Electrothermal,
-            ),
-            AnalysisProcedure::Static | AnalysisProcedure::TransientResponse,
-        ) => Ok(AnalysisRunKind::Transient),
-        (PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer), AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
-            Ok(AnalysisRunKind::Cht)
-        }
-        (PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction), AnalysisProcedure::Static | AnalysisProcedure::TransientResponse) => {
-            Ok(AnalysisRunKind::Fsi)
-        }
-        (family, procedure) => Err(format!(
-            "procedure step `{}` selects unsupported version 1 execution combination {family:?}/{procedure:?}",
-            step.step_id.as_str()
-        )),
+fn resolve_execution(
+    authored: &[FeaExecutionDocument],
+    sequence: &AnalysisSequence,
+) -> Result<AnalysisExecutionPlan, String> {
+    let mut resolved = Vec::with_capacity(authored.len());
+    for entry in authored {
+        let step = sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id.as_str() == entry.step)
+            .ok_or_else(|| {
+                format!(
+                    "execution references procedure step `{}`, which is absent from sequence `{}`",
+                    entry.step, sequence.sequence_id
+                )
+            })?;
+        let solver_options = match &entry.solver_options {
+            Some(options) if options.supports(step) => options.clone(),
+            Some(_) => {
+                return Err(format!(
+                    "solver options are incompatible with procedure step `{}` ({:?}/{:?}/{:?})",
+                    entry.step, step.family, step.procedure, step.solution_space
+                ));
+            }
+            None => AnalysisSolverOptions::defaults_for(step)?,
+        };
+        resolved.push(AnalysisExecutionStep {
+            step_id: step.step_id.clone(),
+            backend: entry.backend,
+            requirement: entry.requirement,
+            solver_options,
+        });
     }
-}
-
-fn resolve_run_options(
-    run: &FeaRunDocument,
-    run_kind: AnalysisRunKind,
-) -> Result<ResolvedRunOptions, String> {
-    let Some(options) = &run.solver else {
-        return Ok(ResolvedRunOptions::default());
-    };
-    let mut resolved = ResolvedRunOptions::default();
-    let selected = match options {
-        FeaSolverOptionsDocument::LinearStatic(value) => {
-            resolved.linear_static = Some(value.clone());
-            AnalysisRunKind::LinearStatic
-        }
-        FeaSolverOptionsDocument::Modal(value) => {
-            resolved.modal = Some(value.clone());
-            AnalysisRunKind::Modal
-        }
-        FeaSolverOptionsDocument::Acoustic(value) => {
-            resolved.acoustic = Some(value.clone());
-            AnalysisRunKind::Acoustic
-        }
-        FeaSolverOptionsDocument::Thermal(value) => {
-            resolved.thermal = Some(value.clone());
-            AnalysisRunKind::Thermal
-        }
-        FeaSolverOptionsDocument::Transient(value) => {
-            resolved.transient = Some(value.clone());
-            AnalysisRunKind::Transient
-        }
-        FeaSolverOptionsDocument::Cfd(value) => {
-            resolved.cfd = Some(value.clone());
-            AnalysisRunKind::Cfd
-        }
-        FeaSolverOptionsDocument::Cht(value) => {
-            resolved.cht = Some(value.clone());
-            AnalysisRunKind::Cht
-        }
-        FeaSolverOptionsDocument::Fsi(value) => {
-            resolved.fsi = Some(value.clone());
-            AnalysisRunKind::Fsi
-        }
-        FeaSolverOptionsDocument::Nonlinear(value) => {
-            resolved.nonlinear = Some(value.clone());
-            AnalysisRunKind::Nonlinear
-        }
-        FeaSolverOptionsDocument::Electromagnetic(value) => {
-            resolved.electromagnetic = Some(value.clone());
-            AnalysisRunKind::Electromagnetic
-        }
-    };
-    if selected != run_kind {
-        return Err(format!(
-            "run solver options select {selected:?}, but the sequence selects {run_kind:?}"
-        ));
-    }
-    Ok(resolved)
+    let execution = AnalysisExecutionPlan { steps: resolved };
+    execution.validate_against(sequence)?;
+    Ok(execution)
 }
 
 fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
@@ -816,26 +833,6 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         response_spectra: Vec::new(),
         sequence: AnalysisSequence::from_steps(format!("{model_id}.sequence"), Vec::new()),
     }
-}
-
-fn has_explicit_model_data(study: &FeaStudyDocument) -> bool {
-    !study.materials.is_empty()
-        || !study.material_assignments.is_empty()
-        || !study.constraints.is_empty()
-        || !study.boundaries.is_empty()
-        || !study.connectors.is_empty()
-        || !study.interfaces.is_empty()
-        || !study.signals.is_empty()
-        || !study.excitation_cases.is_empty()
-        || !study.excitations.is_empty()
-        || !study.initial_conditions.is_empty()
-        || !study.response_spectra.is_empty()
-        || has_structural_model_data(study)
-        || study.domains.thermo_mechanical.is_some()
-        || study.domains.electro_thermal.is_some()
-        || study.domains.electromagnetic.is_some()
-        || study.domains.cfd.is_some()
-        || study.model.frame.is_some()
 }
 
 fn has_structural_model_data(study: &FeaStudyDocument) -> bool {
@@ -943,33 +940,54 @@ fn resolve_region_ref(
     if let Some(alias) = aliases.get(reference) {
         return resolve_region_selector(&alias.selector, geometry);
     }
-    resolve_region_selector(reference, geometry)
+    require_region_id(reference, geometry)
 }
 
-fn resolve_region_selector(selector: &str, geometry: &GeometryAsset) -> Result<String, String> {
-    if let Some(id) = selector
-        .strip_prefix("id:")
-        .or_else(|| selector.strip_prefix("region:"))
-    {
-        return require_region_id(id, geometry);
+fn resolve_region_selector(
+    selector: &FeaRegionSelector,
+    geometry: &GeometryAsset,
+) -> Result<String, String> {
+    match selector {
+        FeaRegionSelector::Id(region_id) => require_region_id(region_id, geometry),
+        FeaRegionSelector::Tag(tag) => require_unique_region_match(
+            "tag",
+            tag,
+            geometry
+                .regions
+                .iter()
+                .filter(|region| region.tag.as_deref() == Some(tag))
+                .map(|region| region.region_id.as_str()),
+        ),
+        FeaRegionSelector::Name(name) => require_unique_region_match(
+            "name",
+            name,
+            geometry
+                .regions
+                .iter()
+                .filter(|region| region.name == *name)
+                .map(|region| region.region_id.as_str()),
+        ),
     }
-    if let Some(tag) = selector.strip_prefix("tag:") {
-        return geometry
-            .regions
-            .iter()
-            .find(|region| region.tag.as_deref() == Some(tag))
-            .map(|region| region.region_id.clone())
-            .ok_or_else(|| format!("region tag `{tag}` was not found in geometry"));
+}
+
+fn require_unique_region_match<'a>(
+    selector_kind: &str,
+    selector_value: &str,
+    matches: impl Iterator<Item = &'a str>,
+) -> Result<String, String> {
+    let mut region_ids = matches.map(str::to_string).collect::<Vec<_>>();
+    region_ids.sort();
+    match region_ids.as_slice() {
+        [region_id] => Ok(region_id.clone()),
+        [] => Err(format!(
+            "region {selector_kind} `{selector_value}` was not found in geometry"
+        )),
+        _ => Err(format!(
+            "region {selector_kind} `{selector_value}` is ambiguous: matched {} regions [{}]",
+            region_ids.len(),
+            region_ids.join(", ")
+        )),
     }
-    if let Some(name) = selector.strip_prefix("name:") {
-        return geometry
-            .regions
-            .iter()
-            .find(|region| region.name == name)
-            .map(|region| region.region_id.clone())
-            .ok_or_else(|| format!("region name `{name}` was not found in geometry"));
-    }
-    require_region_id(selector, geometry)
 }
 
 fn require_region_id(region_id: &str, geometry: &GeometryAsset) -> Result<String, String> {
@@ -1023,6 +1041,10 @@ fn default_backend() -> ComputeBackend {
     ComputeBackend::Cpu
 }
 
+fn default_formulation_requirement() -> FormulationRequirement {
+    FormulationRequirement::Production
+}
+
 fn default_mesh_element_order() -> ElementOrder {
     ElementOrder::Tet4
 }
@@ -1054,6 +1076,10 @@ fn default_assignment_confidence() -> EvidenceConfidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_core::{
+        AnalysisProcedure, Force, ProcedureStep, Signal, SignalApproximationEvidence, SignalId,
+        SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+    };
     use runmat_geometry_core::{
         GeometrySource, MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind,
         SurfaceMesh, TessellationProfile,
@@ -1110,26 +1136,29 @@ mod tests {
         let mut model = serde_yaml::Mapping::new();
         model.insert(
             "template".into(),
-            serde_yaml::to_value(AnalysisModelTemplate::LinearStaticStructural)
-                .expect("model template"),
+            canonical_yaml(AnalysisModelTemplate::LinearStaticStructural),
         );
         model.insert("defaults".into(), "none".into());
         document.insert("model".into(), model.into());
         document.insert(
-            "run".into(),
-            serde_yaml::from_str("backend: cpu\n").expect("run YAML"),
+            "execution".into(),
+            serde_yaml::from_str("- step: solve\n  backend: cpu\n").expect("execution YAML"),
         );
         document.insert(
             "sequence".into(),
-            serde_yaml::to_value(AnalysisSequence::from_steps(
+            canonical_yaml(AnalysisSequence::from_steps(
                 "typed-sequence",
                 vec![runmat_analysis_core::ProcedureStep::structural_static(
                     "solve",
                 )],
-            ))
-            .expect("sequence"),
+            )),
         );
         document.into()
+    }
+
+    fn canonical_yaml(value: impl Serialize) -> serde_yaml::Value {
+        let json = serde_json::to_value(value).expect("JSON-compatible contract");
+        serde_yaml::to_value(json).expect("canonical YAML value")
     }
 
     #[test]
@@ -1138,7 +1167,7 @@ mod tests {
         let mapping = document.as_mapping_mut().expect("study mapping");
         mapping.insert(
             "constraints".into(),
-            serde_yaml::to_value(vec![AnalysisConstraint::Structural(
+            canonical_yaml(vec![AnalysisConstraint::Structural(
                 runmat_analysis_core::StructuralConstraint {
                     constraint_id: "fixed".into(),
                     frame: CoordinateFrame::Global,
@@ -1146,20 +1175,39 @@ mod tests {
                         target: RegionTarget::boundary("tip"),
                     },
                 },
-            )])
-            .expect("constraints"),
+            )]),
+        );
+        mapping.insert(
+            "signals".into(),
+            canonical_yaml(vec![PhysicalSignal::Force(Signal {
+                signal_id: SignalId("push".into()),
+                shape: SignalShape::Scalar,
+                frame: Some(CoordinateFrame::Global),
+                representation: SignalRepresentation::Constant(SignalValue::Scalar(Force::new(
+                    10.0,
+                ))),
+                precision: SignalPrecision::Real64,
+                evidence: SignalApproximationEvidence {
+                    max_absolute_error: None,
+                    max_relative_error: None,
+                    derivative_max_absolute_error: None,
+                    sample_count: 1,
+                },
+                provenance: SignalProvenance::Authored,
+            })]),
         );
 
-        let parsed: RawFeaDocument = serde_yaml::from_value(document).expect("typed document");
+        let parsed = parse_raw_fea_value(document).expect("typed document");
         let RawFeaDocument::Study(study) = parsed else {
             panic!("expected study")
         };
         assert_eq!(study.constraints[0].constraint_id(), "fixed");
+        assert_eq!(study.signals[0].signal_id().0, "push");
         assert_eq!(study.sequence.steps[0].step_id.as_str(), "solve");
     }
 
     #[test]
-    fn required_sequence_is_not_authored_model_data() {
+    fn template_scaffold_retains_the_authored_sequence() {
         let mut document = minimal_study_yaml();
         document
             .as_mapping_mut()
@@ -1170,25 +1218,25 @@ mod tests {
             .expect("model mapping")
             .insert("defaults".into(), "template_scaffold".into());
 
-        let parsed: RawFeaDocument = serde_yaml::from_value(document).expect("study document");
+        let parsed = parse_raw_fea_value(document).expect("study document");
         let RawFeaDocument::Study(study) = parsed else {
             panic!("expected study")
         };
 
         assert!(!study.sequence.steps.is_empty());
-        assert!(!has_explicit_model_data(&study));
         assert_eq!(study.model.defaults, FeaModelDefaultsMode::TemplateScaffold);
         let intent = AnalysisCreateModelIntentSpec {
             model_id: "scaffold-model".into(),
             template: study.model.template,
         };
-        assert!(resolve_model(&study, &sample_geometry(), &intent)
-            .expect("resolve scaffold-only model")
-            .is_none());
+        let model = resolve_model(&study, &sample_geometry(), &intent)
+            .expect("resolve scaffold model")
+            .expect("resolved model");
+        assert_eq!(model.sequence, study.sequence);
     }
 
     #[test]
-    fn retired_document_keys_and_run_kind_are_rejected() {
+    fn retired_document_keys_and_untyped_execution_are_rejected() {
         for key in [
             "boundary_conditions",
             "loads",
@@ -1197,23 +1245,32 @@ mod tests {
             "nodes",
             "elements",
             "sections",
+            "run",
         ] {
             let mut document = minimal_study_yaml();
             document
                 .as_mapping_mut()
                 .expect("study mapping")
                 .insert(key.into(), serde_yaml::Value::Sequence(Vec::new()));
-            let error = serde_yaml::from_value::<RawFeaDocument>(document)
-                .expect_err("retired key must fail");
+            let error = parse_raw_fea_value(document).expect_err("retired key must fail");
             assert!(error.to_string().contains("unknown field"), "{error}");
         }
 
-        let error = serde_yaml::from_str::<FeaRunDocument>("backend: cpu\nkind: linear_static\n")
-            .expect_err("run.kind must fail");
+        let error = serde_yaml::from_str::<FeaExecutionDocument>(
+            "step: solve\nbackend: cpu\nkind: linear_static\n",
+        )
+        .expect_err("execution.kind must fail");
         assert!(error.to_string().contains("unknown field"), "{error}");
-        let error = serde_yaml::from_str::<FeaRunDocument>("backend: cpu\noptions: {}\n")
-            .expect_err("untyped run options must fail");
-        assert!(error.to_string().contains("unknown field"), "{error}");
+        let error = serde_yaml::from_str::<FeaExecutionDocument>(
+            "step: solve\nbackend: cpu\noptions: {}\n",
+        )
+        .expect_err("untyped solver options must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("`solver` and `options` must be provided together"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1228,14 +1285,30 @@ mod tests {
     }
 
     #[test]
-    fn execution_kind_is_derived_from_one_sequence_step() {
+    fn execution_identity_is_resolved_from_each_sequence_step() {
         let sequence = AnalysisSequence::from_steps(
             "sequence",
             vec![runmat_analysis_core::ProcedureStep::structural_modal(
                 "modes",
             )],
         );
-        assert_eq!(resolve_run_kind(&sequence).unwrap(), AnalysisRunKind::Modal);
+        let execution = resolve_execution(
+            &[FeaExecutionDocument {
+                step: "modes".into(),
+                backend: ComputeBackend::Cpu,
+                requirement: FormulationRequirement::Production,
+                solver_options: None,
+            }],
+            &sequence,
+        )
+        .unwrap();
+        assert_eq!(
+            execution
+                .procedure_step(&sequence, &execution.steps[0])
+                .unwrap()
+                .procedure,
+            AnalysisProcedure::ModalExtraction
+        );
 
         let multiple = AnalysisSequence::from_steps(
             "sequence",
@@ -1244,22 +1317,45 @@ mod tests {
                 runmat_analysis_core::ProcedureStep::structural_modal("modes"),
             ],
         );
-        assert!(resolve_run_kind(&multiple)
-            .expect_err("multi-step execution is not implemented")
-            .contains("exactly one procedure step"));
+        let execution = resolve_execution(
+            &[
+                FeaExecutionDocument {
+                    step: "static".into(),
+                    backend: ComputeBackend::Cpu,
+                    requirement: FormulationRequirement::Production,
+                    solver_options: None,
+                },
+                FeaExecutionDocument {
+                    step: "modes".into(),
+                    backend: ComputeBackend::Gpu,
+                    requirement: FormulationRequirement::Production,
+                    solver_options: None,
+                },
+            ],
+            &multiple,
+        )
+        .expect("every sequence step has a typed execution entry");
+        assert_eq!(execution.steps.len(), 2);
+        assert_eq!(execution.steps[1].backend, ComputeBackend::Gpu);
     }
 
     #[test]
     fn typed_solver_options_must_match_the_sequence() {
-        let run = FeaRunDocument {
+        let execution = FeaExecutionDocument {
+            step: "modes".into(),
             backend: ComputeBackend::Cpu,
-            solver: Some(FeaSolverOptionsDocument::LinearStatic(
-                AnalysisRunOptions::default(),
-            )),
+            requirement: FormulationRequirement::Production,
+            solver_options: Some(AnalysisSolverOptions::StructuralLinear(Default::default())),
         };
-        assert!(resolve_run_options(&run, AnalysisRunKind::Modal)
+        let sequence = AnalysisSequence::from_steps(
+            "sequence",
+            vec![runmat_analysis_core::ProcedureStep::structural_modal(
+                "modes",
+            )],
+        );
+        assert!(resolve_execution(&[execution], &sequence)
             .expect_err("mismatched solver options must fail")
-            .contains("sequence selects Modal"));
+            .contains("incompatible"));
     }
 
     #[test]
@@ -1269,7 +1365,7 @@ mod tests {
         aliases.insert(
             "loaded".into(),
             FeaRegionDocument {
-                selector: "tag:tip".into(),
+                selector: FeaRegionSelector::Tag("tip".into()),
             },
         );
         let mut model = empty_model("model".into(), &geometry);
@@ -1371,12 +1467,60 @@ mod tests {
     }
 
     #[test]
+    fn region_selector_requires_a_typed_selector_variant() {
+        let typed: FeaRegionDocument =
+            serde_yaml::from_str("selector:\n  tag: tip\n").expect("typed selector");
+        assert_eq!(typed.selector, FeaRegionSelector::Tag("tip".into()));
+
+        for source in [
+            "selector: tip\n",
+            "selector: tag:tip\n",
+            "selector:\n  region: tip\n",
+            "selector:\n  id: tip\n  tag: tip\n",
+        ] {
+            serde_yaml::from_str::<FeaRegionDocument>(source)
+                .expect_err("legacy region selector syntax must be rejected");
+        }
+    }
+
+    #[test]
+    fn direct_region_references_do_not_parse_legacy_prefixes() {
+        let error = resolve_region_ref("tag:tip", &sample_geometry(), &BTreeMap::new())
+            .expect_err("legacy prefixes are not direct region ids");
+        assert!(error.contains("tag:tip"));
+    }
+
+    #[test]
+    fn tag_and_name_selectors_reject_ambiguous_geometry_matches() {
+        let mut geometry = sample_geometry();
+        geometry.regions.push(Region {
+            region_id: "tip_duplicate".into(),
+            name: "Tip".into(),
+            tag: Some("tip".into()),
+            cad_ownership: None,
+        });
+
+        for selector in [
+            FeaRegionSelector::Tag("tip".into()),
+            FeaRegionSelector::Name("Tip".into()),
+        ] {
+            let error = resolve_region_selector(&selector, &geometry)
+                .expect_err("non-unique selector must be rejected");
+            assert!(error.contains("matched 2 regions"), "{error}");
+            assert!(error.contains("tip"), "{error}");
+            assert!(error.contains("tip_duplicate"), "{error}");
+        }
+    }
+
+    #[test]
     fn fea_document_resolves_canonical_meshing_settings() {
         let mesh: FeaMeshDocument = serde_yaml::from_str(
             "element_order: tet10\ntarget_edge_length_m: 0.02\nmaximum_chordal_deviation_m: 0.0002\nmaximum_grading_ratio: 1.5\nmaximum_elements: 42000\ndeterministic_seed: 17\n",
         )
         .unwrap();
-        let settings = resolve_meshing_settings(Some(&mesh), AnalysisRunKind::LinearStatic)
+        let step = runmat_analysis_core::ProcedureStep::structural_static("solve");
+        let execution = execution_for(step);
+        let settings = resolve_meshing_settings(Some(&mesh), &execution)
             .unwrap()
             .unwrap();
         assert_eq!(settings.element_order, ElementOrder::Tet10);
@@ -1389,14 +1533,18 @@ mod tests {
 
     #[test]
     fn fea_document_defaults_meshing_only_for_solid_structural_studies() {
-        assert!(
-            resolve_meshing_settings(None, AnalysisRunKind::LinearStatic,)
-                .unwrap()
-                .is_some()
-        );
-        assert!(resolve_meshing_settings(None, AnalysisRunKind::Modal,)
-            .unwrap()
-            .is_none());
+        assert!(resolve_meshing_settings(
+            None,
+            &execution_for(ProcedureStep::structural_static("s"))
+        )
+        .unwrap()
+        .is_some());
+        assert!(resolve_meshing_settings(
+            None,
+            &execution_for(ProcedureStep::structural_modal("m"))
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]
@@ -1425,7 +1573,19 @@ mod tests {
             "maximum_elements: 0",
         ] {
             let mesh = serde_yaml::from_str::<FeaMeshDocument>(source).unwrap();
-            assert!(resolve_meshing_settings(Some(&mesh), AnalysisRunKind::LinearStatic,).is_err());
+            assert!(resolve_meshing_settings(
+                Some(&mesh),
+                &execution_for(ProcedureStep::structural_static("s")),
+            )
+            .is_err());
         }
+    }
+
+    fn execution_for(step: ProcedureStep) -> AnalysisExecutionPlan {
+        AnalysisExecutionPlan::for_sequence(
+            &AnalysisSequence::from_steps("test", vec![step]),
+            ComputeBackend::Cpu,
+        )
+        .unwrap()
     }
 }

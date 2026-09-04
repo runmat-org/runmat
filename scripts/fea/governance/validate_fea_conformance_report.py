@@ -212,12 +212,6 @@ REQUIRED_FIXTURES = {
         "thermo_nonlinear_severity",
         "thermo_nonlinear_field_clamp_ratio",
         "thermo_nonlinear_time_scale_mean",
-        "electro_nonlinear_joule_heating_scale",
-        "electro_nonlinear_conductivity_spread_ratio",
-        "electro_nonlinear_severity_peak",
-        "electro_nonlinear_severity_mean",
-        "electro_nonlinear_temporal_variation",
-        "electro_nonlinear_time_scale_mean",
     },
     "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
@@ -440,70 +434,6 @@ REQUIRED_FIXTURES = {
         "thermal_standalone_prescribed_temperature_count",
         "thermal_standalone_heat_flux_boundary_count",
         "thermal_standalone_convection_boundary_count",
-    },
-    "electro_thermal_joule_benign_gpu_provider": {
-        "electro_thermal_benign_joule_heating_scale",
-        "electro_thermal_benign_conductivity_spread_ratio",
-        "electro_thermal_benign_transient_severity_peak",
-        "electro_thermal_benign_temporal_variation",
-        "electro_thermal_benign_time_scale_mean",
-        "electro_thermal_benign_conductive_node_count",
-        "electro_thermal_benign_mapped_voltage_boundary_count",
-        "electro_thermal_benign_mapped_current_source_count",
-        "electro_thermal_benign_topology_component_count",
-        "electro_thermal_benign_source_boundary_alignment_ratio",
-        "electro_thermal_benign_domain_conductance_coverage_ratio",
-        "electro_thermal_benign_mesh_backed_topology_ratio",
-        "electro_thermal_benign_material_region_coverage_ratio",
-        "electro_thermal_benign_potential_residual_norm",
-        "electro_thermal_benign_current_balance_residual",
-        "electro_thermal_benign_potential_span_v",
-        "electro_thermal_benign_conduction_edge_count",
-        "electro_thermal_benign_topology_coverage_ratio",
-        "electro_thermal_benign_ohms_law_residual_ratio",
-        "electro_thermal_benign_joule_heat_balance_ratio",
-        "electro_thermal_benign_potential_monotonic_edge_fraction",
-        "electro_thermal_benign_conduction_graph_coverage_ratio",
-        "electro_thermal_benign_joule_heat_realization_ratio",
-        "electro_thermal_benign_joule_source_coverage_ratio",
-        "electro_thermal_benign_thermal_temperature_source_alignment",
-        "electro_thermal_benign_thermal_source_residual_ratio",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "electro_thermal_joule_pathological_gpu_provider": {
-        "electro_thermal_pathological_joule_heating_scale",
-        "electro_thermal_pathological_conductivity_spread_ratio",
-        "electro_thermal_pathological_transient_severity_peak",
-        "electro_thermal_pathological_temporal_variation",
-        "electro_thermal_pathological_time_scale_mean",
-        "electro_thermal_pathological_conductive_node_count",
-        "electro_thermal_pathological_mapped_voltage_boundary_count",
-        "electro_thermal_pathological_mapped_current_source_count",
-        "electro_thermal_pathological_topology_component_count",
-        "electro_thermal_pathological_source_boundary_alignment_ratio",
-        "electro_thermal_pathological_domain_conductance_coverage_ratio",
-        "electro_thermal_pathological_mesh_backed_topology_ratio",
-        "electro_thermal_pathological_material_region_coverage_ratio",
-        "electro_thermal_pathological_potential_residual_norm",
-        "electro_thermal_pathological_current_balance_residual",
-        "electro_thermal_pathological_potential_span_v",
-        "electro_thermal_pathological_conduction_edge_count",
-        "electro_thermal_pathological_topology_coverage_ratio",
-        "electro_thermal_pathological_ohms_law_residual_ratio",
-        "electro_thermal_pathological_joule_heat_balance_ratio",
-        "electro_thermal_pathological_potential_monotonic_edge_fraction",
-        "electro_thermal_pathological_conduction_graph_coverage_ratio",
-        "electro_thermal_pathological_joule_heat_realization_ratio",
-        "electro_thermal_pathological_joule_source_coverage_ratio",
-        "electro_thermal_pathological_thermal_temperature_source_alignment",
-        "electro_thermal_pathological_thermal_source_residual_ratio",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
     },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "electromagnetic_source_energy_diagnostic_coverage_ratio",
@@ -1390,6 +1320,16 @@ REQUIRED_ERROR_FIXTURES = {
         "run_ok": False,
         "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
     },
+    "electro_thermal_joule_benign_rejected": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+    },
+    "electro_thermal_joule_pathological_rejected": {
+        "validate_ok": True,
+        "run_ok": False,
+        "run_error_code": "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+    },
     "cfd_invalid_domain_options": {
         "validate_ok": True,
         "run_ok": False,
@@ -1439,15 +1379,6 @@ THERMO_REQUIRED_FIELDS = {
     "thermo_field_extrapolation_ratio",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
-}
-
-ELECTRO_REQUIRED_FIELDS = {
-    "electro_thermal_coupling_enabled",
-    "electro_thermal_coupling_fingerprint",
-    "electro_joule_heating_scale",
-    "electro_conductivity_spread_ratio",
-    "electro_transient_severity",
-    "electro_nonlinear_severity",
 }
 
 PLASTIC_REQUIRED_FIELDS = {
@@ -1644,14 +1575,6 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "electro_thermal_joule_benign_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "electro_thermal_joule_pathological_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
@@ -1814,9 +1737,6 @@ def main() -> int:
     require_thermo_field_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY", "false")
     )
-    require_electro_summary = is_true(
-        os.getenv("RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY", "false")
-    )
     require_plastic_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY", "false")
     )
@@ -1891,20 +1811,6 @@ def main() -> int:
                         errors.append(
                             f"fixture {fixture_id} missing thermo artifact field: {required_field}"
                         )
-
-        if fixture_id in {
-            "electro_thermal_joule_benign_gpu_provider",
-            "electro_thermal_joule_pathological_gpu_provider",
-            "nonlinear_load_path_mix_gpu_provider",
-            "nonlinear_plasticity_benchmark_gpu_provider",
-        }:
-            missing_fields = sorted(
-                field for field in ELECTRO_REQUIRED_FIELDS if field not in record
-            )
-            if missing_fields:
-                errors.append(
-                    f"fixture {fixture_id} missing electro summary fields: {', '.join(missing_fields)}"
-                )
 
         if fixture_id in {
             "nonlinear_plasticity_benchmark_gpu_provider",
@@ -2184,19 +2090,6 @@ def main() -> int:
                 errors.append(
                     "thermo_field_extrapolation_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
                 )
-
-    if require_electro_summary:
-        electro_records = [
-            record
-            for record in records.values()
-            if isinstance(record.get("electro_thermal_coupling_enabled"), bool)
-            or isinstance(record.get("electro_transient_severity"), (int, float))
-            or isinstance(record.get("electro_nonlinear_severity"), (int, float))
-        ]
-        if not electro_records:
-            errors.append(
-                "electro summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY=true"
-            )
 
     if require_plastic_summary:
         plastic_records = [

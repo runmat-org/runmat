@@ -176,7 +176,7 @@ pub fn build_spd_preconditioner(
 
 #[cfg(test)]
 mod tests {
-    use crate::assembly::assemble_linear_system;
+    use crate::assembly::{assemble_structural_system, StructuralFormulationRequirement};
     use crate::fixtures::{fixture_model, FixtureId};
 
     use super::*;
@@ -187,8 +187,14 @@ mod tests {
 
     #[test]
     fn ilu0_preconditioner_is_buildable_and_finite() {
-        let summary = assemble_linear_system(&model(), None, None, None)
-            .expect("test system should assemble");
+        let summary = assemble_structural_system(
+            &model(),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("test system should assemble");
         let pc = build_spd_preconditioner(&summary, SpdPreconditionerKind::Ilu0);
         let z = pc.apply(&summary.operator.rhs);
         assert_eq!(z.len(), summary.dof_count);

@@ -3,7 +3,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
-    SolverMeshRegionMappingError, WrenchLoweringSummary,
+    SolverMeshRegionMappingError, StructuralLoadKind, WrenchLoweringSummary,
 };
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 
@@ -33,7 +33,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                             load_id: load.excitation_id.0.clone(),
                             region_id: region_id.to_string(),
-                            load_kind: "force",
+                            load_kind: StructuralLoadKind::Force,
                         });
                     }
                     continue;
@@ -55,7 +55,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                             load_id: load.excitation_id.0.clone(),
                             region_id: region_id.to_string(),
-                            load_kind: "wrench",
+                            load_kind: StructuralLoadKind::Wrench,
                         });
                     }
                     continue;
@@ -85,7 +85,7 @@ pub(super) fn apply_solver_mesh_structural_regions(
                     return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                         load_id: load.excitation_id.0.clone(),
                         region_id: region_id.to_string(),
-                        load_kind: "pressure",
+                        load_kind: StructuralLoadKind::Pressure,
                     });
                 }
                 apply_solver_mesh_pressure(mesh, layout, rhs, region_id, value.real);

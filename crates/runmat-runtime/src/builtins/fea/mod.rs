@@ -3,14 +3,15 @@ use runmat_analysis_core::{
     AnalysisInterfaceKind, AnalysisModel, AnalysisModelId, AnalysisProcedure, AnalysisSequence,
     BoundaryOperator, CfdDomain, CoordinateFrame, Displacement, ElectroThermalDomain,
     ElectromagneticDomain, EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget,
-    FluidConstraint, FluidConstraintKind, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
-    MagneticConstraintKind, MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
-    PhysicalSignal, PhysicsFamily, PrescribedRotations, PrescribedTranslations, PrescribedValue,
-    Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
-    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
-    StructuralRotationDof, StructuralTranslationDof, Temperature, ThermalConstraint,
-    ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue, Velocity,
+    FluidConstraint, FluidConstraintKind, FormulationRequirement, HeatFlux,
+    HeatTransferCoefficient, MagneticConstraint, MagneticConstraintKind, MaterialAcousticModel,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily, PrescribedRotations,
+    PrescribedTranslations, PrescribedValue, Pressure, ProcedureStep, RegionTarget, Rotation,
+    RotationDofValue, SolutionSpace, SpecificAcousticImpedance, StructuralConstraint,
+    StructuralConstraintKind, StructuralRotationDof, StructuralTranslationDof, Temperature,
+    ThermalConstraint, ThermalConstraintKind, ThermoMechanicalDomain, TranslationDofValue,
+    Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -36,14 +37,11 @@ use crate::analysis::{
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_run_study_op,
     analysis_run_study_sweep_op, analysis_trends_op, analysis_validate_study_op,
     analysis_validate_study_sweep_op, load_fea_document_from_path_async,
-    AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions, AnalysisFieldDescriptor,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
-    AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec, AnalysisStudySweepData,
+    AnalysisCreateModelIntentSpec, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisFieldDescriptor, AnalysisModelTemplate, AnalysisResultsCompareQuery,
+    AnalysisResultsQuery, AnalysisSolverOptions, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepSpec,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
-    FeaResolvedDocument,
+    AnalysisTrendsQuery, FeaResolvedDocument,
 };
 use crate::builtins::common::{json::int_value_to_json, tensor as tensor_utils};
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
@@ -68,7 +66,6 @@ const FEA_BOUNDARY_CONDITION_CLASS: &str = "fea.BoundaryCondition";
 const FEA_STEP_CLASS: &str = "fea.Step";
 const FEA_DOMAIN_CLASS: &str = "fea.Domain";
 const FEA_INTERFACE_CLASS: &str = "fea.Interface";
-const FEA_RUN_OPTIONS_CLASS: &str = "fea.RunOptions";
 const FEA_RESULTS_CLASS: &str = "fea.Results";
 const FEA_FIELD_CLASS: &str = "fea.Field";
 const FEA_COMPARE_CLASS: &str = "fea.Compare";
@@ -94,7 +91,6 @@ const BOUNDARY_CONDITION_NAME: &str = "fea.boundaryCondition";
 const STEP_NAME: &str = "fea.step";
 const DOMAIN_NAME: &str = "fea.domain";
 const INTERFACE_NAME: &str = "fea.interface";
-const RUN_OPTIONS_NAME: &str = "fea.runOptions";
 const VALIDATE_NAME: &str = "fea.validate";
 const PLAN_NAME: &str = "fea.plan";
 const RUN_NAME: &str = "fea.run";
@@ -149,7 +145,7 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Required Template plus optional Mesh, Backend, ModelId, and model setup options.",
+            "Required Template plus optional Mesh, Backend, Requirement, ModelId, and model setup options.",
     },
 ];
 const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
@@ -180,7 +176,7 @@ const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Required Template plus Backend, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
+            "Required Template plus Backend, Requirement, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -314,23 +310,6 @@ const STEP_INPUTS: [BuiltinParamDescriptor; 2] = [
         default: None,
         description:
             "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind.",
-    },
-];
-const RUN_OPTIONS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "solver",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "FEA solver family.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Family-specific structural, tolerance, timing, precision, and quality options.",
     },
 ];
 const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
@@ -522,11 +501,6 @@ const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
     inputs: &STEP_INPUTS,
     outputs: &OUT_ANY,
 }];
-const RUN_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "options = fea.runOptions(solver, Name, Value, ...)",
-    inputs: &RUN_OPTIONS_INPUTS,
-    outputs: &OUT_ANY,
-}];
 const BOUNDARY_CONDITION_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -705,12 +679,6 @@ pub const FEA_STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-pub const FEA_RUN_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RUN_OPTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
 const fn fea_floating_input(
     name: &'static str,
@@ -847,66 +815,6 @@ pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinI
     canonical_builtin: None,
     notes: "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs.",
 };
-
-const RUN_OPTIONS_EXACT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "structural iteration, step, retry, mode, and refresh counts",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Host integer scalars and integral scalar doubles are range-checked and decoded exactly as usize; provider-resident values are rejected.",
-    }];
-const RUN_OPTIONS_FLOATING_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "tolerance, timing, residual, convergence, and frequency fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-
-const fn run_options_exact_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &RUN_OPTIONS_EXACT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The exact count is preserved in the typed run-options payload and public object representation.",
-    }
-}
-
-const fn run_options_floating_capability(form: &'static str) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs: &RUN_OPTIONS_FLOATING_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Floating solver controls use finite IEEE-754 binary64 storage; wide integer inputs can round while structural counts remain exact.",
-    }
-}
-
-pub const FEA_RUN_OPTIONS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 18] = [
-    run_options_exact_capability("modal structural controls"),
-    run_options_floating_capability("modal floating controls"),
-    run_options_exact_capability("acoustic structural controls"),
-    run_options_floating_capability("acoustic floating controls"),
-    run_options_exact_capability("thermal structural controls"),
-    run_options_floating_capability("thermal floating controls"),
-    run_options_exact_capability("transient structural controls"),
-    run_options_floating_capability("transient floating controls"),
-    run_options_exact_capability("CFD structural controls"),
-    run_options_floating_capability("CFD floating controls"),
-    run_options_exact_capability("CHT structural controls"),
-    run_options_floating_capability("CHT floating controls"),
-    run_options_exact_capability("FSI structural controls"),
-    run_options_floating_capability("FSI floating controls"),
-    run_options_exact_capability("nonlinear structural controls"),
-    run_options_floating_capability("nonlinear floating controls"),
-    run_options_exact_capability("electromagnetic structural controls"),
-    run_options_floating_capability("electromagnetic floating controls"),
-];
 
 const RESULTS_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
@@ -1206,19 +1114,6 @@ pub async fn fea_interface_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[runtime_builtin(
-    name = "fea.runOptions",
-    category = "fea",
-    summary = "Create typed FEA run options for a solver.",
-    keywords = "fea,run,options,solver,quality",
-    descriptor(crate::builtins::fea::FEA_RUN_OPTIONS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_RUN_OPTIONS_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_run_options_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_run_options_object_from_args(args)
-}
-
-#[runtime_builtin(
     name = "fea.validate",
     category = "fea",
     summary = "Validate a FEA study or sweep without planning or solving.",
@@ -1409,12 +1304,6 @@ async fn resolve_document_input(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RunOptionsPayload {
-    run_kind: AnalysisRunKind,
-    options: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DomainPayload {
     kind: String,
     data: serde_json::Value,
@@ -1441,9 +1330,9 @@ impl Default for ModelDefaultsMode {
 
 #[derive(Debug, Default)]
 struct StudyConstructorOptions {
-    run_kind: Option<AnalysisRunKind>,
     template: Option<AnalysisModelTemplate>,
     backend: Option<ComputeBackend>,
+    requirement: Option<FormulationRequirement>,
     model_id: Option<String>,
     model: Option<AnalysisModel>,
     frame: Option<CoordinateFrame>,
@@ -1457,7 +1346,6 @@ struct StudyConstructorOptions {
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
-    run_options: Option<RunOptionsPayload>,
     mesh: Option<crate::meshing::MeshingExecutionOutput>,
 }
 
@@ -1473,7 +1361,11 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let geometry = geometry_asset_from_value(STUDY_NAME, &args[1])?;
     let options = StudyConstructorOptions::parse(&args[2..])?;
     let supplied_mesh = options.mesh.clone();
-    let (template, run_kind) = resolve_study_template_and_run_kind(&options)?;
+    let template = resolve_study_template(&options)?;
+    let backend = options.backend.unwrap_or(ComputeBackend::Cpu);
+    let requirement = options
+        .requirement
+        .unwrap_or(FormulationRequirement::Production);
     let model_id = options.model_id.clone().unwrap_or_else(|| {
         options
             .model
@@ -1482,8 +1374,8 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             .unwrap_or_else(|| format!("{}_model", sanitize_id(&study_id)))
     });
     let mut model = match options.model {
-        Some(model) => Some(model),
-        None if options.has_model_components() => Some(build_model_from_parts(
+        Some(model) => model,
+        None if options.has_model_components() => build_model_from_parts(
             STUDY_NAME,
             &geometry,
             model_id.clone(),
@@ -1499,17 +1391,40 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             options.steps,
             options.domains,
             options.interfaces,
-        )?),
-        None => None,
+        )?,
+        None => {
+            analysis_create_model_op(
+                &geometry,
+                AnalysisCreateModelIntentSpec {
+                    model_id: model_id.clone(),
+                    template,
+                },
+                OperationContext::new(None, None),
+            )
+            .map_err(|error| operation_error(STUDY_NAME, &ERROR_OPERATION, error))?
+            .data
+        }
     };
-    if let (Some(model), Some(mesh)) = (model.as_mut(), supplied_mesh.as_ref()) {
-        crate::analysis::meshing::apply_boundary_region_ids(model, &mesh.boundary_region_ids);
+    if let Some(mesh) = supplied_mesh.as_ref() {
+        crate::analysis::meshing::apply_boundary_region_ids(&mut model, &mesh.boundary_region_ids);
     }
-    let run_options = options
-        .run_options
-        .map(|payload| resolved_run_options_from_payload(STUDY_NAME, payload, run_kind))
-        .transpose()?
-        .unwrap_or_default();
+    let [procedure_step] = model.sequence.steps.as_slice() else {
+        return Err(builtin_error(
+            STUDY_NAME,
+            &ERROR_INPUT,
+            "fea.study currently requires a model with exactly one procedure step",
+        ));
+    };
+    let solver_options = AnalysisSolverOptions::defaults_for(procedure_step)
+        .map_err(|message| builtin_error(STUDY_NAME, &ERROR_INPUT, message))?;
+    let execution = AnalysisExecutionPlan {
+        steps: vec![AnalysisExecutionStep {
+            step_id: procedure_step.step_id.clone(),
+            backend,
+            requirement,
+            solver_options,
+        }],
+    };
     let persisted_mesh = supplied_mesh
         .as_ref()
         .map(crate::analysis::meshing::persist_mesh_output)
@@ -1519,27 +1434,15 @@ fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         study_id,
         geometry,
         create_model_intent: AnalysisCreateModelIntentSpec { model_id, template },
-        model,
-        run_kind,
-        backend: options.backend.unwrap_or(ComputeBackend::Cpu),
+        model: Some(model),
+        execution,
         meshing_settings: None,
-        outputs: Vec::new(),
         solver_mesh_artifact_path: persisted_mesh
             .as_ref()
             .and_then(|mesh| mesh.artifact_path.clone()),
         meshing_evidence_artifact_path: persisted_mesh
             .as_ref()
             .and_then(|mesh| mesh.evidence_path.clone()),
-        linear_static_run_options: run_options.linear_static,
-        modal_run_options: run_options.modal,
-        acoustic_run_options: run_options.acoustic,
-        thermal_run_options: run_options.thermal,
-        transient_run_options: run_options.transient,
-        cfd_run_options: run_options.cfd,
-        cht_run_options: run_options.cht,
-        fsi_run_options: run_options.fsi,
-        nonlinear_run_options: run_options.nonlinear,
-        electromagnetic_run_options: run_options.electromagnetic,
     };
     study_to_object(spec)
 }
@@ -1558,11 +1461,9 @@ impl StudyConstructorOptions {
         for pair in args.chunks(2) {
             let key = option_key(&pair[0], STUDY_NAME)?;
             let canonical = match key.as_str() {
-                "runkind" | "kind" => "runkind",
                 "materialassignments" | "assignments" => "materialassignments",
                 "boundaryconditions" | "bcs" => "boundaryconditions",
                 "excitationcases" | "cases" => "excitationcases",
-                "runoptions" | "options" => "runoptions",
                 other => other,
             };
             if !seen.insert(canonical.to_string()) {
@@ -1573,10 +1474,6 @@ impl StudyConstructorOptions {
                 ));
             }
             match key.as_str() {
-                "runkind" | "kind" => {
-                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.run_kind = Some(parse_scalar_enum(&text, "RunKind")?);
-                }
                 "template" => {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.template = Some(parse_scalar_enum(&text, "Template")?);
@@ -1584,6 +1481,10 @@ impl StudyConstructorOptions {
                 "backend" => {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.backend = Some(parse_scalar_enum(&text, "Backend")?);
+                }
+                "requirement" | "formulationrequirement" => {
+                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
+                    options.requirement = Some(parse_scalar_enum(&text, "FormulationRequirement")?);
                 }
                 "modelid" => {
                     options.model_id = Some(scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?);
@@ -1632,10 +1533,6 @@ impl StudyConstructorOptions {
                 "interfaces" => {
                     options.interfaces = interface_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
-                "runoptions" | "options" => {
-                    options.run_options =
-                        Some(run_options_payload_from_value(STUDY_NAME, &pair[1])?);
-                }
                 other => {
                     return Err(builtin_error(
                         STUDY_NAME,
@@ -1676,20 +1573,6 @@ struct ModelConstructorOptions {
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<AnalysisInterface>,
-}
-
-#[derive(Debug, Default)]
-struct ResolvedRunOptions {
-    linear_static: Option<AnalysisRunOptions>,
-    modal: Option<AnalysisModalRunOptions>,
-    acoustic: Option<AnalysisAcousticRunOptions>,
-    thermal: Option<AnalysisThermalRunOptions>,
-    transient: Option<AnalysisTransientRunOptions>,
-    cfd: Option<AnalysisCfdRunOptions>,
-    cht: Option<AnalysisChtRunOptions>,
-    fsi: Option<AnalysisFsiRunOptions>,
-    nonlinear: Option<AnalysisNonlinearRunOptions>,
-    electromagnetic: Option<AnalysisElectromagneticRunOptions>,
 }
 
 fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -2341,11 +2224,11 @@ fn default_procedure_step(
         (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear) => {
             ProcedureStep::structural_nonlinear(step_id)
         }
-        (PhysicsFamily::Thermal, AnalysisProcedure::Static) => {
-            ProcedureStep::thermal_static(step_id)
+        (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse) => {
+            ProcedureStep::thermal_transient(step_id)
         }
-        (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static) => {
-            ProcedureStep::electromagnetic_static(step_id)
+        (PhysicsFamily::Electromagnetic, AnalysisProcedure::HarmonicResponse) => {
+            ProcedureStep::electromagnetic_harmonic(step_id)
         }
         (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse) => {
             ProcedureStep::acoustic_harmonic(step_id)
@@ -2570,58 +2453,6 @@ fn create_interface_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         secondary_region_id,
         kind,
     })
-}
-
-fn create_run_options_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.is_empty() {
-        return Err(builtin_error(
-            RUN_OPTIONS_NAME,
-            &ERROR_INPUT,
-            "fea.runOptions requires a solver",
-        ));
-    }
-    let kind_text = scalar_string(&args[0], RUN_OPTIONS_NAME, &ERROR_INPUT)?;
-    let run_kind = parse_scalar_enum::<AnalysisRunKind>(&kind_text, "solver")?;
-    let fields = run_options_fields_from_name_values(&args[1..])?;
-    let data = run_options_json_for_kind(RUN_OPTIONS_NAME, run_kind, fields)?;
-    run_options_to_object(RunOptionsPayload {
-        run_kind,
-        options: data,
-    })
-}
-
-fn run_options_fields_from_name_values(
-    args: &[Value],
-) -> BuiltinResult<serde_json::Map<String, serde_json::Value>> {
-    const EXACT_FIELDS: &[&str] = &[
-        "mode_count",
-        "step_count",
-        "max_linear_iters",
-        "max_step_retries",
-        "increment_count",
-        "max_newton_iters",
-        "max_line_search_backtracks",
-        "tangent_refresh_interval",
-        "harmonic_max_iterations",
-    ];
-    let mut fields = serde_json::Map::new();
-    for pair in expect_name_value_tail(RUN_OPTIONS_NAME, args)? {
-        let raw = scalar_string(pair.name, RUN_OPTIONS_NAME, &ERROR_INPUT)?;
-        let key = canonical_field_name(&raw);
-        let value = if EXACT_FIELDS.contains(&key.as_str()) {
-            serde_json::Value::from(usize_from_value(RUN_OPTIONS_NAME, pair.value)? as u64)
-        } else {
-            value_to_json(RUN_OPTIONS_NAME, pair.value)?
-        };
-        if fields.insert(key.clone(), value).is_some() {
-            return Err(builtin_error(
-                RUN_OPTIONS_NAME,
-                &ERROR_INPUT,
-                format!("duplicate fea.runOptions option `{key}`"),
-            ));
-        }
-    }
-    Ok(fields)
 }
 
 fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -3111,16 +2942,6 @@ fn interface_to_object(interface: AnalysisInterface) -> BuiltinResult<Value> {
     )
 }
 
-fn run_options_to_object(payload: RunOptionsPayload) -> BuiltinResult<Value> {
-    serializable_to_object(
-        RUN_OPTIONS_NAME,
-        &ERROR_INTERNAL,
-        FEA_RUN_OPTIONS_CLASS,
-        &payload,
-        Some(FEA_PAYLOAD_JSON_PROPERTY),
-    )
-}
-
 fn model_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<AnalysisModel> {
     object_payload(builtin, value, FEA_MODEL_CLASS)
 }
@@ -3260,175 +3081,6 @@ fn object_payload_with_property<T: DeserializeOwned>(
         ));
     }
     object_json_property(builtin, object, payload_property, &ERROR_INPUT)
-}
-
-fn run_options_payload_from_value(
-    builtin: &'static str,
-    value: &Value,
-) -> BuiltinResult<RunOptionsPayload> {
-    object_payload(builtin, value, FEA_RUN_OPTIONS_CLASS)
-}
-
-fn resolved_run_options_from_payload(
-    builtin: &'static str,
-    payload: RunOptionsPayload,
-    expected_kind: AnalysisRunKind,
-) -> BuiltinResult<ResolvedRunOptions> {
-    if payload.run_kind != expected_kind {
-        return Err(builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!(
-                "run options kind {:?} does not match selected study solver {:?}",
-                payload.run_kind, expected_kind
-            ),
-        ));
-    }
-    let mut resolved = ResolvedRunOptions::default();
-    match payload.run_kind {
-        AnalysisRunKind::LinearStatic => {
-            resolved.linear_static = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "linear_static run options",
-            )?);
-        }
-        AnalysisRunKind::Modal => {
-            resolved.modal = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "modal run options",
-            )?);
-        }
-        AnalysisRunKind::Acoustic => {
-            resolved.acoustic = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "acoustic run options",
-            )?);
-        }
-        AnalysisRunKind::Thermal => {
-            resolved.thermal = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "thermal run options",
-            )?);
-        }
-        AnalysisRunKind::Transient => {
-            resolved.transient = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "transient run options",
-            )?);
-        }
-        AnalysisRunKind::Cfd => {
-            resolved.cfd = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "cfd run options",
-            )?);
-        }
-        AnalysisRunKind::Cht => {
-            resolved.cht = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "cht run options",
-            )?);
-        }
-        AnalysisRunKind::Fsi => {
-            resolved.fsi = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "fsi run options",
-            )?);
-        }
-        AnalysisRunKind::Nonlinear => {
-            resolved.nonlinear = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "nonlinear run options",
-            )?);
-        }
-        AnalysisRunKind::Electromagnetic => {
-            resolved.electromagnetic = Some(json_deserialize(
-                builtin,
-                payload.options,
-                "electromagnetic run options",
-            )?);
-        }
-    }
-    Ok(resolved)
-}
-
-fn run_options_json_for_kind(
-    builtin: &'static str,
-    run_kind: AnalysisRunKind,
-    fields: serde_json::Map<String, serde_json::Value>,
-) -> BuiltinResult<serde_json::Value> {
-    match run_kind {
-        AnalysisRunKind::LinearStatic => typed_json_with_overrides::<AnalysisRunOptions>(
-            builtin,
-            AnalysisRunOptions::default(),
-            fields,
-            "linear_static run options",
-        ),
-        AnalysisRunKind::Modal => typed_json_with_overrides::<AnalysisModalRunOptions>(
-            builtin,
-            AnalysisModalRunOptions::default(),
-            fields,
-            "modal run options",
-        ),
-        AnalysisRunKind::Acoustic => typed_json_with_overrides::<AnalysisAcousticRunOptions>(
-            builtin,
-            AnalysisAcousticRunOptions::default(),
-            fields,
-            "acoustic run options",
-        ),
-        AnalysisRunKind::Thermal => typed_json_with_overrides::<AnalysisThermalRunOptions>(
-            builtin,
-            AnalysisThermalRunOptions::default(),
-            fields,
-            "thermal run options",
-        ),
-        AnalysisRunKind::Transient => typed_json_with_overrides::<AnalysisTransientRunOptions>(
-            builtin,
-            AnalysisTransientRunOptions::default(),
-            fields,
-            "transient run options",
-        ),
-        AnalysisRunKind::Cfd => typed_json_with_overrides::<AnalysisCfdRunOptions>(
-            builtin,
-            AnalysisCfdRunOptions::default(),
-            fields,
-            "cfd run options",
-        ),
-        AnalysisRunKind::Cht => typed_json_with_overrides::<AnalysisChtRunOptions>(
-            builtin,
-            AnalysisChtRunOptions::default(),
-            fields,
-            "cht run options",
-        ),
-        AnalysisRunKind::Fsi => typed_json_with_overrides::<AnalysisFsiRunOptions>(
-            builtin,
-            AnalysisFsiRunOptions::default(),
-            fields,
-            "fsi run options",
-        ),
-        AnalysisRunKind::Nonlinear => typed_json_with_overrides::<AnalysisNonlinearRunOptions>(
-            builtin,
-            AnalysisNonlinearRunOptions::default(),
-            fields,
-            "nonlinear run options",
-        ),
-        AnalysisRunKind::Electromagnetic => {
-            typed_json_with_overrides::<AnalysisElectromagneticRunOptions>(
-                builtin,
-                AnalysisElectromagneticRunOptions::default(),
-                fields,
-                "electromagnetic run options",
-            )
-        }
-    }
 }
 
 fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery> {
@@ -4077,20 +3729,6 @@ fn json_number(builtin: &'static str, value: f64) -> BuiltinResult<serde_json::V
                 "FEA numeric option values must be finite JSON numbers",
             )
         })
-}
-
-fn typed_json_with_overrides<T: Serialize + DeserializeOwned>(
-    builtin: &'static str,
-    default: T,
-    fields: serde_json::Map<String, serde_json::Value>,
-    label: &str,
-) -> BuiltinResult<serde_json::Value> {
-    let base = serde_json::to_value(default)
-        .map_err(|err| builtin_error(builtin, &ERROR_INTERNAL, err.to_string()))?;
-    let merged = json_with_overrides(builtin, base, fields, label)?;
-    let typed: T = json_deserialize(builtin, merged, label)?;
-    serde_json::to_value(typed)
-        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INTERNAL, err.to_string(), err))
 }
 
 fn json_with_overrides(
@@ -4986,31 +4624,16 @@ fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
     })
 }
 
-fn resolve_study_template_and_run_kind(
+fn resolve_study_template(
     options: &StudyConstructorOptions,
-) -> BuiltinResult<(AnalysisModelTemplate, AnalysisRunKind)> {
-    let template = options.template.ok_or_else(|| {
+) -> BuiltinResult<AnalysisModelTemplate> {
+    options.template.ok_or_else(|| {
         builtin_error(
             STUDY_NAME,
             &ERROR_INPUT,
             "fea.study requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
-    })?;
-    let run_kind = template.derived_run_kind();
-    if let Some(explicit_run_kind) = options.run_kind {
-        if explicit_run_kind != run_kind {
-            return Err(builtin_error(
-                STUDY_NAME,
-                &ERROR_INPUT,
-                format!(
-                    "explicit solver {} does not match Template {}; omit RunKind or choose a matching Template",
-                    explicit_run_kind.as_snake_case(),
-                    template.as_snake_case()
-                ),
-            ));
-        }
-    }
-    Ok((template, run_kind))
+    })
 }
 
 fn ensure_fea_classes_registered() {
@@ -5059,7 +4682,6 @@ fn ensure_fea_classes_registered() {
             FEA_STEP_CLASS,
             FEA_DOMAIN_CLASS,
             FEA_INTERFACE_CLASS,
-            FEA_RUN_OPTIONS_CLASS,
             FEA_FIELD_CLASS,
             FEA_COMPARE_CLASS,
             FEA_TRENDS_CLASS,
@@ -5253,6 +4875,38 @@ mod tests {
         .expect("canonical static sequence should serialize")
     }
 
+    fn test_run_identity(
+        procedure: runmat_analysis_core::AnalysisProcedure,
+    ) -> runmat_analysis_fea::AnalysisRunIdentity {
+        let assembly = runmat_analysis_core::StructuralFormulationRealization::new(
+            runmat_analysis_core::StructuralOperatorImplementation::Tet4LinearElasticity,
+            Some(runmat_analysis_core::StructuralRecoveryImplementation::Tet4ConstantStrain),
+        );
+        let realization = runmat_analysis_fea::admission::structural_exact_realization(
+            runmat_analysis_fea::admission::StructuralRealizationInput {
+                assembly,
+                procedure,
+                coupling: runmat_analysis_core::CouplingImplementation::Uncoupled,
+                sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
+                boundary_transfers: vec![
+                    runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
+                ],
+            },
+        )
+        .expect("test structural formulation must be valid");
+        runmat_analysis_fea::admission::admit_formulation(
+            runmat_analysis_fea::admission::FormulationAdmissionRequest {
+                family: runmat_analysis_core::PhysicsFamily::Structural,
+                procedure,
+                solution_space: runmat_analysis_core::SolutionSpace::Direct,
+                requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                realization,
+            },
+        )
+        .expect("test structural formulation must be admitted")
+        .into_identity()
+    }
+
     fn cell(values: Vec<Value>) -> Value {
         let cols = values.len().max(1);
         Value::Cell(CellArray::new(values, 1, cols).expect("cell should build"))
@@ -5420,9 +5074,9 @@ mod tests {
         }
 
         let object = serializable_to_object_value(
-            RUN_OPTIONS_NAME,
+            RESULTS_NAME,
             &ERROR_INTERNAL,
-            FEA_RUN_OPTIONS_CLASS,
+            FEA_RESULTS_CLASS,
             &IntegerMirror {
                 signed: -9,
                 unsigned: u64::MAX,
@@ -5498,70 +5152,6 @@ mod tests {
 
     #[test]
     fn fea_execution_controls_enforce_exact_structural_boundaries() {
-        let options = block_on(fea_run_options_builtin(vec![
-            Value::String("modal".into()),
-            Value::String("ModeCount".into()),
-            Value::Num(3.0),
-            Value::String("ResidualWarnThreshold".into()),
-            Value::Int(IntValue::U64(1)),
-        ]))
-        .expect("ordinary integral double count and typed floating control");
-        let Value::Object(options) = options else {
-            panic!("run options object");
-        };
-        let Some(Value::Struct(payload)) = options.properties.get("options") else {
-            panic!("run options payload");
-        };
-        assert!(matches!(
-            payload.fields.get("mode_count"),
-            Some(Value::Int(IntValue::U64(3)))
-        ));
-        assert!(matches!(
-            payload.fields.get("residual_warn_threshold"),
-            Some(Value::Num(1.0))
-        ));
-
-        for (solver, exact_field, floating_field) in [
-            ("modal", "ModeCount", "ResidualWarnThreshold"),
-            ("acoustic", "ModeCount", "ResidualWarnThreshold"),
-            ("thermal", "StepCount", "TimeStepS"),
-            ("transient", "MaxStepRetries", "Tolerance"),
-            ("cfd", "MaxLinearIters", "ResidualWarnThreshold"),
-            ("cht", "StepCount", "ResidualWarnThreshold"),
-            ("fsi", "MaxLinearIters", "Tolerance"),
-            ("nonlinear", "TangentRefreshInterval", "Tolerance"),
-            (
-                "electromagnetic",
-                "HarmonicMaxIterations",
-                "HarmonicTolerance",
-            ),
-        ] {
-            let value = block_on(fea_run_options_builtin(vec![
-                Value::String(solver.into()),
-                Value::String(exact_field.into()),
-                Value::Int(IntValue::U32(3)),
-                Value::String(floating_field.into()),
-                Value::Int(IntValue::I16(1)),
-            ]))
-            .unwrap_or_else(|error| panic!("{solver} typed run options: {error}"));
-            let Value::Object(object) = value else {
-                panic!("{solver} run options object");
-            };
-            let Some(Value::Struct(payload)) = object.properties.get("options") else {
-                panic!("{solver} run options payload");
-            };
-            let exact_field = canonical_field_name(exact_field);
-            let floating_field = canonical_field_name(floating_field);
-            assert!(matches!(
-                payload.fields.get(&exact_field),
-                Some(Value::Int(IntValue::U64(3)))
-            ));
-            assert!(matches!(
-                payload.fields.get(&floating_field),
-                Some(Value::Num(1.0))
-            ));
-        }
-
         let extra_step = block_on(fea_step_builtin(vec![
             Value::String("step".into()),
             Value::String("modal".into()),
@@ -5577,21 +5167,11 @@ mod tests {
         .expect_err("trend window must be positive");
         assert_eq!(zero_window.identifier(), Some("RunMat:fea:InvalidInput"));
 
-        let scalar_double = Tensor::new(vec![4.0], vec![1, 1]).expect("double scalar tensor");
-        assert_eq!(
-            usize_from_value(RUN_OPTIONS_NAME, &Value::Tensor(scalar_double.clone())).unwrap(),
-            4
-        );
         assert!(exact_bool_from_value(
             RESULTS_NAME,
             &Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("double flag"))
         )
         .unwrap());
-
-        let scalar_single =
-            Tensor::new_with_dtype(vec![4.0], vec![1, 1], runmat_value::NumericDType::F32)
-                .expect("single scalar tensor");
-        assert!(usize_from_value(RUN_OPTIONS_NAME, &Value::Tensor(scalar_single)).is_err());
     }
 
     #[test]
@@ -6083,8 +5663,12 @@ geometry:
 model:
   template: linear_static_structural
 sequence: {}
-run:
-  backend: cpu
+execution:
+  - step: static
+    backend: cpu
+    requirement: experimental
+    solver: structural_linear
+    options: {{}}
 "#,
                 static_sequence_json("bracket_static")
             ),
@@ -6409,18 +5993,6 @@ run:
             vec![region_id.clone()]
         );
 
-        let run_options = block_on(fea_run_options_builtin(vec![
-            Value::String("linear_static".to_string()),
-            Value::String("DeterministicMode".to_string()),
-            Value::Bool(true),
-            Value::String("PrecisionMode".to_string()),
-            Value::String("fp64".to_string()),
-            Value::String("QualityPolicy".to_string()),
-            Value::String("balanced".to_string()),
-        ]))
-        .expect("run options should build");
-        assert_object_class(&run_options, FEA_RUN_OPTIONS_CLASS);
-
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),
             geometry,
@@ -6430,8 +6002,6 @@ run:
             Value::String("cpu".to_string()),
             Value::String("Model".to_string()),
             model,
-            Value::String("RunOptions".to_string()),
-            run_options,
         ]))
         .expect("study should build");
         assert_object_class(&study, FEA_STUDY_CLASS);
@@ -6648,8 +6218,12 @@ geometry:
 model:
   template: linear_static_structural
 sequence: {}
-run:
-  backend: cpu
+execution:
+  - step: static
+    backend: cpu
+    requirement: experimental
+    solver: structural_linear
+    options: {{}}
 "#,
                 static_sequence_json("synthetic_plot")
             ),
@@ -6665,15 +6239,11 @@ run:
             _ => panic!("expected study spec payload"),
         };
 
+        let identity = test_run_identity(runmat_analysis_core::AnalysisProcedure::Static);
         let run = crate::analysis::AnalysisRunResult {
             run_id: "synthetic_plot_run".to_string(),
-            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
-                runmat_analysis_core::PhysicsFamily::Structural,
-                runmat_analysis_core::AnalysisProcedure::Static,
-                runmat_analysis_core::SolutionSpace::Direct,
-                [runmat_analysis_core::FormulationImplementation::LinearElasticStructural],
-            ),
             run: runmat_analysis_fea::FeaRunResult {
+                identity,
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
@@ -6708,9 +6278,16 @@ run:
             model_validity: crate::analysis::QualityGate::Pass,
             solver_convergence: crate::analysis::QualityGate::Pass,
             result_quality: crate::analysis::QualityGate::Pass,
-            run_status: crate::analysis::RunStatus::Publishable,
-            publishable: true,
+            run_status: crate::analysis::RunStatus::Completed,
+            numerically_acceptable: true,
+            production_publishable: false,
             quality_reasons: Vec::new(),
+            production_publication_reasons: vec![
+                crate::analysis::ProductionPublicationReason {
+                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
+                    detail: "test formulation is experimental".to_string(),
+                },
+            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
@@ -6751,15 +6328,12 @@ run:
             ]
         };
         let run_id = "synthetic_indexed_results".to_string();
+        let identity =
+            test_run_identity(runmat_analysis_core::AnalysisProcedure::TransientResponse);
         let run = crate::analysis::AnalysisRunResult {
             run_id: run_id.clone(),
-            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
-                runmat_analysis_core::PhysicsFamily::Structural,
-                runmat_analysis_core::AnalysisProcedure::TransientResponse,
-                runmat_analysis_core::SolutionSpace::Direct,
-                [runmat_analysis_core::FormulationImplementation::ReducedStructuralTransient],
-            ),
             run: runmat_analysis_fea::FeaRunResult {
+                identity,
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
@@ -6809,9 +6383,16 @@ run:
             model_validity: crate::analysis::QualityGate::Pass,
             solver_convergence: crate::analysis::QualityGate::Pass,
             result_quality: crate::analysis::QualityGate::Pass,
-            run_status: crate::analysis::RunStatus::Publishable,
-            publishable: true,
+            run_status: crate::analysis::RunStatus::Completed,
+            numerically_acceptable: true,
+            production_publishable: false,
             quality_reasons: Vec::new(),
+            production_publication_reasons: vec![
+                crate::analysis::ProductionPublicationReason {
+                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
+                    detail: "test formulation is experimental".to_string(),
+                },
+            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

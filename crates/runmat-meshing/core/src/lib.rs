@@ -68,13 +68,11 @@ pub use quality::boundary::{
 pub use quality::ElementQuality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size::adaptive::{
-    build_refinement_markers_from_samples, default_refinement_indicators_for_analysis,
-    evaluate_adaptive_convergence, plan_refinement_indicators,
-    structural_static_default_refinement_indicators, AdaptiveConvergenceMetrics,
-    AdaptiveConvergenceStatus, AdaptiveIterationSummary, RefinementIndicatorAvailability,
-    RefinementIndicatorKey, RefinementIndicatorSample, RefinementIndicatorStatus,
-    RefinementIndicatorSummary, RefinementMarker, RefinementMarkerError, RefinementMarkerOptions,
-    SizingFieldUpdate,
+    build_refinement_markers_from_samples, evaluate_adaptive_convergence,
+    plan_refinement_indicators, AdaptiveConvergenceMetrics, AdaptiveConvergenceStatus,
+    AdaptiveIterationSummary, RefinementIndicatorAvailability, RefinementIndicatorKey,
+    RefinementIndicatorSample, RefinementIndicatorStatus, RefinementIndicatorSummary,
+    RefinementMarker, RefinementMarkerError, RefinementMarkerOptions, SizingFieldUpdate,
 };
 pub use runmat_meshing_size::field::{
     AnisotropicSizingSample, MeshSizingField, PointSizingQuery, SegmentSizingQuery,

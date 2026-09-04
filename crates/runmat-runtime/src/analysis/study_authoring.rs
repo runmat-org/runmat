@@ -13,10 +13,10 @@ use crate::operations::{
 
 use super::{
     analysis_create_model_op, persist_study_evidence, study_fingerprint,
-    template_supports_run_kind, validate_study_issue_codes, AnalysisCreateModelIntentSpec,
-    AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent,
-    AnalysisStudyDiagramObservation, AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION,
-    ANALYSIS_AUTHOR_STUDY_OP_VERSION,
+    validate_study_issue_codes, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
+    AnalysisExecutionStep, AnalysisSolverOptions, AnalysisStudyAuthoringData,
+    AnalysisStudyAuthoringEvidence, AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
+    AnalysisStudySpec, ANALYSIS_AUTHOR_STUDY_OPERATION, ANALYSIS_AUTHOR_STUDY_OP_VERSION,
 };
 
 pub fn analysis_author_study_op(
@@ -57,18 +57,6 @@ pub fn analysis_author_study_op(
             ]),
         ));
     }
-    if !template_supports_run_kind(intent.template, intent.run_kind) {
-        return Err(author_study_error(
-            &context,
-            "RM.FEA.AUTHOR_STUDY.RUN_KIND_PROFILE_MISMATCH",
-            "template does not support requested run kind",
-            BTreeMap::from([
-                ("template".to_string(), format!("{:?}", intent.template)),
-                ("run_kind".to_string(), format!("{:?}", intent.run_kind)),
-            ]),
-        ));
-    }
-
     let (physical_region_id, physical_region_source) = select_authoring_physical_region(
         &intent.mesh_summary,
         intent.physical_region_id.as_deref(),
@@ -203,27 +191,47 @@ pub fn analysis_author_study_op(
         .and_then(|index| model.excitations.get(index))
         .map(|action| excitation_kind_label(action).to_string());
 
+    let [procedure_step] = model.sequence.steps.as_slice() else {
+        return Err(author_study_error(
+            &context,
+            "RM.FEA.AUTHOR_STUDY.EXECUTION_STEP_COUNT_UNSUPPORTED",
+            "study authoring currently requires a template with exactly one procedure step",
+            BTreeMap::from([(
+                "procedure_step_count".to_string(),
+                model.sequence.steps.len().to_string(),
+            )]),
+        ));
+    };
+    let solver_options =
+        AnalysisSolverOptions::defaults_for(procedure_step).map_err(|message| {
+            author_study_error(
+                &context,
+                "RM.FEA.AUTHOR_STUDY.PROCEDURE_UNSUPPORTED",
+                message,
+                BTreeMap::from([(
+                    "procedure_step_id".to_string(),
+                    procedure_step.step_id.0.clone(),
+                )]),
+            )
+        })?;
+    let execution = AnalysisExecutionStep {
+        step_id: procedure_step.step_id.clone(),
+        backend: intent.backend,
+        requirement: intent.requirement,
+        solver_options,
+    };
+
     let study = AnalysisStudySpec {
         study_id: intent.study_id,
         geometry: intent.geometry,
         create_model_intent,
         model: Some(model),
-        run_kind: intent.run_kind,
-        backend: intent.backend,
+        execution: AnalysisExecutionPlan {
+            steps: vec![execution],
+        },
         meshing_settings: Some(MeshingRequestSettings::default()),
-        outputs: Vec::new(),
         solver_mesh_artifact_path: intent.solver_mesh_artifact_path.clone(),
         meshing_evidence_artifact_path: intent.meshing_evidence_artifact_path.clone(),
-        linear_static_run_options: None,
-        modal_run_options: None,
-        acoustic_run_options: None,
-        thermal_run_options: None,
-        transient_run_options: None,
-        cfd_run_options: None,
-        cht_run_options: None,
-        fsi_run_options: None,
-        nonlinear_run_options: None,
-        electromagnetic_run_options: None,
     };
     let issue_codes = validate_study_issue_codes(&study);
     if !issue_codes.is_empty() {

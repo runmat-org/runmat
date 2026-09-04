@@ -103,6 +103,7 @@ pub use study::accuracy::{
     AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy, RequiredAccuracyEvidence,
     UnavailableEvidencePolicy,
 };
+pub use study::is_exposed_analysis_identity;
 pub use study::output::{
     ComplexRepresentation, CompressionPolicy, DiagnosticKind, DiagnosticObservation,
     ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation, MonitorStopCondition,
@@ -121,10 +122,13 @@ pub use study::sequence::{
     TransitionId,
 };
 pub use study::{
-    AnalysisProcedure, AnalysisRunIdentity, CoupledPhysicsFamily, ExecutionFallbackPolicy,
-    FormulationImplementation, FormulationMaturity, PhysicsFamily, SolutionSpace,
+    AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
+    CoupledPhysicsFamily, CouplingImplementation, ExactFormulationComponent,
+    ExactFormulationRealization, ExecutionFallbackPolicy, FormulationAdmissionRejectionReason,
+    FormulationAxis, FormulationMaturity, FormulationRequirement, PhysicsFamily,
+    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
     StructuralFormulationRealization, StructuralOperatorImplementation,
-    StructuralRecoveryImplementation,
+    StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
 };
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
 

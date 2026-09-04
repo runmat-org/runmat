@@ -13,38 +13,22 @@ export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as 
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
 export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
 
-export const FEA_ANALYSIS_PROFILES = [
+export const FEA_MODEL_TEMPLATES = [
   "linear_static_structural",
   "thermo_mechanical_coupled",
-  "electro_thermal_coupled",
-  "thermal_standalone",
+  "thermal_transient",
   "modal_structural",
   "acoustic_harmonic",
   "transient_structural",
   "nonlinear_structural",
-  "electromagnetic_static",
+  "electromagnetic_harmonic",
   "cfd_steady_state",
   "cfd_transient",
   "cht_coupled",
   "fsi_coupled",
 ] as const;
 
-export const FEA_ANALYSIS_RUN_KINDS = [
-  "linear_static",
-  "modal",
-  "acoustic",
-  "thermal",
-  "transient",
-  "cfd",
-  "cht",
-  "fsi",
-  "nonlinear",
-  "electromagnetic",
-] as const;
-
-export type FeaAnalysisProfile = "linear_static_structural" | "thermo_mechanical_coupled" | "electro_thermal_coupled" | "thermal_standalone" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_static" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
-
-export type FeaAnalysisRunKind = "linear_static" | "modal" | "acoustic" | "thermal" | "transient" | "cfd" | "cht" | "fsi" | "nonlinear" | "electromagnetic";
+export type FeaModelTemplate = "linear_static_structural" | "thermo_mechanical_coupled" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
 
 export type FeaDocumentKind = "study" | "sweep";
 
@@ -54,166 +38,232 @@ export type FeaFieldStorage = "host_f64" | "device_ref";
 
 export type FeaFieldLocation = "node" | "element" | "edge" | "boundary_face" | "interface_face" | "mode" | "global" | "unknown";
 
+export type FeaPrecisionMode = "fp32" | "fp64" | "mixed";
+
+export type FeaPreconditionerMode = "auto" | "jacobi" | "amg" | "ilu";
+
+export type FeaQualityPolicy = "strict" | "balanced" | "exploratory";
+
 export type FeaProgressPhase = "geometry_load" | "region_resolution" | "mesh_prep" | "model_assembly" | "solve" | "postprocess" | "artifact_persistence" | "complete";
 
 export type FeaProgressStatus = "started" | "advanced" | "completed" | "failed" | "cancelled";
 
-export interface FeaPhysicsProfileCatalogEntry {
-  profile: FeaAnalysisProfile;
+export type FeaGeometryUnits = "unspecified" | "meter" | "millimeter" | "inch";
+
+export type FeaComputeBackend = "cpu" | "gpu";
+
+export type FeaElementOrder = "tet4" | "tet10";
+
+export type FeaAnalysisProcedure = "static" | "modal_extraction" | "prestressed_modal_extraction" | "eigenvalue_buckling" | "transient_response" | "harmonic_response" | "prestressed_harmonic_response" | "modal_response_spectrum" | "random_response" | "nonlinear" | "adaptive";
+
+export type FeaFormulationRequirement = "production" | "experimental";
+
+export type FeaPhysicsFamily = "structural" | "thermal" | "electromagnetic" | "acoustic" | "fluid" | { coupled: "thermomechanical" | "electrothermal" | "conjugate_heat_transfer" | "fluid_structure_interaction" };
+
+export type FeaIndependentDomain =
+  | "static"
+  | { time_seconds: { origin: number; start: number; end: number } }
+  | { frequency_hertz: number[] }
+  | { load_factor: { start: number; end: number } }
+  | { eigenvalue: { requested_count: number } }
+  | { study_parameter: { parameter_id: string; canonical_values: number[] } };
+export type FeaStepObjectRef =
+  | { constraint: string } | { boundary: string } | { connector: string }
+  | { interface: string } | { excitation: string } | { initial_condition: string }
+  | { material_parameter: string };
+export type FeaActivationLifecycle = "activate"
+  | { continue: { from_step: string } }
+  | { modify: { prior_step: string; prior_object: FeaStepObjectRef } }
+  | { deactivate: { from_step: string } };
+export interface FeaStepObjectActivation { object: FeaStepObjectRef; lifecycle: FeaActivationLifecycle; }
+export type FeaStateKind = "structural_primary" | "structural_kinematics" | "structural_stress_strain" | "geometric_stiffness" | "material_history" | "contact_history" | "thermal" | "electromagnetic_static" | "electromagnetic_complex" | "acoustic_complex" | "fluid" | "moving_mesh" | "modal_basis" | "coupled_interface" | "integrator";
+export type FeaStateSource = "initial_conditions" | { upstream: { producer_step: string; state_id: string } };
+export type FeaStateUse = "physical_initial_state" | "linearization_point" | "prestress" | "initial_guess" | "modal_basis" | "coupled_interface" | "restart";
+export type FeaInitialStateConflictPolicy = "reject" | "replace_initial_condition" | "augment_disjoint_quantities";
+export interface FeaStateInput { input_id: string; required_kind: FeaStateKind; source: FeaStateSource; use_as: FeaStateUse; conflict: FeaInitialStateConflictPolicy; }
+export interface FeaStateOutput { state_id: string; kind: FeaStateKind; completeness: "complete" | "checkpoint" | "partial"; persistence: "canonical" | "until_dependents_complete" | "checkpoint_only"; }
+export type FeaRestartPolicy = "fresh" | { continue_from_completed_state: { producer_step: string; state_id: string } } | { resume_checkpoint: { checkpoint_id: string; required_state_digest: string } };
+export type FeaObservationQuantity = "displacement" | "rotation" | "velocity" | "acceleration" | "strain" | "stress" | "reaction_force" | "reaction_moment" | "strain_energy" | "temperature" | "temperature_gradient" | "heat_flux" | "heat_rate" | "electric_potential" | "electric_field" | "electric_current" | "electric_current_density" | "electric_charge" | "magnetic_vector_potential" | "magnetic_flux_density" | "magnetic_field_intensity" | "acoustic_pressure" | "acoustic_particle_velocity" | "sound_pressure_level" | "fluid_pressure" | "fluid_velocity" | "vorticity" | "mass_flow_rate" | "wall_shear_stress" | "modal_frequency" | "modal_participation" | "eigenvalue" | "residual" | "balance" | "constraint_violation" | "contact_gap" | "contact_pressure";
+export type FeaSamplingPolicy = "final" | "every_accepted_increment" | { time_seconds: number[] } | { time_interval_seconds: { start: number; end: number; interval: number } } | { frequency_hertz: number[] } | { frequency_interval_hertz: { start: number; end: number; interval: number } } | { load_factors: number[] } | { load_factor_interval: { start: number; end: number; interval: number } } | { mode_indices: number[] } | { event: "first_yield" | "contact_status_change" | "peak_response" | "convergence_failure" | "accuracy_criterion_crossing" } | { adaptive: { minimum_interval: number; maximum_samples: number; relative_change: number } };
+export type FeaRetentionPolicy = "canonical" | "until_dependents_complete" | { latest_samples: { count: number } } | { explicit_samples: { maximum_count: number } };
+export interface FeaObservationSpec {
+  observation_id: string; quantity: FeaObservationQuantity;
+  value_shape: "scalar" | "vector3" | "symmetric_tensor3" | { tensor: { extents: number[] } };
+  target: FeaObservationTarget; source_location: FeaFieldLocationContract; output_location: FeaFieldLocationContract;
+  recovery: "native" | "extrapolate" | "volume_weighted_average" | "area_weighted_average" | "conservative_projection" | "shape_function_interpolation";
+  component: "all" | "x" | "y" | "z" | "normal" | "tangent1" | "tangent2" | "trace" | "hydrostatic" | "deviatoric" | "von_mises" | "maximum_principal" | "minimum_principal" | "magnitude";
+  frame: FeaCoordinateFrame; sign_convention: "native" | "tension_positive" | "compression_positive" | "outward_positive" | "inward_positive";
+  complex_representation: "real" | "imaginary" | "magnitude" | "phase_radians" | "complex";
+  sampling: FeaSamplingPolicy; reduction: FeaReductionPolicy | null; storage: FeaObservationStoragePolicy;
+  purpose: "publication" | "solver_control" | "visualization" | "downstream_state"; cost: FeaObservationCostEstimate;
+}
+export type FeaFieldLocationContract = "node" | "cell" | "element" | "integration_point" | "face" | "edge" | "interface" | "connector" | "reference_point" | "mode" | "global";
+export type FeaObservationTarget = { spatial: FeaExcitationTarget } | { point: { position: FeaPosition } } | { path: { positions: FeaPosition[] } } | { connector: { connector_id: string } } | { constraint: { constraint_id: string } } | "whole_model";
+export interface FeaReductionPolicy { spatial: "none" | "integral" | "average" | "root_mean_square" | "euclidean_norm" | "minimum" | "maximum" | "resultant" | "moment"; series: "none" | "minimum" | "maximum" | "absolute_maximum" | "root_mean_square" | "mean" | "variance" | "envelope"; extrema_ties: "first_canonical" | "all_locations"; }
+export interface FeaObservationStoragePolicy { precision: FeaSignalPrecision; compression: "lossless" | { error_bounded: { maximum_relative_error: number } } | "none"; retention: FeaRetentionPolicy; partial_access: "manifest_and_chunks" | "whole_artifact"; }
+export interface FeaObservationCostEstimate { operation_count: number; peak_resident_bytes: number; stored_bytes: number; transfer_bytes: number; collective_count: number; }
+export type FeaObservationRequest = { field: FeaObservationSpec } | { history: FeaObservationSpec } | { probe: FeaObservationSpec } | { reduction: FeaObservationSpec } | { diagnostic: FeaDiagnosticObservation } | { monitor: FeaMonitorObservation };
+export interface FeaDiagnosticObservation { observation_id: string; diagnostic: "convergence" | "balance" | "constraint" | "contact" | "adaptation" | "resource" | "execution_equivalence"; sampling: FeaSamplingPolicy; retention: FeaRetentionPolicy; }
+export interface FeaMonitorObservation { observation_id: string; source_observation_id: string; cadence: { accepted_increments: { interval: number } } | { wall_seconds: { interval: number } }; stop: FeaMonitorStopCondition | null; }
+export type FeaMonitorStopCondition = { less_than: { threshold: FeaObservationThreshold } } | { greater_than: { threshold: FeaObservationThreshold } } | { absolute_change_below: { threshold: FeaObservationThreshold; consecutive: number } };
+export interface FeaObservationThreshold { quantity: FeaObservationQuantity; canonical_value: number; }
+export type FeaAccuracyTarget = { observation: string } | { quantity: FeaObservationQuantity } | "global_equilibrium" | "interface_closure" | "execution_equivalence";
+export type FeaAccuracyTolerance = { relative: number } | { absolute: { quantity: FeaObservationQuantity; canonical_value: number } };
+export interface FeaAccuracyCriterion { criterion_id: string; target: FeaAccuracyTarget; contribution: FeaErrorContributionKind; tolerance: FeaAccuracyTolerance; evidence: "a_posteriori_estimator" | "convergence_study" | "conservation_balance" | "residual_bound" | "reference_comparison" | "statistical_confidence" | "transfer_bound"; mandatory: boolean; }
+export type FeaErrorContributionKind = "geometry_admission" | "boundary_approximation" | "spatial_discretization" | "algebraic" | "nonlinear" | "temporal" | "frequency_sampling" | "modal_truncation" | "stochastic" | "coupling" | "interface_projection" | "field_transfer" | "signal_interpolation" | "recovery" | "observation_sampling" | "precision" | "execution_equivalence";
+export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate_experimental"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail" | "warn_experimental"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number }; }
+export interface FeaProcedureStep {
+  step_id: string; family: FeaPhysicsFamily; procedure: FeaAnalysisProcedure; solution_space: "direct" | "modal_reduced";
+  independent_domain: FeaIndependentDomain; activations: FeaStepObjectActivation[]; state_inputs: FeaStateInput[];
+  state_outputs: FeaStateOutput[]; observations: FeaObservationRequest[]; accuracy: FeaAccuracyPlan; restart: FeaRestartPolicy;
+}
+export interface FeaSequenceDependency { predecessor: string; successor: string; reason: "state_transfer" | "authored_ordering" | "shared_interface" | "adaptation"; }
+export interface FeaStateTransition { transition_id: string; producer_step: string; consumer_step: string; state_id: string; method: "reuse" | "conservative_projection" | "interpolation" | "linearize" | "derive_operator_contribution" | "initial_guess_only"; topology: "require_identical" | "project_with_evidence" | "adapted_mesh_lineage"; reference: "preserve" | "receiving_step_origin" | "explicit_linearization_point"; }
+export interface FeaSequenceBranch { branch_id: string; producer_step: string; state_ids: string[]; consumer_steps: string[]; }
+
+export interface FeaModelTemplateCatalogEntry {
+  template: FeaModelTemplate;
   label: string;
   family: string;
   target: string;
   value: string;
-  defaultOutputs: readonly {
+  defaultObservations: readonly {
     field: string;
     location: string;
   }[];
 }
 
-export const FEA_SUPPORTED_PHYSICS_PROFILES: readonly FeaPhysicsProfileCatalogEntry[] = [
+export const FEA_SUPPORTED_MODEL_TEMPLATES: readonly FeaModelTemplateCatalogEntry[] = [
   {
-    profile: "linear_static_structural",
+    template: "linear_static_structural",
     label: "Linear static structural",
     family: "structural",
     target: "solid mechanics",
     value: "static stress and displacement",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
     ],
   },
   {
-    profile: "thermo_mechanical_coupled",
+    template: "thermo_mechanical_coupled",
     label: "Thermo-mechanical",
     family: "coupled physics",
     target: "coupled solid mechanics and heat transfer",
     value: "coupled temperature, stress, and displacement",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "thermal.temperature", location: "nodes" },
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
     ],
   },
   {
-    profile: "electro_thermal_coupled",
-    label: "Electro-thermal",
-    family: "coupled physics",
-    target: "coupled electromagnetics and heat transfer",
-    value: "resistive heating, temperature, and electrical fields",
-    defaultOutputs: [
-      { field: "electro_thermal.temperature", location: "nodes" },
-      { field: "electro_thermal.joule_heat", location: "elements" },
-      { field: "electro_thermal.electric_potential", location: "nodes" },
-      { field: "electro_thermal.current_density", location: "elements" },
-    ],
-  },
-  {
-    profile: "thermal_standalone",
-    label: "Thermal",
+    template: "thermal_transient",
+    label: "Thermal transient",
     family: "thermal",
     target: "heat transfer",
-    value: "temperature and heat flux",
-    defaultOutputs: [
+    value: "time-dependent temperature and heat flux",
+    defaultObservations: [
       { field: "thermal.temperature", location: "nodes" },
       { field: "thermal.heat_flux", location: "elements" },
     ],
   },
   {
-    profile: "modal_structural",
+    template: "modal_structural",
     label: "Modal structural",
     family: "modal",
     target: "solid mechanics",
     value: "natural frequencies and modes",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "structural.mode_shapes", location: "nodes" },
       { field: "structural.natural_frequencies", location: "modes" },
     ],
   },
   {
-    profile: "acoustic_harmonic",
+    template: "acoustic_harmonic",
     label: "Acoustic harmonic",
     family: "acoustic",
     target: "acoustics",
     value: "frequency-domain pressure",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "acoustic.pressure", location: "nodes" },
       { field: "acoustic.sound_pressure_level", location: "nodes" },
     ],
   },
   {
-    profile: "transient_structural",
+    template: "transient_structural",
     label: "Transient structural",
     family: "structural",
     target: "solid mechanics",
     value: "time response",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
     ],
   },
   {
-    profile: "nonlinear_structural",
+    template: "nonlinear_structural",
     label: "Nonlinear structural",
     family: "structural",
     target: "solid mechanics",
     value: "large deformation or nonlinear material",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
     ],
   },
   {
-    profile: "electromagnetic_static",
-    label: "Electromagnetic",
+    template: "electromagnetic_harmonic",
+    label: "Electromagnetic harmonic",
     family: "electromagnetic",
     target: "electromagnetics",
-    value: "electric and magnetic fields",
-    defaultOutputs: [
+    value: "frequency-domain electric and magnetic fields",
+    defaultObservations: [
       { field: "em.electric_field", location: "elements" },
       { field: "em.magnetic_flux_density", location: "elements" },
     ],
   },
   {
-    profile: "cfd_steady_state",
+    template: "cfd_steady_state",
     label: "CFD steady state",
     family: "CFD",
     target: "fluid flow",
     value: "steady flow fields",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "fluid.velocity", location: "nodes" },
       { field: "fluid.pressure", location: "nodes" },
     ],
   },
   {
-    profile: "cfd_transient",
+    template: "cfd_transient",
     label: "CFD transient",
     family: "CFD",
     target: "fluid flow",
     value: "time-dependent flow fields",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "fluid.velocity", location: "nodes" },
       { field: "fluid.pressure", location: "nodes" },
     ],
   },
   {
-    profile: "cht_coupled",
+    template: "cht_coupled",
     label: "Conjugate heat transfer",
     family: "coupled physics",
     target: "coupled fluid and solid heat transfer",
     value: "fluid and solid heat transfer",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "thermal.temperature", location: "nodes" },
       { field: "fluid.velocity", location: "nodes" },
       { field: "fluid.pressure", location: "nodes" },
     ],
   },
   {
-    profile: "fsi_coupled",
+    template: "fsi_coupled",
     label: "Fluid-structure interaction",
     family: "coupled physics",
     target: "coupled fluid and structural response",
     value: "fluid loads and structural response",
-    defaultOutputs: [
+    defaultObservations: [
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
       { field: "fluid.pressure", location: "nodes" },
@@ -222,7 +272,7 @@ export const FEA_SUPPORTED_PHYSICS_PROFILES: readonly FeaPhysicsProfileCatalogEn
 ] as const;
 
 export const FEA_SUPPORTED_PHYSICS_FAMILIES: readonly string[] = Array.from(
-  new Set(FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.family))
+  new Set(FEA_SUPPORTED_MODEL_TEMPLATES.map((template) => template.family))
 );
 
 export interface FeaProgressEvent {
@@ -239,7 +289,7 @@ export interface FeaProgressEvent {
 export interface FeaCapabilities {
   supportedDocumentExtensions: string[];
   supportedGeometryExtensions: string[];
-  physicsProfiles: FeaPhysicsProfileCatalogEntry[];
+  modelTemplates: FeaModelTemplateCatalogEntry[];
   supportsCheck: boolean;
   supportsRun: boolean;
   supportsResults: boolean;
@@ -304,9 +354,9 @@ export interface FeaRunDatasetPayload {
   runId: string;
   docPath: string;
   study: FeaRunDatasetStudyRef;
-  analysisProfile?: FeaAnalysisProfile;
+  modelTemplate?: FeaModelTemplate;
   physicsFamily?: string;
-  analysisRunKind?: FeaAnalysisRunKind;
+  procedureStep?: FeaProcedureStep;
   availableOutputSummary?: string;
   run: unknown;
   resultSummary: unknown;
@@ -377,6 +427,127 @@ export interface FeaFieldDescriptor {
   storageRef: FeaFieldStorageRef;
 }
 
+export interface FeaStructuralLinearOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  preconditioner_mode: FeaPreconditionerMode;
+  quality_policy: FeaQualityPolicy;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaStructuralModesOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  mode_count: number;
+  residual_warn_threshold: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaAcousticHelmholtzOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  mode_count: number;
+  residual_warn_threshold: number;
+}
+
+export interface FeaThermalDiffusionOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  step_count: number;
+  time_step_s: number;
+  residual_warn_threshold: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaStructuralTransientOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  time_step_s: number;
+  min_time_step_s: number;
+  max_time_step_s: number;
+  step_count: number;
+  max_linear_iters: number;
+  tolerance: number;
+  residual_target: number;
+  adaptive_time_step: boolean;
+  max_step_retries: number;
+  adapt_min_scale: number;
+  adapt_max_scale: number;
+  adapt_growth_exponent: number;
+  adapt_retry_growth_cap: number;
+  adapt_nonconverged_shrink: number;
+  dt_bucket_rel_tolerance: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaIncompressibleFlowOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  time_step_s: number;
+  step_count: number;
+  max_linear_iters: number;
+  tolerance: number;
+  residual_warn_threshold: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaConjugateHeatTransferOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  time_step_s: number;
+  step_count: number;
+  max_linear_iters: number;
+  tolerance: number;
+  residual_warn_threshold: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaFluidStructureInteractionOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  time_step_s: number;
+  step_count: number;
+  max_linear_iters: number;
+  tolerance: number;
+  residual_warn_threshold: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaStructuralNonlinearOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  increment_count: number;
+  max_newton_iters: number;
+  tolerance: number;
+  residual_convergence_factor: number;
+  increment_norm_tolerance: number;
+  line_search: boolean;
+  max_line_search_backtracks: number;
+  line_search_reduction: number;
+  tangent_refresh_interval: number;
+  solver_mesh_artifact_path: string | null;
+}
+
+export interface FeaElectromagneticPotentialOptions {
+  deterministic_mode: boolean;
+  precision_mode: FeaPrecisionMode;
+  quality_policy: FeaQualityPolicy;
+  residual_target: number;
+  harmonic_tolerance: number;
+  harmonic_max_iterations: number;
+  solver_mesh_artifact_path: string | null;
+  sweep_enabled: boolean;
+  sweep_frequency_hz: number[];
+}
+
 export const FEA_STUDY_DOCUMENT_OPERATIONS = [
   "get_summary",
   "create",
@@ -385,18 +556,169 @@ export const FEA_STUDY_DOCUMENT_OPERATIONS = [
   "remove_region",
   "add_material",
   "update_material",
+  "remove_material",
   "assign_material",
+  "remove_material_assignment",
   "add_constraint",
   "update_constraint",
   "remove_constraint",
-  "add_driving_condition",
-  "update_driving_condition",
-  "remove_driving_condition",
+  "add_boundary",
+  "update_boundary",
+  "remove_boundary",
+  "add_connector",
+  "update_connector",
+  "remove_connector",
+  "add_interface",
+  "update_interface",
+  "remove_interface",
+  "add_signal",
+  "update_signal",
+  "remove_signal",
+  "add_excitation_case",
+  "update_excitation_case",
+  "remove_excitation_case",
+  "add_excitation",
+  "update_excitation",
+  "remove_excitation",
+  "add_initial_condition",
+  "update_initial_condition",
+  "remove_initial_condition",
+  "add_response_spectrum",
+  "update_response_spectrum",
+  "remove_response_spectrum",
+  "set_sequence",
+  "set_domains",
   "set_mesh",
-  "set_outputs",
+  "clear_mesh",
 ] as const;
 
 export type FeaStudyDocumentOperation = typeof FEA_STUDY_DOCUMENT_OPERATIONS[number];
+
+export type FeaRegionSelector = { id: string } | { tag: string } | { name: string };
+
+export interface FeaRegionInput { region_id: string; selector: FeaRegionSelector; }
+
+export interface FeaRegionTarget {
+
+  region_id: string;
+
+  entity_dimension: "point" | "edge" | "face" | "volume";
+
+  expected_topology: "geometry_entity" | "mesh_node" | "mesh_element" | "boundary_face" | "cell";
+
+  cardinality: "one" | "one_or_more";
+
+}
+
+export interface FeaPosition { meters: [number, number, number]; }
+
+export type FeaCoordinateFrame = "global" | "material" | "element" | "boundary_normal_tangent" | { cartesian: { frame_id: string; origin: FeaPosition; x_axis: [number, number, number]; y_axis: [number, number, number] } } | { cylindrical: { frame_id: string; origin: FeaPosition; axis: [number, number, number]; radial_reference: [number, number, number] } } | { spherical: { frame_id: string; origin: FeaPosition; polar_axis: [number, number, number]; azimuth_reference: [number, number, number] } };
+
+export type FeaPrescribedValue<Q> = { constant: Q } | { signal: string };
+
+export interface FeaPairedConstraint { primary: FeaRegionTarget; secondary: FeaRegionTarget; pairing: "matching" | { geometric_tolerance: { meters: number } }; }
+
+export type FeaStructuralConstraintKind = { fixed: { target: FeaRegionTarget } } | { prescribed_translations: { target: FeaRegionTarget; values: { dof: "ux" | "uy" | "uz"; value: FeaPrescribedValue<{ meters: number }> }[] } } | { prescribed_rotations: { target: FeaRegionTarget; values: { dof: "rx" | "ry" | "rz"; value: FeaPrescribedValue<{ radians: number }> }[] } } | { normal_displacement: { target: FeaRegionTarget; value: FeaPrescribedValue<{ meters: number }> } } | { symmetry: { target: FeaRegionTarget } } | { antisymmetry: { target: FeaRegionTarget } } | { rigid_coupling: { target: FeaRegionTarget; reference_point: { reference_point_id: string; position: FeaPosition } } } | { distributing_coupling: { target: FeaRegionTarget; reference_point: { reference_point_id: string; position: FeaPosition } } } | { tie: FeaPairedConstraint } | { periodic: FeaPairedConstraint } | { equation: { terms: { target: FeaRegionTarget; dof: "ux" | "uy" | "uz"; coefficient: number }[]; right_hand_side: { meters: number } } };
+
+export type FeaConstraintInput = { structural: { constraint_id: string; frame: FeaCoordinateFrame; kind: FeaStructuralConstraintKind } } | { thermal: { constraint_id: string; kind: { prescribed: { target: FeaRegionTarget; value: FeaPrescribedValue<{ kelvin: number }> } } | { periodic: FeaPairedConstraint } | { tie: FeaPairedConstraint } | { affine_jump: { pair: FeaPairedConstraint; temperature_jump: FeaPrescribedValue<{ kelvin: number }> } } } } | { electrical: { constraint_id: string; kind: { prescribed_potential: { target: FeaRegionTarget; value: FeaPrescribedValue<{ volts: number }> } } | { equipotential: { target: FeaRegionTarget } } | { floating_conductor: { target: FeaRegionTarget } } | { integral_current: { target: FeaRegionTarget; value: FeaPrescribedValue<{ amperes: number }> } } | { periodic: FeaPairedConstraint } | { potential_reference: { target: FeaRegionTarget } } } } | { magnetic: { constraint_id: string; kind: { prescribed_vector_potential: { target: FeaRegionTarget; value: FeaPrescribedValue<{ webers_per_meter: number }> } } | { periodic: FeaPairedConstraint } | { vector_potential_ground: { target: FeaRegionTarget } } | { coulomb_gauge: { target: FeaRegionTarget } } } } | { acoustic: { constraint_id: string; kind: { prescribed_pressure: { target: FeaRegionTarget; value: FeaPrescribedValue<{ pascals: number }> } } | { periodic: FeaPairedConstraint } } } | { fluid: { constraint_id: string; kind: { prescribed_velocity: { target: FeaRegionTarget; value: FeaPrescribedValue<{ meters_per_second: number }> } } | { moving_wall: { target: FeaRegionTarget; velocity: FeaPrescribedValue<{ meters_per_second: number }> } } | { no_slip_wall: { target: FeaRegionTarget } } | { slip_wall: { target: FeaRegionTarget } } | { symmetry: { target: FeaRegionTarget } } | { periodic: FeaPairedConstraint } | { pressure_reference: { target: FeaRegionTarget; value: FeaPrescribedValue<{ pascals: number }> } } } };
+
+export type FeaBoundaryOperator = { structural_pressure: { value: FeaPrescribedValue<{ pascals: number }> } } | { thermal_heat_flux: { value: FeaPrescribedValue<{ watts_per_square_meter: number }> } } | { thermal_convection: { ambient_temperature: FeaPrescribedValue<{ kelvin: number }>; coefficient: { watts_per_square_meter_kelvin: number } } } | "magnetic_insulation" | "acoustic_rigid_wall" | "acoustic_radiation" | { acoustic_impedance: { impedance: { pascal_seconds_per_meter: number } } } | { fluid_inlet_velocity: { value: FeaPrescribedValue<{ meters_per_second: number }> } } | { fluid_outlet_pressure: { value: FeaPrescribedValue<{ pascals: number }> } } | "fluid_no_slip_wall" | "fluid_slip_wall" | "fluid_symmetry";
+
+export interface FeaBoundaryInput { boundary_id: string; target: FeaRegionTarget; operator: FeaBoundaryOperator; }
+
+export type FeaConnectorKind = { translational_spring: { stiffness: { newtons_per_meter: number } } } | { translational_dashpot: { damping: { newton_seconds_per_meter: number } } } | { elastic_foundation: { stiffness: { newtons_per_meter: number } } };
+
+export interface FeaConnectorInput { connector_id: string; primary: FeaRegionTarget; secondary: FeaRegionTarget | null; kind: FeaConnectorKind; }
+
+export type FeaInterfaceKind = { contact: { penalty_stiffness_scale: number; max_penetration_ratio: number; friction_coefficient: number } } | { fluid_structure: { normal_stiffness_pa_per_m: number; damping_ratio: number; relaxation_factor: number } } | { conjugate_heat_transfer: { thermal_conductance_w_per_m2k: number; contact_resistance_m2k_per_w: number; relaxation_factor: number } };
+
+export interface FeaInterfaceInput { interface_id: string; primary_region_id: string; secondary_region_id: string; kind: FeaInterfaceKind; }
+
+export interface FeaMaterialInput { material_id: string; name?: string; mechanical: { youngs_modulus_pa: number; poisson_ratio: number; density_kg_per_m3?: number }; thermal?: { reference_temperature_k?: number; modulus_temp_coeff_per_k?: number; conductivity_w_per_mk?: number; specific_heat_j_per_kgk?: number; expansion_coefficient_per_k?: number }; acoustic?: { density_kg_per_m3?: number; speed_of_sound_m_per_s?: number; damping_ratio?: number }; electrical?: { reference_temperature_k?: number; conductivity_s_per_m?: number; resistive_heating_coefficient?: number; relative_permittivity?: number; relative_permeability?: number; conductivity_frequency_response?: { frequency_hz: number; conductivity_scale: number; dispersive_loss_scale?: number; relative_permittivity_scale?: number; relative_permeability_scale?: number }[] }; plastic?: { yield_strain: number; hardening_modulus_ratio: number; saturation_exponent: number }; }
+
+export interface FeaMaterialAssignmentInput { region: string; material: string; expected_material?: string; confidence?: "verified" | "probable" | "inferred"; }
+
+export type FeaSignalShape = "scalar" | "vector3" | { tensor: number[] } | { topology_field: { topology_id: string; component_count: number } };
+
+export type FeaSignalValue<Q> = { scalar: Q } | { vector3: [Q, Q, Q] } | { tensor: { shape: number[]; values: Q[] } };
+
+export type FeaSignalOrdinate<Q> = { real: FeaSignalValue<Q> } | { complex: { real: FeaSignalValue<Q>; imaginary: FeaSignalValue<Q> } };
+
+export type FeaSignalAxis = { time_seconds: number[] } | { frequency_hertz: number[] } | { study_parameter: { parameter_id: string; canonical_values: number[] } };
+
+export interface FeaSignalArtifact { artifact_id: string; content_digest: string; schema: string; domain: "constant" | { time_seconds: { start: number; end: number } } | { frequency_hertz: { start: number; end: number } } | { study_parameter: { parameter_id: string; start: number; end: number } }; topology_digest: string | null; sample_count: number; }
+
+export type FeaGeneratorArgument = { boolean: boolean } | { signed_integer: number } | { unsigned_integer: number } | { real: number } | { text: string } | { real_vector: number[] } | { artifact: FeaSignalArtifact };
+
+export interface FeaSignalGenerator { qualified_function: string; arguments: FeaGeneratorArgument[]; domain: "time_seconds" | "frequency_hertz" | { study_parameter: { parameter_id: string } }; sampling: { uniform: { start: number; end: number; sample_count: number } } | { adaptive: { start: number; end: number; max_absolute_error: number; max_samples: number } } | { canonical_points: number[] }; effects: "pure" | "declared_immutable_artifacts" | { seeded_random: { seed: number; distribution: "uniform" | "normal" | "log_normal" } }; }
+
+export type FeaSignalRepresentation<Q> = { constant: FeaSignalValue<Q> } | { tabulated: { axis: FeaSignalAxis; values: FeaSignalOrdinate<Q>[]; interpolation: "step_left" | "step_right" | "linear" | "cubic_hermite"; extrapolation: "reject" | "hold_endpoint" | "zero"; breakpoints: { abscissa: number; side: "left" | "right" | "both" }[] } } | { waveform: { kind: "step" | "ramp" | "sine" | "half_sine_pulse" | "triangular_pulse" | "rectangular_pulse"; amplitude: FeaSignalValue<Q>; offset: FeaSignalValue<Q> | null; start_seconds: number; duration_seconds: number | null; frequency_hz: number | null; phase_radians: number; duty_cycle: number | null } } | { artifact: FeaSignalArtifact } | { generator: FeaSignalGenerator };
+
+export type FeaSignalPrecision = "real32" | "real64" | "complex64" | "complex128";
+
+export interface FeaSignalBody<Q> { signal_id: string; shape: FeaSignalShape; frame: FeaCoordinateFrame | null; representation: FeaSignalRepresentation<Q>; precision: FeaSignalPrecision; evidence: { max_absolute_error: number | null; max_relative_error: number | null; derivative_max_absolute_error: number | null; sample_count: number }; provenance: "authored" | { imported: { source_digest: string } } | { generated: { project_revision: string; callable_id: string; frozen_input_digest: string } }; }
+
+export type FeaSignalInput = { displacement: FeaSignalBody<{ meters: number }> } | { rotation: FeaSignalBody<{ radians: number }> } | { velocity: FeaSignalBody<{ meters_per_second: number }> } | { acceleration: FeaSignalBody<{ meters_per_second_squared: number }> } | { angular_velocity: FeaSignalBody<{ radians_per_second: number }> } | { angular_acceleration: FeaSignalBody<{ radians_per_second_squared: number }> } | { force: FeaSignalBody<{ newtons: number }> } | { moment: FeaSignalBody<{ newton_meters: number }> } | { traction: FeaSignalBody<{ pascals: number }> } | { pressure: FeaSignalBody<{ pascals: number }> } | { body_force_density: FeaSignalBody<{ newtons_per_cubic_meter: number }> } | { temperature: FeaSignalBody<{ kelvin: number }> } | { heat_flux: FeaSignalBody<{ watts_per_square_meter: number }> } | { heat_generation_density: FeaSignalBody<{ watts_per_cubic_meter: number }> } | { electric_potential: FeaSignalBody<{ volts: number }> } | { electric_current: FeaSignalBody<{ amperes: number }> } | { electric_charge: FeaSignalBody<{ coulombs: number }> } | { electric_current_density: FeaSignalBody<{ amperes_per_square_meter: number }> } | { electric_charge_density: FeaSignalBody<{ coulombs_per_cubic_meter: number }> } | { magnetic_vector_potential: FeaSignalBody<{ webers_per_meter: number }> } | { mass_flow_rate: FeaSignalBody<{ kilograms_per_second: number }> };
+
+export type FeaExcitationTarget = { region: FeaRegionTarget } | { reference_point: { reference_point_id: string; position: FeaPosition } } | { port: { port_id: string } } | { interface: { interface_id: string } } | "whole_model";
+
+export interface FeaExcitationBody { excitation_id: string; case_id: string; target: FeaExcitationTarget; frame: FeaCoordinateFrame; direction: { vector: [number, number, number] } | null; distribution: "concentrated" | "preserve_resultant" | "intensity_per_area" | "intensity_per_volume" | "uniform_kinematic" | "topology_field"; kinematics: "fixed_frame" | "follower"; signal_id: string; active_step_ids: string[]; combination_group: string | null; projection: { preserve_resultant: boolean; preserve_moment: boolean; relative_tolerance: number }; }
+
+export type FeaExcitationInput = { force: FeaExcitationBody } | { moment: FeaExcitationBody } | { traction: FeaExcitationBody } | { pressure: FeaExcitationBody } | { body_force: FeaExcitationBody } | { base_displacement: FeaExcitationBody } | { base_velocity: FeaExcitationBody } | { base_acceleration: FeaExcitationBody } | { heat_generation: FeaExcitationBody } | { heat_flux: FeaExcitationBody } | { ambient_temperature: FeaExcitationBody } | { terminal_voltage: FeaExcitationBody } | { electric_current: FeaExcitationBody } | { electric_charge: FeaExcitationBody } | { current_density: FeaExcitationBody } | { magnetic_vector_potential: FeaExcitationBody } | { acoustic_pressure: FeaExcitationBody } | { normal_velocity: FeaExcitationBody } | { inlet_velocity: FeaExcitationBody } | { mass_flow: FeaExcitationBody } | { wall_motion: FeaExcitationBody };
+
+export interface FeaExcitationCaseInput { case_id: string; action_ids: string[]; activation: "always" | { steps: string[] } | { mutually_exclusive_group: { group_id: string } }; }
+
+export type FeaInitialValue<Q> = { uniform: Q } | { uniform_vector3: [Q, Q, Q] } | { signal_sample: { signal_id: string; abscissa: number } } | { field_artifact: { artifact_id: string; content_digest: string; topology_digest: string; field_id: string } };
+
+export interface FeaInitialConditionBody<Q> { initial_condition_id: string; target: { region: FeaRegionTarget } | "whole_model"; frame: FeaCoordinateFrame; value: FeaInitialValue<Q>; applies_before_step_id: string; }
+
+export type FeaInitialConditionInput = { displacement: FeaInitialConditionBody<{ meters: number }> } | { velocity: FeaInitialConditionBody<{ meters_per_second: number }> } | { angular_velocity: FeaInitialConditionBody<{ radians_per_second: number }> } | { temperature: FeaInitialConditionBody<{ kelvin: number }> } | { electric_potential: FeaInitialConditionBody<{ volts: number }> } | { magnetic_vector_potential: FeaInitialConditionBody<{ webers_per_meter: number }> } | { acoustic_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_velocity: FeaInitialConditionBody<{ meters_per_second: number }> };
+
+export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { frequency_hertz: number[] } | { period_seconds: number[] }; ordinates: number[]; damping: { ratio: number } | { quality_factor: number }; response: "relative_displacement" | "relative_velocity" | "relative_acceleration" | "absolute_acceleration" | "pseudo_velocity" | "pseudo_acceleration"; envelope: "positive" | "negative" | "maximax"; interpolation: "linear_frequency" | "linear_period" | "log_log"; extrapolation: "reject" | "hold_endpoint"; direction: { frame: FeaCoordinateFrame; vector: [number, number, number] }; modal_combination: "srss" | "complete_quadratic_combination" | "ten_percent" | "absolute_sum"; directional_combination: "srss" | "absolute_sum" | { percentage_rule: { primary: number; secondary: number } }; truncation: { minimum_cumulative_mass_ratio: number; include_residual_mode: boolean; include_rigid_response: boolean; include_missing_mass: boolean }; construction: "authored_design" | { derived_from_acceleration_history: { source_signal_id: string; method: "exact_piecewise_linear" | "recursive_filter" } }; evidence: { sampling_adequacy_ratio: number; max_interpolation_error: number | null }; provenance_digest: string; }
+
+export interface FeaDomainsInput { thermo_mechanical?: { enabled: boolean; reference_temperature_k: number; applied_temperature_delta_k: number; field_artifact_id?: string | null; field_source?: { source_id: string; revision: number; interpolation_mode?: "linear" | "step" | null; expected_region_ids?: string[] } | null; region_temperature_deltas?: { region_id: string; temperature_delta_k: number }[]; temperature_signal_id?: string | null }; electro_thermal?: { enabled: boolean; reference_temperature_k: number; applied_voltage_v: number; region_conductivity_scales?: { region_id: string; conductivity_scale: number }[]; electric_potential_signal_id?: string | null }; electromagnetic?: { enabled: boolean; reference_frequency_hz: number; applied_current_a: number }; cfd?: { enabled: boolean; solve_family: "steady_state" | "transient"; reference_density_kg_per_m3: number; dynamic_viscosity_pa_s: number; inlet_velocity_m_per_s: number; turbulence_intensity: number; inlet_velocity_signal_id?: string | null }; }
+
+export type FeaMeshSettingsInput = Partial<FeaStudyMeshInput>;
+
+export interface FeaStudyCreateInput { study_id?: string; geometry: { path: string; units?: FeaGeometryUnits; import?: { max_triangles?: number } }; model: { id?: string; template: FeaModelTemplate; frame?: FeaCoordinateFrame; defaults?: "template_scaffold" | "none" }; mesh?: FeaMeshSettingsInput; sequence?: FeaCanonicalSequence; execution?: FeaExecutionInput[]; }
+
+export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }
+
+export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: "structural_linear"; options: FeaStructuralLinearOptions } | { solver: "structural_modes"; options: FeaStructuralModesOptions } | { solver: "acoustic_helmholtz"; options: FeaAcousticHelmholtzOptions } | { solver: "thermal_diffusion"; options: FeaThermalDiffusionOptions } | { solver: "structural_transient"; options: FeaStructuralTransientOptions } | { solver: "incompressible_flow"; options: FeaIncompressibleFlowOptions } | { solver: "conjugate_heat_transfer"; options: FeaConjugateHeatTransferOptions } | { solver: "fluid_structure_interaction"; options: FeaFluidStructureInteractionOptions } | { solver: "structural_nonlinear"; options: FeaStructuralNonlinearOptions } | { solver: "electromagnetic_potential"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });
+
+export interface FeaStudyOperationInputs {
+
+  get_summary: Record<string, never>; create: FeaStudyCreateInput;
+
+  add_region: FeaRegionInput; update_region: FeaRegionInput; remove_region: { id: string };
+
+  add_material: FeaMaterialInput; update_material: FeaMaterialInput; remove_material: { id: string };
+
+  assign_material: FeaMaterialAssignmentInput; remove_material_assignment: { region: string; material: string };
+
+  add_constraint: FeaConstraintInput; update_constraint: FeaConstraintInput; remove_constraint: { id: string };
+
+  add_boundary: FeaBoundaryInput; update_boundary: FeaBoundaryInput; remove_boundary: { id: string };
+
+  add_connector: FeaConnectorInput; update_connector: FeaConnectorInput; remove_connector: { id: string };
+
+  add_interface: FeaInterfaceInput; update_interface: FeaInterfaceInput; remove_interface: { id: string };
+
+  add_signal: FeaSignalInput; update_signal: FeaSignalInput; remove_signal: { id: string };
+
+  add_excitation_case: FeaExcitationCaseInput; update_excitation_case: FeaExcitationCaseInput; remove_excitation_case: { id: string };
+
+  add_excitation: FeaExcitationInput; update_excitation: FeaExcitationInput; remove_excitation: { id: string };
+
+  add_initial_condition: FeaInitialConditionInput; update_initial_condition: FeaInitialConditionInput; remove_initial_condition: { id: string };
+
+  add_response_spectrum: FeaResponseSpectrumInput; update_response_spectrum: FeaResponseSpectrumInput; remove_response_spectrum: { id: string };
+
+  set_sequence: FeaCanonicalSequence; set_domains: FeaDomainsInput; set_mesh: FeaMeshSettingsInput; clear_mesh: Record<string, never>;
+
+}
+
+export type FeaStudyOperationInput<O extends FeaStudyDocumentOperation> = FeaStudyOperationInputs[O];
 
 export interface FeaStudyDocumentOperationOutput {
   source: string;
@@ -407,31 +729,32 @@ export interface FeaStudyDocumentOperationOutput {
 export interface FeaStudySummary {
   studyId: string | null;
   geometryPath: string | null;
-  geometryUnits: string | null;
-  modelProfile: string | null;
-  modelDefaults: string | null;
-  meshProfile: string | null;
-  meshTargetSize: string | null;
-  meshMaxElements: string | null;
-  runKind: string | null;
-  runBackend: string | null;
+  geometryUnits: FeaGeometryUnits | null;
+  modelTemplate: FeaModelTemplate | null;
+  mesh: FeaStudyMeshInput | null;
+  executionBackend: FeaComputeBackend | null;
+  sequenceId: string | null;
+  primaryFamily: FeaPhysicsFamily | null;
+  primaryProcedure: FeaAnalysisProcedure | null;
+}
+
+export interface FeaStudyMeshInput {
+  element_order: FeaElementOrder;
+  maximum_elements: number;
+  target_edge_length_m: number;
+  maximum_chordal_deviation_m: number;
+  maximum_grading_ratio: number;
+  deterministic_seed: number;
 }
 
 export interface FeaStudyRegionEntry {
   key: string;
-  selector: string | null;
+  selector: FeaRegionSelector | null;
 }
 
 export interface FeaStudyMaterialEntry {
   key: string;
   name: string | null;
-  mechanicalSummary: string | null;
-  thermalSummary: string | null;
-  electromagneticSummary: string | null;
-  acousticSummary: string | null;
-  fluidSummary: string | null;
-  youngsModulusPa: string | null;
-  poissonRatio: string | null;
 }
 
 export interface FeaStudyMaterialAssignmentEntry {
@@ -440,34 +763,16 @@ export interface FeaStudyMaterialAssignmentEntry {
   material: string | null;
 }
 
-export interface FeaStudyBoundaryConditionEntry {
+export interface FeaStudyNamedEntry {
   index: number;
-  id: string | null;
-  region: string | null;
-  kind: string | null;
+  id: string;
 }
 
-export interface FeaStudyDrivingConditionEntry {
-  index: number;
-  id: string | null;
-  region: string | null;
-  type: string | null;
-  value: string | null;
-  direction: string | null;
-}
-
-export interface FeaStudyStepEntry {
-  index: number;
-  id: string | null;
-  kind: string | null;
-}
-
-export interface FeaStudyOutputEntry {
-  index: number;
-  id: string | null;
-  field: string | null;
-  location: string | null;
-  kind: string | null;
+export interface FeaStudySequenceSummary {
+  sequenceId: string;
+  stepCount: number;
+  primaryFamily: FeaPhysicsFamily | null;
+  primaryProcedure: FeaAnalysisProcedure | null;
 }
 
 export interface FeaStudyReadiness {
@@ -486,24 +791,36 @@ export interface FeaStudyDocumentDiff {
 export interface FeaStudyDocumentCounts {
   regions: number;
   materials: number;
-  material_assignments: number;
-  boundary_conditions: number;
-  driving_conditions: number;
-  steps: number;
-  outputs: number;
+  materialAssignments: number;
+  constraints: number;
+  boundaries: number;
+  connectors: number;
+  interfaces: number;
+  signals: number;
+  excitationCases: number;
+  excitations: number;
+  initialConditions: number;
+  responseSpectra: number;
+  sequenceSteps: number;
 }
 
 export interface FeaStudyDocumentOperationResult {
   path: string;
-  document_kind: string;
+  documentKind: string;
   summary: FeaStudySummary;
   regions: FeaStudyRegionEntry[];
   materials: FeaStudyMaterialEntry[];
-  material_assignments: FeaStudyMaterialAssignmentEntry[];
-  boundary_conditions: FeaStudyBoundaryConditionEntry[];
-  driving_conditions: FeaStudyDrivingConditionEntry[];
-  steps: FeaStudyStepEntry[];
-  outputs: FeaStudyOutputEntry[];
+  materialAssignments: FeaStudyMaterialAssignmentEntry[];
+  constraints: FeaStudyNamedEntry[];
+  boundaries: FeaStudyNamedEntry[];
+  connectors: FeaStudyNamedEntry[];
+  interfaces: FeaStudyNamedEntry[];
+  signals: FeaStudyNamedEntry[];
+  excitationCases: FeaStudyNamedEntry[];
+  excitations: FeaStudyNamedEntry[];
+  initialConditions: FeaStudyNamedEntry[];
+  responseSpectra: FeaStudyNamedEntry[];
+  sequence: FeaStudySequenceSummary | null;
   counts: FeaStudyDocumentCounts;
   readiness: FeaStudyReadiness;
   diff?: FeaStudyDocumentDiff;

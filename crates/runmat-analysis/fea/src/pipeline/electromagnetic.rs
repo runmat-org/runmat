@@ -40,6 +40,11 @@ pub fn run_electromagnetic_with_options(
     backend: ComputeBackend,
     options: ElectromagneticSolveOptions,
 ) -> Result<FeaElectromagneticRunResult, FeaRunError> {
+    super::admission::require_nonstructural(
+        runmat_analysis_core::PhysicsFamily::Electromagnetic,
+        options.procedure,
+        options.formulation_requirement,
+    )?;
     let prepared_start = Instant::now();
     emit_phase(
         "fea.run_electromagnetic",
@@ -103,14 +108,6 @@ pub fn run_electromagnetic_with_options(
         Some(5),
     );
     check_cancelled("fea.run_electromagnetic")?;
-    emit_phase(
-        "fea.run_electromagnetic",
-        FeaProgressPhase::Solve,
-        FeaProgressStatus::Started,
-        "solving electromagnetic harmonic system",
-        Some(2),
-        Some(5),
-    );
     let node_count = solver_mesh
         .map(|mesh| mesh.topology.nodes.len())
         .unwrap_or_else(|| summary.dof_count.max(8));
@@ -183,6 +180,9 @@ pub fn run_electromagnetic_with_options(
     let mut electromagnetic_source_count = 0usize;
     let mut electromagnetic_source_strength = 0.0_f64;
     let mut mapped_source_count = 0usize;
+    let mut canonical_source_projection_count = 0usize;
+    let mut ordinal_source_projection_count = 0usize;
+    let mut unmapped_source_count = 0usize;
     let mut aligned_source_count = 0usize;
     let mut per_source_real_profiles = Vec::new();
     let mut per_source_imag_profiles = Vec::new();
@@ -229,6 +229,7 @@ pub fn run_electromagnetic_with_options(
         let mut source_profile_imag = vec![0.0_f64; node_count];
 
         let Some(region_id) = load.target.solver_region_id() else {
+            unmapped_source_count += 1;
             continue;
         };
         if let Some(region_index) = region_index_by_id.get(region_id).copied() {
@@ -251,6 +252,7 @@ pub fn run_electromagnetic_with_options(
                     })
                     .unwrap_or_default();
                 if mesh_nodes.is_empty() {
+                    ordinal_source_projection_count += 1;
                     let (start, end) =
                         region_span_for_index(region_index, region_count, node_count);
                     for local_idx in 0..(end - start) {
@@ -267,6 +269,7 @@ pub fn run_electromagnetic_with_options(
                         source_profile_imag[node_index] += magnitude * source_phase_rad.sin();
                     }
                 } else {
+                    canonical_source_projection_count += 1;
                     for (local_idx, node_index) in mesh_nodes.iter().copied().enumerate() {
                         let local_x = (local_idx as f64 + 0.5) / mesh_nodes.len() as f64;
                         let mode = (std::f64::consts::PI * local_x).sin();
@@ -278,6 +281,7 @@ pub fn run_electromagnetic_with_options(
                 }
             }
         } else {
+            unmapped_source_count += 1;
             for i in 0..node_count {
                 let x = i as f64 * h;
                 let mode = (std::f64::consts::PI * x).sin();
@@ -354,6 +358,16 @@ pub fn run_electromagnetic_with_options(
         0.25
     } else {
         (electromagnetic_source_strength / electromagnetic_source_count as f64).clamp(0.25, 2.5)
+    };
+    let source_implementation = if electromagnetic_source_count == 0 {
+        runmat_analysis_core::SourceImplementation::SyntheticProfileFallback
+    } else if unmapped_source_count > 0 {
+        runmat_analysis_core::SourceImplementation::UnmappedFallback
+    } else if canonical_source_projection_count == electromagnetic_source_count {
+        runmat_analysis_core::SourceImplementation::CanonicalEdgeProjection
+    } else {
+        debug_assert!(ordinal_source_projection_count > 0);
+        runmat_analysis_core::SourceImplementation::OrdinalDistribution
     };
 
     let mu0 = 4.0e-7 * std::f64::consts::PI;
@@ -607,6 +621,37 @@ pub fn run_electromagnetic_with_options(
         maxwell_topology.edge_average_terms(&conductivity_coupling_terms, 1.0e-9);
     let edge_rhs_real = maxwell_topology.edge_source_terms(&edge_nodal_rhs_real);
     let edge_rhs_imag = maxwell_topology.edge_source_terms(&edge_nodal_rhs_imag);
+    let boundary_transfer = if electromagnetic_boundary_count == 0 {
+        runmat_analysis_core::BoundaryTransferImplementation::ImplicitNaturalBoundaryAndGaugeAnchor
+    } else if mapped_boundary_condition_count < electromagnetic_boundary_count
+        || (solver_mesh.is_some()
+            && vector_potential_ground_count > 0
+            && expected_ground_anchor_nodes == 0)
+    {
+        runmat_analysis_core::BoundaryTransferImplementation::UnmappedFallback
+    } else if solver_mesh.is_none() {
+        runmat_analysis_core::BoundaryTransferImplementation::GlobalCountProfile
+    } else if magnetic_insulation_count > 0 {
+        runmat_analysis_core::BoundaryTransferImplementation::CanonicalGroundWithOrdinalInsulationProfile
+    } else {
+        runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
+    };
+    let identity = super::admission::admit_nonstructural(
+        runmat_analysis_core::PhysicsFamily::Electromagnetic,
+        options.procedure,
+        options.solver_mesh.as_ref(),
+        source_implementation,
+        boundary_transfer,
+        options.formulation_requirement,
+    )?;
+    emit_phase(
+        "fea.run_electromagnetic",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving electromagnetic harmonic system",
+        Some(2),
+        Some(5),
+    );
     let backend_kind = if backend == ComputeBackend::Gpu {
         LinearAlgebraBackendKind::RuntimeTensor
     } else {
@@ -1303,6 +1348,7 @@ pub fn run_electromagnetic_with_options(
     );
 
     let run = FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(backend_kind),
         solver_backend: backend_kind,

@@ -93,11 +93,15 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
-                    "  {} {} ({:?}, {:?})",
+                    "  {} {} ({} procedure step{})",
                     styles.label("study:"),
                     styles.identifier(&spec.study_id),
-                    spec.run_kind,
-                    spec.backend
+                    spec.execution.steps.len(),
+                    if spec.execution.steps.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
                 );
                 eprintln!(
                     "  {} {} regions, {} meshes",
@@ -574,8 +578,18 @@ fn print_study_check_summary(
         styles.success("OK"),
         styles.identifier(&plan.study_id)
     );
-    println!("  {} {:?}", styles.label("kind:"), plan.run_kind);
-    println!("  {} {:?}", styles.label("backend:"), plan.backend);
+    println!(
+        "  {} {:?} / {:?} / {:?}",
+        styles.label("procedure:"),
+        plan.procedure_step.family,
+        plan.procedure_step.procedure,
+        plan.procedure_step.solution_space
+    );
+    println!(
+        "  {} {:?}",
+        styles.label("backend:"),
+        plan.execution.backend
+    );
     println!(
         "  {} {}",
         styles.label("model:"),

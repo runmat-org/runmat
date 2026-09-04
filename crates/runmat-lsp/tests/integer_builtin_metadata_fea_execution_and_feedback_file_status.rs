@@ -7,11 +7,10 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const PACKET: [&str; 10] = [
+const PACKET: [&str; 9] = [
     "feedback",
     "fea.results",
     "fea.run",
-    "fea.runOptions",
     "fea.step",
     "fea.study",
     "fea.sweep",
@@ -66,11 +65,6 @@ fn fea_execution_and_feedback_file_status_signatures_are_exact_and_visible() {
             "run",
             "out = fea.run(\"study.fea\");",
             "run = fea.run(studyOrSweepOrPath)",
-        ),
-        (
-            "runOptions",
-            "out = fea.runOptions(\"modal\");",
-            "options = fea.runOptions(solver, Name, Value, ...)",
         ),
         (
             "step",
@@ -136,11 +130,7 @@ fn packet_is_public_complete_and_visible_to_completion() {
 
 #[test]
 fn fea_capability_metadata_matches_exact_and_binary64_contracts() {
-    for (name, expected_forms) in [
-        ("fea.results", 3usize),
-        ("fea.runOptions", 18usize),
-        ("fea.trends", 1usize),
-    ] {
+    for (name, expected_forms) in [("fea.results", 3usize), ("fea.trends", 1usize)] {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(
             builtin.integer_audit.is_none(),

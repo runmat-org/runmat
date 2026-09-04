@@ -20,8 +20,7 @@ import {
   decodePackageLock,
   encodePackageLock,
   handoffFromFrozenProject,
-  FEA_ANALYSIS_PROFILES,
-  FEA_ANALYSIS_RUN_KINDS,
+  FEA_MODEL_TEMPLATES,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
@@ -34,7 +33,8 @@ import {
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
   FEA_STUDY_DOCUMENT_OPERATIONS,
-  FEA_SUPPORTED_PHYSICS_PROFILES,
+  FEA_SUPPORTED_MODEL_TEMPLATES,
+  type FeaStudyOperationInput,
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type ExecuteRequest,
@@ -55,6 +55,22 @@ const defaultStats: SessionStats = {
 };
 
 describe("FEA study document contracts", () => {
+  const canonicalCreateInput = {
+    geometry: { path: "part.step", units: "millimeter" },
+    model: { template: "linear_static_structural" },
+    execution: [
+      {
+        step: "solve",
+        backend: "cpu",
+        requirement: "production",
+      },
+    ],
+  } satisfies FeaStudyOperationInput<"create">;
+  const canonicalRegionInput = {
+    region_id: "loaded_face",
+    selector: { tag: "load" },
+  } satisfies FeaStudyOperationInput<"add_region">;
+
   it("exports Rust-generated analysis artifact constants", () => {
     expect(FEA_RUN_DATASET_SCHEMA_VERSION).toBe(1);
     expect(FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION).toBe(1);
@@ -78,71 +94,96 @@ describe("FEA study document contracts", () => {
       "remove_region",
       "add_material",
       "update_material",
+      "remove_material",
       "assign_material",
+      "remove_material_assignment",
       "add_constraint",
       "update_constraint",
       "remove_constraint",
-      "add_driving_condition",
-      "update_driving_condition",
-      "remove_driving_condition",
+      "add_boundary",
+      "update_boundary",
+      "remove_boundary",
+      "add_connector",
+      "update_connector",
+      "remove_connector",
+      "add_interface",
+      "update_interface",
+      "remove_interface",
+      "add_signal",
+      "update_signal",
+      "remove_signal",
+      "add_excitation_case",
+      "update_excitation_case",
+      "remove_excitation_case",
+      "add_excitation",
+      "update_excitation",
+      "remove_excitation",
+      "add_initial_condition",
+      "update_initial_condition",
+      "remove_initial_condition",
+      "add_response_spectrum",
+      "update_response_spectrum",
+      "remove_response_spectrum",
+      "set_sequence",
+      "set_domains",
       "set_mesh",
-      "set_outputs",
+      "clear_mesh",
     ]);
   });
 
-  it("keeps the public FEA physics catalog aligned with Rust-supported profiles", () => {
-    expect(FEA_ANALYSIS_PROFILES).toEqual([
+  it("types canonical create execution without a retired run wrapper", () => {
+    expect(canonicalCreateInput.execution[0]).toEqual({
+      step: "solve",
+      backend: "cpu",
+      requirement: "production",
+    });
+  });
+
+  it("types region selection as an explicit selector variant", () => {
+    expect(canonicalRegionInput.selector).toEqual({ tag: "load" });
+  });
+
+  it("keeps the public FEA model-template catalog aligned with Rust", () => {
+    expect(FEA_MODEL_TEMPLATES).toEqual([
       "linear_static_structural",
       "thermo_mechanical_coupled",
-      "electro_thermal_coupled",
-      "thermal_standalone",
+      "thermal_transient",
       "modal_structural",
       "acoustic_harmonic",
       "transient_structural",
       "nonlinear_structural",
-      "electromagnetic_static",
+      "electromagnetic_harmonic",
       "cfd_steady_state",
       "cfd_transient",
       "cht_coupled",
       "fsi_coupled",
     ]);
-    expect(FEA_ANALYSIS_RUN_KINDS).toEqual([
-      "linear_static",
-      "modal",
-      "acoustic",
-      "thermal",
-      "transient",
-      "cfd",
-      "cht",
-      "fsi",
-      "nonlinear",
-      "electromagnetic",
-    ]);
-    const catalogProfiles = FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.profile);
-    expect(catalogProfiles).toHaveLength(FEA_ANALYSIS_PROFILES.length);
-    expect(new Set(catalogProfiles)).toEqual(new Set(FEA_ANALYSIS_PROFILES));
-    expect(new Set(FEA_SUPPORTED_PHYSICS_PROFILES.map((profile) => profile.family))).toEqual(
+    const catalogTemplates = FEA_SUPPORTED_MODEL_TEMPLATES.map((entry) => entry.template);
+    expect(catalogTemplates).toHaveLength(FEA_MODEL_TEMPLATES.length);
+    expect(new Set(catalogTemplates)).toEqual(new Set(FEA_MODEL_TEMPLATES));
+    expect(new Set(FEA_SUPPORTED_MODEL_TEMPLATES.map((entry) => entry.family))).toEqual(
       new Set(["structural", "modal", "coupled physics", "thermal", "acoustic", "electromagnetic", "CFD"]),
     );
   });
 
-  it("exposes electro-thermal as a first-class coupled FEA profile", () => {
-    const profile = FEA_SUPPORTED_PHYSICS_PROFILES.find(
-      (entry) => entry.profile === "electro_thermal_coupled"
+  it("describes thermal and electromagnetic templates by their admitted procedures", () => {
+    const thermal = FEA_SUPPORTED_MODEL_TEMPLATES.find(
+      (entry) => entry.template === "thermal_transient"
+    );
+    const electromagnetic = FEA_SUPPORTED_MODEL_TEMPLATES.find(
+      (entry) => entry.template === "electromagnetic_harmonic"
     );
 
-    expect(profile).toMatchObject({
-      label: "Electro-thermal",
-      family: "coupled physics",
-      target: "coupled electromagnetics and heat transfer",
-      value: "resistive heating, temperature, and electrical fields",
+    expect(thermal).toMatchObject({
+      label: "Thermal transient",
+      family: "thermal",
+      value: "time-dependent temperature and heat flux",
     });
-    expect(profile?.defaultOutputs.map((output) => output.field)).toEqual([
-      "electro_thermal.temperature",
-      "electro_thermal.joule_heat",
-      "electro_thermal.electric_potential",
-      "electro_thermal.current_density",
-    ]);
+    expect(electromagnetic).toMatchObject({
+      label: "Electromagnetic harmonic",
+      family: "electromagnetic",
+      value: "frequency-domain electric and magnetic fields",
+    });
   });
 });
 

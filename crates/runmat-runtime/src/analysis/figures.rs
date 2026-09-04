@@ -1,13 +1,13 @@
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, AnalysisRunIdentity,
-    CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, PrescribedValue, Pressure,
-    SignalRepresentation, SignalValue,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
+    ExcitationAction, PhysicsFamily, PrescribedValue, Pressure, SignalRepresentation, SignalValue,
 };
 use runmat_analysis_fea::contracts::{
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
     FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
 };
+use runmat_analysis_fea::AnalysisRunIdentity;
 use runmat_geometry_core::UnitSystem;
 use runmat_plot::plots::{
     BarChart, Figure, LinePlot, MeshDeformation, MeshEdgeMode, MeshFieldLocation, MeshPlot,
@@ -991,8 +991,22 @@ fn comparison_figure(data: &AnalysisResultsCompareData) -> Option<AnalysisGenera
     push_bar_value(
         &mut labels,
         &mut values,
-        "Publishable changed",
-        Some(if data.publishable_changed { 1.0 } else { 0.0 }),
+        "Numerical acceptance changed",
+        Some(if data.numerically_acceptable_changed {
+            1.0
+        } else {
+            0.0
+        }),
+    );
+    push_bar_value(
+        &mut labels,
+        &mut values,
+        "Production publication changed",
+        Some(if data.production_publishable_changed {
+            1.0
+        } else {
+            0.0
+        }),
     );
     push_bar_value(
         &mut labels,
@@ -1057,22 +1071,33 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
         }
     }
 
-    let publishable_values = data
+    let numerically_acceptable_values = data
         .summaries
         .iter()
-        .map(|summary| summary.publishable_rate * 100.0)
+        .map(|summary| summary.numerically_acceptable_rate * 100.0)
         .collect::<Vec<_>>();
-    if let Ok(mut chart) = BarChart::new(labels, publishable_values) {
-        chart.label = Some("Publishable rate".to_string());
-        chart.color = Vec4::new(0.32, 0.74, 0.56, 1.0);
+    let production_publishable_values = data
+        .summaries
+        .iter()
+        .map(|summary| summary.production_publishable_rate * 100.0)
+        .collect::<Vec<_>>();
+    if let (Ok(mut numerical_chart), Ok(mut production_chart)) = (
+        BarChart::new(labels.clone(), numerically_acceptable_values),
+        BarChart::new(labels, production_publishable_values),
+    ) {
+        numerical_chart.label = Some("Numerically acceptable".to_string());
+        numerical_chart.color = Vec4::new(0.31, 0.62, 0.91, 1.0);
+        production_chart.label = Some("Production publishable".to_string());
+        production_chart.color = Vec4::new(0.32, 0.74, 0.56, 1.0);
         let mut figure = Figure::new()
-            .with_title("FEA publishable result trends")
-            .with_labels("Run family", "Publishable (%)")
+            .with_title("FEA result disposition trends")
+            .with_labels("Run family", "Runs (%)")
             .with_grid(true);
-        figure.add_bar_chart(chart);
+        figure.add_bar_chart(numerical_chart);
+        figure.add_bar_chart(production_chart);
         figures.push(AnalysisGeneratedFigure {
             kind: AnalysisGeneratedFigureKind::Trend,
-            title: "FEA publishable result trends".to_string(),
+            title: "FEA result disposition trends".to_string(),
             field_ids: Vec::new(),
             topology_ids: Vec::new(),
             warnings: Vec::new(),
@@ -2022,7 +2047,7 @@ fn topology_ids_for_field_ids<'a>(field_ids: impl IntoIterator<Item = &'a str>) 
 fn previous_run_of_kind(current: &AnalysisRunResult) -> Result<Option<AnalysisRunResult>, String> {
     let mut candidates = storage::list_run_results()?
         .into_iter()
-        .filter(|run| run.run_id != current.run_id && run.identity == current.identity)
+        .filter(|run| run.run_id != current.run_id && run.run.identity == current.run.identity)
         .collect::<Vec<_>>();
     candidates.sort_by(|a, b| b.run_id.cmp(&a.run_id));
     Ok(candidates.into_iter().next())
@@ -2274,7 +2299,7 @@ fn render_topology_mesh_bytes(topology: &AnalysisRenderTopology) -> usize {
 }
 
 fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
-    let family = match identity.family {
+    let family = match identity.family() {
         PhysicsFamily::Structural => "Structural",
         PhysicsFamily::Thermal => "Thermal",
         PhysicsFamily::Electromagnetic => "Electromagnetic",
@@ -2285,7 +2310,7 @@ fn run_identity_label(identity: &AnalysisRunIdentity) -> String {
         PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => "CHT",
         PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => "FSI",
     };
-    let procedure = match identity.procedure {
+    let procedure = match identity.procedure() {
         AnalysisProcedure::Static => "static",
         AnalysisProcedure::ModalExtraction => "modal extraction",
         AnalysisProcedure::PrestressedModalExtraction => "prestressed modal extraction",
@@ -2313,19 +2338,45 @@ mod tests {
         SignalProvenance, SignalShape, StructuralConstraint, StructuralConstraintKind,
     };
 
+    fn test_run_identity() -> AnalysisRunIdentity {
+        let assembly = runmat_analysis_core::StructuralFormulationRealization::new(
+            runmat_analysis_core::StructuralOperatorImplementation::Tet4LinearElasticity,
+            Some(runmat_analysis_core::StructuralRecoveryImplementation::Tet4ConstantStrain),
+        );
+        let realization = runmat_analysis_fea::admission::structural_exact_realization(
+            runmat_analysis_fea::admission::StructuralRealizationInput {
+                assembly,
+                procedure: runmat_analysis_core::AnalysisProcedure::Static,
+                coupling: runmat_analysis_core::CouplingImplementation::Uncoupled,
+                sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
+                boundary_transfers: vec![
+                    runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
+                ],
+            },
+        )
+        .expect("test structural formulation must be valid");
+        runmat_analysis_fea::admission::admit_formulation(
+            runmat_analysis_fea::admission::FormulationAdmissionRequest {
+                family: runmat_analysis_core::PhysicsFamily::Structural,
+                procedure: runmat_analysis_core::AnalysisProcedure::Static,
+                solution_space: runmat_analysis_core::SolutionSpace::Direct,
+                requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                realization,
+            },
+        )
+        .expect("test structural formulation must be admitted")
+        .into_identity()
+    }
+
     fn simple_run_result(
         fields: Vec<AnalysisField>,
         render_topology: AnalysisRenderTopology,
     ) -> AnalysisRunResult {
+        let identity = test_run_identity();
         AnalysisRunResult {
             run_id: "run_test".to_string(),
-            identity: runmat_analysis_core::AnalysisRunIdentity::experimental(
-                runmat_analysis_core::PhysicsFamily::Structural,
-                runmat_analysis_core::AnalysisProcedure::Static,
-                runmat_analysis_core::SolutionSpace::Direct,
-                [runmat_analysis_core::FormulationImplementation::LinearElasticStructural],
-            ),
             run: runmat_analysis_fea::FeaRunResult {
+                identity,
                 requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
@@ -2345,9 +2396,16 @@ mod tests {
             model_validity: crate::analysis::contracts::QualityGate::Pass,
             solver_convergence: crate::analysis::contracts::QualityGate::Pass,
             result_quality: crate::analysis::contracts::QualityGate::Pass,
-            run_status: crate::analysis::contracts::RunStatus::Publishable,
-            publishable: true,
+            run_status: crate::analysis::contracts::RunStatus::Completed,
+            numerically_acceptable: true,
+            production_publishable: false,
             quality_reasons: Vec::new(),
+            production_publication_reasons: vec![
+                crate::analysis::contracts::ProductionPublicationReason {
+                    code: crate::analysis::contracts::ProductionPublicationReasonCode::FormulationNotProductionQualified,
+                    detail: "test formulation is experimental".to_string(),
+                },
+            ],
             provenance: crate::analysis::contracts::RunProvenance {
                 requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

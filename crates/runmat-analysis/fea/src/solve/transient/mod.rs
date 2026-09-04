@@ -1,3 +1,4 @@
+use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -30,6 +31,7 @@ use linear_step::{
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
     pub time_step_s: f64,
     pub min_time_step_s: f64,
     pub max_time_step_s: f64,
@@ -60,6 +62,7 @@ fn default_progress_operation() -> String {
 impl Default for TransientSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
             time_step_s: 1.0e-3,
             min_time_step_s: 1.0e-6,
             max_time_step_s: 2.0e-2,

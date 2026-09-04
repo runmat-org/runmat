@@ -33,13 +33,6 @@ def report(
     thermo_field_artifact_approved=None,
     thermo_field_artifact_age_days=None,
     thermo_field_artifact_provenance_valid=None,
-    electro_thermal_coupling_enabled=None,
-    electro_transient_severity=None,
-    electro_transient_time_scale_mean=None,
-    electro_nonlinear_severity=None,
-    electro_nonlinear_time_scale_mean=None,
-    electro_joule_heating_scale=None,
-    electro_conductivity_spread_ratio=None,
     plastic_nonlinear_severity=None,
     plastic_load_realization_ratio=None,
     plastic_load_amplification_ratio=None,
@@ -116,27 +109,6 @@ def report(
             rec["thermo_field_artifact_provenance_valid"] = (
                 thermo_field_artifact_provenance_valid
             )
-    if electro_thermal_coupling_enabled is not None:
-        for rec in records:
-            rec["electro_thermal_coupling_enabled"] = electro_thermal_coupling_enabled
-    if electro_transient_severity is not None:
-        for rec in records:
-            rec["electro_transient_severity"] = electro_transient_severity
-    if electro_transient_time_scale_mean is not None:
-        for rec in records:
-            rec["electro_transient_time_scale_mean"] = electro_transient_time_scale_mean
-    if electro_nonlinear_severity is not None:
-        for rec in records:
-            rec["electro_nonlinear_severity"] = electro_nonlinear_severity
-    if electro_nonlinear_time_scale_mean is not None:
-        for rec in records:
-            rec["electro_nonlinear_time_scale_mean"] = electro_nonlinear_time_scale_mean
-    if electro_joule_heating_scale is not None:
-        for rec in records:
-            rec["electro_joule_heating_scale"] = electro_joule_heating_scale
-    if electro_conductivity_spread_ratio is not None:
-        for rec in records:
-            rec["electro_conductivity_spread_ratio"] = electro_conductivity_spread_ratio
     if plastic_nonlinear_severity is not None:
         for rec in records:
             rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
@@ -234,24 +206,6 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_CONDUCTIVITY_SPREAD_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_BREACH_RATE",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ",
@@ -1479,7 +1433,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertTrue(matches)
         detail = matches[0]["detail"]
         self.assertIn("thermo_gradient_pathological_gpu_provider", detail)
-        self.assertIn("electro_thermal_joule_pathological_gpu_provider", detail)
         self.assertIn("thermo_mech_kickoff_gpu_provider", detail)
         self.assertIn("thermal_standalone_ramp_gpu_provider", detail)
         self.assertIn("electromagnetic_reference_boundary_kernel_gpu_provider", detail)
@@ -4546,126 +4499,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMAL_ASSERTION_MONOTONIC_RESPONSE_TREND_WORSENING", codes)
 
-    def test_electro_transient_severity_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_transient_severity=0.55,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY"] = "0.2"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_TRANSIENT_SEVERITY_HIGH", codes)
-
-    def test_electro_nonlinear_severity_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_nonlinear_severity=0.55,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY"] = "0.2"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_NONLINEAR_SEVERITY_HIGH", codes)
-
-    def test_electro_metrics_missing_warn_when_required(self):
-        latest = report(passed=True, publishable=True, gpu_ms=100.0)
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS"] = "true"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_COUPLING_METRICS_MISSING", codes)
-
-    def test_electro_metrics_missing_is_fail_on_protected_branches(self):
-        latest = report(passed=True, publishable=True, gpu_ms=100.0)
-        result = evaluate_release_readiness(latest, [], protected=True)
-        missing = next(
-            (
-                reason
-                for reason in result["reasons"]
-                if reason["code"] == "ELECTRO_COUPLING_METRICS_MISSING"
-            ),
-            None,
-        )
-        self.assertIsNotNone(missing)
-        self.assertEqual(missing["severity"], "fail")
-
-    def test_electro_enabled_rate_missing_is_fail_on_protected_branches(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_transient_severity=0.2,
-        )
-        result = evaluate_release_readiness(latest, [], protected=True)
-        missing = next(
-            (
-                reason
-                for reason in result["reasons"]
-                if reason["code"] == "ELECTRO_COUPLING_ENABLED_RATE_MISSING"
-            ),
-            None,
-        )
-        self.assertIsNotNone(missing)
-        self.assertEqual(missing["severity"], "fail")
-
-    def test_electro_assertion_contract_missing_reason_is_emitted_when_required(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_transient_severity=0.2,
-            electro_joule_heating_scale=1.1,
-            electro_conductivity_spread_ratio=1.1,
-        )
-        latest["records"].append(
-            {
-                "fixture_id": "electro_thermal_joule_benign_gpu_provider",
-                "publishable": True,
-                "threshold_assertions": [],
-            }
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS"] = "true"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
-
-    def test_electro_joule_heating_scale_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_joule_heating_scale=11.6,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE"] = "10.5"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_JOULE_HEATING_SCALE_HIGH", codes)
-
     def test_plastic_assertion_contract_missing_reason_is_emitted_when_required(self):
         latest = report(
             passed=True,
@@ -4715,75 +4548,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
-
-    def test_electro_spread_ratio_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_conductivity_spread_ratio=2.1,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_CONDUCTIVITY_SPREAD_RATIO"] = "1.8"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
-
-    def test_electro_joule_breach_rate_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_joule_heating_scale=11.4,
-        )
-        rolling = [
-            report(
-                passed=True,
-                publishable=True,
-                gpu_ms=95.0,
-                electro_thermal_coupling_enabled=True,
-                electro_joule_heating_scale=11.0,
-            ),
-            report(
-                passed=True,
-                publishable=True,
-                gpu_ms=92.0,
-                electro_thermal_coupling_enabled=True,
-                electro_joule_heating_scale=9.8,
-            ),
-        ]
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE"] = "10.5"
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_BREACH_RATE"] = "0.5"
-        result = evaluate_release_readiness(latest, rolling, protected=False)
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_JOULE_BREACH_RATE_HIGH", codes)
-
-    def test_electro_spread_trend_worsening_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_conductivity_spread_ratio=2.0,
-        )
-        rolling = [
-            report(
-                passed=True,
-                publishable=True,
-                gpu_ms=95.0,
-                electro_thermal_coupling_enabled=True,
-                electro_conductivity_spread_ratio=1.4,
-            )
-        ]
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO"] = "1.3"
-        result = evaluate_release_readiness(latest, rolling, protected=False)
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
 
     def test_nonlinear_core_metrics_missing_is_fail_on_protected_branches(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -5143,7 +4907,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("NONLINEAR_SOFTENING_SPIKE_COUNT_TREND_WORSENING", codes)
         self.assertIn("NONLINEAR_SOFTENING_BACKTRACK_BURSTS_TREND_WORSENING", codes)
 
-    def test_pathological_thermo_electro_assertion_breaches_emit_reasons(self):
+    def test_pathological_thermo_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
             {
@@ -5172,34 +4936,11 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
-        latest["records"].append(
-            {
-                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 100.0,
-                "threshold_assertions": [
-                    {
-                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
-                        "observed": 4.0,
-                    },
-                    {
-                        "name": "electro_thermal_pathological_temporal_variation",
-                        "observed": 0.9,
-                    },
-                ],
-            }
-        )
         os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO"] = "1.5"
         os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION"] = (
             "0.6"
         )
         os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION"] = "0.5"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO"
-        ] = "3.0"
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION"] = (
-            "0.6"
-        )
         result = evaluate_release_readiness(
             latest,
             [report(passed=True, publishable=True, gpu_ms=95.0)],
@@ -5209,10 +4950,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("THERMO_PATHOLOGICAL_SPREAD_RATIO_HIGH", codes)
         self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH", codes)
         self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_HIGH", codes)
-        self.assertIn("ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
-        self.assertIn("ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH", codes)
 
-    def test_pathological_thermo_electro_assertion_trend_worsening_reasons_are_emitted(self):
+    def test_pathological_thermo_assertion_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
             {
@@ -5238,23 +4977,6 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "thermo_shock_oscillatory_temporal_variation",
                         "observed": 0.7,
                     }
-                ],
-            }
-        )
-        latest["records"].append(
-            {
-                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 100.0,
-                "threshold_assertions": [
-                    {
-                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
-                        "observed": 2.5,
-                    },
-                    {
-                        "name": "electro_thermal_pathological_temporal_variation",
-                        "observed": 0.7,
-                    },
                 ],
             }
         )
@@ -5286,23 +5008,6 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
-        rolling[0]["records"].append(
-            {
-                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 95.0,
-                "threshold_assertions": [
-                    {
-                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
-                        "observed": 1.0,
-                    },
-                    {
-                        "name": "electro_thermal_pathological_temporal_variation",
-                        "observed": 0.2,
-                    },
-                ],
-            }
-        )
         os.environ[
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO"
         ] = "1.2"
@@ -5312,19 +5017,11 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO"
         ] = "1.2"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO"
-        ] = "1.2"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO"
-        ] = "1.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_PATHOLOGICAL_SPREAD_TREND_WORSENING", codes)
         self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING", codes)
         self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_TREND_WORSENING", codes)
-        self.assertIn("ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
-        self.assertIn("ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING", codes)
 
     def test_acoustic_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -7594,23 +7291,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_CLAMP_RATIO_HIGH", codes)
 
-    def test_electro_time_scale_mean_out_of_range_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            electro_thermal_coupling_enabled=True,
-            electro_transient_time_scale_mean=1.45,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN"] = "1.3"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("ELECTRO_TIME_SCALE_MEAN_OUT_OF_RANGE", codes)
-
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -7677,20 +7357,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermal spread trend ratio", summary)
         self.assertIn("### Nonlinear Core Posture", summary)
         self.assertIn("Nonlinear assembly increments/failed/spikes thresholds", summary)
-        self.assertIn("Electro-thermal time-scale min/max", summary)
-        self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
-        self.assertIn("Electro-thermal time-scale breach rate", summary)
-        self.assertIn("Electro-thermal time-scale trend ratio", summary)
-        self.assertIn(
-            "Electro-thermal pathological conductivity spread assertion/threshold", summary
-        )
-        self.assertIn(
-            "Electro-thermal pathological temporal variation assertion/threshold", summary
-        )
-        self.assertIn(
-            "Electro-thermal pathological trend ratios (conductivity spread, temporal variation)",
-            summary,
-        )
         self.assertIn("### Acoustic Posture", summary)
         self.assertIn("Acoustic normalized residual norm/threshold", summary)
         self.assertIn("Acoustic peak pressure/threshold", summary)

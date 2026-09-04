@@ -1,16 +1,18 @@
 pub mod dofs;
 pub mod elements;
+mod reduced_rhs;
 mod solid_matrix;
 pub mod solver_solid;
 mod solver_solid_boundary;
+mod structural_inputs;
 
 use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, ExecutionFallbackPolicy, ShellSectionModel,
-    StructuralConstraintKind, StructuralElementKind, StructuralFormulationRealization,
-    StructuralModel, StructuralOperatorImplementation, StructuralRecoveryImplementation,
-    StructuralRotationDof, StructuralTranslationDof,
+    AnalysisModel, BeamSectionModel, BoundaryTransferImplementation, ShellSectionModel,
+    SourceImplementation, StructuralConstraintKind, StructuralElementKind,
+    StructuralFormulationRealization, StructuralModel, StructuralOperatorImplementation,
+    StructuralRecoveryImplementation, StructuralRotationDof, StructuralTranslationDof,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
@@ -32,7 +34,13 @@ use self::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
     solver_solid_boundary::apply_solver_mesh_structural_regions,
+    structural_inputs::{
+        apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
+        structural_boundary_implementations, structural_constraint_kind_name,
+        structural_source_implementations, validate_structural_inputs, StructuralProjectionBasis,
+    },
 };
+use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
@@ -76,6 +84,10 @@ pub struct AssemblySummary {
     pub structural_shell_recovery: Vec<ShellRecoveryElementSummary>,
     #[serde(default)]
     pub structural_formulation: Option<StructuralFormulationRealization>,
+    #[serde(default)]
+    pub structural_sources: Vec<SourceImplementation>,
+    #[serde(default)]
+    pub structural_boundary_transfers: Vec<BoundaryTransferImplementation>,
     pub constrained_dof_count: usize,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
@@ -108,6 +120,67 @@ impl fmt::Display for LinearAssemblyError {
 }
 
 impl std::error::Error for LinearAssemblyError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralLoadKind {
+    Force,
+    Moment,
+    Wrench,
+    Traction,
+    Pressure,
+    BodyForce,
+    BaseDisplacement,
+    BaseVelocity,
+    BaseAcceleration,
+    HeatGeneration,
+    HeatFlux,
+    AmbientTemperature,
+    TerminalVoltage,
+    ElectricCurrent,
+    ElectricCharge,
+    CurrentDensity,
+    MagneticVectorPotential,
+    AcousticPressure,
+    NormalVelocity,
+    InletVelocity,
+    MassFlow,
+    WallMotion,
+}
+
+impl StructuralLoadKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Force => "force",
+            Self::Moment => "moment",
+            Self::Wrench => "wrench",
+            Self::Traction => "traction",
+            Self::Pressure => "pressure",
+            Self::BodyForce => "body_force",
+            Self::BaseDisplacement => "base_displacement",
+            Self::BaseVelocity => "base_velocity",
+            Self::BaseAcceleration => "base_acceleration",
+            Self::HeatGeneration => "heat_generation",
+            Self::HeatFlux => "heat_flux",
+            Self::AmbientTemperature => "ambient_temperature",
+            Self::TerminalVoltage => "terminal_voltage",
+            Self::ElectricCurrent => "electric_current",
+            Self::ElectricCharge => "electric_charge",
+            Self::CurrentDensity => "current_density",
+            Self::MagneticVectorPotential => "magnetic_vector_potential",
+            Self::AcousticPressure => "acoustic_pressure",
+            Self::NormalVelocity => "normal_velocity",
+            Self::InletVelocity => "inlet_velocity",
+            Self::MassFlow => "mass_flow",
+            Self::WallMotion => "wall_motion",
+        }
+    }
+}
+
+impl fmt::Display for StructuralLoadKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuralAssemblyError {
@@ -145,6 +218,26 @@ pub enum StructuralAssemblyError {
     ShellElement {
         element_id: String,
         error: ShellElementError,
+    },
+    UnsupportedStructuralLoad {
+        load_id: String,
+        load_kind: StructuralLoadKind,
+    },
+    UnmappedStructuralLoad {
+        load_id: String,
+        region_id: String,
+        load_kind: StructuralLoadKind,
+    },
+    UnsupportedStructuralConstraint {
+        constraint_id: String,
+        constraint_kind: &'static str,
+    },
+    UnmappedExplicitConstraint {
+        constraint_id: String,
+        region_id: String,
+    },
+    UnsupportedScheduledConstraint {
+        constraint_id: String,
     },
 }
 
@@ -206,6 +299,45 @@ impl fmt::Display for StructuralAssemblyError {
             Self::ShellElement { element_id, error } => {
                 write!(f, "shell element assembly failed: element_id={element_id} error={error}")
             }
+            Self::UnsupportedStructuralLoad { load_id, load_kind } => {
+                if *load_kind == StructuralLoadKind::Moment {
+                    write!(
+                        f,
+                        "moment loads require rotational-DOF structural elements; use a wrench load for equivalent force-couple moments on solid-only face regions: load_id={load_id}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "the selected structural formulation does not implement this load: load_id={load_id} load_kind={load_kind}"
+                    )
+                }
+            }
+            Self::UnmappedStructuralLoad {
+                load_id,
+                region_id,
+                load_kind,
+            } => write!(
+                f,
+                "structural load target does not resolve to the selected discretization: load_id={load_id} region_id={region_id} load_kind={load_kind}"
+            ),
+            Self::UnsupportedStructuralConstraint {
+                constraint_id,
+                constraint_kind,
+            } => write!(
+                f,
+                "the selected structural formulation does not implement this constraint: constraint_id={constraint_id} constraint_kind={constraint_kind}"
+            ),
+            Self::UnmappedExplicitConstraint {
+                constraint_id,
+                region_id,
+            } => write!(
+                f,
+                "explicit structural constraint target does not resolve to connectivity: constraint_id={constraint_id} region_id={region_id}"
+            ),
+            Self::UnsupportedScheduledConstraint { constraint_id } => write!(
+                f,
+                "structural assembly requires study-constant prescribed constraints: constraint_id={constraint_id}"
+            ),
         }
     }
 }
@@ -224,7 +356,7 @@ pub enum SolverMeshRegionMappingError {
     UnmappedLoadRegion {
         load_id: String,
         region_id: String,
-        load_kind: &'static str,
+        load_kind: StructuralLoadKind,
     },
     UnmappedConstraintRegion {
         constraint_id: String,
@@ -326,6 +458,7 @@ pub struct ThermoMechanicalAssemblySummary {
     pub temporal_profile_variation: f64,
     pub region_delta_count: usize,
     pub coupling_fingerprint: u64,
+    pub profile_sources: Vec<SourceImplementation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -391,14 +524,14 @@ fn assemble_linear_system_impl(
         .as_ref()
         .map(|structural| structural.elements.len())
         .unwrap_or(0);
-    if solver_mesh.is_some() && explicit_element_count > 0 {
+    if structural_requirement.is_some() && solver_mesh.is_some() && explicit_element_count > 0 {
         return Err(LinearAssemblyError::Structural(
             StructuralAssemblyError::MixedSolidAndExplicit {
                 explicit_element_count,
             },
         ));
     }
-    if solver_mesh.is_none() && explicit_element_count > 0 {
+    if structural_requirement.is_some() && solver_mesh.is_none() && explicit_element_count > 0 {
         return assemble_explicit_structural_system(model, &excitations)
             .map_err(LinearAssemblyError::Structural);
     }
@@ -416,6 +549,18 @@ fn assemble_linear_system_impl(
         .map(|mesh| solver_solid_topology(mesh, base_dof_count))
         .transpose()
         .map_err(LinearAssemblyError::SolidStiffness)?;
+    if structural_requirement.is_some() {
+        validate_structural_inputs(
+            model,
+            &excitations,
+            if solid_topology.is_some() {
+                StructuralProjectionBasis::CanonicalSolid
+            } else {
+                StructuralProjectionBasis::Synthetic
+            },
+        )
+        .map_err(LinearAssemblyError::Structural)?;
+    }
     let dof_count = solid_topology
         .as_ref()
         .map(|topology| topology.dof_count)
@@ -489,64 +634,15 @@ fn assemble_linear_system_impl(
     }
 
     let mut rhs = vec![0.0; dof_count];
-    for (i, load) in excitations.iter().enumerate() {
-        let base = (i * 3) % dof_count;
-        match &load.kind {
-            RealizedExcitationKind::Force(value) => {
-                let [fx, fy, fz] = value.real;
-                rhs[base] += fx;
-                if base + 1 < dof_count {
-                    rhs[base + 1] += fy;
-                }
-                if base + 2 < dof_count {
-                    rhs[base + 2] += fz;
-                }
-            }
-            RealizedExcitationKind::Moment(_) => {}
-            RealizedExcitationKind::Wrench { force, .. } => {
-                let [fx, fy, fz] = force.real;
-                rhs[base] += fx;
-                if base + 1 < dof_count {
-                    rhs[base + 1] += fy;
-                }
-                if base + 2 < dof_count {
-                    rhs[base + 2] += fz;
-                }
-            }
-            RealizedExcitationKind::Pressure(value) => {
-                rhs[base] += value.real * 1.0e-3;
-                if base + 1 < dof_count {
-                    rhs[base + 1] -= value.real * 1.0e-3;
-                }
-            }
-            RealizedExcitationKind::BodyForce(value) => {
-                let [gx, gy, gz] = value.real;
-                rhs[base] += gx;
-                if base + 1 < dof_count {
-                    rhs[base + 1] += gy;
-                }
-                if base + 2 < dof_count {
-                    rhs[base + 2] += gz;
-                }
-            }
-            RealizedExcitationKind::CurrentDensity(value) => {
-                let [jx, jy, jz] = value.real;
-                rhs[base] += jx * 1.0e-3;
-                if base + 1 < dof_count {
-                    rhs[base + 1] += jy * 1.0e-3;
-                }
-                if base + 2 < dof_count {
-                    rhs[base + 2] += jz * 1.0e-3;
-                }
-            }
-            RealizedExcitationKind::ElectricCurrent(value) => {
-                rhs[base] += value.real * 1.0e-2;
-            }
-            _ => {}
-        }
+    if structural_requirement
+        == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
+    {
+        apply_synthetic_structural_rhs(&excitations, &mut rhs);
+    } else if structural_requirement.is_none() {
+        apply_reduced_multiphysics_rhs(&excitations, &mut rhs);
     }
 
-    let structural_dof_layout = StructuralDofLayout::legacy_translational_rows(dof_count);
+    let structural_dof_layout = StructuralDofLayout::reduced_translational_rows(dof_count);
     let structural_moment_load_count = excitations
         .iter()
         .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
@@ -559,26 +655,37 @@ fn assemble_linear_system_impl(
             0
         };
 
-    let legacy_constrained_dof_count = model.constraints.len().min(dof_count);
+    let reduced_constraint_count = if structural_requirement.is_some() {
+        model
+            .constraints
+            .iter()
+            .filter(|constraint| constraint.structural().is_some())
+            .count()
+    } else {
+        model.constraints.len()
+    };
+    let reduced_constrained_dof_count = reduced_constraint_count.min(dof_count);
     let mut constrained = vec![false; dof_count];
     let constraint_offset = 0;
-    for idx in 0..legacy_constrained_dof_count {
+    for idx in 0..reduced_constrained_dof_count {
         let dof = (constraint_offset + idx * 2) % dof_count.max(1);
         constrained[dof] = true;
         rhs[dof] = 0.0;
     }
     let mut structural_wrench_lowering = Vec::new();
-    if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
-        structural_wrench_lowering = apply_solver_mesh_structural_regions(
-            model,
-            &excitations,
-            mesh,
-            &structural_dof_layout,
-            &mut constrained,
-            &mut rhs,
-            true,
-        )
-        .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+    if structural_requirement.is_some() {
+        if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
+            structural_wrench_lowering = apply_solver_mesh_structural_regions(
+                model,
+                &excitations,
+                mesh,
+                &structural_dof_layout,
+                &mut constrained,
+                &mut rhs,
+                true,
+            )
+            .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+        }
     }
 
     let mut thermo_mechanical = None;
@@ -693,6 +800,7 @@ fn assemble_linear_system_impl(
                         temporal_profile_variation,
                     },
                 ),
+                profile_sources: thermomechanical_profile_sources(&context),
             });
         }
     }
@@ -814,36 +922,58 @@ fn assemble_linear_system_impl(
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
-        structural_formulation: solid_topology
-            .as_ref()
-            .map(|topology| {
-                let (operator, recovery) = match topology.order {
-                    ElementOrder::Tet4 => (
-                        StructuralOperatorImplementation::Tet4LinearElasticity,
-                        Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
-                    ),
-                    ElementOrder::Tet10 => (
-                        StructuralOperatorImplementation::Tet10LinearElasticity,
-                        None,
-                    ),
-                };
-                StructuralFormulationRealization::experimental(
-                    operator,
-                    recovery,
-                    ExecutionFallbackPolicy::Forbid,
-                )
-            })
-            .or_else(|| {
-                (structural_requirement
-                    == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator))
-                .then(|| {
-                    StructuralFormulationRealization::experimental(
-                        StructuralOperatorImplementation::SyntheticDiagonalChain,
-                        None,
-                        ExecutionFallbackPolicy::AllowExperimental,
-                    )
+        structural_formulation: structural_requirement.and_then(|requirement| {
+            solid_topology
+                .as_ref()
+                .map(|topology| {
+                    let (operator, recovery) = match topology.order {
+                        ElementOrder::Tet4 => (
+                            StructuralOperatorImplementation::Tet4LinearElasticity,
+                            Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
+                        ),
+                        ElementOrder::Tet10 => (
+                            StructuralOperatorImplementation::Tet10LinearElasticity,
+                            None,
+                        ),
+                    };
+                    StructuralFormulationRealization::new(operator, recovery)
                 })
-            }),
+                .or_else(|| {
+                    (requirement == StructuralFormulationRequirement::ExperimentalSyntheticOperator)
+                        .then(|| {
+                            StructuralFormulationRealization::new(
+                                StructuralOperatorImplementation::SyntheticDiagonalChain,
+                                None,
+                            )
+                        })
+                })
+        }),
+        structural_sources: structural_requirement.map_or_else(
+            || vec![SourceImplementation::NotApplicable],
+            |_| {
+                structural_source_implementations(
+                    &excitations,
+                    if solid_topology.is_some() {
+                        StructuralProjectionBasis::CanonicalSolid
+                    } else {
+                        StructuralProjectionBasis::Synthetic
+                    },
+                )
+            },
+        ),
+        structural_boundary_transfers: structural_requirement.map_or_else(
+            || vec![BoundaryTransferImplementation::NotApplicable],
+            |_| {
+                structural_boundary_implementations(
+                    model,
+                    if solid_topology.is_some() {
+                        StructuralProjectionBasis::CanonicalSolid
+                    } else {
+                        StructuralProjectionBasis::Synthetic
+                    },
+                )
+            },
+        ),
         constrained_dof_count,
         load_count: excitations.len(),
         structural_material,
@@ -928,6 +1058,11 @@ fn assemble_explicit_structural_system(
         .structural
         .as_ref()
         .ok_or(StructuralAssemblyError::MissingDiscretization)?;
+    validate_structural_inputs(
+        model,
+        excitations,
+        StructuralProjectionBasis::ExplicitConnectivity,
+    )?;
     let beam_elements = structural
         .elements
         .iter()
@@ -1133,12 +1268,20 @@ fn assemble_explicit_structural_system(
     let mut direct_rotational_moment_load_count = 0usize;
     let mut structural_wrench_lowering = Vec::new();
     for load in excitations.iter() {
-        let Some(region_id) = load.target.solver_region_id() else {
-            continue;
-        };
+        let region_id = load.target.solver_region_id().ok_or_else(|| {
+            StructuralAssemblyError::UnmappedStructuralLoad {
+                load_id: load.excitation_id.0.clone(),
+                region_id: "<non-region target>".to_string(),
+                load_kind: explicit_load_kind(&load.kind),
+            }
+        })?;
         let target_nodes = structural_target_nodes(structural, region_id);
         if target_nodes.is_empty() {
-            continue;
+            return Err(StructuralAssemblyError::UnmappedStructuralLoad {
+                load_id: load.excitation_id.0.clone(),
+                region_id: region_id.to_string(),
+                load_kind: explicit_load_kind(&load.kind),
+            });
         }
         let scale = 1.0 / target_nodes.len() as f64;
         match load.kind {
@@ -1225,10 +1368,30 @@ fn assemble_explicit_structural_system(
         .iter()
         .filter_map(|value| value.structural())
     {
-        let Some(target) = constraint.kind.target() else {
-            continue;
-        };
+        if !matches!(
+            constraint.kind,
+            StructuralConstraintKind::Fixed { .. }
+                | StructuralConstraintKind::PrescribedTranslations(_)
+                | StructuralConstraintKind::PrescribedRotations(_)
+        ) {
+            return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
+                constraint_id: constraint.constraint_id.clone(),
+                constraint_kind: structural_constraint_kind_name(&constraint.kind),
+            });
+        }
+        let target = constraint.kind.target().ok_or_else(|| {
+            StructuralAssemblyError::UnsupportedStructuralConstraint {
+                constraint_id: constraint.constraint_id.clone(),
+                constraint_kind: structural_constraint_kind_name(&constraint.kind),
+            }
+        })?;
         let target_nodes = structural_target_nodes(structural, &target.region_id);
+        if target_nodes.is_empty() {
+            return Err(StructuralAssemblyError::UnmappedExplicitConstraint {
+                constraint_id: constraint.constraint_id.clone(),
+                region_id: target.region_id.clone(),
+            });
+        }
         for node_index in target_nodes {
             match &constraint.kind {
                 StructuralConstraintKind::Fixed { .. } => {
@@ -1312,16 +1475,14 @@ fn assemble_explicit_structural_system(
         .count();
 
     let structural_formulation = if !beam_elements.is_empty() {
-        StructuralFormulationRealization::experimental(
+        StructuralFormulationRealization::new(
             StructuralOperatorImplementation::EulerBernoulliBeam3d,
             Some(StructuralRecoveryImplementation::BeamSectionResultants),
-            ExecutionFallbackPolicy::Forbid,
         )
     } else {
-        StructuralFormulationRealization::experimental(
+        StructuralFormulationRealization::new(
             StructuralOperatorImplementation::PairSpringShellProxy,
             Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
-            ExecutionFallbackPolicy::Forbid,
         )
     };
 
@@ -1347,6 +1508,14 @@ fn assemble_explicit_structural_system(
         structural_beam_recovery,
         structural_shell_recovery,
         structural_formulation: Some(structural_formulation),
+        structural_sources: structural_source_implementations(
+            excitations,
+            StructuralProjectionBasis::ExplicitConnectivity,
+        ),
+        structural_boundary_transfers: structural_boundary_implementations(
+            model,
+            StructuralProjectionBasis::ExplicitConnectivity,
+        ),
         constrained_dof_count,
         load_count: excitations.len(),
         structural_material,
@@ -1364,30 +1533,6 @@ fn assemble_explicit_structural_system(
             rhs,
         },
     })
-}
-
-fn requested_moment_norm(excitations: &RealizedExcitations) -> f64 {
-    let moment = excitations.iter().fold([0.0_f64; 3], |mut total, entry| {
-        match entry.kind {
-            RealizedExcitationKind::Moment(value) => {
-                for (total, value) in total.iter_mut().zip(value.real) {
-                    *total += value;
-                }
-            }
-            RealizedExcitationKind::Wrench { moment, .. } => {
-                for (total, value) in total.iter_mut().zip(moment.real) {
-                    *total += value;
-                }
-            }
-            _ => {}
-        }
-        total
-    });
-    moment
-        .into_iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt()
 }
 
 fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
@@ -1995,6 +2140,19 @@ fn apply_thermo_spatial_field(
     }
 }
 
+fn thermomechanical_profile_sources(
+    context: &FeaThermoMechanicalContext,
+) -> Vec<SourceImplementation> {
+    let mut sources = vec![SourceImplementation::PrescribedTemperatureDeltaProfile];
+    if !context.region_temperature_deltas.is_empty() {
+        sources.push(SourceImplementation::OrdinalRegionTemperatureDistribution);
+    }
+    if !context.sampled_time_profile.is_empty() {
+        sources.push(SourceImplementation::SampledTemporalProfileInterpolation);
+    }
+    sources
+}
+
 fn apply_thermo_material_heterogeneity(
     model: &AnalysisModel,
     dof_count: usize,
@@ -2103,10 +2261,9 @@ fn region_hash(region_id: &str) -> u64 {
 mod tests {
     use super::*;
     use crate::fixtures::{
-        fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
-        FixtureId,
+        fixture_model, replace_fixture_excitations, replace_fixture_with_electric_current,
+        FixtureExcitation, FixtureExcitationKind, FixtureId,
     };
-    use runmat_analysis_core::FormulationMaturity;
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
     };
@@ -2123,12 +2280,25 @@ mod tests {
         )
     }
 
+    fn assemble_physical_structural_system(
+        model: &AnalysisModel,
+        solver_mesh: Option<SolverMeshArtifact>,
+    ) -> Result<AssemblySummary, LinearAssemblyError> {
+        assemble_structural_system(
+            model,
+            solver_mesh,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+    }
+
     #[test]
     fn solver_mesh_populates_sparse_solid_stiffness_operator() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.excitations.clear();
         model.constraints.clear();
-        let summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+        let summary = assemble_physical_structural_system(&model, Some(tetrahedron4_mesh()))
             .expect("valid Tet4 system should assemble");
 
         assert_eq!(summary.dof_count, 12);
@@ -2211,8 +2381,14 @@ mod tests {
             shell_sections: Vec::new(),
         });
 
-        let error = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
-            .expect_err("an uncoupled solid-plus-beam model must be rejected");
+        let error = assemble_structural_system(
+            &model,
+            Some(tetrahedron4_mesh()),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("an uncoupled solid-plus-beam model must be rejected");
 
         assert_eq!(
             error,
@@ -2254,9 +2430,9 @@ mod tests {
         let hard_mesh = soft_mesh.clone();
         assert_eq!(soft_mesh.canonical_digest, hard_mesh.canonical_digest);
 
-        let soft_summary = assemble_linear_system(&soft_model, Some(soft_mesh), None, None)
+        let soft_summary = assemble_physical_structural_system(&soft_model, Some(soft_mesh))
             .expect("soft-material system should assemble");
-        let hard_summary = assemble_linear_system(&hard_model, Some(hard_mesh), None, None)
+        let hard_summary = assemble_physical_structural_system(&hard_model, Some(hard_mesh))
             .expect("hard-material system should assemble");
 
         assert!(
@@ -2278,7 +2454,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let err = assemble_linear_system(&model, Some(mesh), None, None).expect_err(
+        let err = assemble_physical_structural_system(&model, Some(mesh)).expect_err(
             "strict solver mesh assembly should reject inverted Tetrahedron4 stiffness",
         );
 
@@ -2324,7 +2500,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None)
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
             .expect("valid boundary regions should assemble");
 
         assert_eq!(summary.constrained_dof_count, 9);
@@ -2351,7 +2527,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 0, &["root"]);
         reseal(&mut mesh);
 
-        let err = assemble_linear_system(&model, Some(mesh), None, None)
+        let err = assemble_physical_structural_system(&model, Some(mesh))
             .expect_err("strict solver mesh assembly should reject unmapped loads");
 
         assert!(matches!(
@@ -2382,7 +2558,7 @@ mod tests {
         set_boundary_regions(&mut mesh, 0, &["tip"]);
         reseal(&mut mesh);
 
-        let err = assemble_linear_system(&model, Some(mesh), None, None)
+        let err = assemble_physical_structural_system(&model, Some(mesh))
             .expect_err("strict solver mesh assembly should reject unmapped constraints");
 
         assert!(matches!(
@@ -2412,12 +2588,22 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None)
-            .expect("valid pressure boundary should assemble");
+        let summary = assemble_structural_system(
+            &model,
+            Some(mesh),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("valid pressure boundary should assemble");
 
         assert_close(summary.operator.rhs[1], -2.0);
         assert_close(summary.operator.rhs[4], -2.0);
         assert_close(summary.operator.rhs[10], -2.0);
+        assert_eq!(
+            summary.structural_sources,
+            vec![SourceImplementation::CanonicalBoundaryPressureIntegration]
+        );
     }
 
     #[test]
@@ -2440,8 +2626,14 @@ mod tests {
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
-        let summary = assemble_linear_system(&model, Some(mesh), None, None)
-            .expect("valid wrench boundary should assemble");
+        let summary = assemble_structural_system(
+            &model,
+            Some(mesh),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("valid wrench boundary should assemble");
 
         assert_eq!(summary.structural_wrench_lowering.len(), 1);
         let lowering = &summary.structural_wrench_lowering[0];
@@ -2451,6 +2643,10 @@ mod tests {
         assert_close(lowering.applied_moment_at_point[1], 6.0);
         assert_close(lowering.moment_residual[1], 0.0);
         assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+        assert_eq!(
+            summary.structural_sources,
+            vec![SourceImplementation::BoundaryResultantWrenchDistribution]
+        );
     }
 
     #[test]
@@ -2650,6 +2846,218 @@ mod tests {
     }
 
     #[test]
+    fn explicit_connectivity_rejects_unimplemented_sources_without_fallback() {
+        let cases = [
+            (
+                FixtureExcitationKind::Pressure(12.0),
+                StructuralLoadKind::Pressure,
+            ),
+            (
+                FixtureExcitationKind::BodyForce([0.0, -9.81, 0.0]),
+                StructuralLoadKind::BodyForce,
+            ),
+        ];
+        for (kind, expected_kind) in cases {
+            let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+            replace_fixture_excitations(
+                &mut model,
+                vec![FixtureExcitation {
+                    id: format!("unsupported_{expected_kind}"),
+                    region_id: "tip".to_string(),
+                    kind,
+                }],
+            );
+            let error = assemble_structural_system(
+                &model,
+                None,
+                None,
+                None,
+                StructuralFormulationRequirement::PhysicalDiscretization,
+            )
+            .expect_err("unsupported explicit sources must not silently disappear");
+            assert!(matches!(
+                error,
+                LinearAssemblyError::Structural(
+                    StructuralAssemblyError::UnsupportedStructuralLoad { load_kind, .. }
+                ) if load_kind == expected_kind
+            ));
+        }
+    }
+
+    #[test]
+    fn structural_validation_rejects_cross_physics_sources() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let cases = [
+            (
+                RealizedExcitationKind::ElectricCurrent(crate::excitation::ComplexScalar::real(
+                    4.0,
+                )),
+                StructuralLoadKind::ElectricCurrent,
+            ),
+            (
+                RealizedExcitationKind::CurrentDensity(crate::excitation::ComplexVector3::real([
+                    1.0, 2.0, 3.0,
+                ])),
+                StructuralLoadKind::CurrentDensity,
+            ),
+        ];
+        for (kind, expected_kind) in cases {
+            let excitations =
+                RealizedExcitations::new(vec![crate::excitation::RealizedExcitation {
+                    excitation_id: runmat_analysis_core::ExcitationId(format!(
+                        "unsupported_{expected_kind}"
+                    )),
+                    case_id: runmat_analysis_core::ExcitationCaseId("case".to_string()),
+                    target: crate::excitation::RealizedExcitationTarget::WholeModel,
+                    kind,
+                }]);
+            let error = validate_structural_inputs(
+                &model,
+                &excitations,
+                StructuralProjectionBasis::Synthetic,
+            )
+            .expect_err("electrical sources must not become a mechanical right-hand side");
+            assert!(matches!(
+                error,
+                StructuralAssemblyError::UnsupportedStructuralLoad { load_kind, .. }
+                    if load_kind == expected_kind
+            ));
+        }
+    }
+
+    #[test]
+    fn nonstructural_scaffolding_ignores_explicit_structural_connectivity() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
+        model.constraints.clear();
+
+        let summary = assemble_linear_system(&model, None, None, None)
+            .expect("nonstructural scaffolding must not select explicit structural assembly");
+
+        assert_eq!(summary.load_count, 1);
+        assert_eq!(summary.structural_beam_element_count, 0);
+        assert!(summary.structural_formulation.is_none());
+        assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+
+        let mesh_summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
+            .expect("a solver mesh must not route a nonstructural source through mechanics");
+        assert!(mesh_summary.structural_formulation.is_none());
+        assert_eq!(
+            mesh_summary.structural_sources,
+            vec![SourceImplementation::NotApplicable]
+        );
+        assert_eq!(
+            mesh_summary.structural_boundary_transfers,
+            vec![BoundaryTransferImplementation::NotApplicable]
+        );
+        assert!(mesh_summary
+            .operator
+            .rhs
+            .iter()
+            .any(|value| value.abs() > 0.0));
+    }
+
+    #[test]
+    fn explicit_connectivity_rejects_unmapped_load_targets() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "missing_tip".to_string(),
+                region_id: "not_a_connectivity_region".to_string(),
+                kind: FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+            }],
+        );
+        let error = assemble_structural_system(
+            &model,
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("unmapped explicit source must not be dropped");
+        assert!(matches!(
+            error,
+            LinearAssemblyError::Structural(StructuralAssemblyError::UnmappedStructuralLoad {
+                load_kind: StructuralLoadKind::Force,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn structural_assembly_rejects_scheduled_prescribed_constraints() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Structural(
+            runmat_analysis_core::StructuralConstraint {
+                constraint_id: "scheduled_root".to_string(),
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                kind: runmat_analysis_core::StructuralConstraintKind::PrescribedTranslations(
+                    runmat_analysis_core::PrescribedTranslations {
+                        target: runmat_analysis_core::RegionTarget::authored("root"),
+                        values: vec![runmat_analysis_core::TranslationDofValue {
+                            dof: runmat_analysis_core::StructuralTranslationDof::Ux,
+                            value: runmat_analysis_core::PrescribedValue::Signal(
+                                runmat_analysis_core::SignalId("time_dependent".to_string()),
+                            ),
+                        }],
+                    },
+                ),
+            },
+        )];
+        let error = assemble_structural_system(
+            &model,
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("unsupported scheduled constraints must not vanish during assembly");
+        assert_eq!(
+            error,
+            LinearAssemblyError::Structural(
+                StructuralAssemblyError::UnsupportedScheduledConstraint {
+                    constraint_id: "scheduled_root".to_string(),
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn canonical_solid_records_executed_source_and_constraint_projection() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = vec![fixed_constraint("root")];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "load_tip".to_string(),
+                region_id: "tip".to_string(),
+                kind: FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+            }],
+        );
+        let mut mesh = tetrahedron4_mesh();
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
+        let summary = assemble_structural_system(
+            &model,
+            Some(mesh),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("supported solid projections should assemble");
+        assert_eq!(
+            summary.structural_sources,
+            vec![SourceImplementation::CanonicalBoundaryProjection]
+        );
+        assert_eq!(
+            summary.structural_boundary_transfers,
+            vec![BoundaryTransferImplementation::CanonicalBoundaryProjection]
+        );
+    }
+
+    #[test]
     fn structural_formulation_evidence_identifies_every_implemented_operator_exactly() {
         let mut solid_model = fixture_model(FixtureId::CantileverLinearStatic);
         solid_model.excitations.clear();
@@ -2704,43 +3112,47 @@ mod tests {
                 tet4,
                 StructuralOperatorImplementation::Tet4LinearElasticity,
                 Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
-                ExecutionFallbackPolicy::Forbid,
+                SourceImplementation::NotApplicable,
+                BoundaryTransferImplementation::NotApplicable,
             ),
             (
                 tet10,
                 StructuralOperatorImplementation::Tet10LinearElasticity,
                 None,
-                ExecutionFallbackPolicy::Forbid,
+                SourceImplementation::NotApplicable,
+                BoundaryTransferImplementation::NotApplicable,
             ),
             (
                 beam,
                 StructuralOperatorImplementation::EulerBernoulliBeam3d,
                 Some(StructuralRecoveryImplementation::BeamSectionResultants),
-                ExecutionFallbackPolicy::Forbid,
+                SourceImplementation::ExplicitRegionNodalDistribution,
+                BoundaryTransferImplementation::ExplicitRegionConnectivity,
             ),
             (
                 shell,
                 StructuralOperatorImplementation::PairSpringShellProxy,
                 Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
-                ExecutionFallbackPolicy::Forbid,
+                SourceImplementation::ExplicitRegionNodalDistribution,
+                BoundaryTransferImplementation::ExplicitRegionConnectivity,
             ),
             (
                 synthetic,
                 StructuralOperatorImplementation::SyntheticDiagonalChain,
                 None,
-                ExecutionFallbackPolicy::AllowExperimental,
+                SourceImplementation::OrdinalDistribution,
+                BoundaryTransferImplementation::GlobalCountProfile,
             ),
         ];
 
-        for (summary, operator, recovery, fallback_policy) in cases {
+        for (summary, operator, recovery, source, boundary) in cases {
             let realization = summary
                 .structural_formulation
                 .expect("structural assembly must record its exact realization");
             assert_eq!(realization.operator, operator);
             assert_eq!(realization.recovery, recovery);
-            assert_eq!(realization.maturity, FormulationMaturity::Experimental);
-            assert_eq!(realization.fallback_policy, fallback_policy);
-            assert_eq!(realization.validate(), Ok(()));
+            assert_eq!(summary.structural_sources, vec![source]);
+            assert_eq!(summary.structural_boundary_transfers, vec![boundary]);
         }
     }
 

@@ -42,6 +42,11 @@ pub fn run_thermal_with_options(
     backend: ComputeBackend,
     options: ThermalSolveOptions,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
+    super::admission::require_nonstructural(
+        runmat_analysis_core::PhysicsFamily::Thermal,
+        options.procedure,
+        options.formulation_requirement,
+    )?;
     emit_phase(
         "fea.run_thermal",
         FeaProgressPhase::RegionResolution,
@@ -90,6 +95,14 @@ pub fn run_thermal_with_options(
         None,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let identity = super::admission::admit_nonstructural(
+        runmat_analysis_core::PhysicsFamily::Thermal,
+        options.procedure,
+        options.solver_mesh.as_ref(),
+        runmat_analysis_core::SourceImplementation::OrdinalDistribution,
+        runmat_analysis_core::BoundaryTransferImplementation::GlobalCountProfile,
+        options.formulation_requirement,
+    )?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_thermal",
@@ -523,6 +536,7 @@ pub fn run_thermal_with_options(
     }
 
     let run = FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::Cpu,
         solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,

@@ -1,8 +1,11 @@
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisRunIdentity,
+    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
+    FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace,
 };
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
-use runmat_analysis_fea::{ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult};
+use runmat_analysis_fea::{
+    AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
+};
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
@@ -27,13 +30,12 @@ pub struct AnalysisCreateModelIntentSpec {
 pub enum AnalysisModelTemplate {
     LinearStaticStructural,
     ThermoMechanicalCoupled,
-    ElectroThermalCoupled,
-    ThermalStandalone,
+    ThermalTransient,
     ModalStructural,
     AcousticHarmonic,
     TransientStructural,
     NonlinearStructural,
-    ElectromagneticStatic,
+    ElectromagneticHarmonic,
     CfdSteadyState,
     CfdTransient,
     ChtCoupled,
@@ -47,7 +49,7 @@ pub struct AnalysisModelTemplateCatalogEntry {
     pub family: &'static str,
     pub target: &'static str,
     pub value: &'static str,
-    pub default_outputs: &'static [AnalysisModelTemplateDefaultObservation],
+    pub default_observations: &'static [AnalysisModelTemplateDefaultObservation],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +66,7 @@ pub struct AnalysisRuntimeModelTemplateCatalogEntry {
     pub family: String,
     pub target: String,
     pub value: String,
-    pub default_outputs: Vec<AnalysisRuntimeModelTemplateDefaultObservation>,
+    pub default_observations: Vec<AnalysisRuntimeModelTemplateDefaultObservation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,7 +83,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "structural",
         target: "solid mechanics",
         value: "static stress and displacement",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
@@ -98,7 +100,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "coupled physics",
         target: "coupled solid mechanics and heat transfer",
         value: "coupled temperature, stress, and displacement",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
@@ -114,37 +116,12 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         ],
     },
     AnalysisModelTemplateCatalogEntry {
-        template: AnalysisModelTemplate::ElectroThermalCoupled,
-        label: "Electro-thermal",
-        family: "coupled physics",
-        target: "coupled electromagnetics and heat transfer",
-        value: "resistive heating, temperature, and electrical fields",
-        default_outputs: &[
-            AnalysisModelTemplateDefaultObservation {
-                field: "electro_thermal.temperature",
-                location: "nodes",
-            },
-            AnalysisModelTemplateDefaultObservation {
-                field: "electro_thermal.joule_heat",
-                location: "elements",
-            },
-            AnalysisModelTemplateDefaultObservation {
-                field: "electro_thermal.electric_potential",
-                location: "nodes",
-            },
-            AnalysisModelTemplateDefaultObservation {
-                field: "electro_thermal.current_density",
-                location: "elements",
-            },
-        ],
-    },
-    AnalysisModelTemplateCatalogEntry {
-        template: AnalysisModelTemplate::ThermalStandalone,
-        label: "Thermal",
+        template: AnalysisModelTemplate::ThermalTransient,
+        label: "Thermal transient",
         family: "thermal",
         target: "heat transfer",
-        value: "temperature and heat flux",
-        default_outputs: &[
+        value: "time-dependent temperature and heat flux",
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
@@ -161,7 +138,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "modal",
         target: "solid mechanics",
         value: "natural frequencies and modes",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.mode_shapes",
                 location: "nodes",
@@ -178,7 +155,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "acoustic",
         target: "acoustics",
         value: "frequency-domain pressure",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "acoustic.pressure",
                 location: "nodes",
@@ -195,7 +172,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "structural",
         target: "solid mechanics",
         value: "time response",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
@@ -212,7 +189,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "structural",
         target: "solid mechanics",
         value: "large deformation or nonlinear material",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
@@ -224,12 +201,12 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         ],
     },
     AnalysisModelTemplateCatalogEntry {
-        template: AnalysisModelTemplate::ElectromagneticStatic,
-        label: "Electromagnetic",
+        template: AnalysisModelTemplate::ElectromagneticHarmonic,
+        label: "Electromagnetic harmonic",
         family: "electromagnetic",
         target: "electromagnetics",
-        value: "electric and magnetic fields",
-        default_outputs: &[
+        value: "frequency-domain electric and magnetic fields",
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "em.electric_field",
                 location: "elements",
@@ -246,7 +223,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "CFD",
         target: "fluid flow",
         value: "steady flow fields",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "fluid.velocity",
                 location: "nodes",
@@ -263,7 +240,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "CFD",
         target: "fluid flow",
         value: "time-dependent flow fields",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "fluid.velocity",
                 location: "nodes",
@@ -280,7 +257,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "coupled physics",
         target: "coupled fluid and solid heat transfer",
         value: "fluid and solid heat transfer",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "thermal.temperature",
                 location: "nodes",
@@ -301,7 +278,7 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
         family: "coupled physics",
         target: "coupled fluid and structural response",
         value: "fluid loads and structural response",
-        default_outputs: &[
+        default_observations: &[
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.displacement",
                 location: "nodes",
@@ -327,13 +304,15 @@ pub fn analysis_runtime_model_template_catalog() -> Vec<AnalysisRuntimeModelTemp
             family: entry.family.to_string(),
             target: entry.target.to_string(),
             value: entry.value.to_string(),
-            default_outputs: entry
-                .default_outputs
+            default_observations: entry
+                .default_observations
                 .iter()
-                .map(|output| AnalysisRuntimeModelTemplateDefaultObservation {
-                    field: output.field.to_string(),
-                    location: output.location.to_string(),
-                })
+                .map(
+                    |observation| AnalysisRuntimeModelTemplateDefaultObservation {
+                        field: observation.field.to_string(),
+                        location: observation.location.to_string(),
+                    },
+                )
                 .collect(),
         })
         .collect()
@@ -509,6 +488,19 @@ pub enum QualityReasonCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityReason {
     pub code: QualityReasonCode,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductionPublicationReasonCode {
+    NumericalAcceptanceFailed,
+    FormulationNotProductionQualified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProductionPublicationReason {
+    pub code: ProductionPublicationReasonCode,
     pub detail: String,
 }
 
@@ -979,7 +971,7 @@ pub enum QualityGate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
-    Publishable,
+    Completed,
     Degraded,
     Rejected,
 }
@@ -1128,7 +1120,6 @@ pub struct AnalysisRenderTriangleRange {
 #[serde(deny_unknown_fields)]
 pub struct AnalysisRunResult {
     pub run_id: String,
-    pub identity: AnalysisRunIdentity,
     pub run: FeaRunResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_topology: Option<AnalysisRenderTopology>,
@@ -1143,8 +1134,10 @@ pub struct AnalysisRunResult {
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub run_status: RunStatus,
-    pub publishable: bool,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
+    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
 }
 
@@ -1364,7 +1357,7 @@ pub struct AnalysisRunDatasetPayload {
     pub physics_family: Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub analysis_run_kind: Option<AnalysisRunKind>,
+    pub procedure_step: Option<ProcedureStep>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_output_summary: Option<String>,
@@ -2109,8 +2102,10 @@ pub struct AnalysisResultsData {
     pub electromagnetic_results: Option<ElectromagneticResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
-    pub publishable: bool,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
+    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub summary: AnalysisResultsSummary,
 }
@@ -2125,7 +2120,8 @@ pub struct AnalysisResultsCompareQuery {
 pub struct AnalysisResultsCompareData {
     pub baseline_run_id: String,
     pub candidate_run_id: String,
-    pub publishable_changed: bool,
+    pub numerically_acceptable_changed: bool,
+    pub production_publishable_changed: bool,
     pub run_status_changed: bool,
     pub quality_reason_count_delta: i64,
     pub failed_increment_delta: Option<i64>,
@@ -2146,14 +2142,215 @@ impl Default for AnalysisTrendsQuery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisOutputRequest {
-    pub id: String,
-    pub field_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub location: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "solver", content = "options", rename_all = "snake_case")]
+pub enum AnalysisSolverOptions {
+    StructuralLinear(AnalysisRunOptions),
+    StructuralModes(AnalysisModalRunOptions),
+    AcousticHelmholtz(AnalysisAcousticRunOptions),
+    ThermalDiffusion(AnalysisThermalRunOptions),
+    StructuralTransient(AnalysisTransientRunOptions),
+    IncompressibleFlow(AnalysisCfdRunOptions),
+    ConjugateHeatTransfer(AnalysisChtRunOptions),
+    FluidStructureInteraction(AnalysisFsiRunOptions),
+    StructuralNonlinear(AnalysisNonlinearRunOptions),
+    ElectromagneticPotential(AnalysisElectromagneticRunOptions),
+}
+
+impl AnalysisSolverOptions {
+    pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
+        use AnalysisProcedure::{
+            HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,
+        };
+        use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
+
+        if step.solution_space != SolutionSpace::Direct {
+            return Err(format!(
+                "procedure step `{}` selects unsupported solution space {:?}",
+                step.step_id.as_str(),
+                step.solution_space
+            ));
+        }
+        match (step.family, step.procedure) {
+            (Structural, Static)
+            | (Coupled(CoupledPhysicsFamily::Thermomechanical), Static) => {
+                Ok(Self::StructuralLinear(AnalysisRunOptions::default()))
+            }
+            (Structural, ModalExtraction) => {
+                Ok(Self::StructuralModes(AnalysisModalRunOptions::default()))
+            }
+            (Acoustic, HarmonicResponse) => Ok(Self::AcousticHelmholtz(
+                AnalysisAcousticRunOptions::default(),
+            )),
+            (Thermal, TransientResponse) => Ok(Self::ThermalDiffusion(
+                AnalysisThermalRunOptions::default(),
+            )),
+            (Structural, TransientResponse)
+            | (Coupled(CoupledPhysicsFamily::Thermomechanical), TransientResponse) => Ok(
+                Self::StructuralTransient(AnalysisTransientRunOptions::default()),
+            ),
+            (Fluid, Static | TransientResponse) => Ok(Self::IncompressibleFlow(
+                AnalysisCfdRunOptions::default(),
+            )),
+            (
+                Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+                Static | TransientResponse,
+            ) => Ok(Self::ConjugateHeatTransfer(
+                AnalysisChtRunOptions::default(),
+            )),
+            (
+                Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                TransientResponse,
+            ) => Ok(Self::FluidStructureInteraction(
+                AnalysisFsiRunOptions::default(),
+            )),
+            (Structural, Nonlinear)
+            | (Coupled(CoupledPhysicsFamily::Thermomechanical), Nonlinear) => Ok(
+                Self::StructuralNonlinear(AnalysisNonlinearRunOptions::default()),
+            ),
+            (Electromagnetic, HarmonicResponse) => Ok(
+                Self::ElectromagneticPotential(AnalysisElectromagneticRunOptions::default()),
+            ),
+            (family, procedure) => Err(format!(
+                "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{:?}",
+                step.step_id.as_str(),
+                step.solution_space
+            )),
+        }
+    }
+
+    pub fn supports(&self, step: &ProcedureStep) -> bool {
+        Self::defaults_for(step)
+            .map(|expected| std::mem::discriminant(&expected) == std::mem::discriminant(self))
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisExecutionStep {
+    pub step_id: ProcedureStepId,
+    pub backend: ComputeBackend,
+    #[serde(default = "default_formulation_requirement")]
+    pub requirement: FormulationRequirement,
+    pub solver_options: AnalysisSolverOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisExecutionPlan {
+    pub steps: Vec<AnalysisExecutionStep>,
+}
+
+impl AnalysisExecutionPlan {
+    pub fn for_sequence(
+        sequence: &runmat_analysis_core::AnalysisSequence,
+        backend: ComputeBackend,
+    ) -> Result<Self, String> {
+        Self::for_sequence_with_requirement(sequence, backend, FormulationRequirement::Production)
+    }
+
+    pub fn for_sequence_with_requirement(
+        sequence: &runmat_analysis_core::AnalysisSequence,
+        backend: ComputeBackend,
+        requirement: FormulationRequirement,
+    ) -> Result<Self, String> {
+        let steps = sequence
+            .steps
+            .iter()
+            .map(|step| {
+                Ok(AnalysisExecutionStep {
+                    step_id: step.step_id.clone(),
+                    backend,
+                    requirement,
+                    solver_options: AnalysisSolverOptions::defaults_for(step)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let plan = Self { steps };
+        plan.validate_against(sequence)?;
+        Ok(plan)
+    }
+
+    pub fn validate_against(
+        &self,
+        sequence: &runmat_analysis_core::AnalysisSequence,
+    ) -> Result<(), String> {
+        if self.steps.is_empty() {
+            return Err("execution plan must contain at least one procedure step".to_string());
+        }
+        if self.steps.len() != sequence.steps.len() {
+            return Err(format!(
+                "execution plan must contain exactly one entry for each sequence procedure step (execution={}, sequence={})",
+                self.steps.len(),
+                sequence.steps.len()
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for execution in &self.steps {
+            if !seen.insert(&execution.step_id) {
+                return Err(format!(
+                    "procedure step `{}` appears more than once in the execution plan",
+                    execution.step_id.as_str()
+                ));
+            }
+            let step = sequence
+                .steps
+                .iter()
+                .find(|step| step.step_id == execution.step_id)
+                .ok_or_else(|| {
+                    format!(
+                        "execution plan references procedure step `{}`, which is absent from sequence `{}`",
+                        execution.step_id.as_str(),
+                        sequence.sequence_id
+                    )
+                })?;
+            if !execution.solver_options.supports(step) {
+                return Err(format!(
+                    "solver options are incompatible with procedure step `{}` ({:?}/{:?}/{:?})",
+                    step.step_id.as_str(),
+                    step.family,
+                    step.procedure,
+                    step.solution_space
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn procedure_step<'a>(
+        &self,
+        sequence: &'a runmat_analysis_core::AnalysisSequence,
+        execution: &AnalysisExecutionStep,
+    ) -> Result<&'a ProcedureStep, String> {
+        if !self.steps.iter().any(|planned| planned == execution) {
+            return Err(format!(
+                "execution entry for procedure step `{}` does not belong to this plan",
+                execution.step_id.as_str()
+            ));
+        }
+        let step = sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id == execution.step_id)
+            .ok_or_else(|| {
+                format!(
+                    "execution plan references procedure step `{}`, which is absent from sequence `{}`",
+                    execution.step_id.as_str(),
+                    sequence.sequence_id
+                )
+            })?;
+        if !execution.solver_options.supports(step) {
+            return Err(format!(
+                "solver options are incompatible with procedure step `{}` ({:?}/{:?}/{:?})",
+                step.step_id.as_str(),
+                step.family,
+                step.procedure,
+                step.solution_space
+            ));
+        }
+        Ok(step)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2164,36 +2361,13 @@ pub struct AnalysisStudySpec {
     pub create_model_intent: AnalysisCreateModelIntentSpec,
     #[serde(default)]
     pub model: Option<AnalysisModel>,
-    pub run_kind: AnalysisRunKind,
-    pub backend: ComputeBackend,
+    pub execution: AnalysisExecutionPlan,
     #[serde(default)]
     pub meshing_settings: Option<MeshingRequestSettings>,
-    #[serde(default)]
-    pub outputs: Vec<AnalysisOutputRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meshing_evidence_artifact_path: Option<String>,
-    #[serde(default)]
-    pub linear_static_run_options: Option<AnalysisRunOptions>,
-    #[serde(default)]
-    pub modal_run_options: Option<AnalysisModalRunOptions>,
-    #[serde(default)]
-    pub acoustic_run_options: Option<AnalysisAcousticRunOptions>,
-    #[serde(default)]
-    pub thermal_run_options: Option<AnalysisThermalRunOptions>,
-    #[serde(default)]
-    pub transient_run_options: Option<AnalysisTransientRunOptions>,
-    #[serde(default)]
-    pub cfd_run_options: Option<AnalysisCfdRunOptions>,
-    #[serde(default)]
-    pub cht_run_options: Option<AnalysisChtRunOptions>,
-    #[serde(default)]
-    pub fsi_run_options: Option<AnalysisFsiRunOptions>,
-    #[serde(default)]
-    pub nonlinear_run_options: Option<AnalysisNonlinearRunOptions>,
-    #[serde(default)]
-    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -2224,8 +2398,8 @@ pub struct AnalysisStudyAuthoringIntent {
     pub geometry: GeometryAsset,
     pub mesh_summary: AnalysisMeshSummary,
     pub template: AnalysisModelTemplate,
-    pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    pub requirement: FormulationRequirement,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
@@ -2301,12 +2475,8 @@ pub struct AnalysisStudyIssue {
 pub struct AnalysisStudyPlanData {
     pub study_id: String,
     pub model_id: String,
-    pub run_kind: AnalysisRunKind,
-    pub backend: ComputeBackend,
-    #[serde(default)]
-    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
-    #[serde(default)]
-    pub run_options: serde_json::Value,
+    pub procedure_step: ProcedureStep,
+    pub execution: AnalysisExecutionStep,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
     pub run_op_version: String,
@@ -2319,12 +2489,9 @@ pub struct AnalysisStudyRunData {
     pub study_id: String,
     pub model_id: String,
     pub model_template: AnalysisModelTemplate,
-    pub run_kind: AnalysisRunKind,
-    pub backend: ComputeBackend,
-    #[serde(default)]
-    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
-    #[serde(default)]
-    pub run_options: serde_json::Value,
+    pub procedure_step: ProcedureStep,
+    pub execution: AnalysisExecutionStep,
+    pub identity: AnalysisRunIdentity,
     #[serde(default)]
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
@@ -2335,11 +2502,13 @@ pub struct AnalysisStudyRunData {
     pub run_op_version: String,
     pub run_id: String,
     pub run_status: RunStatus,
-    pub publishable: bool,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     #[serde(default)]
     pub quality_reasons: Vec<QualityReason>,
+    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub evidence_artifact_path: String,
 }
@@ -2374,12 +2543,8 @@ pub struct AnalysisStudySweepValidateData {
 pub struct AnalysisStudySweepPlanEntry {
     pub study_id: String,
     pub model_id: String,
-    pub run_kind: AnalysisRunKind,
-    pub backend: ComputeBackend,
-    #[serde(default)]
-    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
-    #[serde(default)]
-    pub run_options: serde_json::Value,
+    pub procedure_step: ProcedureStep,
+    pub execution: AnalysisExecutionStep,
     pub operation_sequence: Vec<String>,
     pub run_operation: String,
     pub run_op_version: String,
@@ -2401,10 +2566,14 @@ pub struct AnalysisStudySweepPlanData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySweepRunEntry {
     pub study_id: String,
-    pub run_kind: AnalysisRunKind,
+    pub procedure_step: ProcedureStep,
+    pub execution: AnalysisExecutionStep,
+    pub identity: AnalysisRunIdentity,
     pub run_id: String,
     pub run_status: RunStatus,
-    pub publishable: bool,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
+    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub run_operation: String,
     pub run_op_version: String,
 }
@@ -2433,19 +2602,8 @@ fn default_study_sweep_fail_fast() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisRunKind {
-    LinearStatic,
-    Modal,
-    Acoustic,
-    Thermal,
-    Transient,
-    Cfd,
-    Cht,
-    Fsi,
-    Nonlinear,
-    Electromagnetic,
+const fn default_formulation_requirement() -> FormulationRequirement {
+    FormulationRequirement::Production
 }
 
 impl AnalysisModelTemplate {
@@ -2457,13 +2615,12 @@ impl AnalysisModelTemplate {
         match self {
             AnalysisModelTemplate::LinearStaticStructural => "linear_static_structural",
             AnalysisModelTemplate::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
-            AnalysisModelTemplate::ElectroThermalCoupled => "electro_thermal_coupled",
-            AnalysisModelTemplate::ThermalStandalone => "thermal_standalone",
+            AnalysisModelTemplate::ThermalTransient => "thermal_transient",
             AnalysisModelTemplate::ModalStructural => "modal_structural",
             AnalysisModelTemplate::AcousticHarmonic => "acoustic_harmonic",
             AnalysisModelTemplate::TransientStructural => "transient_structural",
             AnalysisModelTemplate::NonlinearStructural => "nonlinear_structural",
-            AnalysisModelTemplate::ElectromagneticStatic => "electromagnetic_static",
+            AnalysisModelTemplate::ElectromagneticHarmonic => "electromagnetic_harmonic",
             AnalysisModelTemplate::CfdSteadyState => "cfd_steady_state",
             AnalysisModelTemplate::CfdTransient => "cfd_transient",
             AnalysisModelTemplate::ChtCoupled => "cht_coupled",
@@ -2477,49 +2634,6 @@ impl AnalysisModelTemplate {
             .find(|entry| entry.template == self)
             .expect("analysis template catalog must contain every template variant")
     }
-
-    pub fn derived_run_kind(self) -> AnalysisRunKind {
-        debug_assert!(
-            ANALYSIS_MODEL_TEMPLATE_CATALOG
-                .iter()
-                .any(|entry| entry.template == self),
-            "analysis template catalog is missing {:?}",
-            self
-        );
-        match self {
-            AnalysisModelTemplate::LinearStaticStructural => AnalysisRunKind::LinearStatic,
-            AnalysisModelTemplate::ThermoMechanicalCoupled => AnalysisRunKind::Transient,
-            AnalysisModelTemplate::ElectroThermalCoupled => AnalysisRunKind::Transient,
-            AnalysisModelTemplate::ThermalStandalone => AnalysisRunKind::Thermal,
-            AnalysisModelTemplate::ModalStructural => AnalysisRunKind::Modal,
-            AnalysisModelTemplate::AcousticHarmonic => AnalysisRunKind::Acoustic,
-            AnalysisModelTemplate::TransientStructural => AnalysisRunKind::Transient,
-            AnalysisModelTemplate::NonlinearStructural => AnalysisRunKind::Nonlinear,
-            AnalysisModelTemplate::ElectromagneticStatic => AnalysisRunKind::Electromagnetic,
-            AnalysisModelTemplate::CfdSteadyState | AnalysisModelTemplate::CfdTransient => {
-                AnalysisRunKind::Cfd
-            }
-            AnalysisModelTemplate::ChtCoupled => AnalysisRunKind::Cht,
-            AnalysisModelTemplate::FsiCoupled => AnalysisRunKind::Fsi,
-        }
-    }
-}
-
-impl AnalysisRunKind {
-    pub const fn as_snake_case(self) -> &'static str {
-        match self {
-            AnalysisRunKind::LinearStatic => "linear_static",
-            AnalysisRunKind::Modal => "modal",
-            AnalysisRunKind::Acoustic => "acoustic",
-            AnalysisRunKind::Thermal => "thermal",
-            AnalysisRunKind::Transient => "transient",
-            AnalysisRunKind::Cfd => "cfd",
-            AnalysisRunKind::Cht => "cht",
-            AnalysisRunKind::Fsi => "fsi",
-            AnalysisRunKind::Nonlinear => "nonlinear",
-            AnalysisRunKind::Electromagnetic => "electromagnetic",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2528,7 +2642,8 @@ pub struct AnalysisTrendKindSummary {
     pub sample_count: usize,
     pub median_solve_ms: Option<f64>,
     pub p95_solve_ms: Option<f64>,
-    pub publishable_rate: f64,
+    pub numerically_acceptable_rate: f64,
+    pub production_publishable_rate: f64,
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
@@ -2798,13 +2913,12 @@ mod tests {
         let expected_profiles = [
             AnalysisModelTemplate::LinearStaticStructural,
             AnalysisModelTemplate::ThermoMechanicalCoupled,
-            AnalysisModelTemplate::ElectroThermalCoupled,
-            AnalysisModelTemplate::ThermalStandalone,
+            AnalysisModelTemplate::ThermalTransient,
             AnalysisModelTemplate::ModalStructural,
             AnalysisModelTemplate::AcousticHarmonic,
             AnalysisModelTemplate::TransientStructural,
             AnalysisModelTemplate::NonlinearStructural,
-            AnalysisModelTemplate::ElectromagneticStatic,
+            AnalysisModelTemplate::ElectromagneticHarmonic,
             AnalysisModelTemplate::CfdSteadyState,
             AnalysisModelTemplate::CfdTransient,
             AnalysisModelTemplate::ChtCoupled,
@@ -2843,34 +2957,33 @@ mod tests {
             assert!(!entry.target.trim().is_empty());
             assert!(!entry.value.trim().is_empty());
             assert!(
-                !entry.default_outputs.is_empty(),
-                "catalog template {:?} needs at least one default output",
+                !entry.default_observations.is_empty(),
+                "catalog template {:?} needs at least one default observation",
                 entry.template
             );
-            for output in entry.default_outputs {
-                assert!(!output.field.trim().is_empty());
-                assert!(!output.location.trim().is_empty());
+            for observation in entry.default_observations {
+                assert!(!observation.field.trim().is_empty());
+                assert!(!observation.location.trim().is_empty());
             }
         }
+    }
 
-        for run_kind in [
-            AnalysisRunKind::LinearStatic,
-            AnalysisRunKind::Modal,
-            AnalysisRunKind::Acoustic,
-            AnalysisRunKind::Thermal,
-            AnalysisRunKind::Transient,
-            AnalysisRunKind::Cfd,
-            AnalysisRunKind::Cht,
-            AnalysisRunKind::Fsi,
-            AnalysisRunKind::Nonlinear,
-            AnalysisRunKind::Electromagnetic,
+    #[test]
+    fn model_template_names_are_truthful_and_do_not_accept_retired_aliases() {
+        assert_eq!(
+            AnalysisModelTemplate::from_snake_case("thermal_transient"),
+            Some(AnalysisModelTemplate::ThermalTransient)
+        );
+        assert_eq!(
+            AnalysisModelTemplate::from_snake_case("electromagnetic_harmonic"),
+            Some(AnalysisModelTemplate::ElectromagneticHarmonic)
+        );
+        for retired in [
+            "thermal_standalone",
+            "electromagnetic_static",
+            "electro_thermal_coupled",
         ] {
-            let serialized_run_kind = serde_json::to_value(run_kind)
-                .expect("run kind should serialize")
-                .as_str()
-                .expect("run kind should serialize as string")
-                .to_string();
-            assert_eq!(run_kind.as_snake_case(), serialized_run_kind);
+            assert_eq!(AnalysisModelTemplate::from_snake_case(retired), None);
         }
     }
 
@@ -2907,7 +3020,70 @@ mod tests {
             assert!(!entry.label.trim().is_empty());
             assert!(!entry.target.trim().is_empty());
             assert!(!entry.value.trim().is_empty());
-            assert!(!entry.default_outputs.is_empty());
+            assert!(!entry.default_observations.is_empty());
         }
+    }
+
+    #[test]
+    fn solver_defaults_reject_unimplemented_exact_procedures() {
+        let mut prestressed_modal = ProcedureStep::structural_modal("prestressed_modal");
+        prestressed_modal.procedure = AnalysisProcedure::PrestressedModalExtraction;
+        assert!(AnalysisSolverOptions::defaults_for(&prestressed_modal).is_err());
+
+        let mut thermal_static = ProcedureStep::thermal_transient("thermal_static");
+        thermal_static.procedure = AnalysisProcedure::Static;
+        assert!(AnalysisSolverOptions::defaults_for(&thermal_static).is_err());
+
+        let mut electromagnetic_static =
+            ProcedureStep::electromagnetic_harmonic("electromagnetic_static");
+        electromagnetic_static.procedure = AnalysisProcedure::Static;
+        assert!(AnalysisSolverOptions::defaults_for(&electromagnetic_static).is_err());
+
+        let electrothermal = ProcedureStep::coupled(
+            "electrothermal",
+            CoupledPhysicsFamily::Electrothermal,
+            AnalysisProcedure::TransientResponse,
+        );
+        assert!(AnalysisSolverOptions::defaults_for(&electrothermal).is_err());
+    }
+
+    #[test]
+    fn execution_plan_owns_one_to_one_sequence_resolution() {
+        let sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+            "two_step_sequence",
+            vec![
+                ProcedureStep::structural_static("static"),
+                ProcedureStep::structural_modal("modes"),
+            ],
+        );
+        let plan = AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
+            .expect("supported sequence should produce a typed execution plan");
+        assert_eq!(plan.steps.len(), 2);
+        assert!(plan
+            .steps
+            .iter()
+            .all(|step| step.requirement == FormulationRequirement::Production));
+        assert!(plan.validate_against(&sequence).is_ok());
+
+        let mut duplicate = plan.clone();
+        duplicate.steps[1] = duplicate.steps[0].clone();
+        assert!(duplicate
+            .validate_against(&sequence)
+            .expect_err("duplicate execution entries must fail")
+            .contains("more than once"));
+
+        let mut missing = plan.clone();
+        missing.steps.pop();
+        assert!(missing
+            .validate_against(&sequence)
+            .expect_err("missing execution entries must fail")
+            .contains("exactly one entry"));
+
+        let mut orphan = plan;
+        orphan.steps[0].step_id = ProcedureStepId("absent".to_string());
+        assert!(orphan
+            .validate_against(&sequence)
+            .expect_err("orphan execution entries must fail")
+            .contains("absent from sequence"));
     }
 }

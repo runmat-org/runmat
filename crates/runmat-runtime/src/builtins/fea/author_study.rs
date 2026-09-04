@@ -1,8 +1,9 @@
+use runmat_analysis_core::FormulationRequirement;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_value::Value;
 
 use crate::analysis::{
-    analysis_author_study_op, AnalysisMeshSummary, AnalysisModelTemplate, AnalysisRunKind,
+    analysis_author_study_op, AnalysisMeshSummary, AnalysisModelTemplate,
     AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation,
 };
 use crate::operations::OperationContext;
@@ -34,8 +35,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
     let geometry = geometry_asset_from_value_with_builtin(&args[1], AUTHOR_STUDY_NAME)?;
     let mesh_summary = mesh_summary_from_value(&args[2])?;
     let mut template = None::<AnalysisModelTemplate>;
-    let mut run_kind = None::<AnalysisRunKind>;
     let mut backend = ComputeBackend::Cpu;
+    let mut requirement = FormulationRequirement::Production;
     let mut model_id = None::<String>;
     let mut physical_region_id = None::<String>;
     let mut boundary_condition_region_id = None::<String>;
@@ -52,13 +53,13 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
                 template = Some(parse_scalar_enum(&text, "Template")?);
             }
-            "runkind" | "kind" => {
-                let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
-                run_kind = Some(parse_scalar_enum(&text, "RunKind")?);
-            }
             "backend" => {
                 let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
                 backend = parse_scalar_enum(&text, "Backend")?;
+            }
+            "requirement" | "formulationrequirement" => {
+                let text = scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?;
+                requirement = parse_scalar_enum(&text, "FormulationRequirement")?;
             }
             "modelid" => {
                 model_id = Some(scalar_string(&pair[1], AUTHOR_STUDY_NAME, &ERROR_INPUT)?);
@@ -115,23 +116,6 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             "fea.authorStudy requires Template; choose a model template from fea.capabilities().modelTemplates",
         )
     })?;
-    let derived_run_kind = template.derived_run_kind();
-    let run_kind = match run_kind {
-        Some(explicit_run_kind) if explicit_run_kind != derived_run_kind => {
-            return Err(builtin_error(
-                AUTHOR_STUDY_NAME,
-                &ERROR_INPUT,
-                format!(
-                    "explicit solver {} does not match Template {}; omit RunKind or choose a matching Template",
-                    explicit_run_kind.as_snake_case(),
-                    template.as_snake_case()
-                ),
-            ));
-        }
-        Some(explicit_run_kind) => explicit_run_kind,
-        None => derived_run_kind,
-    };
-
     let authored = analysis_author_study_op(
         AnalysisStudyAuthoringIntent {
             study_id,
@@ -139,8 +123,8 @@ pub(super) fn create_author_study_object_from_args(args: Vec<Value>) -> BuiltinR
             geometry,
             mesh_summary,
             template,
-            run_kind,
             backend,
+            requirement,
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
             physical_region_id,
@@ -516,6 +500,8 @@ mod tests {
             summary,
             Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
+            Value::String("Requirement".to_string()),
+            Value::String("experimental".to_string()),
             Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
             Value::String("StructuralForceN".to_string()),
@@ -551,10 +537,21 @@ mod tests {
         };
         let run_data: crate::analysis::AnalysisStudyRunData =
             serde_json::from_str(run_payload).expect("run result should decode");
-        assert_eq!(run_data.run_kind, AnalysisRunKind::LinearStatic);
-        assert_eq!(run_data.run_status, crate::analysis::RunStatus::Publishable);
-        assert!(run_data.publishable);
-        assert_eq!(run_data.quality_reasons.len(), 0);
+        assert_eq!(
+            run_data.procedure_step.procedure,
+            runmat_analysis_core::AnalysisProcedure::Static
+        );
+        assert_eq!(run_data.run_status, crate::analysis::RunStatus::Completed);
+        assert!(run_data.numerically_acceptable);
+        assert!(!run_data.production_publishable);
+        assert!(run_data.quality_reasons.is_empty());
+        assert!(run_data
+            .production_publication_reasons
+            .iter()
+            .any(|reason| {
+                reason.code
+                    == crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified
+            }));
         assert_eq!(
             run_data.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())
@@ -603,6 +600,8 @@ mod tests {
             summary,
             Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
+            Value::String("Requirement".to_string()),
+            Value::String("experimental".to_string()),
             Value::String("SolverMeshArtifactPath".to_string()),
             Value::String(mesh_path.clone()),
         ])
@@ -644,10 +643,21 @@ mod tests {
         };
         let run_data: crate::analysis::AnalysisStudyRunData =
             serde_json::from_str(run_payload).expect("run result should decode");
-        assert_eq!(run_data.run_kind, AnalysisRunKind::LinearStatic);
-        assert_eq!(run_data.run_status, crate::analysis::RunStatus::Publishable);
-        assert!(run_data.publishable);
-        assert_eq!(run_data.quality_reasons.len(), 0);
+        assert_eq!(
+            run_data.procedure_step.procedure,
+            runmat_analysis_core::AnalysisProcedure::Static
+        );
+        assert_eq!(run_data.run_status, crate::analysis::RunStatus::Completed);
+        assert!(run_data.numerically_acceptable);
+        assert!(!run_data.production_publishable);
+        assert!(run_data.quality_reasons.is_empty());
+        assert!(run_data
+            .production_publication_reasons
+            .iter()
+            .any(|reason| {
+                reason.code
+                    == crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified
+            }));
         assert_eq!(
             run_data.solver_mesh_artifact_path.as_deref(),
             Some(mesh_path.as_str())

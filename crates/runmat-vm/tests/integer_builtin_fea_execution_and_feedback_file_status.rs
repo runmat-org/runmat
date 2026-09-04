@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_value::{IntValue, Value};
+use runmat_value::Value;
 use test_helpers::execute_source;
 
 const INTEGER_CONSTRUCTORS: [&str; 8] = [
@@ -18,42 +18,16 @@ fn object_of_class<'a>(values: &'a [Value], class_name: &str) -> &'a runmat_valu
         .unwrap_or_else(|| panic!("expected {class_name} object"))
 }
 
-fn struct_field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
-    match value {
-        Value::Struct(fields) => fields.fields.get(name),
-        _ => None,
-    }
-}
-
 #[test]
-fn fea_run_options_and_trends_accept_every_exact_integer_class() {
+fn fea_trends_accepts_every_exact_integer_class() {
     for constructor in INTEGER_CONSTRUCTORS {
         let source = format!(
             r#"
-            opts = fea.runOptions("modal", ...
-                "ModeCount", {constructor}(3), ...
-                "ResidualWarnThreshold", {constructor}(1));
             trends = fea.trends("WindowSize", {constructor}(1));
             "#
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} FEA structural controls: {error}"));
-        let options = object_of_class(&values, "fea.RunOptions");
-        let payload = options.properties.get("options").expect("public options");
-        assert!(
-            matches!(
-                struct_field(payload, "mode_count"),
-                Some(Value::Int(IntValue::U64(3)))
-            ),
-            "{constructor} mode count must remain exact"
-        );
-        assert!(
-            matches!(
-                struct_field(payload, "residual_warn_threshold"),
-                Some(Value::Num(1.0))
-            ),
-            "{constructor} residual threshold must use binary64"
-        );
         object_of_class(&values, "fea.Trends");
     }
 }

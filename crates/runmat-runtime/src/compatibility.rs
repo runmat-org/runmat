@@ -2058,7 +2058,6 @@ mod tests {
             "fea.interface",
             "fea.material",
             "fea.results",
-            "fea.runOptions",
             "fea.trends",
             "feof",
             "fitclinear",

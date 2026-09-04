@@ -2,8 +2,6 @@ import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
 import type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
   FeaCapabilities,
   FeaCheckResult,
   FeaDiagnosticsArtifactPayload,
@@ -26,7 +24,8 @@ import type {
   FeaRunDatasetStudyRef,
   FeaRunResult,
   FeaStudyDocumentOperation,
-  FeaStudyDocumentOperationOutput
+  FeaStudyDocumentOperationOutput,
+  FeaStudyOperationInput
 } from "./fea-contracts.js";
 import {
   FEA_ARTIFACT_MANIFEST_KIND,
@@ -66,8 +65,7 @@ import type {
 import { __internals as workspaceHoverInternals } from "./workspace-hover.js";
 import { installWebGpuCompatibilityShims } from "./webgpu-shims.js";
 export {
-  FEA_ANALYSIS_PROFILES,
-  FEA_ANALYSIS_RUN_KINDS,
+  FEA_MODEL_TEMPLATES,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
@@ -84,12 +82,13 @@ export {
   FEA_RUN_MANIFEST_METADATA_SCHEMA_VERSION,
   FEA_STUDY_DOCUMENT_OPERATIONS,
   FEA_SUPPORTED_PHYSICS_FAMILIES,
-  FEA_SUPPORTED_PHYSICS_PROFILES,
+  FEA_SUPPORTED_MODEL_TEMPLATES,
   feaRunArtifactRefId,
 } from "./fea-contracts.js";
 export type {
-  FeaAnalysisProfile,
-  FeaAnalysisRunKind,
+  FeaAnalysisProcedure,
+  FeaBoundaryInput,
+  FeaCanonicalSequence,
   FeaCapabilities,
   FeaCheckResult,
   FeaDiagnosticsArtifactPayload,
@@ -104,7 +103,30 @@ export type {
   FeaFieldStorage,
   FeaFieldStorageRef,
   FeaObjectArtifactMetadata,
-  FeaPhysicsProfileCatalogEntry,
+  FeaComputeBackend,
+  FeaConnectorInput,
+  FeaConstraintInput,
+  FeaDomainsInput,
+  FeaElementOrder,
+  FeaExecutionInput,
+  FeaFormulationRequirement,
+  FeaExcitationCaseInput,
+  FeaExcitationInput,
+  FeaGeometryUnits,
+  FeaInitialConditionInput,
+  FeaInterfaceInput,
+  FeaMaterialAssignmentInput,
+  FeaMaterialInput,
+  FeaMeshSettingsInput,
+  FeaModelTemplate,
+  FeaModelTemplateCatalogEntry,
+  FeaPhysicsFamily,
+  FeaProcedureStep,
+  FeaRegionInput,
+  FeaRegionSelector,
+  FeaRegionTarget,
+  FeaResponseSpectrumInput,
+  FeaSignalInput,
   FeaProgressEvent,
   FeaProgressPhase,
   FeaProgressStatus,
@@ -112,19 +134,21 @@ export type {
   FeaRunDatasetPayload,
   FeaRunDatasetStudyRef,
   FeaRunResult,
-  FeaStudyBoundaryConditionEntry,
   FeaStudyDocumentCounts,
+  FeaStudyCreateInput,
   FeaStudyDocumentDiff,
   FeaStudyDocumentOperation,
   FeaStudyDocumentOperationOutput,
   FeaStudyDocumentOperationResult,
-  FeaStudyDrivingConditionEntry,
+  FeaStudyOperationInput,
+  FeaStudyOperationInputs,
+  FeaStudyMeshInput,
+  FeaStudyNamedEntry,
   FeaStudyMaterialAssignmentEntry,
   FeaStudyMaterialEntry,
-  FeaStudyOutputEntry,
   FeaStudyReadiness,
   FeaStudyRegionEntry,
-  FeaStudyStepEntry,
+  FeaStudySequenceSummary,
   FeaStudySummary,
   FeaRunArtifactRole
 } from "./fea-contracts.js";
@@ -1000,11 +1024,11 @@ export interface RunMatSessionHandle {
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
   checkFeaStudy(path: string): Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
+  applyFeaStudyDocumentOperation<O extends FeaStudyDocumentOperation>(
+    operation: O,
     path: string,
     source: string | null,
-    input: Record<string, unknown>,
+    input: FeaStudyOperationInput<O>,
   ): Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy(path: string, artifactRoot?: string | null): Promise<FeaRunResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
@@ -1098,11 +1122,11 @@ interface RunMatNativeSession {
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
   checkFeaStudy?: (path: string) => FeaCheckResult | Promise<FeaCheckResult>;
-  applyFeaStudyDocumentOperation?: (
-    operation: FeaStudyDocumentOperation,
+  applyFeaStudyDocumentOperation?: <O extends FeaStudyDocumentOperation>(
+    operation: O,
     path: string,
     source: string | null,
-    input: Record<string, unknown>,
+    input: FeaStudyOperationInput<O>,
   ) => FeaStudyDocumentOperationOutput | Promise<FeaStudyDocumentOperationOutput>;
   runFeaStudy?: (path: string, artifactRoot?: string | null) => FeaRunResult | Promise<FeaRunResult>;
   feaField?: (
@@ -2192,11 +2216,11 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.checkFeaStudy(path);
   }
 
-  async applyFeaStudyDocumentOperation(
-    operation: FeaStudyDocumentOperation,
+  async applyFeaStudyDocumentOperation<O extends FeaStudyDocumentOperation>(
+    operation: O,
     path: string,
     source: string | null,
-    input: Record<string, unknown>,
+    input: FeaStudyOperationInput<O>,
   ): Promise<FeaStudyDocumentOperationOutput> {
     this.ensureActive();
     if (typeof this.native.applyFeaStudyDocumentOperation !== "function") {

@@ -432,7 +432,7 @@ mod tests {
             ObservationQuantity::Residual
         ));
 
-        let thermal = ProcedureStep::thermal_static("thermal");
+        let thermal = ProcedureStep::thermal_transient("thermal");
         assert!(quantity_supported(&thermal, ObservationQuantity::HeatFlux));
         assert!(!quantity_supported(
             &thermal,

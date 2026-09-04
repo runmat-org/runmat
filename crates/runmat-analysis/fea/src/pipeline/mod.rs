@@ -7,6 +7,8 @@ pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;
 
+mod admission;
+
 use runmat_analysis_core::{
     AnalysisModel, StructuralConstraint, StructuralConstraintKind, StructuralElementKind,
     StructuralModel,

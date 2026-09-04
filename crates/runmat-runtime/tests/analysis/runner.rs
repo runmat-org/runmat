@@ -657,18 +657,26 @@ fn thermo_field_signature(payload_hash: &str, approved_by: &str) -> String {
     format!("sigv1:sha256:{:x}", hasher.finalize())
 }
 
-fn primary_result_field_id(run_kind: AnalysisRunKind) -> String {
-    match run_kind {
-        AnalysisRunKind::Thermal => fea_thermal_temperature_field_id(0),
-        AnalysisRunKind::Acoustic => FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string(),
-        AnalysisRunKind::Electromagnetic => FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
-        AnalysisRunKind::Cfd => FEA_FIELD_CFD_VELOCITY.to_string(),
-        AnalysisRunKind::Cht => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
-        AnalysisRunKind::Fsi => fea_fsi_fluid_velocity_field_id(0),
-        AnalysisRunKind::LinearStatic
-        | AnalysisRunKind::Modal
-        | AnalysisRunKind::Transient
-        | AnalysisRunKind::Nonlinear => FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
+fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
+    match AnalysisSolverOptions::defaults_for(procedure_step)
+        .expect("fixture procedure step must select a supported solver")
+    {
+        AnalysisSolverOptions::ThermalDiffusion(_) => fea_thermal_temperature_field_id(0),
+        AnalysisSolverOptions::AcousticHelmholtz(_) => {
+            FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
+        }
+        AnalysisSolverOptions::ElectromagneticPotential(_) => {
+            FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string()
+        }
+        AnalysisSolverOptions::IncompressibleFlow(_) => FEA_FIELD_CFD_VELOCITY.to_string(),
+        AnalysisSolverOptions::ConjugateHeatTransfer(_) => FEA_FIELD_CHT_FLUID_VELOCITY.to_string(),
+        AnalysisSolverOptions::FluidStructureInteraction(_) => fea_fsi_fluid_velocity_field_id(0),
+        AnalysisSolverOptions::StructuralLinear(_)
+        | AnalysisSolverOptions::StructuralModes(_)
+        | AnalysisSolverOptions::StructuralTransient(_)
+        | AnalysisSolverOptions::StructuralNonlinear(_) => {
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string()
+        }
     }
 }
 
@@ -1056,7 +1064,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
 
 fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingOptions> {
     match spec_id {
-        "electro_thermal_joule_benign_gpu_provider" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_joule_benign_rejected" => Some(ElectroThermalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
@@ -1083,7 +1091,7 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                 },
             ],
         }),
-        "electro_thermal_joule_pathological_gpu_provider" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_joule_pathological_rejected" => Some(ElectroThermalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
             applied_voltage_v: 180.0,
@@ -1150,37 +1158,6 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
                 conductivity_scale: 1.0,
             }],
             sampled_time_profile: Vec::new(),
-        }),
-        "nonlinear_load_path_mix_gpu_provider" => Some(ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 82.0,
-            base_electrical_conductivity_s_per_m: 2.6e7,
-            resistive_heating_coefficient: 6.0e-4,
-            region_conductivity_scales: vec![
-                ElectroRegionConductivityScale {
-                    region_id: "softening_material_region_0".to_string(),
-                    conductivity_scale: 1.2,
-                },
-                ElectroRegionConductivityScale {
-                    region_id: "softening_material_region_1".to_string(),
-                    conductivity_scale: 0.85,
-                },
-            ],
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.55,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.5,
-                    scale: 1.2,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 0.9,
-                },
-            ],
         }),
         _ => None,
     }
@@ -1447,7 +1424,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("thermal_standalone_ramp_") {
-        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_static(
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_transient(
             format!("step_thermal_{}", spec_id),
         )];
         model.constraints = vec![thermal_temperature(
@@ -1541,10 +1518,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         ));
     }
     if spec_id.starts_with("cfd_transient_") {
-        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(format!(
-            "step_cfd_{}",
-            spec_id
-        ))];
+        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_transient(
+            format!("step_cfd_{}", spec_id),
+        )];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -1754,9 +1730,12 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
-        model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::electromagnetic_static(
-            format!("step_em_{}", spec_id),
-        )];
+        model.sequence.steps = vec![
+            runmat_analysis_core::ProcedureStep::electromagnetic_harmonic(format!(
+                "step_em_{}",
+                spec_id
+            )),
+        ];
         model.thermo_mechanical = None;
         model.electro_thermal = None;
         model.interfaces.clear();
@@ -2707,6 +2686,20 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 .collect(),
             temperature_signal_id,
         });
+        for step in &mut model.sequence.steps {
+            if step.family == runmat_analysis_core::PhysicsFamily::Structural
+                && matches!(
+                    step.procedure,
+                    runmat_analysis_core::AnalysisProcedure::Static
+                        | runmat_analysis_core::AnalysisProcedure::TransientResponse
+                        | runmat_analysis_core::AnalysisProcedure::Nonlinear
+                )
+            {
+                step.family = runmat_analysis_core::PhysicsFamily::Coupled(
+                    runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+                );
+            }
+        }
     }
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
@@ -2969,16 +2962,20 @@ fn run_fixture_cpu(
     solver_mesh_artifact_path: Option<&str>,
 ) -> FixtureRunResult {
     let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
-    boxed_fixture_run_result(match spec.run_kind {
-        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
+    let solver = AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
+        .expect("fixture procedure step must select a supported solver");
+    boxed_fixture_run_result(match solver {
+        AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+        AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 mode_count: spec
@@ -2988,9 +2985,10 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+        AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -2999,21 +2997,24 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+        AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+        AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+        AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3029,9 +3030,10 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+        AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3047,9 +3049,10 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
+        AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3065,18 +3068,22 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
+        AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
-            model,
-            ComputeBackend::Cpu,
-            electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        ),
+        AnalysisSolverOptions::ElectromagneticPotential(_) => {
+            analysis_run_electromagnetic_with_options_op(
+                model,
+                ComputeBackend::Cpu,
+                FormulationRequirement::Experimental,
+                electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
+                OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+            )
+        }
     })
 }
 
@@ -3087,16 +3094,20 @@ fn run_fixture_gpu(
     solver_mesh_artifact_path: Option<&str>,
 ) -> FixtureRunResult {
     let solver_mesh_artifact_path = solver_mesh_artifact_path.map(str::to_owned);
-    let run = || match spec.run_kind {
-        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
+    let run = || match AnalysisSolverOptions::defaults_for(fixture_procedure_step(model))
+        .expect("fixture procedure step must select a supported solver")
+    {
+        AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+        AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 mode_count: spec
@@ -3106,9 +3117,10 @@ fn run_fixture_gpu(
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+        AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -3117,21 +3129,24 @@ fn run_fixture_gpu(
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+        AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+        AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+        AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3147,9 +3162,10 @@ fn run_fixture_gpu(
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+        AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3165,9 +3181,10 @@ fn run_fixture_gpu(
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
+        AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -3183,18 +3200,22 @@ fn run_fixture_gpu(
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
+        AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
+            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
-        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
-            model,
-            ComputeBackend::Gpu,
-            electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
-            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        ),
+        AnalysisSolverOptions::ElectromagneticPotential(_) => {
+            analysis_run_electromagnetic_with_options_op(
+                model,
+                ComputeBackend::Gpu,
+                FormulationRequirement::Experimental,
+                electromagnetic_options_for_spec(spec, solver_mesh_artifact_path.clone()),
+                OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+            )
+        }
     };
     boxed_fixture_run_result(match mode {
         GpuMode::WithProvider => with_harness_provider(run),
@@ -3972,71 +3993,6 @@ fn push_em_reference_topology_threshold_assertions(
     );
 }
 
-fn push_electro_thermal_source_coupling_threshold_assertions(
-    fixture_id: &str,
-    assertions: &mut Vec<ThresholdAssertionRecord>,
-    failures: &mut Vec<String>,
-    run: &AnalysisRunResult,
-    prefix: &str,
-) {
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_joule_heat_realization_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "joule_heat_realization_ratio",
-        ),
-        Some(0.999_999),
-        Some(1.000_001),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_joule_source_coverage_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "joule_source_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_thermal_temperature_source_alignment"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "thermal_temperature_source_alignment",
-        ),
-        Some(0.999_999),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        &format!("{prefix}_thermal_source_residual_ratio"),
-        "FEA_ET_THERMAL_SOURCE_COUPLING",
-        diagnostic_metric(
-            run,
-            "FEA_ET_THERMAL_SOURCE_COUPLING",
-            "thermal_source_residual_ratio",
-        ),
-        Some(0.0),
-        Some(1.0e-10),
-    );
-}
-
 fn push_linear_structural_threshold_assertions(
     fixture_id: &str,
     assertions: &mut Vec<ThresholdAssertionRecord>,
@@ -4718,15 +4674,15 @@ fn write_fixture_solver_mesh_artifact(
     Ok(path)
 }
 
-fn fixture_requires_solver_mesh(spec: &FixtureSpec) -> bool {
+fn fixture_requires_solver_mesh(spec: &FixtureSpec, model: &AnalysisModel) -> bool {
     spec.expect_validate_error.is_none()
         && spec.expect_run_error.is_none()
         && (matches!(
-            spec.run_kind,
-            AnalysisRunKind::Thermal
-                | AnalysisRunKind::Cht
-                | AnalysisRunKind::Fsi
-                | AnalysisRunKind::Electromagnetic
+            AnalysisSolverOptions::defaults_for(fixture_procedure_step(model)),
+            Ok(AnalysisSolverOptions::ThermalDiffusion(_))
+                | Ok(AnalysisSolverOptions::ConjugateHeatTransfer(_))
+                | Ok(AnalysisSolverOptions::FluidStructureInteraction(_))
+                | Ok(AnalysisSolverOptions::ElectromagneticPotential(_))
         ) || spec.id.starts_with("electro_thermal_joule_"))
 }
 
@@ -4766,7 +4722,7 @@ pub(super) fn run_fixture(
         )
         .expect("configure isolated fixture artifact store");
     }
-    let solver_mesh_artifact_path = if fixture_requires_solver_mesh(spec) {
+    let solver_mesh_artifact_path = if fixture_requires_solver_mesh(spec, &model) {
         filesystem_root.map(|root| {
             write_fixture_solver_mesh_artifact(root, &model)
                 .expect("write canonical fixture solver mesh artifact")
@@ -4922,7 +4878,8 @@ pub(super) fn run_fixture(
     let mut electromagnetic_resonance_bandwidth_hz = None;
     let mut electromagnetic_resonance_quality_factor = None;
     let mut electromagnetic_resonance_flux_gain = None;
-    let mut publishable = None;
+    let mut numerically_acceptable = None;
+    let mut production_publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
 
@@ -5039,7 +4996,8 @@ pub(super) fn run_fixture(
                     electromagnetic_resonance_bandwidth_hz,
                     electromagnetic_resonance_quality_factor,
                     electromagnetic_resonance_flux_gain,
-                    publishable,
+                    numerically_acceptable,
+                    production_publishable,
                     parity,
                     threshold_assertions,
                     failures,
@@ -5047,17 +5005,27 @@ pub(super) fn run_fixture(
             }
         };
         run_ok = true;
-        publishable = Some(cpu_envelope.data.publishable);
-        if let Some(expected_publishable) = spec.expected_publishable {
-            if cpu_envelope.data.publishable != expected_publishable {
+        numerically_acceptable = Some(cpu_envelope.data.numerically_acceptable);
+        production_publishable = Some(cpu_envelope.data.production_publishable);
+        if let Some(expected_numerically_acceptable) = spec.expected_numerically_acceptable {
+            if cpu_envelope.data.numerically_acceptable != expected_numerically_acceptable {
                 failures.push(format!(
-                    "cpu publishable mismatch: expected {expected_publishable}, got {}",
-                    cpu_envelope.data.publishable
+                    "cpu numerical acceptance mismatch: expected {expected_numerically_acceptable}, got {}",
+                    cpu_envelope.data.numerically_acceptable
                 ));
             }
         }
+        if cpu_envelope.data.production_publishable {
+            failures.push(
+                "cpu result from an explicitly experimental formulation must not be production publishable"
+                    .to_string(),
+            );
+        }
 
-        if matches!(spec.run_kind, AnalysisRunKind::Modal) {
+        if matches!(
+            AnalysisSolverOptions::defaults_for(fixture_procedure_step(&model)),
+            Ok(AnalysisSolverOptions::StructuralModes(_))
+        ) {
             let observed = cpu_envelope
                 .data
                 .modal_results
@@ -7085,7 +7053,8 @@ pub(super) fn run_fixture(
             match gpu_result {
                 Ok(gpu_envelope) => {
                     run_ok = true;
-                    publishable = Some(gpu_envelope.data.publishable);
+                    numerically_acceptable = Some(gpu_envelope.data.numerically_acceptable);
+                    production_publishable = Some(gpu_envelope.data.production_publishable);
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
                     gpu_solver_host_sync_count =
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
@@ -7287,7 +7256,8 @@ pub(super) fn run_fixture(
                         }
                     }
 
-                    let gpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                    let gpu_primary_field_id =
+                        primary_result_field_id(fixture_procedure_step(&model));
                     if let Some(primary_field) =
                         analysis_result_field(&gpu_envelope.data, &gpu_primary_field_id)
                     {
@@ -7302,18 +7272,29 @@ pub(super) fn run_fixture(
                         ));
                     }
 
-                    let gpu_expected_publishable = if spec.id.starts_with("acoustic_harmonic_") {
-                        Some(false)
-                    } else {
-                        spec.expected_publishable
-                    };
-                    if let Some(expected_publishable) = gpu_expected_publishable {
-                        if gpu_envelope.data.publishable != expected_publishable {
+                    let gpu_expected_numerically_acceptable =
+                        if spec.id.starts_with("acoustic_harmonic_") {
+                            Some(false)
+                        } else {
+                            spec.expected_numerically_acceptable
+                        };
+                    if let Some(expected_numerically_acceptable) =
+                        gpu_expected_numerically_acceptable
+                    {
+                        if gpu_envelope.data.numerically_acceptable
+                            != expected_numerically_acceptable
+                        {
                             failures.push(format!(
-                                "gpu publishable mismatch: expected {expected_publishable}, got {}",
-                                gpu_envelope.data.publishable
+                                "gpu numerical acceptance mismatch: expected {expected_numerically_acceptable}, got {}",
+                                gpu_envelope.data.numerically_acceptable
                             ));
                         }
+                    }
+                    if gpu_envelope.data.production_publishable {
+                        failures.push(
+                            "gpu result from an explicitly experimental formulation must not be production publishable"
+                                .to_string(),
+                        );
                     }
 
                     if let Some(expected_solver_backend) = spec.expected_solver_backend {
@@ -7957,638 +7938,6 @@ pub(super) fn run_fixture(
                             &mut failures,
                             &gpu_envelope.data,
                         );
-                    } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(1.03),
-                            Some(1.12),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_transient_severity_peak",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.98),
-                            Some(1.02),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_temporal_variation",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.08),
-                            Some(0.25),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_time_scale_mean",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.82),
-                            Some(0.95),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conductive_node_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "conductive_node_count",
-                            ),
-                            Some(2.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mapped_voltage_boundary_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_voltage_boundary_count",
-                            ),
-                            Some(2.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_topology_component_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "topology_component_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mapped_current_source_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_current_source_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_source_boundary_alignment_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "source_boundary_alignment_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_domain_conductance_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "domain_conductance_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_mesh_backed_topology_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mesh_backed_topology_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_material_region_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "material_region_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_residual_norm",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "residual_norm",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_current_balance_residual",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "current_balance_residual",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_span_v",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "potential_span_v",
-                            ),
-                            Some(35.9),
-                            Some(36.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conduction_edge_count",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_topology_coverage_ratio",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "topology_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_ohms_law_residual_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "ohms_law_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_joule_heat_balance_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "joule_heat_balance_ratio",
-                            ),
-                            Some(0.999_999),
-                            Some(1.000_001),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_potential_monotonic_edge_fraction",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "potential_monotonic_edge_fraction",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_benign_conduction_graph_coverage_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "conduction_graph_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_electro_thermal_source_coupling_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "electro_thermal_benign",
-                        );
-                    } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(2.8),
-                            Some(3.6),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_transient_severity_peak",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "severity_peak",
-                            ),
-                            Some(0.9),
-                            Some(1.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_temporal_variation",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.35),
-                            Some(0.8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_time_scale_mean",
-                            "FEA_ET_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.85),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conductive_node_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "conductive_node_count",
-                            ),
-                            Some(2.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mapped_voltage_boundary_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_voltage_boundary_count",
-                            ),
-                            Some(2.0),
-                            Some(2.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_topology_component_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "topology_component_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mapped_current_source_count",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mapped_current_source_count",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_source_boundary_alignment_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "source_boundary_alignment_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_domain_conductance_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "domain_conductance_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_mesh_backed_topology_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "mesh_backed_topology_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_material_region_coverage_ratio",
-                            "FEA_ET_DOMAIN_TOPOLOGY",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_DOMAIN_TOPOLOGY",
-                                "material_region_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_residual_norm",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "residual_norm",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_current_balance_residual",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "current_balance_residual",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_span_v",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "potential_span_v",
-                            ),
-                            Some(179.9),
-                            Some(180.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conduction_edge_count",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "edge_count",
-                            ),
-                            Some(1.0),
-                            None,
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_topology_coverage_ratio",
-                            "FEA_ET_POTENTIAL_SOLVE",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_POTENTIAL_SOLVE",
-                                "topology_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_ohms_law_residual_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "ohms_law_residual_ratio",
-                            ),
-                            Some(0.0),
-                            Some(1.0e-8),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_joule_heat_balance_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "joule_heat_balance_ratio",
-                            ),
-                            Some(0.999_999),
-                            Some(1.000_001),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_potential_monotonic_edge_fraction",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "potential_monotonic_edge_fraction",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_thermal_pathological_conduction_graph_coverage_ratio",
-                            "FEA_ET_CONDUCTION_CONSERVATION",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_CONDUCTION_CONSERVATION",
-                                "conduction_graph_coverage_ratio",
-                            ),
-                            Some(1.0),
-                            Some(1.0),
-                        );
-                        push_electro_thermal_source_coupling_threshold_assertions(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            &gpu_envelope.data,
-                            "electro_thermal_pathological",
-                        );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
                         push_threshold_assertion!(
@@ -8906,90 +8255,6 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.0),
                             Some(0.05),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_joule_heating_scale",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "joule_heating_scale",
-                            ),
-                            Some(9.8),
-                            Some(10.2),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_conductivity_spread_ratio",
-                            "FEA_ET_COUPLING",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_COUPLING",
-                                "conductivity_spread_ratio",
-                            ),
-                            Some(1.3),
-                            Some(1.55),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_severity_peak",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "severity_peak",
-                            ),
-                            Some(0.98),
-                            Some(1.02),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_temporal_variation",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "temporal_variation",
-                            ),
-                            Some(0.2),
-                            Some(0.45),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_time_scale_mean",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "time_scale_mean",
-                            ),
-                            Some(0.9),
-                            Some(1.05),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "electro_nonlinear_severity_mean",
-                            "FEA_ET_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_ET_NONLINEAR",
-                                "severity_mean",
-                            ),
-                            Some(0.9),
-                            Some(0.98),
                         );
                     }
                     if spec.id == "nonlinear_plasticity_benchmark_gpu_provider" {
@@ -11049,7 +10314,8 @@ pub(super) fn run_fixture(
                         );
                     }
 
-                    let gpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                    let gpu_primary_field_id =
+                        primary_result_field_id(fixture_procedure_step(&model));
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
                         AnalysisResultsQuery {
@@ -11175,7 +10441,8 @@ pub(super) fn run_fixture(
                                 electromagnetic_resonance_bandwidth_hz,
                                 electromagnetic_resonance_quality_factor,
                                 electromagnetic_resonance_flux_gain,
-                                publishable,
+                                numerically_acceptable,
+                                production_publishable,
                                 parity,
                                 threshold_assertions,
                                 failures,
@@ -11500,7 +10767,8 @@ pub(super) fn run_fixture(
                     }
 
                     if let Some(tol) = spec.parity_tolerance {
-                        let cpu_primary_field_id = primary_result_field_id(spec.run_kind);
+                        let cpu_primary_field_id =
+                            primary_result_field_id(fixture_procedure_step(&model));
                         let cpu_results = analysis_results_op(
                             &cpu_envelope.data,
                             AnalysisResultsQuery {
@@ -11628,7 +10896,8 @@ pub(super) fn run_fixture(
                                     electromagnetic_resonance_bandwidth_hz,
                                     electromagnetic_resonance_quality_factor,
                                     electromagnetic_resonance_flux_gain,
-                                    publishable,
+                                    numerically_acceptable,
+                                    production_publishable,
                                     parity,
                                     threshold_assertions,
                                     failures,
@@ -11794,7 +11063,8 @@ pub(super) fn run_fixture(
         electromagnetic_resonance_bandwidth_hz,
         electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
-        publishable,
+        numerically_acceptable,
+        production_publishable,
         parity,
         threshold_assertions,
         failures,

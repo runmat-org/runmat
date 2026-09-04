@@ -40,11 +40,15 @@ pub async fn execute_fea_path(
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
-                    "  {} {} ({:?}, {:?})",
+                    "  {} {} ({} procedure step{})",
                     styles.label("study:"),
                     styles.identifier(&spec.study_id),
-                    spec.run_kind,
-                    spec.backend
+                    spec.execution.steps.len(),
+                    if spec.execution.steps.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
                 );
                 eprintln!(
                     "  {} {} regions, {} meshes",
@@ -102,13 +106,28 @@ fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
         styles.label("run id:"),
         styles.identifier(&data.run_id)
     );
-    println!("  {} {:?}", styles.label("kind:"), data.run_kind);
-    println!("  {} {:?}", styles.label("backend:"), data.backend);
     println!(
-        "  {} {:?} (publishable: {})",
-        styles.label("status:"),
-        data.run_status,
-        data.publishable
+        "  {} {:?} / {:?} / {:?}",
+        styles.label("procedure:"),
+        data.procedure_step.family,
+        data.procedure_step.procedure,
+        data.procedure_step.solution_space
+    );
+    println!(
+        "  {} {:?}",
+        styles.label("backend:"),
+        data.execution.backend
+    );
+    println!("  {} {:?}", styles.label("status:"), data.run_status);
+    println!(
+        "  {} {}",
+        styles.label("numerically acceptable:"),
+        data.numerically_acceptable
+    );
+    println!(
+        "  {} {}",
+        styles.label("production publishable:"),
+        data.production_publishable
     );
     println!(
         "  {} {:?}",
@@ -129,6 +148,12 @@ fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
     if !data.quality_reasons.is_empty() {
         println!("  quality reasons:");
         for reason in &data.quality_reasons {
+            println!("    {:?}: {}", reason.code, reason.detail);
+        }
+    }
+    if !data.production_publication_reasons.is_empty() {
+        println!("  production publication reasons:");
+        for reason in &data.production_publication_reasons {
             println!("    {:?}: {}", reason.code, reason.detail);
         }
     }
@@ -164,8 +189,12 @@ fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         println!("  runs:");
         for entry in &data.run_entries {
             println!(
-                "    {}  {}  {:?}  publishable: {}",
-                entry.study_id, entry.run_id, entry.run_status, entry.publishable
+                "    {}  {}  {:?}  numerically acceptable: {}  production publishable: {}",
+                entry.study_id,
+                entry.run_id,
+                entry.run_status,
+                entry.numerically_acceptable,
+                entry.production_publishable
             );
         }
     }

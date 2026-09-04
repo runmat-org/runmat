@@ -1,4 +1,4 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
@@ -34,6 +34,11 @@ pub fn run_nonlinear_with_options(
     backend: ComputeBackend,
     options: NonlinearSolveOptions,
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
+    let execution_step = super::admission::require_structural(
+        model,
+        AnalysisProcedure::Nonlinear,
+        options.formulation_requirement,
+    )?;
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::RegionResolution,
@@ -72,6 +77,11 @@ pub fn run_nonlinear_with_options(
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let identity = super::admission::admit_structural(
+        &summary,
+        execution_step,
+        options.formulation_requirement,
+    )?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_nonlinear",
@@ -131,6 +141,7 @@ pub fn run_nonlinear_with_options(
         * 1.0e11;
 
     let mut run = FeaRunResult {
+        identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
             nonlinear.solver_backend,

@@ -12,7 +12,7 @@ use runmat_analysis_core::{
     TranslationDofValue,
 };
 #[cfg(test)]
-use runmat_analysis_core::{Position, ReferencePoint};
+use runmat_analysis_core::{ElectricCurrent, Position, ReferencePoint};
 use runmat_geometry_core::UnitSystem;
 
 #[derive(Debug, Clone)]
@@ -46,6 +46,50 @@ pub(crate) fn replace_fixture_excitations(
     for specification in specifications {
         append_fixture_excitation(model, specification);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn replace_fixture_with_electric_current(
+    model: &mut AnalysisModel,
+    id: &str,
+    region_id: &str,
+    current_a: f64,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    model.signals = vec![PhysicalSignal::ElectricCurrent(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(ElectricCurrent::new(
+            current_a,
+        ))),
+        precision: SignalPrecision::Real64,
+        evidence: exact_signal_evidence(),
+        provenance: SignalProvenance::Authored,
+    })];
+    model.excitations = vec![ExcitationAction::ElectricCurrent(AnalysisExcitation {
+        excitation_id: ExcitationId(id.to_string()),
+        case_id: case_id.clone(),
+        target: ExcitationTarget::Region(RegionTarget::volume(region_id)),
+        frame: CoordinateFrame::Global,
+        direction: None,
+        distribution: ExcitationDistribution::Concentrated,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: false,
+            preserve_moment: false,
+            relative_tolerance: 1.0e-12,
+        },
+    })];
+    model.excitation_cases = vec![ExcitationCase {
+        case_id,
+        action_ids: vec![ExcitationId(id.to_string())],
+        activation: ExcitationCaseActivation::Always,
+    }];
 }
 
 fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureExcitation) {
@@ -1032,8 +1076,10 @@ fn thermo_mechanical_kickoff_fixture() -> AnalysisModel {
         })
         .collect();
     replace_fixture_excitations(&mut model, excitations);
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "thermo_mech_transient_1".to_string(),
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermo_mech_transient_1",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::TransientResponse,
     )];
     model
 }

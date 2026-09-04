@@ -1,6 +1,7 @@
 //! FEA pipeline scaffolding for assembly, solve orchestration, and diagnostics.
 
 pub mod adaptation;
+pub mod admission;
 pub mod assembly;
 pub mod contracts;
 pub mod diagnostics;
@@ -14,6 +15,7 @@ pub mod post;
 pub mod progress;
 pub mod solve;
 
+pub use admission::AnalysisRunIdentity;
 pub use contracts::*;
 pub use pipeline::electromagnetic::{run_electromagnetic, run_electromagnetic_with_options};
 pub use pipeline::linear_static::{run_linear_static, run_linear_static_with_options};

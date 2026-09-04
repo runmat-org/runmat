@@ -1,3 +1,4 @@
+use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -23,6 +24,7 @@ const TENSOR_COMPONENT_COUNT: usize = 6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonlinearSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
     pub increment_count: usize,
     pub max_newton_iters: usize,
     pub tolerance: f64,
@@ -43,6 +45,7 @@ pub struct NonlinearSolveOptions {
 impl Default for NonlinearSolveOptions {
     fn default() -> Self {
         Self {
+            formulation_requirement: FormulationRequirement::Production,
             increment_count: 12,
             max_newton_iters: 24,
             tolerance: 1.0e-6,
@@ -136,6 +139,7 @@ pub fn solve_nonlinear_system(
     let transient = solve_transient_system(
         summary,
         TransientSolveOptions {
+            formulation_requirement: options.formulation_requirement,
             solver_mesh: None,
             time_step_s: 1.0 / options.increment_count as f64,
             min_time_step_s: 1.0 / options.increment_count as f64,

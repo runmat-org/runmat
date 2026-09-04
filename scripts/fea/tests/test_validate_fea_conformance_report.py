@@ -239,12 +239,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "thermo_nonlinear_severity",
                     "thermo_nonlinear_field_clamp_ratio",
                     "thermo_nonlinear_time_scale_mean",
-                    "electro_nonlinear_joule_heating_scale",
-                    "electro_nonlinear_conductivity_spread_ratio",
-                    "electro_nonlinear_severity_peak",
-                    "electro_nonlinear_severity_mean",
-                    "electro_nonlinear_temporal_variation",
-                    "electro_nonlinear_time_scale_mean",
                 },
             )
             | {
@@ -259,12 +253,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
             },
             _record(
                 "nonlinear_plasticity_benchmark_gpu_provider",
@@ -280,12 +268,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 },
             )
             | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
                 "plastic_nonlinear_severity": 0.1,
             },
             _record(
@@ -614,90 +596,14 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermal_standalone_ramp_invalid_boundary",
                 "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
             ),
-            _record(
-                "electro_thermal_joule_benign_gpu_provider",
-                {
-                    "electro_thermal_benign_joule_heating_scale",
-                    "electro_thermal_benign_conductivity_spread_ratio",
-                    "electro_thermal_benign_transient_severity_peak",
-                    "electro_thermal_benign_temporal_variation",
-                    "electro_thermal_benign_time_scale_mean",
-                    "electro_thermal_benign_conductive_node_count",
-                    "electro_thermal_benign_mapped_voltage_boundary_count",
-                    "electro_thermal_benign_mapped_current_source_count",
-                    "electro_thermal_benign_topology_component_count",
-                    "electro_thermal_benign_source_boundary_alignment_ratio",
-                    "electro_thermal_benign_domain_conductance_coverage_ratio",
-                    "electro_thermal_benign_material_region_coverage_ratio",
-                    "electro_thermal_benign_potential_residual_norm",
-                    "electro_thermal_benign_current_balance_residual",
-                    "electro_thermal_benign_potential_span_v",
-                    "electro_thermal_benign_conduction_edge_count",
-                    "electro_thermal_benign_topology_coverage_ratio",
-                    "electro_thermal_benign_ohms_law_residual_ratio",
-                    "electro_thermal_benign_joule_heat_balance_ratio",
-                    "electro_thermal_benign_potential_monotonic_edge_fraction",
-                    "electro_thermal_benign_conduction_graph_coverage_ratio",
-                    "electro_thermal_benign_joule_heat_realization_ratio",
-                    "electro_thermal_benign_joule_source_coverage_ratio",
-                    "electro_thermal_benign_thermal_temperature_source_alignment",
-                    "electro_thermal_benign_thermal_source_residual_ratio",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
-            },
-            _record(
-                "electro_thermal_joule_pathological_gpu_provider",
-                {
-                    "electro_thermal_pathological_joule_heating_scale",
-                    "electro_thermal_pathological_conductivity_spread_ratio",
-                    "electro_thermal_pathological_transient_severity_peak",
-                    "electro_thermal_pathological_temporal_variation",
-                    "electro_thermal_pathological_time_scale_mean",
-                    "electro_thermal_pathological_conductive_node_count",
-                    "electro_thermal_pathological_mapped_voltage_boundary_count",
-                    "electro_thermal_pathological_mapped_current_source_count",
-                    "electro_thermal_pathological_topology_component_count",
-                    "electro_thermal_pathological_source_boundary_alignment_ratio",
-                    "electro_thermal_pathological_domain_conductance_coverage_ratio",
-                    "electro_thermal_pathological_material_region_coverage_ratio",
-                    "electro_thermal_pathological_potential_residual_norm",
-                    "electro_thermal_pathological_current_balance_residual",
-                    "electro_thermal_pathological_potential_span_v",
-                    "electro_thermal_pathological_conduction_edge_count",
-                    "electro_thermal_pathological_topology_coverage_ratio",
-                    "electro_thermal_pathological_ohms_law_residual_ratio",
-                    "electro_thermal_pathological_joule_heat_balance_ratio",
-                    "electro_thermal_pathological_potential_monotonic_edge_fraction",
-                    "electro_thermal_pathological_conduction_graph_coverage_ratio",
-                    "electro_thermal_pathological_joule_heat_realization_ratio",
-                    "electro_thermal_pathological_joule_source_coverage_ratio",
-                    "electro_thermal_pathological_thermal_temperature_source_alignment",
-                    "electro_thermal_pathological_thermal_source_residual_ratio",
-                    "transient_max_residual_norm",
-                    "transient_max_energy_growth_ratio",
-                    "transient_prepared_cache_hit_ratio",
-                    "transient_prepared_cache_misses",
-                },
-            )
-            | {
-                "electro_thermal_coupling_enabled": True,
-                "electro_thermal_coupling_fingerprint": 1,
-                "electro_joule_heating_scale": 1.0,
-                "electro_conductivity_spread_ratio": 1.0,
-                "electro_transient_severity": 0.1,
-                "electro_nonlinear_severity": 0.1,
-            },
+            _error_record(
+                "electro_thermal_joule_benign_rejected",
+                "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+            ),
+            _error_record(
+                "electro_thermal_joule_pathological_rejected",
+                "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
+            ),
             _error_record(
                 "electro_thermal_invalid_voltage",
                 "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
@@ -2014,12 +1920,12 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
-    def test_fails_when_expanded_performance_field_missing(self):
+    def test_fails_when_electro_thermal_rejection_code_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = self._base_records()
             for record in records:
-                if record["fixture_id"] == "electro_thermal_joule_benign_gpu_provider":
-                    record.pop("gpu_solver_solve_ms", None)
+                if record["fixture_id"] == "electro_thermal_joule_benign_rejected":
+                    record["run_error_code"] = None
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

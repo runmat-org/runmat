@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
     HostTensorOwned, HostTensorView, ThreadProviderGuard,
 };
-use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel};
+use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ProcedureStep};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
@@ -28,9 +28,9 @@ use runmat_runtime::analysis::{
     analysis_validate, AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisCreateModelIntentSpec, AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions,
     AnalysisModalRunOptions, AnalysisModelTemplate, AnalysisNonlinearRunOptions,
-    AnalysisResultsQuery, AnalysisRunOptions, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, FallbackEvent, FallbackReason, FallbackStage, PrecisionMode,
-    PreconditionerMode, QualityPolicy,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisSolverOptions, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, FallbackEvent, FallbackReason, FallbackStage,
+    FormulationRequirement, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -49,20 +49,6 @@ enum ResidencyExpectation {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum AnalysisRunKind {
-    LinearStatic,
-    Modal,
-    Acoustic,
-    Thermal,
-    Transient,
-    Cfd,
-    Cht,
-    Fsi,
-    Nonlinear,
-    Electromagnetic,
-}
-
-#[derive(Debug, Clone, Copy)]
 struct ParityTolerance {
     abs: f64,
     rel: f64,
@@ -73,10 +59,9 @@ struct FixtureSpec {
     id: &'static str,
     description: &'static str,
     model: fn() -> AnalysisModel,
-    run_kind: AnalysisRunKind,
     expect_validate_error: Option<&'static str>,
     expect_run_error: Option<&'static str>,
-    expected_publishable: Option<bool>,
+    expected_numerically_acceptable: Option<bool>,
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
     residency_expectation: Option<ResidencyExpectation>,
@@ -98,10 +83,10 @@ struct FixtureSpec {
 struct FixtureManifestEntry {
     id: String,
     description: String,
-    run_kind: String,
+    procedure_step: ProcedureStep,
     expect_validate_error: Option<String>,
     expect_run_error: Option<String>,
-    expected_publishable: Option<bool>,
+    expected_numerically_acceptable: Option<bool>,
     parity_tolerance_abs: Option<f64>,
     parity_tolerance_rel: Option<f64>,
     gpu_mode: Option<String>,
@@ -134,6 +119,17 @@ struct ThresholdAssertionRecord {
 struct FixtureManifest {
     version: String,
     fixtures: Vec<FixtureManifestEntry>,
+}
+
+fn fixture_procedure_step(model: &AnalysisModel) -> &ProcedureStep {
+    let [step] = model.sequence.steps.as_slice() else {
+        panic!(
+            "analysis fixture `{}` must define exactly one canonical procedure step; found {}",
+            model.model_id.0,
+            model.sequence.steps.len()
+        )
+    };
+    step
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -244,7 +240,8 @@ struct FixtureRunRecord {
     electromagnetic_resonance_bandwidth_hz: Option<f64>,
     electromagnetic_resonance_quality_factor: Option<f64>,
     electromagnetic_resonance_flux_gain: Option<f64>,
-    publishable: Option<bool>,
+    numerically_acceptable: Option<bool>,
+    production_publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
     failures: Vec<String>,
@@ -285,8 +282,6 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "thermo_shock_oscillatory_gpu_provider",
     "thermo_shock_oscillatory_field_artifact_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
-    "electro_thermal_joule_benign_gpu_provider",
-    "electro_thermal_joule_pathological_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_benchmark_gpu_provider",
