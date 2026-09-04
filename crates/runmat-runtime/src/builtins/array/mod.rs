@@ -1,3 +1,4 @@
+pub mod accumulation;
 pub mod binning;
 pub mod combinatorics;
 pub mod creation;

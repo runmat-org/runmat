@@ -1,3 +1,4 @@
+mod accumulation;
 mod binning;
 mod combinatorics;
 mod creation;
@@ -13,6 +14,7 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        ArrayInferenceRule::Accumulation(rule) => accumulation::infer(rule, request, entry),
         ArrayInferenceRule::Binning(rule) => binning::infer(rule, request, entry),
         ArrayInferenceRule::Combinatorics(rule) => combinatorics::infer(rule, request, entry),
         ArrayInferenceRule::Creation(ArrayCreationInferenceRule::Full) => {
