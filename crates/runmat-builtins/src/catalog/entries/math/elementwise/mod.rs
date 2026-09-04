@@ -8,6 +8,7 @@ mod logarithms;
 mod magnitude_phase_sign;
 mod numeric_conversions;
 mod numeric_limits;
+mod powers_of_two;
 mod roots;
 mod support;
 
@@ -21,6 +22,7 @@ pub use logarithms::*;
 pub use magnitude_phase_sign::*;
 pub use numeric_conversions::*;
 pub use numeric_limits::*;
+pub use powers_of_two::*;
 pub use roots::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
@@ -34,5 +36,6 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     magnitude_phase_sign::ENTRIES,
     numeric_conversions::ENTRIES,
     numeric_limits::ENTRIES,
+    powers_of_two::ENTRIES,
     roots::ENTRIES,
 ];
