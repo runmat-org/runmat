@@ -1,3 +1,4 @@
+pub mod combinatorics;
 pub mod creation;
 pub mod grouping;
 pub mod indexing;

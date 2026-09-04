@@ -358,6 +358,44 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
 }
 
+for (const rootPath of [
+  "crates/runmat-builtins/src/catalog/entries/array/combinatorics",
+  "crates/runmat-builtins/src/catalog/inference/array/combinatorics",
+  "crates/runmat-runtime/src/builtins/array/combinatorics",
+]) {
+  for (const { path: sourcePath, text } of rustSources(rootPath)) {
+    const lines = text.split("\n").length;
+    const isTest = sourcePath.includes("/tests/") || sourcePath.endsWith("/tests.rs");
+    const isDocumentation = sourcePath.endsWith("/documentation.rs");
+    const isCompositionRoot = sourcePath.endsWith("/mod.rs") && !isTest;
+    const ceiling = isTest ? 512 : isDocumentation ? 256 : isCompositionRoot ? 192 : 256;
+    if (lines > ceiling) {
+      fail(
+        `${sourcePath} exceeds its deterministic-combinatorics role boundary ` +
+        `(found ${lines} lines; maximum ${ceiling})`
+      );
+    }
+    if (
+      rootPath.includes("runmat-runtime") &&
+      /\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)
+    ) {
+      fail(`${sourcePath} duplicates catalog-owned combinatorics metadata`);
+    }
+  }
+}
+for (const sourcePath of [
+  "docs/builtins/reference/nchoosek.json",
+  "docs/builtins/reference/perms.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/nchoosek.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/perms.json",
+  "crates/runmat-runtime/src/builtins/array/creation/nchoosek.rs",
+  "crates/runmat-runtime/src/builtins/array/creation/perms.rs",
+]) {
+  if (fs.existsSync(path.join(repo, sourcePath))) {
+    fail(`${sourcePath} is obsolete deterministic-combinatorics debt and must not return`);
+  }
+}
+
 const logicalReductionBoundaries = new Map([
   ["crates/runmat-runtime/src/builtins/math/reduction/logical/mod.rs", 128],
   ["crates/runmat-runtime/src/builtins/math/reduction/logical/arguments.rs", 192],

@@ -36,10 +36,11 @@ fn all_integer_vectors() -> Vec<(&'static str, Value)> {
 #[test]
 fn numeric_transform_packet_has_class_complete_capability_metadata() {
     for (name, expected_forms) in PACKET {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.integer_capabilities.len(), expected_forms, "{name}");
-        assert!(builtin.integer_audit.is_none(), "{name}");
-        for capability in builtin.integer_capabilities {
+        let metadata = runmat_builtins::builtin_integer_metadata_by_name(name)
+            .expect("builtin integer metadata");
+        assert_eq!(metadata.capabilities.len(), expected_forms, "{name}");
+        assert!(metadata.audit.is_none(), "{name}");
+        for capability in metadata.capabilities {
             assert!(!capability.inputs.is_empty(), "{name}: {}", capability.form);
             for input in capability.inputs {
                 assert_eq!(input.classes.len(), 8, "{name}: {}", input.name);
@@ -61,9 +62,10 @@ fn numeric_transform_extensions_are_declarative_and_independent() {
         ("permute", 0),
     ];
     for (name, count) in expected {
-        let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
-        assert_eq!(builtin.extensions.len(), count, "{name}");
-        for extension in builtin.extensions {
+        let extensions =
+            runmat_builtins::builtin_extensions_by_name(name).expect("builtin extension metadata");
+        assert_eq!(extensions.len(), count, "{name}");
+        for extension in extensions {
             assert_eq!(
                 extension.mode,
                 runmat_builtins::BuiltinExtensionMode::RunMatOnly,
