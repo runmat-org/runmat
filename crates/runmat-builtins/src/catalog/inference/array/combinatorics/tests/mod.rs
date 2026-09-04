@@ -1,6 +1,7 @@
-mod combinations;
+mod cartesian_product;
 mod materialization;
 mod permutations;
+mod selection_combinations;
 
 use runmat_types::{
     CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,

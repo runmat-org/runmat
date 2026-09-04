@@ -1,6 +1,7 @@
+mod cartesian_product;
 mod coefficient_class;
-mod combinations;
 mod permutations;
+mod selection_combinations;
 
 #[cfg(test)]
 mod tests;
@@ -14,7 +15,10 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
-        CombinatoricsInferenceRule::Combinations => combinations::infer(request, entry),
+        CombinatoricsInferenceRule::CartesianProduct => cartesian_product::infer(request, entry),
         CombinatoricsInferenceRule::Permutations => permutations::infer(request, entry),
+        CombinatoricsInferenceRule::SelectionCombinations => {
+            selection_combinations::infer(request, entry)
+        }
     }
 }
