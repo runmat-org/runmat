@@ -838,17 +838,29 @@ for (const sourcePath of [
   "crates/runmat-runtime/src/builtins/math/elementwise/nextpow2.rs",
   "docs/builtins/reference/nextpow2.json",
   "crates/runmat-runtime/src/builtins/builtins-json/nextpow2.json",
+  "crates/runmat-runtime/src/builtins/math/elementwise/pow2.rs",
+  "docs/builtins/reference/pow2.json",
+  "crates/runmat-runtime/src/builtins/builtins-json/pow2.json",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent.rs",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/tests.rs",
 ]) {
   if (fs.existsSync(path.join(repo, sourcePath))) {
-    fail(`${sourcePath} is obsolete next-power-of-two migration debt and must not return`);
+    fail(`${sourcePath} is obsolete powers-of-two migration debt and must not return`);
   }
 }
 const powersOfTwoRoots = new Set([
   "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/nextpow2/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two/pow2/mod.rs",
   "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/mod.rs",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/next_exponent/mod.rs",
+  "crates/runmat-builtins/src/catalog/inference/math/powers_of_two/power/mod.rs",
   "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/mod.rs",
   "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/nextpow2/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/binary/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/provider/mod.rs",
+  "crates/runmat-runtime/src/builtins/math/elementwise/powers_of_two/pow2/tests/mod.rs",
 ]);
 for (const rootPath of [
   "crates/runmat-builtins/src/catalog/entries/math/elementwise/powers_of_two",

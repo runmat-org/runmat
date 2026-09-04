@@ -260,6 +260,7 @@ pub enum MathInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PowerOfTwoInferenceRule {
     NextExponent,
+    Power,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

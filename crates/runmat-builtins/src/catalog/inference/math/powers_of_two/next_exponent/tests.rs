@@ -1,4 +1,4 @@
-use super::super::super::super::infer_catalog_call;
+use super::super::super::super::super::infer_catalog_call;
 use crate::{
     builtin_catalog_entry_by_name, BuiltinInferenceRule, MathInferenceRule, PowerOfTwoInferenceRule,
 };
@@ -26,7 +26,7 @@ fn infer(input: ValueFact) -> runmat_types::CallInference {
 }
 
 #[test]
-fn nextpow2_preserves_real_numeric_class_and_shape() {
+fn preserves_real_numeric_class_and_shape() {
     for class in [
         NumericClass::Single,
         NumericClass::Double,
@@ -57,7 +57,7 @@ fn nextpow2_preserves_real_numeric_class_and_shape() {
 }
 
 #[test]
-fn nextpow2_promotes_logical_and_rejects_unsupported_representations() {
+fn promotes_logical_and_rejects_unsupported_representations() {
     let logical = infer(ValueFact::proven(
         ValueKindFact::Logical,
         ShapeFact::from(vec![Some(1), Some(4)]),
