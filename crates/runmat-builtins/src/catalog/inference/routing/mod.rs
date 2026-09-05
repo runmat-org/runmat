@@ -3,6 +3,7 @@ pub(super) mod aggregate;
 pub(super) mod array;
 mod distributed;
 pub(super) mod introspection;
+pub(super) mod io;
 mod local;
 pub(super) mod math;
 pub(super) mod parallel;

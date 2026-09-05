@@ -1,66 +1,33 @@
-//! MATLAB-compatible `clc` builtin for clearing the host-visible console.
+//! Clear-console control event.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
 use crate::{build_runtime_error, console, BuiltinResult};
 
-const CLC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ans",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Empty matrix placeholder returned by sink invocation.",
-}];
-const CLC_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
-const CLC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "clc()",
-    inputs: &CLC_INPUTS_EMPTY,
-    outputs: &CLC_OUTPUT,
-}];
-const CLC_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CLC.ARG_COUNT",
-    identifier: None,
-    when: "One or more input arguments are passed to clc.",
-    message: "clc: expected no input arguments",
-};
-const CLC_ERRORS: [BuiltinErrorDescriptor; 1] = [CLC_ERROR_ARG_COUNT];
-pub const CLC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CLC_ERRORS,
-};
-
-fn clc_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin("clc");
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
+const BUILTIN_NAME: &str = "clc";
 
 #[runtime_builtin(
     name = "clc",
-    category = "io",
-    summary = "Clear the visible command window or console display hosts.",
-    keywords = "clc,console,clear screen",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::io::clc::CLC_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::clc"
 )]
 async fn clc_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err(clc_error(&CLC_ERROR_ARG_COUNT));
+        return Err(argument_count_error());
     }
-
     console::record_clear_screen();
     Ok(empty_return_value())
+}
+
+fn argument_count_error() -> crate::RuntimeError {
+    let descriptor: &'static BuiltinErrorDescriptor = &runmat_builtins::CLC_ERROR_ARG_COUNT;
+    let mut builder = build_runtime_error(descriptor.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn empty_return_value() -> Value {
@@ -70,14 +37,29 @@ fn empty_return_value() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::console::ConsoleStream;
 
     #[test]
-    fn clc_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = CLC_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"clc()"));
+    fn records_clear_event_and_returns_empty_sink_value() {
+        console::reset_thread_buffer();
+        let result = futures::executor::block_on(clc_builtin(Vec::new())).expect("clc");
+        let Value::Tensor(empty) = result else {
+            panic!("expected empty tensor")
+        };
+        assert_eq!(empty.shape, vec![0, 0]);
+        let entries = console::take_thread_buffer();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].stream, ConsoleStream::ClearScreen);
+        assert!(entries[0].text.is_empty());
+    }
+
+    #[test]
+    fn rejects_input_without_emitting_clear_event() {
+        console::reset_thread_buffer();
+        let error = futures::executor::block_on(clc_builtin(vec![Value::Num(1.0)]))
+            .expect_err("clc input must fail");
+        assert_eq!(error.message(), "clc: expected no input arguments");
+        assert_eq!(error.identifier(), Some("RunMat:clc:ArgumentCount"));
+        assert!(console::take_thread_buffer().is_empty());
     }
 }
