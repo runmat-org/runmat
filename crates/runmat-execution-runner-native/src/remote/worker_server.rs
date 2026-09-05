@@ -85,7 +85,7 @@ pub(super) async fn run_worker_loop(
         bundle_digest: None,
         attempts: HashMap::new(),
         values: HashMap::new(),
-        objects: super::object_transfer::RemoteObjectStore::default(),
+        objects: super::object_transfer::RemoteObjectStore::new()?,
         draining: false,
         bundle_cache,
     }));

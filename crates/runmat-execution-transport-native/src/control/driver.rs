@@ -13,6 +13,7 @@ use crate::{TransportError, TransportResult};
 
 #[derive(Clone)]
 pub struct HttpDriverControlPlane {
+    base_url: String,
     client: public_api::Client,
     http: reqwest::Client,
 }
@@ -25,6 +26,7 @@ impl HttpDriverControlPlane {
         }
         Ok(Self {
             client: public_api::Client::new(&base_url),
+            base_url,
             http: reqwest::Client::new(),
         })
     }
@@ -161,6 +163,44 @@ impl DriverControlPlane for HttpDriverControlPlane {
             &bytes,
         )?;
         Ok(bytes)
+    }
+
+    async fn input_artifact(
+        &self,
+        authority: &DriverAuthority,
+        artifact_id: &str,
+    ) -> TransportResult<DriverArtifactDownload> {
+        authority.validate()?;
+        if artifact_id.is_empty()
+            || artifact_id.len() > 128
+            || !artifact_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(TransportError::Integrity);
+        }
+        let response = self
+            .http
+            .get(format!(
+                "{}/v1/execution/drivers/{}/artifacts/{}",
+                self.base_url, authority.driver_lease_id, artifact_id
+            ))
+            .query(&[("fencingToken", authority.fencing_token)])
+            .header("x-runmat-driver-credential", &authority.credential)
+            .send()
+            .await
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(TransportError::Unavailable(format!(
+                "input artifact authorization returned {}",
+                response.status()
+            )));
+        }
+        let artifact = response
+            .json::<types::DriverArtifactDownloadResponse>()
+            .await
+            .map_err(|_| TransportError::Integrity)?;
+        download_from_api(artifact)
     }
 
     async fn store_artifact(

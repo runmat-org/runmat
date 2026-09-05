@@ -19,6 +19,7 @@ pub use target::{
     NativeTargetIdentity, ProgramTarget, ProgramTargetCohort, PROGRAM_TARGET_SCHEMA_VERSION,
 };
 pub use transport::{
-    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionOutputs,
-    MAX_PROGRAM_EXECUTION_OBJECT_BYTES, MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    ProgramExecutionOutputs, MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
+    MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES,
 };

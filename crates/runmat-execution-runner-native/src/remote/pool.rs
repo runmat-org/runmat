@@ -86,7 +86,7 @@ impl RemotePoolDriver {
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
             value_scope: value_scope.into(),
             values: super::pool_values::RemoteValueCatalog::default(),
-            execution_objects: super::pool_objects::RemoteObjectCatalog::default(),
+            execution_objects: super::pool_objects::RemoteObjectCatalog::new()?,
             programs: Mutex::new(HashMap::new()),
             completions: Mutex::new(HashMap::new()),
             progress: Mutex::new(HashMap::new()),

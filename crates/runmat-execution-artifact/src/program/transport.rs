@@ -11,13 +11,12 @@ use super::{
 use crate::{ArtifactError, ArtifactResult};
 
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
+    MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramExecutionObject {
     pub reference: ValueRef,
-    #[serde(with = "base64_bytes")]
     pub bytes: Vec<u8>,
 }
 
@@ -45,10 +44,35 @@ impl ProgramExecutionObject {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProgramExecutionObjectLocation {
+    pub reference: ValueRef,
+    pub artifact_id: String,
+}
+
+impl ProgramExecutionObjectLocation {
+    pub fn validate(&self) -> ArtifactResult<()> {
+        validate_reference(&self.reference)?;
+        if self.artifact_id.is_empty()
+            || self.artifact_id.len() > 128
+            || !self
+                .artifact_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(ArtifactError::Invalid(
+                "program object artifact identity is malformed or unbounded".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProgramExecutionInputs {
     pub schema_version: u16,
     pub arguments: Vec<ValuePayload>,
-    pub objects: Vec<ProgramExecutionObject>,
+    pub objects: Vec<ProgramExecutionObjectLocation>,
 }
 
 impl ProgramExecutionInputs {
@@ -65,7 +89,7 @@ impl ProgramExecutionInputs {
                 .validate(ValueLimits::default())
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         }
-        validate_objects(&self.objects, ValueRefKind::DriverObject, "input")?;
+        validate_locations(&self.objects, ValueRefKind::DriverObject, "input")?;
         for reference in collect_references(&self.arguments) {
             if reference.kind != ValueRefKind::DriverObject {
                 return Err(ArtifactError::Invalid(
@@ -91,28 +115,14 @@ impl ProgramExecutionInputs {
 pub struct ProgramExecutionOutputs {
     pub schema_version: u16,
     pub response: ProgramExecutionResponse,
-    pub objects: Vec<ProgramExecutionObject>,
+    pub objects: Vec<ProgramExecutionObjectLocation>,
 }
 
 impl ProgramExecutionOutputs {
-    pub fn from_response<F>(response: ProgramExecutionResponse, mut read: F) -> ArtifactResult<Self>
-    where
-        F: FnMut(&ValueRef) -> ArtifactResult<Option<Vec<u8>>>,
-    {
-        let references: &[ValueRef] = match &response {
-            ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => result_objects,
-            _ => &[],
-        };
-        let mut objects = Vec::with_capacity(references.len());
-        for reference in references {
-            let bytes = read(reference)?.ok_or_else(|| {
-                ArtifactError::Invalid("program result object is absent from its store".into())
-            })?;
-            objects.push(ProgramExecutionObject {
-                reference: reference.clone(),
-                bytes,
-            });
-        }
+    pub fn new(
+        response: ProgramExecutionResponse,
+        objects: Vec<ProgramExecutionObjectLocation>,
+    ) -> ArtifactResult<Self> {
         let outputs = Self {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
             response,
@@ -128,7 +138,7 @@ impl ProgramExecutionOutputs {
                 "program outputs use an unsupported schema".into(),
             ));
         }
-        validate_objects(&self.objects, ValueRefKind::ResultObject, "result")?;
+        validate_locations(&self.objects, ValueRefKind::ResultObject, "result")?;
         match &self.response {
             ProgramExecutionResponse::Success { value } => {
                 value
@@ -171,8 +181,8 @@ impl ProgramExecutionOutputs {
     }
 }
 
-fn validate_objects(
-    objects: &[ProgramExecutionObject],
+fn validate_locations(
+    objects: &[ProgramExecutionObjectLocation],
     expected_kind: ValueRefKind,
     inventory_name: &str,
 ) -> ArtifactResult<()> {
@@ -183,6 +193,7 @@ fn validate_objects(
     }
     let mut ids = BTreeSet::new();
     let mut digests = BTreeSet::new();
+    let mut artifact_ids = BTreeSet::new();
     let mut authorization_scope = None;
     let mut total_bytes = 0_u64;
     for object in objects {
@@ -190,6 +201,7 @@ fn validate_objects(
         if object.reference.kind != expected_kind
             || !ids.insert(object.reference.id)
             || !digests.insert(object.reference.logical_digest)
+            || !artifact_ids.insert(object.artifact_id.as_str())
         {
             return Err(ArtifactError::Invalid(format!(
                 "program {inventory_name} object inventory contains a wrong-kind or duplicate object"
@@ -216,6 +228,24 @@ fn validate_objects(
         return Err(ArtifactError::Invalid(format!(
             "program {inventory_name} object inventory exceeds its byte bound"
         )));
+    }
+    Ok(())
+}
+
+fn validate_reference(reference: &ValueRef) -> ArtifactResult<()> {
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(ValueLimits::default())
+        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+    if !matches!(
+        reference.kind,
+        ValueRefKind::DriverObject | ValueRefKind::ResultObject
+    ) || reference.resident_fence.is_some()
+        || reference.encoded_length == 0
+        || reference.encoded_length > MAX_PROGRAM_EXECUTION_OBJECT_BYTES
+    {
+        return Err(ArtifactError::Invalid(
+            "program object reference is not portable or exceeds its bound".into(),
+        ));
     }
     Ok(())
 }
@@ -251,28 +281,6 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
         .iter()
         .for_each(|value| visit(value, &mut references));
     references
-}
-
-mod base64_bytes {
-    use base64::Engine as _;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let encoded = String::deserialize(deserializer)?;
-        base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(encoded)
-            .map_err(serde::de::Error::custom)
-    }
 }
 
 #[cfg(test)]
@@ -312,9 +320,9 @@ mod tests {
         let inputs = ProgramExecutionInputs {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
             arguments: vec![ValuePayload::Object(Box::new(root.clone()))],
-            objects: vec![ProgramExecutionObject {
+            objects: vec![ProgramExecutionObjectLocation {
                 reference: root.clone(),
-                bytes: bytes.clone(),
+                artifact_id: "input-artifact".into(),
             }],
         };
         inputs.validate().unwrap();
@@ -323,14 +331,14 @@ mod tests {
         missing.objects.clear();
         assert!(missing.validate().is_err());
 
-        let mut corrupt = inputs.clone();
-        corrupt.objects[0].bytes.push(0);
-        assert!(corrupt.validate().is_err());
+        let mut malformed = inputs.clone();
+        malformed.objects[0].artifact_id.clear();
+        assert!(malformed.validate().is_err());
 
         let mut duplicate = inputs;
-        duplicate.objects.push(ProgramExecutionObject {
+        duplicate.objects.push(ProgramExecutionObjectLocation {
             reference: root,
-            bytes,
+            artifact_id: "different-artifact".into(),
         });
         assert!(duplicate.validate().is_err());
 
@@ -346,42 +354,45 @@ mod tests {
     }
 
     #[test]
-    fn terminal_outputs_bind_externalized_references_to_verified_bytes() {
+    fn terminal_outputs_bind_externalized_references_to_unique_artifact_locations() {
         let bytes = b"canonical result bytes".to_vec();
         let root = result_reference(&bytes);
         let response = ProgramExecutionResponse::ExternalizedSuccess {
             outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
             result_objects: vec![root.clone()],
         };
-        let outputs = ProgramExecutionOutputs::from_response(response.clone(), |reference| {
-            Ok((reference == &root).then_some(bytes.clone()))
-        })
+        let outputs = ProgramExecutionOutputs::new(
+            response.clone(),
+            vec![ProgramExecutionObjectLocation {
+                reference: root.clone(),
+                artifact_id: "result-artifact".into(),
+            }],
+        )
         .unwrap();
         outputs.validate().unwrap();
         let encoded = serde_json::to_vec(&outputs).unwrap();
         let encoded_text = String::from_utf8(encoded.clone()).unwrap();
-        assert!(!encoded_text.contains("\"bytes\":["));
-        assert!(encoded_text.contains("Y2Fub25pY2FsIHJlc3VsdCBieXRlcw"));
+        assert!(!encoded_text.contains("canonical result bytes"));
+        assert!(encoded_text.contains("result-artifact"));
         assert_eq!(
             serde_json::from_slice::<ProgramExecutionOutputs>(&encoded).unwrap(),
             outputs
         );
 
-        assert!(ProgramExecutionOutputs::from_response(response, |_| Ok(None)).is_err());
         let mut tampered = outputs.clone();
-        tampered.objects[0].bytes.push(0);
+        tampered.objects[0].reference.logical_digest = Digest::sha256(b"substituted");
         assert!(tampered.validate().is_err());
         let mut missing = outputs;
         missing.objects.clear();
         assert!(missing.validate().is_err());
 
-        ProgramExecutionOutputs::from_response(
+        ProgramExecutionOutputs::new(
             ProgramExecutionResponse::Success {
                 value: ValuePayload::Inline(Box::new(
                     runmat_execution::value::InlineValue::String("done".into()),
                 )),
             },
-            |_| unreachable!(),
+            Vec::new(),
         )
         .unwrap();
     }

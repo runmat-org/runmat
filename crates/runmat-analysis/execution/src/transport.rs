@@ -4,8 +4,8 @@ use runmat_execution::identity::ValueId;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{
-    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionRequest,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 
 use crate::{
@@ -17,7 +17,32 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedAnalysisProgram {
     pub request: ProgramExecutionRequest,
-    pub inputs: ProgramExecutionInputs,
+    pub objects: Vec<ProgramExecutionObject>,
+}
+
+impl PreparedAnalysisProgram {
+    pub fn inputs(
+        &self,
+        locations: Vec<ProgramExecutionObjectLocation>,
+    ) -> AnalysisBridgeResult<ProgramExecutionInputs> {
+        if locations.len() != self.objects.len()
+            || locations
+                .iter()
+                .zip(&self.objects)
+                .any(|(location, object)| location.reference != object.reference)
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "analysis input locations differ from the prepared object inventory",
+            ));
+        }
+        let inputs = ProgramExecutionInputs {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            arguments: self.request.arguments.clone(),
+            objects: locations,
+        };
+        inputs.validate()?;
+        Ok(inputs)
+    }
 }
 
 pub fn prepare_analysis_program(
@@ -75,11 +100,8 @@ pub fn prepare_analysis_program(
     }
 
     let request = host.program_request(program_revision, &roots)?;
-    let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-        arguments: request.arguments.clone(),
+    Ok(PreparedAnalysisProgram {
+        request,
         objects: inventory.into_values().collect(),
-    };
-    inputs.validate()?;
-    Ok(PreparedAnalysisProgram { request, inputs })
+    })
 }

@@ -16,7 +16,8 @@ use runmat_execution_artifact::encryption::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_server_client::execution::{endpoint_evidence, public_error, ExecutionArtifactUpload};
 use runmat_server_client::public_api::types;
@@ -35,7 +36,8 @@ pub(crate) struct PreparedRemoteExecution {
     pub revision: ProgramRevision,
     pub bundle_archive: Vec<u8>,
     pub descriptor: Vec<u8>,
-    pub inputs: Vec<u8>,
+    pub inputs: ProgramExecutionInputs,
+    pub objects: Vec<ProgramExecutionObject>,
 }
 
 pub(crate) struct RemoteSubmissionOptions {
@@ -152,14 +154,15 @@ pub async fn submit(
         function: executable_function,
         requested_outputs: 1,
     })?;
-    let inputs = serde_json::to_vec(&ProgramExecutionInputs {
+    let inputs = ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         arguments: args
             .into_iter()
             .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
             .collect(),
         objects: Vec::new(),
-    })?;
+    };
+    inputs.validate()?;
     let mut bundle_archive = Vec::new();
     write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())?;
 
@@ -169,6 +172,7 @@ pub async fn submit(
             bundle_archive,
             descriptor,
             inputs,
+            objects: Vec::new(),
         },
         RemoteSubmissionOptions {
             project,
@@ -355,12 +359,6 @@ where
         EncryptionPurpose::Program,
         &prepared.descriptor,
     )?;
-    let input = seal(
-        &run_key,
-        &run.id,
-        EncryptionPurpose::Input,
-        &prepared.inputs,
-    )?;
     let bundle_id = upload(
         &client,
         &project_id,
@@ -377,6 +375,36 @@ where
         program,
     )
     .await?;
+    let mut object_locations = Vec::with_capacity(prepared.objects.len());
+    for object in prepared.objects {
+        object.validate()?;
+        if object.reference.authorization_scope != run.id
+            || object.reference.kind != runmat_execution::value::ValueRefKind::DriverObject
+        {
+            bail!("prepared input object is outside the admitted run authority");
+        }
+        let ciphertext = seal(&run_key, &run.id, EncryptionPurpose::Input, &object.bytes)?;
+        let artifact_id = upload(
+            &client,
+            &project_id,
+            &endpoint_fingerprint,
+            types::ArtifactKindRequest::Input,
+            ciphertext,
+        )
+        .await?;
+        object_locations.push(ProgramExecutionObjectLocation {
+            reference: object.reference,
+            artifact_id,
+        });
+    }
+    let inputs = ProgramExecutionInputs {
+        schema_version: prepared.inputs.schema_version,
+        arguments: prepared.inputs.arguments,
+        objects: object_locations,
+    };
+    inputs.validate()?;
+    let encoded_inputs = serde_json::to_vec(&inputs)?;
+    let input = seal(&run_key, &run.id, EncryptionPurpose::Input, &encoded_inputs)?;
     let input_id = upload(
         &client,
         &project_id,

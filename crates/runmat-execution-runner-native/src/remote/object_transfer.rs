@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{Seek, Write};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
 use runmat_execution::Digest;
-use runmat_execution_artifact::cache::{CacheExport, CacheImport};
+use runmat_execution_artifact::cache::{CacheExport, CacheImport, FilesystemObjectStore};
 use runmat_execution_artifact::{
-    ArtifactError, ArtifactResult, LogicalObject, ProgramExecutionObject,
+    ArtifactError, ArtifactResult, LogicalObject, ObjectNamespace, ProgramExecutionObject,
 };
 use runmat_execution_transport_native::transfer::{ObjectChunk, ResumeState};
 
@@ -13,30 +14,55 @@ use super::protocol::{RemoteWorkerCommand, RemoteWorkerOutcome};
 use super::RemoteObjectReceipt;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-pub(super) const MAX_REMOTE_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
+pub(super) const MAX_REMOTE_OBJECT_BYTES: u64 =
+    runmat_execution_artifact::MAX_PROGRAM_EXECUTION_OBJECT_BYTES;
 pub(super) const MAX_REMOTE_OBJECT_CHUNK_BYTES: usize = 256 * 1024;
 pub(super) const MAX_REMOTE_OBJECTS: usize =
     runmat_execution_artifact::MAX_PROGRAM_EXECUTION_RESULT_OBJECTS;
-pub(super) const MAX_REMOTE_OBJECT_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 
 struct PartialObject {
     reference: ValueRef,
     resume: ResumeState,
-    bytes: Vec<u8>,
+    file: tempfile::NamedTempFile,
 }
 
-#[derive(Default)]
 pub(super) struct RemoteObjectCache {
-    complete: HashMap<runmat_execution::identity::ValueId, (ValueRef, Vec<u8>)>,
+    complete: HashMap<runmat_execution::identity::ValueId, ValueRef>,
     partial: HashMap<runmat_execution::identity::ValueId, PartialObject>,
-    generated: HashMap<Digest, Vec<u8>>,
-    buffered_bytes: u64,
+    generated: HashSet<Digest>,
+    stored_bytes: u64,
+    store: FilesystemObjectStore,
+    _directory: tempfile::TempDir,
 }
 
-#[derive(Clone, Default)]
+impl RemoteObjectCache {
+    fn new() -> NativeExecutionResult<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix("runmat-remote-worker-objects-")
+            .tempdir()
+            .map_err(protocol)?;
+        let store =
+            FilesystemObjectStore::open(directory.path().join("objects"), MAX_REMOTE_OBJECT_BYTES)
+                .map_err(protocol)?;
+        Ok(Self {
+            complete: HashMap::new(),
+            partial: HashMap::new(),
+            generated: HashSet::new(),
+            stored_bytes: 0,
+            store,
+            _directory: directory,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct RemoteObjectStore(Arc<Mutex<RemoteObjectCache>>);
 
 impl RemoteObjectStore {
+    pub(super) fn new() -> NativeExecutionResult<Self> {
+        Ok(Self(Arc::new(Mutex::new(RemoteObjectCache::new()?))))
+    }
+
     pub(super) fn register(&self, object: ProgramExecutionObject) -> NativeExecutionResult<()> {
         object.validate().map_err(protocol)?;
         self.0
@@ -90,27 +116,18 @@ impl RemoteObjectCache {
     fn register(&mut self, reference: ValueRef, bytes: Vec<u8>) -> NativeExecutionResult<()> {
         validate_reference(&reference, &reference.authorization_scope)?;
         validate_bytes(&reference, &bytes)?;
-        if let Some((stored, existing)) = self.complete.get(&reference.id) {
-            return if stored == &reference && existing == &bytes {
-                Ok(())
-            } else {
-                Err(protocol(
+        if let Some(stored) = self.complete.get(&reference.id) {
+            if stored != &reference {
+                return Err(protocol(
                     "remote object id was reused for different content",
-                ))
-            };
+                ));
+            }
+            return store_reference(&mut self.store, &reference, bytes);
         }
-        if self.complete.len().saturating_add(self.partial.len()) >= MAX_REMOTE_OBJECTS {
-            return Err(protocol("remote object inventory exceeds its count bound"));
-        }
-        let next_total = self
-            .buffered_bytes
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(|| protocol("remote object inventory byte total overflowed"))?;
-        if next_total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
-            return Err(protocol("remote object inventory exceeds its byte bound"));
-        }
-        self.buffered_bytes = next_total;
-        self.complete.insert(reference.id, (reference, bytes));
+        let next_total = self.extended_total(reference.encoded_length)?;
+        store_reference(&mut self.store, &reference, bytes)?;
+        self.complete.insert(reference.id, reference);
+        self.stored_bytes = next_total;
         Ok(())
     }
 
@@ -120,13 +137,13 @@ impl RemoteObjectCache {
         authorization_scope: &str,
     ) -> NativeExecutionResult<RemoteObjectReceipt> {
         validate_reference(reference, authorization_scope)?;
-        if let Some((stored, bytes)) = self.complete.get(&reference.id) {
+        if let Some(stored) = self.complete.get(&reference.id) {
             if stored != reference {
                 return Err(protocol(
                     "remote object id was reused for a different reference",
                 ));
             }
-            return Ok(receipt(reference, bytes.len() as u64, true));
+            return Ok(receipt(reference, reference.encoded_length, true));
         }
         if let Some(partial) = self.partial.get(&reference.id) {
             if &partial.reference != reference {
@@ -134,17 +151,18 @@ impl RemoteObjectCache {
             }
             return Ok(receipt(reference, partial.resume.next_offset(), false));
         }
-        if self.complete.len().saturating_add(self.partial.len()) >= MAX_REMOTE_OBJECTS {
-            return Err(protocol("remote object inventory exceeds its count bound"));
-        }
+        let next_total = self.extended_total(reference.encoded_length)?;
+        let resume = ResumeState::new(reference.encoded_length).map_err(protocol)?;
+        let file = tempfile::NamedTempFile::new_in(self.store.root()).map_err(protocol)?;
         self.partial.insert(
             reference.id,
             PartialObject {
                 reference: reference.clone(),
-                resume: ResumeState::new(reference.encoded_length).map_err(protocol)?,
-                bytes: Vec::new(),
+                resume,
+                file,
             },
         );
+        self.stored_bytes = next_total;
         Ok(receipt(reference, 0, false))
     }
 
@@ -167,36 +185,35 @@ impl RemoteObjectCache {
             .partial
             .get_mut(&reference.id)
             .expect("object probe created partial state");
-        let next_total = self
-            .buffered_bytes
-            .checked_add(chunk.bytes.len() as u64)
-            .ok_or_else(|| protocol("remote object inventory byte total overflowed"))?;
-        if next_total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
-            return Err(protocol("remote object inventory exceeds its byte bound"));
-        }
         partial
             .resume
             .accept(chunk.offset, chunk.bytes.len())
             .map_err(protocol)?;
-        partial.bytes.extend_from_slice(&chunk.bytes);
-        self.buffered_bytes = next_total;
+        partial.file.write_all(&chunk.bytes).map_err(protocol)?;
         if !partial.resume.is_complete() {
             return Ok(receipt(reference, partial.resume.next_offset(), false));
         }
-        let partial = self
+        let mut partial = self
             .partial
             .remove(&reference.id)
             .expect("completed partial object exists");
-        if let Err(error) = validate_bytes(reference, &partial.bytes) {
-            self.buffered_bytes = self
-                .buffered_bytes
-                .saturating_sub(partial.bytes.len() as u64);
+        partial.file.as_file_mut().sync_all().map_err(protocol)?;
+        partial.file.rewind().map_err(protocol)?;
+        let mut bytes = Vec::with_capacity(
+            usize::try_from(reference.encoded_length)
+                .map_err(|_| protocol("remote object length does not fit this host"))?,
+        );
+        std::io::Read::read_to_end(partial.file.as_file_mut(), &mut bytes).map_err(protocol)?;
+        if let Err(error) = validate_bytes(reference, &bytes) {
+            self.stored_bytes = self.stored_bytes.saturating_sub(reference.encoded_length);
             return Err(error);
         }
-        let length = partial.bytes.len() as u64;
-        self.complete
-            .insert(reference.id, (partial.reference, partial.bytes));
-        Ok(receipt(reference, length, true))
+        if let Err(error) = store_reference(&mut self.store, reference, bytes) {
+            self.stored_bytes = self.stored_bytes.saturating_sub(reference.encoded_length);
+            return Err(error);
+        }
+        self.complete.insert(reference.id, partial.reference);
+        Ok(receipt(reference, reference.encoded_length, true))
     }
 
     pub(super) fn get(
@@ -207,20 +224,23 @@ impl RemoteObjectCache {
         authorization_scope: &str,
     ) -> NativeExecutionResult<(ObjectChunk, bool)> {
         validate_reference(reference, authorization_scope)?;
-        let bytes = match self.complete.get(&reference.id) {
-            Some((stored, bytes)) if stored == reference => bytes,
+        match self.complete.get(&reference.id) {
+            Some(stored) if stored == reference => {}
             Some(_) => {
                 return Err(protocol(
                     "remote object download reference differs from stored content",
                 ))
             }
-            None => self
-                .generated
-                .get(&reference.logical_digest)
-                .ok_or_else(|| protocol("remote object is unavailable or incomplete"))?,
-        };
+            None if self.generated.contains(&reference.logical_digest) => {}
+            None => return Err(protocol("remote object is unavailable or incomplete")),
+        }
+        let bytes = self
+            .store
+            .read_verified(reference.logical_digest)
+            .map_err(protocol)?
+            .ok_or_else(|| protocol("remote object bytes are absent"))?;
         if bytes.len() as u64 != reference.encoded_length
-            || Digest::sha256(bytes) != reference.logical_digest
+            || Digest::sha256(&bytes) != reference.logical_digest
             || offset > reference.encoded_length
         {
             return Err(protocol(
@@ -248,24 +268,7 @@ impl RemoteObjectCache {
 
 impl CacheImport for RemoteObjectCache {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        let bytes = self
-            .generated
-            .get(&digest)
-            .or_else(|| {
-                self.complete.values().find_map(|(reference, bytes)| {
-                    (reference.logical_digest == digest).then_some(bytes)
-                })
-            })
-            .cloned();
-        if bytes
-            .as_ref()
-            .is_some_and(|bytes| Digest::sha256(bytes) != digest)
-        {
-            return Err(ArtifactError::Identity(
-                "remote cache returned bytes under the wrong digest".into(),
-            ));
-        }
-        Ok(bytes)
+        self.store.read_verified(digest)
     }
 }
 
@@ -279,43 +282,71 @@ impl CacheExport for RemoteObjectCache {
                 "remote generated object exceeds its per-object bound".into(),
             ));
         }
-        if let Some(existing) = self.generated.get(&object.descriptor.digest) {
-            return identical(existing, &object.bytes);
-        }
-        if let Some(existing) = self.complete.values().find_map(|(reference, bytes)| {
-            (reference.logical_digest == object.descriptor.digest).then_some(bytes)
-        }) {
-            return identical(existing, &object.bytes);
-        }
-        if self.complete.len().saturating_add(self.generated.len()) >= MAX_REMOTE_OBJECTS {
-            return Err(ArtifactError::Limit(
-                "remote generated object inventory exceeds its count bound".into(),
-            ));
+        if self.generated.contains(&object.descriptor.digest)
+            || self
+                .complete
+                .values()
+                .any(|reference| reference.logical_digest == object.descriptor.digest)
+        {
+            return self.store.write_verified(object);
         }
         let next_total = self
-            .buffered_bytes
-            .checked_add(object.descriptor.encoded_length)
-            .ok_or_else(|| ArtifactError::Limit("remote object byte total overflowed".into()))?;
-        if next_total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
-            return Err(ArtifactError::Limit(
-                "remote generated object inventory exceeds its byte bound".into(),
-            ));
-        }
-        self.generated
-            .insert(object.descriptor.digest, object.bytes.clone());
-        self.buffered_bytes = next_total;
+            .extended_total(object.descriptor.encoded_length)
+            .map_err(|error| ArtifactError::Limit(error.to_string()))?;
+        self.store.write_verified(object)?;
+        self.generated.insert(object.descriptor.digest);
+        self.stored_bytes = next_total;
         Ok(())
     }
 }
 
-fn identical(existing: &[u8], expected: &[u8]) -> ArtifactResult<()> {
-    if existing == expected {
-        Ok(())
-    } else {
-        Err(ArtifactError::Identity(
-            "remote object digest was reused for different content".into(),
-        ))
+impl RemoteObjectCache {
+    fn extended_total(&self, bytes: u64) -> NativeExecutionResult<u64> {
+        if self
+            .complete
+            .len()
+            .saturating_add(self.partial.len())
+            .saturating_add(self.generated.len())
+            >= MAX_REMOTE_OBJECTS
+        {
+            return Err(protocol("remote object inventory exceeds its count bound"));
+        }
+        let next_total = self
+            .stored_bytes
+            .checked_add(bytes)
+            .ok_or_else(|| protocol("remote object inventory byte total overflowed"))?;
+        if next_total > runmat_execution_artifact::MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES {
+            return Err(protocol("remote object inventory exceeds its byte bound"));
+        }
+        Ok(next_total)
     }
+}
+
+fn store_reference(
+    store: &mut FilesystemObjectStore,
+    reference: &ValueRef,
+    bytes: Vec<u8>,
+) -> NativeExecutionResult<()> {
+    let namespace = match reference.kind {
+        runmat_execution::value::ValueRefKind::DriverObject => ObjectNamespace::InputValue,
+        runmat_execution::value::ValueRefKind::ResultObject => ObjectNamespace::ResultValue,
+        _ => return Err(protocol("remote execution object has a non-portable kind")),
+    };
+    let object = LogicalObject::new(
+        namespace,
+        reference.value_schema.clone(),
+        reference.media_type.clone(),
+        bytes,
+    )
+    .map_err(protocol)?;
+    if object.descriptor.digest != reference.logical_digest
+        || object.descriptor.encoded_length != reference.encoded_length
+    {
+        return Err(protocol(
+            "remote execution object differs from its logical descriptor",
+        ));
+    }
+    store.write_verified(&object).map_err(protocol)
 }
 
 pub(super) fn handle_command(
@@ -411,10 +442,10 @@ mod tests {
     }
 
     #[test]
-    fn object_cache_resumes_and_rejects_corruption() {
+    fn object_cache_resumes_from_disk_and_rejects_corruption() {
         let bytes = b"canonical object bytes";
         let reference = reference(bytes);
-        let mut cache = RemoteObjectCache::default();
+        let mut cache = RemoteObjectCache::new().unwrap();
         assert_eq!(
             cache.probe(&reference, "run-object").unwrap().next_offset,
             0
@@ -431,6 +462,18 @@ mod tests {
             .unwrap();
         assert_eq!(
             cache.probe(&reference, "run-object").unwrap().next_offset,
+            9
+        );
+        assert_eq!(
+            cache
+                .partial
+                .get(&reference.id)
+                .unwrap()
+                .file
+                .as_file()
+                .metadata()
+                .unwrap()
+                .len(),
             9
         );
         assert!(cache
@@ -454,6 +497,8 @@ mod tests {
             )
             .unwrap();
         assert!(receipt.complete);
+        assert!(cache.partial.is_empty());
+        assert_eq!(cache.complete.get(&reference.id), Some(&reference));
         let (chunk, complete) = cache.get(&reference, 0, 10, "run-object").unwrap();
         assert_eq!(chunk.bytes, bytes[..10]);
         assert!(!complete);
@@ -475,7 +520,7 @@ mod tests {
         )
         .unwrap();
         let reference = reference(&bytes);
-        let mut store = RemoteObjectStore::default();
+        let mut store = RemoteObjectStore::new().unwrap();
         store.write_verified(&object).unwrap();
         assert_eq!(
             store.read_verified(object.descriptor.digest).unwrap(),
@@ -501,7 +546,7 @@ mod tests {
         let bytes = b"transported analysis manifest".to_vec();
         let mut reference = reference(&bytes);
         reference.kind = ValueRefKind::DriverObject;
-        let store = RemoteObjectStore::default();
+        let store = RemoteObjectStore::new().unwrap();
         store
             .register(ProgramExecutionObject {
                 reference: reference.clone(),

@@ -9,7 +9,7 @@ use runmat_analysis_fea::execution::{
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
+use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutionObjectLocation};
 
 use super::*;
 
@@ -129,13 +129,23 @@ fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
     let host = AnalysisHostWorkload::new(workload, access()).unwrap();
     let prepared =
         prepare_analysis_program(&host, revision(), std::slice::from_ref(&input)).unwrap();
-    assert_eq!(prepared.inputs.arguments, prepared.request.arguments);
-    assert_eq!(prepared.inputs.objects.len(), input.objects.len());
-    assert!(prepared.inputs.objects.iter().all(|object| {
+    assert_eq!(prepared.objects.len(), input.objects.len());
+    assert!(prepared.objects.iter().all(|object| {
         object.reference.authorization_scope == host.artifact_access.authorization_scope
             && object.reference.kind == ValueRefKind::DriverObject
     }));
-    prepared.inputs.validate().unwrap();
+    let locations = prepared
+        .objects
+        .iter()
+        .enumerate()
+        .map(|(index, object)| ProgramExecutionObjectLocation {
+            reference: object.reference.clone(),
+            artifact_id: format!("input-artifact-{index}"),
+        })
+        .collect();
+    let inputs = prepared.inputs(locations).unwrap();
+    assert_eq!(inputs.arguments, prepared.request.arguments);
+    inputs.validate().unwrap();
 
     let mut wrong = input;
     wrong.manifest.logical_identity = digest("substituted");

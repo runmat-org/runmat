@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::Duration;
 
 use runmat_execution::identity::{ArtifactId, PoolId};
@@ -7,8 +8,7 @@ use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, OutputContract, TaskId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{
-    ArtifactError, ProgramExecutionObject, ProgramExecutionOutputs, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    ProgramExecutionObject, ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_execution_runner::{PoolSpec, TaskSubmission};
 use runmat_execution_transport_native::control::{
@@ -25,9 +25,14 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) enum RemotePoolExecutionOutcome {
-    Completed(ProgramExecutionOutputs),
+    Completed(RemotePoolExecutionResult),
     Cancelled,
     Indeterminate(String),
+}
+
+pub(super) struct RemotePoolExecutionResult {
+    pub(super) response: ProgramExecutionResponse,
+    pub(super) objects: super::result_objects::RemoteResultObjects,
 }
 
 pub(super) struct RemotePoolExecution<'a> {
@@ -173,7 +178,7 @@ pub(super) async fn execute(
                                 ProgramExecutionResponse::Success {
                                     value: value.clone(),
                                 },
-                                &pool,
+                                Arc::clone(&pool),
                             )
                             .map(RemotePoolExecutionOutcome::Completed),
                             _ => Err(protocol(
@@ -186,7 +191,7 @@ pub(super) async fn execute(
                             outputs: success.outputs,
                             result_objects: success.result_objects,
                         },
-                        &pool,
+                        Arc::clone(&pool),
                     )
                     .map(RemotePoolExecutionOutcome::Completed),
                     Err(message) => {
@@ -194,7 +199,7 @@ pub(super) async fn execute(
                         if state == Some(TaskState::Indeterminate) {
                             Ok(RemotePoolExecutionOutcome::Indeterminate(message))
                         } else {
-                            packaged(ProgramExecutionResponse::Failure { message }, &pool)
+                            packaged(ProgramExecutionResponse::Failure { message }, Arc::clone(&pool))
                                 .map(RemotePoolExecutionOutcome::Completed)
                         }
                     }
@@ -237,14 +242,25 @@ pub(super) async fn execute(
 
 fn packaged(
     response: ProgramExecutionResponse,
-    pool: &RemotePoolDriver,
-) -> NativeExecutionResult<ProgramExecutionOutputs> {
-    ProgramExecutionOutputs::from_response(response, |reference| {
-        pool.execution_object(reference)
-            .map(|bytes| bytes.map(|bytes| bytes.to_vec()))
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+    pool: std::sync::Arc<RemotePoolDriver>,
+) -> NativeExecutionResult<RemotePoolExecutionResult> {
+    if let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &response {
+        for reference in result_objects {
+            if pool
+                .execution_object(reference)
+                .map_err(protocol)?
+                .is_none()
+            {
+                return Err(protocol(
+                    "remote result object is absent from the worker pool",
+                ));
+            }
+        }
+    }
+    Ok(RemotePoolExecutionResult {
+        response,
+        objects: super::result_objects::RemoteResultObjects::Pool(pool),
     })
-    .map_err(protocol)
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

@@ -171,12 +171,12 @@ impl WorkerBackend for RemoteTestBackend {
                 requested_outputs: 1,
             })
             .map_err(protocol)?;
-            let inputs = serde_json::to_vec(&ProgramExecutionInputs {
+            let inputs = ProgramExecutionInputs {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
                 arguments: Vec::new(),
                 objects: Vec::new(),
-            })
-            .map_err(protocol)?;
+            };
+            inputs.validate().map_err(protocol)?;
             let active_run = Arc::clone(&session.active_run);
             let submitted = crate::commands::job::submit::submit_prepared(
                 PreparedRemoteExecution {
@@ -184,6 +184,7 @@ impl WorkerBackend for RemoteTestBackend {
                     bundle_archive,
                     descriptor,
                     inputs,
+                    objects: Vec::new(),
                 },
                 RemoteSubmissionOptions {
                     project: self.config.project,

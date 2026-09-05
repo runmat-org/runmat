@@ -4,28 +4,46 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::identity::{ValueId, WorkerId};
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
 use runmat_execution::Digest;
+use runmat_execution_artifact::cache::{CacheExport, CacheImport, FilesystemObjectStore};
+use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::object_transfer::{MAX_REMOTE_OBJECTS, MAX_REMOTE_OBJECT_TOTAL_BYTES};
+use super::object_transfer::MAX_REMOTE_OBJECTS;
 use super::RemoteWorkerChannel;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
-type StoredObject = (ValueRef, Arc<[u8]>);
-
 #[derive(Default)]
 struct ObjectState {
-    objects: HashMap<ValueId, StoredObject>,
+    objects: HashMap<ValueId, ValueRef>,
     registered_inputs: HashSet<ValueId>,
     committed_results: HashSet<ValueId>,
 }
 
-#[derive(Default)]
 pub(super) struct RemoteObjectCatalog {
     state: Mutex<ObjectState>,
     transferred: AsyncMutex<HashSet<(WorkerId, ValueId)>>,
+    store: FilesystemObjectStore,
+    _directory: tempfile::TempDir,
 }
 
 impl RemoteObjectCatalog {
+    pub(super) fn new() -> NativeExecutionResult<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix("runmat-remote-pool-objects-")
+            .tempdir()
+            .map_err(protocol)?;
+        let store = FilesystemObjectStore::open(
+            directory.path().join("objects"),
+            super::object_transfer::MAX_REMOTE_OBJECT_BYTES,
+        )
+        .map_err(protocol)?;
+        Ok(Self {
+            state: Mutex::new(ObjectState::default()),
+            transferred: AsyncMutex::new(HashSet::new()),
+            store,
+            _directory: directory,
+        })
+    }
     pub(super) fn register(
         &self,
         reference: ValueRef,
@@ -34,12 +52,10 @@ impl RemoteObjectCatalog {
     ) -> NativeExecutionResult<()> {
         validate_object(&reference, &encoded, authorization_scope)?;
         let mut state = self.state.lock().expect("remote object catalog poisoned");
-        validate_extension(
-            &state.objects,
-            std::iter::once((&reference, encoded.len() as u64)),
-        )?;
+        validate_extension(&state.objects, std::iter::once(&reference))?;
         let value_id = reference.id;
-        insert(&mut state.objects, reference, encoded)?;
+        store(&self.store, &reference, encoded.as_ref())?;
+        insert(&mut state.objects, reference)?;
         state.registered_inputs.insert(value_id);
         Ok(())
     }
@@ -47,7 +63,11 @@ impl RemoteObjectCatalog {
     pub(super) fn get(&self, reference: &ValueRef) -> NativeExecutionResult<Option<Arc<[u8]>>> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {
-            Some((stored, bytes)) if stored == reference => Ok(Some(Arc::clone(bytes))),
+            Some(stored) if stored == reference => self
+                .store
+                .read_verified(reference.logical_digest)
+                .map(|bytes| bytes.map(Arc::<[u8]>::from))
+                .map_err(protocol),
             Some(_) => Err(protocol(
                 "remote execution object reference differs from stored content",
             )),
@@ -58,7 +78,7 @@ impl RemoteObjectCatalog {
     pub(super) fn contains(&self, reference: &ValueRef) -> NativeExecutionResult<bool> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {
-            Some((stored, _)) if stored == reference => Ok(true),
+            Some(stored) if stored == reference => Ok(true),
             Some(_) => Err(protocol(
                 "remote execution object reference differs from stored content",
             )),
@@ -71,7 +91,7 @@ impl RemoteObjectCatalog {
         channel: &dyn RemoteWorkerChannel,
         worker_id: WorkerId,
     ) -> NativeExecutionResult<()> {
-        let objects = self
+        let references = self
             .state
             .lock()
             .expect("remote object catalog poisoned")
@@ -79,14 +99,17 @@ impl RemoteObjectCatalog {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        for (reference, encoded) in objects {
+        for reference in references {
             let key = (worker_id, reference.id);
             if self.transferred.lock().await.contains(&key) {
                 continue;
             }
-            let receipt = channel
-                .transfer_object(reference.clone(), encoded.as_ref())
-                .await?;
+            let encoded = self
+                .store
+                .read_verified(reference.logical_digest)
+                .map_err(protocol)?
+                .ok_or_else(|| protocol("registered remote input object is absent"))?;
+            let receipt = channel.transfer_object(reference.clone(), &encoded).await?;
             if receipt.value_id != reference.id
                 || receipt.next_offset != reference.encoded_length
                 || !receipt.complete
@@ -106,30 +129,29 @@ impl RemoteObjectCatalog {
         references: &[ValueRef],
         authorization_scope: &str,
     ) -> NativeExecutionResult<()> {
+        {
+            let state = self.state.lock().expect("remote object catalog poisoned");
+            for reference in references {
+                if let Some(stored) = state.objects.get(&reference.id) {
+                    if stored != reference {
+                        return Err(protocol(
+                            "remote result object collides with registered content",
+                        ));
+                    }
+                }
+            }
+            validate_extension(&state.objects, references.iter())?;
+        }
         let mut downloaded = Vec::with_capacity(references.len());
         for reference in references {
             let encoded = channel.download_object(reference.clone()).await?;
             validate_object(reference, &encoded, authorization_scope)?;
-            downloaded.push((reference.clone(), Arc::<[u8]>::from(encoded)));
+            store(&self.store, reference, &encoded)?;
+            downloaded.push(reference.clone());
         }
         let mut state = self.state.lock().expect("remote object catalog poisoned");
-        for (reference, encoded) in &downloaded {
-            if let Some((stored, bytes)) = state.objects.get(&reference.id) {
-                if stored != reference || bytes.as_ref() != encoded.as_ref() {
-                    return Err(protocol(
-                        "remote result object collides with registered content",
-                    ));
-                }
-            }
-        }
-        validate_extension(
-            &state.objects,
-            downloaded
-                .iter()
-                .map(|(reference, encoded)| (reference, encoded.len() as u64)),
-        )?;
-        for (reference, encoded) in downloaded {
-            insert(&mut state.objects, reference, encoded)?;
+        for reference in downloaded {
+            insert(&mut state.objects, reference)?;
         }
         Ok(())
     }
@@ -138,7 +160,7 @@ impl RemoteObjectCatalog {
         let mut state = self.state.lock().expect("remote object catalog poisoned");
         for reference in references {
             match state.objects.get(&reference.id) {
-                Some((stored, _)) if stored == reference => {}
+                Some(stored) if stored == reference => {}
                 Some(_) => {
                     return Err(protocol(
                         "committed remote result differs from downloaded content",
@@ -161,7 +183,7 @@ impl RemoteObjectCatalog {
                 && state
                     .objects
                     .get(&reference.id)
-                    .is_some_and(|(stored, _)| stored == reference)
+                    .is_some_and(|stored| stored == reference)
             {
                 state.objects.remove(&reference.id);
             }
@@ -190,49 +212,78 @@ fn validate_object(
 }
 
 fn insert(
-    objects: &mut HashMap<ValueId, StoredObject>,
+    objects: &mut HashMap<ValueId, ValueRef>,
     reference: ValueRef,
-    encoded: Arc<[u8]>,
 ) -> NativeExecutionResult<()> {
-    if let Some((stored, bytes)) = objects.get(&reference.id) {
-        if stored == &reference && bytes.as_ref() == encoded.as_ref() {
+    if let Some(stored) = objects.get(&reference.id) {
+        if stored == &reference {
             return Ok(());
         }
         return Err(protocol(
             "remote execution object id was reused for different content",
         ));
     }
-    objects.insert(reference.id, (reference, encoded));
+    objects.insert(reference.id, reference);
     Ok(())
 }
 
 fn validate_extension<'a>(
-    objects: &HashMap<ValueId, StoredObject>,
-    additions: impl Iterator<Item = (&'a ValueRef, u64)>,
+    objects: &HashMap<ValueId, ValueRef>,
+    additions: impl Iterator<Item = &'a ValueRef>,
 ) -> NativeExecutionResult<()> {
     let mut count = objects.len();
     let mut total = objects
         .values()
-        .try_fold(0_u64, |total, (_, bytes)| {
-            total.checked_add(bytes.len() as u64)
+        .try_fold(0_u64, |total, reference| {
+            total.checked_add(reference.encoded_length)
         })
         .ok_or_else(|| protocol("remote execution object byte total overflowed"))?;
     let mut new_ids = HashSet::new();
-    for (reference, length) in additions {
+    for reference in additions {
         if objects.contains_key(&reference.id) || !new_ids.insert(reference.id) {
             continue;
         }
         count = count.saturating_add(1);
         total = total
-            .checked_add(length)
+            .checked_add(reference.encoded_length)
             .ok_or_else(|| protocol("remote execution object byte total overflowed"))?;
     }
-    if count > MAX_REMOTE_OBJECTS || total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
+    if count > MAX_REMOTE_OBJECTS
+        || total > runmat_execution_artifact::MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES
+    {
         return Err(protocol(
             "remote execution object catalog exceeds its hard bounds",
         ));
     }
     Ok(())
+}
+
+fn store(
+    store: &FilesystemObjectStore,
+    reference: &ValueRef,
+    bytes: &[u8],
+) -> NativeExecutionResult<()> {
+    let namespace = match reference.kind {
+        runmat_execution::value::ValueRefKind::DriverObject => ObjectNamespace::InputValue,
+        runmat_execution::value::ValueRefKind::ResultObject => ObjectNamespace::ResultValue,
+        _ => return Err(protocol("remote execution object has a non-portable kind")),
+    };
+    let object = LogicalObject::new(
+        namespace,
+        reference.value_schema.clone(),
+        reference.media_type.clone(),
+        bytes.to_vec(),
+    )
+    .map_err(protocol)?;
+    if object.descriptor.digest != reference.logical_digest
+        || object.descriptor.encoded_length != reference.encoded_length
+    {
+        return Err(protocol(
+            "remote execution object differs from its logical descriptor",
+        ));
+    }
+    let mut store = store.clone();
+    store.write_verified(&object).map_err(protocol)
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
@@ -247,7 +298,7 @@ mod tests {
 
     #[test]
     fn stale_results_are_discarded_without_evicting_inputs_or_commits() {
-        let catalog = RemoteObjectCatalog::default();
+        let catalog = RemoteObjectCatalog::new().unwrap();
         let input_bytes = Arc::<[u8]>::from(&b"registered input"[..]);
         let input = reference("run", input_bytes.as_ref(), b"input");
         catalog
@@ -262,15 +313,12 @@ mod tests {
         let stale = reference("run", stale_bytes.as_ref(), b"stale");
         let committed_bytes = Arc::<[u8]>::from(&b"committed result"[..]);
         let committed = reference("run", committed_bytes.as_ref(), b"committed");
+        store(&catalog.store, &stale, stale_bytes.as_ref()).unwrap();
+        store(&catalog.store, &committed, committed_bytes.as_ref()).unwrap();
         {
             let mut state = catalog.state.lock().unwrap();
-            insert(&mut state.objects, stale.clone(), stale_bytes).unwrap();
-            insert(
-                &mut state.objects,
-                committed.clone(),
-                Arc::clone(&committed_bytes),
-            )
-            .unwrap();
+            insert(&mut state.objects, stale.clone()).unwrap();
+            insert(&mut state.objects, committed.clone()).unwrap();
         }
         catalog
             .commit_results(std::slice::from_ref(&committed))

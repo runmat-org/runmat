@@ -180,17 +180,22 @@ async fn remote_driver_commits_verified_externalized_results() {
         authorization_scope: run_id.into(),
         resident_fence: None,
     };
-    let outputs = ProgramExecutionOutputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    let objects = super::object_transfer::RemoteObjectStore::new().unwrap();
+    objects
+        .register(ProgramExecutionObject {
+            reference: reference.clone(),
+            bytes,
+        })
+        .unwrap();
+    let result = super::pool_execution::RemotePoolExecutionResult {
         response: ProgramExecutionResponse::ExternalizedSuccess {
             outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
                 reference.clone(),
             ))],
             result_objects: vec![reference.clone()],
         },
-        objects: vec![ProgramExecutionObject { reference, bytes }],
+        objects: super::result_objects::RemoteResultObjects::Local(objects),
     };
-    outputs.validate().unwrap();
     let control = FakeControl {
         bootstrap: DriverBootstrap {
             project_revision: "unused".into(),
@@ -219,17 +224,25 @@ async fn remote_driver_commits_verified_externalized_results() {
         },
         endpoint_identity_file: PathBuf::from("unused"),
     };
-    super::driver::commit_response(&control, &config, &run_key, outputs)
+    super::driver::commit_response(&control, &config, &run_key, result)
         .await
         .unwrap();
     let state = control.state.lock().unwrap();
     assert_eq!(
         state.transitions,
-        vec![(DriverRunTarget::Succeeded, Some("stored-1".into()))]
+        vec![(DriverRunTarget::Succeeded, Some("stored-2".into()))]
     );
-    let plaintext = open_object(
+    let object_plaintext = open_object(
         &run_key,
         &state.stored[0].2,
+        run_id,
+        EncryptionPurpose::Result,
+    )
+    .unwrap();
+    assert_eq!(object_plaintext, b"canonical analysis result object");
+    let plaintext = open_object(
+        &run_key,
+        &state.stored[1].2,
         run_id,
         EncryptionPurpose::Result,
     )
@@ -237,6 +250,7 @@ async fn remote_driver_commits_verified_externalized_results() {
     let committed: ProgramExecutionOutputs = serde_json::from_slice(&plaintext).unwrap();
     committed.validate().unwrap();
     assert_eq!(committed.objects.len(), 1);
+    assert_eq!(committed.objects[0].artifact_id, "stored-1");
 }
 
 #[tokio::test]

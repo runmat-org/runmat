@@ -10,7 +10,6 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 aes-gcm = { workspace = true }
-base64 = "0.22"
 hkdf = { workspace = true }
 minicbor = { workspace = true }
 runmat-execution = { workspace = true }
