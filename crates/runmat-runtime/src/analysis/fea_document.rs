@@ -885,6 +885,19 @@ fn resolve_typed_region_targets(
             resolve_region_target(target, geometry, aliases, &mut failure);
         }
     }
+    for step in &mut model.sequence.steps {
+        for observation in &mut step.observations {
+            let Some(spec) = observation.spec_mut() else {
+                continue;
+            };
+            if let runmat_analysis_core::ObservationTarget::Spatial(ExcitationTarget::Region(
+                target,
+            )) = &mut spec.target
+            {
+                resolve_region_target(target, geometry, aliases, &mut failure);
+            }
+        }
+    }
     failure.map_or(Ok(()), Err)
 }
 
@@ -1481,6 +1494,48 @@ mod tests {
                 applies_before_step_id: "solve".into(),
             },
         )];
+        model.sequence = AnalysisSequence::from_steps(
+            "sequence",
+            vec![runmat_analysis_core::ProcedureStep::structural_static(
+                "solve",
+            )],
+        );
+        model.sequence.steps[0]
+            .observations
+            .push(runmat_analysis_core::ObservationRequest::Probe(
+                runmat_analysis_core::ObservationSpec {
+                    observation_id: runmat_analysis_core::ObservationId("temperature".into()),
+                    quantity: runmat_analysis_core::ObservationQuantity::Temperature,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                    target: runmat_analysis_core::ObservationTarget::Spatial(
+                        ExcitationTarget::Region(RegionTarget::boundary("loaded")),
+                    ),
+                    source_location: runmat_analysis_core::FieldLocation::Node,
+                    output_location: runmat_analysis_core::FieldLocation::Node,
+                    recovery: runmat_analysis_core::RecoveryPolicy::Native,
+                    component: runmat_analysis_core::ObservationComponent::All,
+                    frame: CoordinateFrame::Global,
+                    sign_convention: runmat_analysis_core::SignConvention::Native,
+                    complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+                    sampling: runmat_analysis_core::SamplingPolicy::Final,
+                    reduction: None,
+                    storage: runmat_analysis_core::ObservationStoragePolicy {
+                        precision: runmat_analysis_core::SignalPrecision::Real64,
+                        compression: runmat_analysis_core::CompressionPolicy::None,
+                        retention: runmat_analysis_core::RetentionPolicy::Canonical,
+                        partial_access:
+                            runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+                    },
+                    purpose: runmat_analysis_core::ObservationPurpose::Visualization,
+                    cost: runmat_analysis_core::ObservationCostEstimate {
+                        operation_count: 0,
+                        peak_resident_bytes: 0,
+                        stored_bytes: 0,
+                        transfer_bytes: 0,
+                        collective_count: 0,
+                    },
+                },
+            ));
 
         resolve_typed_region_targets(&mut model, &geometry, &aliases).expect("resolve aliases");
 
@@ -1504,6 +1559,14 @@ mod tests {
                 .region_id,
             "tip"
         );
+        assert!(matches!(
+            model.sequence.steps[0].observations[0]
+                .spec()
+                .map(|spec| &spec.target),
+            Some(runmat_analysis_core::ObservationTarget::Spatial(
+                ExcitationTarget::Region(target)
+            )) if target.region_id == "tip"
+        ));
     }
 
     #[test]

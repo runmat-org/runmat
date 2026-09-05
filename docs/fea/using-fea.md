@@ -279,6 +279,7 @@ The typed constructors are:
 | `fea.<Family>InitialCondition.<state>(...)` | Sample a compatible typed signal into the model state before a named procedure step. |
 | `fea.ResponseSpectrum.new(...)` | Assemble response-spectrum data, evaluation policy, direction, modal rules, evidence, and provenance from typed components. |
 | `fea.<Family>Step.<procedure>(id)` | A concrete direct-solution procedure step; family and procedure are selected by the class method rather than text. |
+| `fea.ProcedureStep.configure(...)`, `fea.AnalysisSequence.new(...)` | Add typed domains, activations, state transfer, observations, accuracy, restart, dependencies, transitions, and branches to procedure steps. |
 | `fea.ThermoMechanicalDomain.atReferenceTemperature(...)` | Thermo-mechanical constitutive reference state from a typed `fea.Temperature`. |
 | `fea.ElectroThermalDomain.atReferenceTemperature(...)` | Electro-thermal constitutive reference state from a typed `fea.Temperature`. |
 | `fea.ElectromagneticDomain.atFrequency(...)` | Electromagnetic frequency-domain definition from a typed `fea.Frequency`. |

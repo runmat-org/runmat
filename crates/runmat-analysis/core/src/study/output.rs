@@ -27,6 +27,16 @@ impl ObservationRequest {
         }
     }
 
+    pub fn spec_mut(&mut self) -> Option<&mut ObservationSpec> {
+        match self {
+            Self::Field(value)
+            | Self::History(value)
+            | Self::Probe(value)
+            | Self::Reduction(value) => Some(value),
+            Self::Diagnostic(_) | Self::Monitor(_) => None,
+        }
+    }
+
     pub fn observation_id(&self) -> &ObservationId {
         match self {
             Self::Field(value)

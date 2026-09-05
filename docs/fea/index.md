@@ -24,6 +24,7 @@ RunMat FEA lets you start with a CAD or mesh file and run repeatable physics stu
 | Load, inspect, and prepare CAD or mesh geometry | [Geometry](/docs/fea/geometry) |
 | Generate deterministic solver meshes and inspect quality evidence | [Meshing](/docs/fea/meshing) |
 | Define solver-ready model data | [Models](/docs/fea/models) |
+| Compose procedure sequences, observations, and accuracy requirements | [Procedure Sequences, Observations, and Accuracy](/docs/fea/study-contracts) |
 | Choose the physics family and understand family limits | [Physics Families](/docs/fea/physics) |
 | Run direct solves, studies, and sweeps | [Solves, Studies, and Sweeps](/docs/fea/solves) |
 | Understand saved artifacts, diagnostics, and provenance | [Evidence & Artifacts](/docs/fea/evidence) |

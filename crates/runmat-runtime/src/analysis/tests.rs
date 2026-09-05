@@ -4893,6 +4893,41 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
         panic!("expected region excitation target");
     };
     target.region_id = "face_000002".to_owned();
+    model.sequence.steps[0]
+        .observations
+        .push(runmat_analysis_core::ObservationRequest::Field(
+            runmat_analysis_core::ObservationSpec {
+                observation_id: runmat_analysis_core::ObservationId("temperature".into()),
+                quantity: runmat_analysis_core::ObservationQuantity::Temperature,
+                value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                target: runmat_analysis_core::ObservationTarget::Spatial(ExcitationTarget::Region(
+                    RegionTarget::boundary("face_000001"),
+                )),
+                source_location: runmat_analysis_core::FieldLocation::Node,
+                output_location: runmat_analysis_core::FieldLocation::Node,
+                recovery: runmat_analysis_core::RecoveryPolicy::Native,
+                component: runmat_analysis_core::ObservationComponent::All,
+                frame: CoordinateFrame::Global,
+                sign_convention: runmat_analysis_core::SignConvention::Native,
+                complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+                sampling: runmat_analysis_core::SamplingPolicy::Final,
+                reduction: None,
+                storage: runmat_analysis_core::ObservationStoragePolicy {
+                    precision: SignalPrecision::Real64,
+                    compression: runmat_analysis_core::CompressionPolicy::None,
+                    retention: runmat_analysis_core::RetentionPolicy::Canonical,
+                    partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+                },
+                purpose: runmat_analysis_core::ObservationPurpose::Visualization,
+                cost: runmat_analysis_core::ObservationCostEstimate {
+                    operation_count: 0,
+                    peak_resident_bytes: 0,
+                    stored_bytes: 0,
+                    transfer_bytes: 0,
+                    collective_count: 0,
+                },
+            },
+        ));
     let aliases = BTreeMap::from([
         ("face_000001".to_owned(), persistent_face("exact-face-a")),
         ("face_000002".to_owned(), persistent_face("exact-face-b")),
@@ -4905,6 +4940,14 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
         "exact-face-a"
     );
     assert_eq!(excitation_region_id(&model.excitations[0]), "exact-face-b");
+    assert!(matches!(
+        model.sequence.steps[0].observations[0]
+            .spec()
+            .map(|spec| &spec.target),
+        Some(runmat_analysis_core::ObservationTarget::Spatial(
+            ExcitationTarget::Region(target)
+        )) if target.region_id == "exact-face-a"
+    ));
 }
 
 #[test]

@@ -57,6 +57,8 @@ use crate::builtins::io::json::jsondecode::value_from_json;
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub(crate) mod accuracy;
+pub(crate) mod activations;
 mod author_study;
 pub(crate) mod boundaries;
 pub(crate) mod classes;
@@ -66,11 +68,15 @@ pub(crate) mod excitations;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
 mod modeling;
+pub(crate) mod observations;
 pub(crate) mod response_spectra;
 pub(crate) mod response_spectrum_policies;
+pub(crate) mod sequences;
 pub(crate) mod signal_policies;
 pub(crate) mod signals;
 pub(crate) mod steps;
+pub(crate) mod study_policies;
+mod study_values;
 #[cfg(test)]
 mod test_support;
 pub(crate) mod values;
@@ -105,14 +111,19 @@ const TRENDS_NAME: &str = "fea.trends";
 
 pub(crate) fn ensure_value_classes_registered() {
     classes::ensure_fea_classes_registered();
+    activations::ensure_activation_classes_registered();
+    accuracy::ensure_accuracy_classes_registered();
     constraints::ensure_constraint_support_classes_registered();
     values::ensure_quantity_classes_registered();
     signal_policies::ensure_signal_policy_classes_registered();
     signals::ensure_signal_classes_registered();
     excitations::ensure_excitation_classes_registered();
     initial_conditions::ensure_initial_condition_classes_registered();
+    observations::ensure_observation_classes_registered();
     response_spectrum_policies::ensure_spectrum_policy_classes_registered();
     response_spectra::ensure_response_spectrum_class_registered();
+    sequences::ensure_sequence_classes_registered();
+    study_policies::ensure_study_policy_classes_registered();
 }
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

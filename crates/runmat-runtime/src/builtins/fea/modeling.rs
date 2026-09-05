@@ -60,6 +60,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
     pub(super) response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     pub(super) steps: Vec<ProcedureStep>,
+    pub(super) sequence: Option<AnalysisSequence>,
     pub(super) domains: Vec<DomainPayload>,
     pub(super) interfaces: Vec<GeometryBoundInterface>,
     pub(super) mesh: Option<crate::meshing::MeshingExecutionOutput>,
@@ -108,6 +109,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             options.initial_conditions,
             options.response_spectra,
             options.steps,
+            options.sequence,
             options.domains,
             options.interfaces,
         )?,
@@ -261,6 +263,10 @@ impl StudyConstructorOptions {
                         )?;
                 }
                 "steps" => options.steps = step_vec_from_value(STUDY_NAME, &pair[1])?,
+                "sequence" => {
+                    options.sequence =
+                        Some(super::sequences::sequence_from_value(STUDY_NAME, &pair[1])?)
+                }
                 "domains" => options.domains = domain_vec_from_value(STUDY_NAME, &pair[1])?,
                 "interfaces" => {
                     options.interfaces = interface_vec_from_value(STUDY_NAME, &pair[1])?;
@@ -289,6 +295,7 @@ impl StudyConstructorOptions {
             || !self.initial_conditions.is_empty()
             || !self.response_spectra.is_empty()
             || !self.steps.is_empty()
+            || self.sequence.is_some()
             || !self.domains.is_empty()
             || !self.interfaces.is_empty()
     }
@@ -309,6 +316,7 @@ struct ModelConstructorOptions {
     initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
     response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     steps: Vec<ProcedureStep>,
+    sequence: Option<AnalysisSequence>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<GeometryBoundInterface>,
 }
@@ -389,6 +397,7 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         options.initial_conditions,
         options.response_spectra,
         options.steps,
+        options.sequence,
         options.domains,
         options.interfaces,
     )?;
@@ -452,6 +461,9 @@ fn parse_model_constructor_options(
                     super::response_spectra::response_spectrum_vec_from_value(builtin, pair.value)?
             }
             "steps" => options.steps = step_vec_from_value(builtin, pair.value)?,
+            "sequence" => {
+                options.sequence = Some(super::sequences::sequence_from_value(builtin, pair.value)?)
+            }
             "domains" => options.domains = domain_vec_from_value(builtin, pair.value)?,
             "interfaces" => options.interfaces = interface_vec_from_value(builtin, pair.value)?,
             other => {
@@ -671,6 +683,7 @@ fn build_model_from_parts(
     initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
     response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     steps: Vec<ProcedureStep>,
+    sequence: Option<AnalysisSequence>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<GeometryBoundInterface>,
 ) -> BuiltinResult<AnalysisModel> {
@@ -781,7 +794,16 @@ fn build_model_from_parts(
     if !response_spectra.is_empty() {
         model.response_spectra = response_spectra;
     }
-    if !steps.is_empty() {
+    if sequence.is_some() && !steps.is_empty() {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "Sequence and Steps are mutually exclusive",
+        ));
+    }
+    if let Some(sequence) = sequence {
+        model.sequence = sequence;
+    } else if !steps.is_empty() {
         model.sequence =
             AnalysisSequence::from_steps(format!("{}.sequence", model.model_id.0), steps);
     }
@@ -1060,7 +1082,10 @@ fn signal_vec_from_value(
     }
 }
 
-fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ProcedureStep>> {
+pub(super) fn step_vec_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<Vec<ProcedureStep>> {
     let values = match value {
         Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],

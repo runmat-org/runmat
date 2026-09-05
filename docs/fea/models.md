@@ -16,7 +16,7 @@ A model attaches physics data to geometry. It defines what material exists where
 | Response spectra | Direction, damping, response measure, modal combination, truncation, construction, and evidence for modal response-spectrum work. |
 | Domains | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | Interfaces | Contact and coupling interfaces between regions. |
-| Steps | The analysis steps the model supports, such as static, modal, thermal, transient, nonlinear, electromagnetic, or CFD. |
+| Sequence | Typed procedure steps, activation lifecycles, state transitions, observations, accuracy plans, branches, and restart policy. |
 
 ## Model Profiles
 
@@ -41,6 +41,10 @@ In a `.fea` file, `model.defaults: profile_scaffold` lets RunMat create the scaf
 ## Define Model Data
 
 Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint, boundary, signal, excitation, and initial-condition classes, `fea.ExcitationCase`, `fea.ResponseSpectrum`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
+
+For multi-procedure models, construct an explicit `fea.AnalysisSequence` and pass it as the
+`Sequence` model option. The sequence API and its activation, state, observation, accuracy, branch,
+and restart contracts are described in [Procedure Sequences, Observations, and Accuracy](./study-contracts).
 
 ```yaml
 model:

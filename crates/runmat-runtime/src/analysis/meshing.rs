@@ -132,6 +132,10 @@ pub(crate) fn apply_boundary_region_ids(
             }
         }
     }
+    for interface in &mut model.interfaces {
+        apply_boundary_region_id(&mut interface.primary, aliases);
+        apply_boundary_region_id(&mut interface.secondary, aliases);
+    }
     for action in &mut model.excitations {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
             &mut action.excitation_mut().target
@@ -147,6 +151,28 @@ pub(crate) fn apply_boundary_region_ids(
                 target.region_id = id.source_topology_id.clone();
             }
         }
+    }
+    for step in &mut model.sequence.steps {
+        for observation in &mut step.observations {
+            let Some(spec) = observation.spec_mut() else {
+                continue;
+            };
+            if let runmat_analysis_core::ObservationTarget::Spatial(
+                runmat_analysis_core::ExcitationTarget::Region(target),
+            ) = &mut spec.target
+            {
+                apply_boundary_region_id(target, aliases);
+            }
+        }
+    }
+}
+
+fn apply_boundary_region_id(
+    target: &mut runmat_analysis_core::RegionTarget,
+    aliases: &BTreeMap<String, PersistentEntityId>,
+) {
+    if let Some(id) = aliases.get(&target.region_id) {
+        target.region_id = id.source_topology_id.clone();
     }
 }
 

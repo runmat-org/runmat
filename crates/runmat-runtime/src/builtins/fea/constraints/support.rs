@@ -11,7 +11,7 @@ use runmat_types::MemberAccess;
 
 pub(super) use direction::direction_from_value;
 pub(super) use dof::structural_dof_values_from_value;
-pub(super) use frame::coordinate_frame_from_value;
+pub(crate) use frame::coordinate_frame_from_value;
 pub(super) use pairing::pairing_policy_from_value;
 pub(super) use periodic_transform::periodic_transform_from_value;
 pub(super) use reference_point::reference_point_from_value;

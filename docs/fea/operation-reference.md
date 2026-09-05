@@ -99,6 +99,11 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.InitialConditionTarget.wholeModel()`, `fea.<Family>InitialCondition.<state>(...)` | Create whole-model or region-bound initial state from a typed signal sample. |
 | `fea.ResponseSpectrum.new(...)` and `fea.Spectrum*` policy classes | Create a typed modal response spectrum with explicit axis, direction, combination, evidence, and provenance. |
 | `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
+| `fea.StepObjectRef.*`, `fea.ActivationLifecycle.*`, `fea.StepObjectActivation.new(...)` | Bind authored model objects to an explicit step lifecycle. |
+| `fea.StateInput.*`, `fea.StateOutput.new(...)`, `fea.StateTransition.new(...)` | Declare solver-neutral state production, consumption, and transfer. |
+| `fea.ProcedureStep.configure(...)`, `fea.AnalysisSequence.new(...)` | Compose the semantic procedure sequence independently of execution placement. |
+| `fea.Observation.*`, `fea.ObservationTarget.*`, `fea.SamplingPolicy.*`, `fea.ReductionPolicy.*` | Plan field, history, probe, reduction, diagnostic, and monitor computation and retention. |
+| `fea.AccuracyCriterion.new(...)`, `fea.AccuracyPlan.new(...)` | Declare numerical evidence, acceptance tolerances, and bounded corrective action. |
 | `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
@@ -151,6 +156,8 @@ These constructors, planning operations, field projections, comparisons, and plo
 | Builtin | Exact signature | Validation boundary |
 | --- | --- | --- |
 | `fea.StructuralStep.static/modal/transient/nonlinear` | `step = fea.StructuralStep.<procedure>(id)` | The id is a non-empty text scalar; family, procedure, direct solution space, independent domain, and state outputs come from the concrete method. |
+| `fea.ProcedureStep.configure` | `step = fea.ProcedureStep.configure(step, independentDomain, activations, stateInputs, stateOutputs, observations, accuracy, restart)` | Every supplied value has a closed typed class; the concrete family/procedure identity cannot be changed. |
+| `fea.AnalysisSequence.new` | `sequence = fea.AnalysisSequence.new(id, steps, dependencies, transitions, branches)` | Step identity, dependency graph, transition compatibility, activation ancestry, observation semantics, and accuracy dimensions are validated with the model. |
 | `fea.ThermalStep.transient`, `fea.ElectromagneticStep.harmonic`, `fea.AcousticStep.harmonic` | `step = fea.<Family>Step.<procedure>(id)` | Only currently supported family/procedure combinations are constructible. |
 | `fea.FluidStep.steadyState/transient` | `step = fea.FluidStep.<procedure>(id)` | Steady-state produces a static domain; transient produces a time domain. |
 | `fea.ThermoMechanicalStep.transient`, `fea.ElectroThermalStep.transient/nonlinear`, `fea.ConjugateHeatTransferStep.steadyState/transient`, `fea.FluidStructureStep.transient` | `step = fea.<CoupledFamily>Step.<procedure>(id)` | Coupled family and procedure are fixed by the concrete method and cannot be supplied as strings. |
@@ -161,7 +168,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
-`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`, `Domains`, `Interfaces`, and `Mesh`. `fea.model` accepts the same model-component options. Direct integer values do not substitute for any identity or typed-object option.
+`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`, `Sequence`, `Domains`, `Interfaces`, and `Mesh`. `Steps` and `Sequence` are mutually exclusive. `fea.model` accepts the same model-component options. Direct integer values do not substitute for any identity or typed-object option.
 
 ### Run-option numeric contracts
 

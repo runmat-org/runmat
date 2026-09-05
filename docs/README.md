@@ -120,6 +120,7 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Using FEA](./fea/using-fea.md)
 - [Geometry](./fea/geometry.md)
 - [Models](./fea/models.md)
+- [Procedure Sequences, Observations, and Accuracy](./fea/study-contracts.md)
 - [Physics Families](./fea/physics.md)
 - [Solves, Studies, and Sweeps](./fea/solves.md)
 - [Evidence & Artifacts](./fea/evidence.md)
