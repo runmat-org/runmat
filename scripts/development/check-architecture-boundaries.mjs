@@ -248,7 +248,6 @@ const legacyRootInferenceLeaves = new Set([
   "metadata_predicate",
   "numeric_classification",
   "numeric_component",
-  "numeric_limit",
   "parallel_semantics",
   "scalar_logical_reduction",
   "unary_logical_scalar",
@@ -1210,6 +1209,40 @@ enforceMigratedBuiltinFamily({
   ],
   leafLineCeiling: 224,
   testLineCeiling: 224,
+});
+
+enforceMigratedBuiltinFamily({
+  name: "numeric-limit family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_limits",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_limits",
+    "crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_limits/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_limits/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/inference/numeric_limit.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_limits/documentation/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_limits/documentation/integer.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_limits/documentation/floating.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/numeric_limits.rs",
+    "docs/builtins/reference/intmin.json",
+    "docs/builtins/reference/intmax.json",
+    "docs/builtins/reference/realmin.json",
+    "docs/builtins/reference/realmax.json",
+    "docs/builtins/reference/flintmax.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/intmin.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/intmax.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/realmin.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/realmax.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/flintmax.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 256,
 });
 
 enforceMigratedBuiltinFamily({
