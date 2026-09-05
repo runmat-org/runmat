@@ -236,7 +236,6 @@ const legacyRootInferenceLeaves = new Set([
   "acceleration_semantics",
   "aggregate_semantics",
   "introspection_semantics",
-  "math_binary",
   "math_degree_trigonometric",
   "math_exponential",
   "math_hyperbolic",
@@ -298,7 +297,6 @@ for (const sourcePath of [
   }
 }
 const legacyInferenceLeafCeilings = new Map([
-  ["crates/runmat-builtins/src/catalog/inference/math_binary.rs", 483],
   ["crates/runmat-builtins/src/catalog/inference/math_inverse.rs", 510],
   ["crates/runmat-builtins/src/catalog/inference/math_logarithms.rs", 481],
   ["crates/runmat-builtins/src/catalog/inference/math_rounding.rs", 269],
@@ -1175,6 +1173,36 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 224,
   testLineCeiling: 320,
 });
+
+enforceMigratedBuiltinFamily({
+  name: "typed binary inference families",
+  roots: [
+    "crates/runmat-builtins/src/catalog/inference/math/hypotenuse",
+    "crates/runmat-builtins/src/catalog/inference/math/remainder",
+    "crates/runmat-builtins/src/catalog/inference/math/two_argument_angle",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/inference/math/hypotenuse/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/remainder/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/two_argument_angle/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/inference/math_binary.rs",
+    "crates/runmat-builtins/src/catalog/inference/math_binary/tests.rs",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+
+for (const [sourcePath, ceiling] of new Map([
+  ["crates/runmat-builtins/src/catalog/inference/math/binary_containers.rs", 160],
+  ["crates/runmat-builtins/src/catalog/inference/math/test_support.rs", 64],
+])) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(`${sourcePath} exceeds its typed binary inference support boundary (found ${lines} lines; maximum ${ceiling})`);
+  }
+}
 
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
