@@ -104,7 +104,7 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
     )
     .unwrap();
     let document = objects.document.clone();
-    let access = crate::MeshingArtifactAccess {
+    let access = crate::ArtifactAccess {
         authorization_scope: "exact-host-run".into(),
         encryption_context: Digest::sha256(b"exact-host-context"),
     };
@@ -158,7 +158,7 @@ fn faceted_geometry_document_binds_without_exact_kernel_capability() {
         prepare_faceted_geometry_objects(document, solid, ObjectInventoryLimits::default())
             .unwrap();
     let document = objects.document.clone();
-    let access = crate::MeshingArtifactAccess {
+    let access = crate::ArtifactAccess {
         authorization_scope: "faceted-host-run".into(),
         encryption_context: Digest::sha256(b"faceted-host-context"),
     };

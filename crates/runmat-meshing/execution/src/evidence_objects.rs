@@ -8,7 +8,7 @@ use runmat_meshing_core::{CanonicalMeshingContract, MeshingChunkMediaType, Meshi
 use crate::object_support::{
     enforce_object_length, input_object_reference, logical_object, read_exact, validate_input_root,
 };
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 pub(crate) const EVIDENCE_VALUE_SCHEMA: &str = "runmat.meshing.evidence.v1";
 
@@ -66,7 +66,7 @@ impl PreparedEvidenceInput {
 
 pub fn prepare_evidence_input(
     evidence_objects: PreparedEvidenceObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedEvidenceInput> {
     access.validate()?;
@@ -93,7 +93,7 @@ pub fn prepare_evidence_input(
 pub fn import_evidence_input(
     source: &impl CacheImport,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedEvidenceInput> {
     access.validate()?;

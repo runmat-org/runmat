@@ -13,7 +13,8 @@ use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
-    ArtifactResult, ExecutableForm, ExecutionBundleBuilder, LogicalObject, ProgramExecutionResponse,
+    ArtifactAccess, ArtifactResult, ExecutableForm, ExecutionBundleBuilder, LogicalObject,
+    ProgramExecutionResponse,
 };
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_transport_native::frame::FrameLimits;
@@ -32,9 +33,9 @@ use runmat_meshing_core::{
 use runmat_meshing_execution::{
     build_task_submission, import_result_publication, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingArtifactAccess, MeshingExecutionContext,
-    MeshingHostResponse, MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation,
-    MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
+    prepare_faceted_geometry_objects, MeshingExecutionContext, MeshingHostResponse,
+    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
+    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
     ValidatedMeshingStageOutput,
 };
 
@@ -855,7 +856,7 @@ fn fixture_for(
     MeshingHostWorkload,
     runmat_execution_artifact::ProgramExecutionRequest,
 ) {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };

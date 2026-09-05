@@ -57,7 +57,7 @@ fn execute_native_dag(
     let mut config = config(directory.path(), "--exact-dag-child");
     config.max_workers = max_workers;
     let session = NativeProgramSession::new(config).unwrap();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: format!("native-exact-dag-{max_workers}"),
         encryption_context: Digest::sha256(
             [
@@ -134,7 +134,7 @@ fn execute_native_dag(
 }
 
 pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> ExactFixture {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };

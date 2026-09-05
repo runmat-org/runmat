@@ -5,7 +5,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactError, LogicalObject, ObjectNamespace};
 
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 pub(crate) fn logical_object(
     logical_prefix: &str,
@@ -80,7 +80,7 @@ pub(crate) fn add_inventory_bytes(
 
 pub(crate) fn input_object_reference(
     object: &LogicalObject,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
     value_schema: &str,
     domain: &'static str,
 ) -> MeshingExecutionResult<ValueRef> {
@@ -105,7 +105,7 @@ pub(crate) fn input_object_reference(
 
 pub(crate) fn validate_input_root(
     root: &ValueRef,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
     media_type: &str,
     value_schema: &str,
     domain: &'static str,

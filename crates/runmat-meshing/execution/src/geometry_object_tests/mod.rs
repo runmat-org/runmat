@@ -8,7 +8,7 @@ use runmat_geometry_core::{
 
 use crate::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, MeshingArtifactAccess,
+    prepare_exact_geometry_objects, ArtifactAccess,
 };
 
 #[test]
@@ -256,8 +256,8 @@ fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
     .is_err());
 }
 
-fn access() -> MeshingArtifactAccess {
-    MeshingArtifactAccess {
+fn access() -> ArtifactAccess {
+    ArtifactAccess {
         authorization_scope: "geometry-run".into(),
         encryption_context: runmat_execution::Digest::sha256(b"geometry-context"),
     }

@@ -14,7 +14,7 @@ pub use bundle::{
     SourceReader, EXECUTION_BUNDLE_SCHEMA_VERSION,
 };
 pub use error::{ArtifactError, ArtifactResult};
-pub use object::{LogicalObject, ObjectDescriptor, ObjectNamespace};
+pub use object::{ArtifactAccess, LogicalObject, ObjectDescriptor, ObjectNamespace};
 pub use program::{
     ExecutableForm, NativeObjectPayload, NativeTargetIdentity, ProgramArtifact, ProgramArtifactId,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionInputs,

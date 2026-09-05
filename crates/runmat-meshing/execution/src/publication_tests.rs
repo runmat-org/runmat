@@ -13,8 +13,7 @@ use runmat_execution_runner::{AttemptReport, Driver, PoolSpec, TaskSubmission, W
 
 use crate::tests::{fixture, MemoryCache};
 use crate::{
-    import_result_publication, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess,
+    import_result_publication, prepare_result_publication, prepare_stage_objects, ArtifactAccess,
 };
 
 #[test]
@@ -191,8 +190,8 @@ fn publication() -> crate::PreparedMeshingResultPublication {
     .unwrap()
 }
 
-fn access(scope: &str, seed: u8) -> MeshingArtifactAccess {
-    MeshingArtifactAccess {
+fn access(scope: &str, seed: u8) -> ArtifactAccess {
+    ArtifactAccess {
         authorization_scope: scope.into(),
         encryption_context: Digest::sha256([seed]),
     }

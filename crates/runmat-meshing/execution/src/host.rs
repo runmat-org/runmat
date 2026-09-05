@@ -15,7 +15,7 @@ use runmat_meshing_core::{
 };
 
 use crate::task::validate_inputs;
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 pub const MESHING_HOST_WORKLOAD_SCHEMA_VERSION: u16 = 2;
 pub const MESHING_HOST_ABI: &str = "host-v2";
@@ -32,7 +32,7 @@ pub struct MeshingHostWorkload {
     pub workload: MeshingWorkloadRequest,
     pub stage_identity: MeshingStageIdentity,
     pub resolved_request: MeshingRequest,
-    pub artifact_access: MeshingArtifactAccess,
+    pub artifact_access: ArtifactAccess,
     pub geometry_document: Option<GeometryDocument>,
 }
 
@@ -41,7 +41,7 @@ impl MeshingHostWorkload {
         workload: MeshingWorkloadRequest,
         stage_identity: MeshingStageIdentity,
         resolved_request: MeshingRequest,
-        artifact_access: MeshingArtifactAccess,
+        artifact_access: ArtifactAccess,
         geometry_document: Option<GeometryDocument>,
     ) -> MeshingExecutionResult<Self> {
         let host = Self {
@@ -286,7 +286,7 @@ impl MeshingHostWorkload {
     }
 }
 
-fn encode_access(access: &MeshingArtifactAccess) -> MeshingExecutionResult<Vec<u8>> {
+fn encode_access(access: &ArtifactAccess) -> MeshingExecutionResult<Vec<u8>> {
     access.validate()?;
     let scope = access.authorization_scope.as_bytes();
     let mut bytes = Vec::with_capacity(4 + scope.len() + 32);
@@ -296,7 +296,7 @@ fn encode_access(access: &MeshingArtifactAccess) -> MeshingExecutionResult<Vec<u
     Ok(bytes)
 }
 
-fn decode_access(bytes: &[u8]) -> MeshingExecutionResult<MeshingArtifactAccess> {
+fn decode_access(bytes: &[u8]) -> MeshingExecutionResult<ArtifactAccess> {
     let length = bytes
         .get(..4)
         .ok_or_else(truncated)?
@@ -315,7 +315,7 @@ fn decode_access(bytes: &[u8]) -> MeshingExecutionResult<MeshingArtifactAccess> 
     if digest_end != bytes.len() {
         return Err(truncated());
     }
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: scope.into(),
         encryption_context: runmat_execution::Digest::from_bytes(digest),
     };

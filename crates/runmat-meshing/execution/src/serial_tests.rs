@@ -6,7 +6,7 @@ use crate::{
     build_task_submission, import_exact_geometry_input, prepare_exact_geometry_input,
     prepare_exact_geometry_objects, prepare_faceted_geometry_input,
     prepare_faceted_geometry_objects, prepare_result_publication, prepare_stage_objects,
-    MeshingArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
+    ArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
     MeshingTaskEffectPolicy,
 };
 use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
@@ -1040,7 +1040,7 @@ impl Fixture {
     }
 
     fn with_request(request: MeshingRequest) -> Self {
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "serial-meshing-run".into(),
             encryption_context: Digest::sha256(b"serial-meshing-encryption-context"),
         };
@@ -1165,7 +1165,7 @@ impl Fixture {
         relaxed_volume: bool,
         element_order: ElementOrder,
     ) -> Self {
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "serial-exact-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-exact-geometry-context"),
         };
@@ -1313,7 +1313,7 @@ impl Fixture {
     }
 
     fn with_faceted_geometry() -> Self {
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "serial-faceted-geometry-run".into(),
             encryption_context: Digest::sha256(b"serial-faceted-geometry-context"),
         };
@@ -1425,7 +1425,7 @@ fn stage_failure(error: &MeshingSerialExecutionError) -> &MeshingFailure {
     failure
 }
 
-fn input_publication(access: MeshingArtifactAccess) -> crate::PreparedMeshingResultPublication {
+fn input_publication(access: ArtifactAccess) -> crate::PreparedMeshingResultPublication {
     let payload = build_chunked_stage_payload(
         &[MeshingChunkStream {
             media_type: MeshingChunkMediaType::ExactGeometry,

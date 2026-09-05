@@ -20,7 +20,7 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
+    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
@@ -35,7 +35,7 @@ pub struct MeshingExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
-    pub artifact_access: MeshingArtifactAccess,
+    pub artifact_access: ArtifactAccess,
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
     pub maximum_relay_bytes: u64,
@@ -149,7 +149,7 @@ fn validate_identity_binding(
 pub(crate) fn validate_inputs(
     workload: &MeshingWorkloadRequest,
     roots: &[ValueRef],
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<()> {
     if roots.len() != workload.inputs.len() {
         return Err(MeshingExecutionError::Invalid(
@@ -165,7 +165,7 @@ pub(crate) fn validate_inputs(
 pub(crate) fn validate_input(
     root: &ValueRef,
     input: &runmat_meshing_core::MeshingInputRef,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<()> {
     ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
     let expected_shape = match input.kind {

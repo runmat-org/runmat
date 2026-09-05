@@ -120,7 +120,7 @@ pub(crate) fn validate_stage_evidence_inventory(
 }
 
 pub(crate) fn validate_stage_evidence_result(
-    access: &crate::MeshingArtifactAccess,
+    access: &crate::ArtifactAccess,
     evidence: &MeshingStageEvidence,
     result_objects: &[ValueRef],
 ) -> MeshingExecutionResult<()> {
@@ -157,7 +157,7 @@ fn validate_reference(
 }
 
 fn validate_reference_for_access(
-    access: &crate::MeshingArtifactAccess,
+    access: &crate::ArtifactAccess,
     reference: &ValueRef,
 ) -> MeshingExecutionResult<()> {
     ValuePayload::Object(Box::new(reference.clone()))

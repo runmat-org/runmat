@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     stage_evidence_object::{validate_stage_evidence_inventory, validate_stage_evidence_result},
-    CompletedMeshingStage, MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
+    ArtifactAccess, CompletedMeshingStage, MeshingExecutionError, MeshingExecutionResult,
     MeshingHostWorkload, MeshingSerialExecutionError, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
@@ -190,7 +190,7 @@ impl MeshingHostResponse {
                         "validated meshing host response has an invalid root or inventory".into(),
                     ));
                 }
-                let access = MeshingArtifactAccess {
+                let access = ArtifactAccess {
                     authorization_scope: root.authorization_scope.clone(),
                     encryption_context: root.encryption_context,
                 };
@@ -290,10 +290,7 @@ fn validate_version(schema_version: u16) -> MeshingExecutionResult<()> {
     Ok(())
 }
 
-fn validate_access(
-    reference: &ValueRef,
-    access: &MeshingArtifactAccess,
-) -> MeshingExecutionResult<()> {
+fn validate_access(reference: &ValueRef, access: &ArtifactAccess) -> MeshingExecutionResult<()> {
     if reference.authorization_scope != access.authorization_scope
         || reference.encryption_context != access.encryption_context
         || reference.id != access.value_id(reference.logical_digest)

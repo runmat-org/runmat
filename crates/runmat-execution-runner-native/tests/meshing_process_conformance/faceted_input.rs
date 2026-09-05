@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn native_conformance() {
     let directory = tempfile::tempdir().unwrap();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: "native-faceted-meshing-run".into(),
         encryption_context: Digest::sha256(b"native-faceted-meshing-context"),
     };

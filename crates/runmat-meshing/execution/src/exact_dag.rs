@@ -19,7 +19,7 @@ use runmat_meshing_surface::{face_partition_descriptors, MAX_EXACT_FACE_PARTITIO
 
 use crate::task::{validate_input, validate_inputs};
 use crate::{
-    MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload,
+    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload,
     PreparedExactGeometryInput, MESHING_HOST_ABI,
 };
 
@@ -114,7 +114,7 @@ impl ExactMeshingDagPlanner {
     pub fn new(
         geometry: &PreparedExactGeometryInput,
         request: MeshingRequest,
-        artifact_access: MeshingArtifactAccess,
+        artifact_access: ArtifactAccess,
         capability_cohort: Option<String>,
     ) -> MeshingExecutionResult<Self> {
         artifact_access.validate()?;

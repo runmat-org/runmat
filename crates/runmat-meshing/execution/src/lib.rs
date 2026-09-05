@@ -3,6 +3,8 @@
 //! Meshing owns logical records, stage identity, and manifest closure. This crate only maps that
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
+pub(crate) use runmat_execution_artifact::ArtifactAccess;
+
 mod accounting;
 mod budget;
 mod curve_join_kernel;
@@ -93,8 +95,7 @@ pub use objects::{
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 pub use publication::{
-    import_result_publication, prepare_result_publication, MeshingArtifactAccess,
-    PreparedMeshingResultPublication,
+    import_result_publication, prepare_result_publication, PreparedMeshingResultPublication,
 };
 pub use response::{MeshingHostResponse, MESHING_HOST_RESPONSE_SCHEMA_VERSION};
 pub use serial::{

@@ -6,6 +6,7 @@ pub mod assembly;
 pub mod contracts;
 pub mod diagnostics;
 pub(crate) mod excitation;
+pub mod execution;
 pub mod fixtures;
 pub mod operator;
 pub mod parity;

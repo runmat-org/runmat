@@ -2,14 +2,15 @@
 
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
+use runmat_execution_artifact::ArtifactAccess;
 use runmat_geometry_core::{ExactContactDefinition, PersistentEntityId};
 use runmat_geometry_io::{
     detect_geometry_format, import_exact_cad, ExactCadImportOptions, GeometryFormat,
     GeometryImportContext,
 };
 use runmat_meshing_execution::{
-    prepare_exact_geometry_input, prepare_exact_geometry_objects, MeshingArtifactAccess,
-    PreparedExactGeometryInput, PreparedExactGeometryObjects,
+    prepare_exact_geometry_input, prepare_exact_geometry_objects, PreparedExactGeometryInput,
+    PreparedExactGeometryObjects,
 };
 
 use crate::NativeProgramSession;
@@ -169,7 +170,7 @@ fn invalid_contact_selector(selector: &str, reason: &str) -> ExactGeometryAdmiss
 pub fn admit_prepared_exact_geometry(
     session: &NativeProgramSession,
     prepared: PreparedExactGeometryAdmission,
-    artifact_access: MeshingArtifactAccess,
+    artifact_access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> Result<PreparedExactGeometryInput, ExactGeometryAdmissionError> {
     let mut store = session.object_store();
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn admitted_cad_is_immediately_reconstructible_from_the_session_store() {
         let (_directory, session) = session();
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "exact-admission-test".into(),
             encryption_context: Digest::sha256(b"exact-admission-test"),
         };

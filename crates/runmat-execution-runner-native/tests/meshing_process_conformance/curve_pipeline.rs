@@ -242,7 +242,7 @@ pub(super) async fn remote_conformance(
 }
 
 pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> CurveFixture {
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
     };
@@ -356,7 +356,7 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
 fn host(
     resolved_request: MeshingRequest,
     document: runmat_geometry_core::GeometryDocument,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     inputs: Vec<MeshingInputRef>,
     partition: MeshingPartitionDescriptor,
 ) -> MeshingHostWorkload {

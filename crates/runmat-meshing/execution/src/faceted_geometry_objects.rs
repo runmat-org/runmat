@@ -12,7 +12,7 @@ use crate::geometry_objects::{geometry_object, validate_geometry_reference};
 use crate::object_support::{
     enforce_object_length, input_object_reference, read_exact, validate_input_root,
 };
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 const FACETED_SOLID_SCHEMA: &str = "runmat.geometry.faceted-solid.v2";
 
@@ -73,7 +73,7 @@ impl PreparedFacetedGeometryInput {
 
 pub fn prepare_faceted_geometry_input(
     geometry_objects: PreparedFacetedGeometryObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
     access.validate()?;
@@ -101,7 +101,7 @@ pub fn import_faceted_geometry_input(
     source: &impl CacheImport,
     document: GeometryDocument,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedFacetedGeometryInput> {
     access.validate()?;

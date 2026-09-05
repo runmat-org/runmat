@@ -15,7 +15,7 @@ use runmat_meshing_core::{
     SizingResolutionEvidence, SolverMeshArtifact, MESHING_FAILURE_SCHEMA_VERSION,
 };
 
-use crate::{ExactMeshingDagPlanner, MeshingArtifactAccess, PreparedExactGeometryInput};
+use crate::{ArtifactAccess, ExactMeshingDagPlanner, PreparedExactGeometryInput};
 
 use stage::{admit_stage_success, execute_planned_stage};
 pub use stage::{ExactMeshingDagExecutor, MeshingStageExecutionError, SerialExactMeshingExecutor};
@@ -30,7 +30,7 @@ pub struct MeshingRunEvidenceContext {
 pub struct ExactMeshingDagRun<'a> {
     pub geometry: &'a PreparedExactGeometryInput,
     pub request: MeshingRequest,
-    pub artifact_access: MeshingArtifactAccess,
+    pub artifact_access: ArtifactAccess,
     pub capability_cohort: Option<String>,
     pub program_revision: ProgramRevision,
     pub preferred_edges_per_partition: u32,

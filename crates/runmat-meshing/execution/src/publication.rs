@@ -1,10 +1,8 @@
-use runmat_execution::identity::ValueId;
 use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
-use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{LogicalObject, ObjectDescriptor};
+use runmat_execution_artifact::{ArtifactAccess, LogicalObject, ObjectDescriptor};
 use runmat_execution_runner::AttemptSuccess;
 
 use crate::{
@@ -15,40 +13,6 @@ use crate::{
 const RESULT_IDENTITY_SCHEMA: &str = "runmat.meshing.stage-result-identity.v2";
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 const CHUNK_SCHEMA: &str = "runmat.meshing.logical-record-chunk.v2";
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MeshingArtifactAccess {
-    pub authorization_scope: String,
-    pub encryption_context: Digest,
-}
-
-impl MeshingArtifactAccess {
-    pub fn validate(&self) -> MeshingExecutionResult<()> {
-        if self.authorization_scope.is_empty()
-            || self.authorization_scope.len() > 1024
-            || self.authorization_scope.chars().any(char::is_control)
-            || self
-                .encryption_context
-                .bytes()
-                .iter()
-                .all(|byte| *byte == 0)
-        {
-            return Err(MeshingExecutionError::Identity(
-                "artifact authorization or encryption context is invalid",
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn value_id(&self, logical_digest: Digest) -> ValueId {
-        ValueId::derive(&[
-            b"runmat-meshing-artifact-object-v2",
-            logical_digest.bytes(),
-            self.encryption_context.bytes(),
-            self.authorization_scope.as_bytes(),
-        ])
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMeshingResultPublication {
@@ -80,7 +44,7 @@ impl PreparedMeshingResultPublication {
 
 pub fn prepare_result_publication(
     stage_objects: PreparedMeshingStageObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedMeshingResultPublication> {
     access.validate()?;
@@ -116,7 +80,7 @@ pub fn prepare_result_publication(
 pub fn import_result_publication(
     source: &impl CacheImport,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedMeshingResultPublication> {
     access.validate()?;
@@ -158,7 +122,7 @@ pub fn import_result_publication(
 fn object_reference(
     object: &LogicalObject,
     root: &ObjectDescriptor,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<ValueRef> {
     object.validate()?;
     let value_schema = if object.descriptor.digest == root.digest {
@@ -173,7 +137,7 @@ fn object_reference(
 
 pub(crate) fn result_object_reference(
     object: &LogicalObject,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
     value_schema: &str,
 ) -> MeshingExecutionResult<ValueRef> {
     object.validate()?;

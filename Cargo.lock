@@ -6326,6 +6326,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-analysis-execution"
+version = "0.6.2"
+dependencies = [
+ "runmat-analysis-fea",
+ "runmat-canonical-codec",
+ "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-execution-runner",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-analysis-fea"
 version = "0.6.2"
 dependencies = [
@@ -6333,6 +6347,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-canonical-codec",
+ "runmat-execution",
  "runmat-geometry-core",
  "runmat-meshing-core",
  "serde",

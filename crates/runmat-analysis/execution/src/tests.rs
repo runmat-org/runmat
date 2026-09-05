@@ -1,0 +1,210 @@
+use std::collections::BTreeSet;
+
+use runmat_analysis_fea::execution::{
+    AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
+    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
+    ProblemIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
+};
+use runmat_execution::value::ValueRefKind;
+use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
+use runmat_execution_artifact::object::ObjectInventoryLimits;
+use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
+
+use super::*;
+
+fn digest(label: &str) -> Digest {
+    Digest::sha256(label)
+}
+
+fn execution_identities() -> (StudyIdentity, ExecutionPlanIdentity) {
+    let study = StudyIdentity::new(digest("study"), Some(digest("project"))).unwrap();
+    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
+    let step = StepIdentity::new(sequence, digest("step")).unwrap();
+    let constraints =
+        ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
+    let problem =
+        ProblemIdentity::new(step, digest("model"), None, constraints, Vec::new()).unwrap();
+    let discretization =
+        DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
+    let operator = OperatorIdentity::new(discretization, digest("operator")).unwrap();
+    let accuracy = AccuracyIdentity::new(step, digest("accuracy")).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
+    (
+        study,
+        ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap(),
+    )
+}
+
+fn access() -> ArtifactAccess {
+    ArtifactAccess {
+        authorization_scope: "study:test".into(),
+        encryption_context: digest("encryption"),
+    }
+}
+
+fn revision() -> ProgramRevision {
+    ProgramRevision::new(
+        digest("graph"),
+        digest("source"),
+        ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
+    let payload = vec![7_u8; 65];
+    let objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        digest("mesh-identity"),
+        &payload,
+        16,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(objects.objects.len(), 6);
+    let root = objects
+        .root_reference(&access(), ValueRefKind::DriverObject)
+        .unwrap();
+    let (study, execution_plan) = execution_identities();
+    let workload = AnalysisWorkloadRequest::new(
+        study,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        vec![AnalysisWorkloadInput {
+            kind: objects.manifest.kind,
+            logical_identity: objects.manifest.logical_identity,
+            payload_digest: objects.manifest.payload_digest,
+            manifest_digest: objects.root.digest,
+            manifest_encoded_length: objects.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
+        vec![AnalysisNumericalObjectKind::Field],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let request = host.program_request(revision(), &[root]).unwrap();
+    assert!(request.artifact.executable_bytes.len() < payload.len() * 20);
+    assert_eq!(
+        AnalysisHostWorkload::from_program_request(&request).unwrap(),
+        host
+    );
+}
+
+#[test]
+fn workload_rejects_identity_and_access_tampering() {
+    let objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Signal,
+        digest("signal-identity"),
+        b"signal samples",
+        4,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = objects
+        .root_reference(&access(), ValueRefKind::DriverObject)
+        .unwrap();
+    let (study, execution_plan) = execution_identities();
+    let mut workload = AnalysisWorkloadRequest::new(
+        study,
+        execution_plan,
+        AnalysisWorkKind::MaterializeSignal,
+        vec![AnalysisWorkloadInput {
+            kind: objects.manifest.kind,
+            logical_identity: objects.manifest.logical_identity,
+            payload_digest: objects.manifest.payload_digest,
+            manifest_digest: objects.root.digest,
+            manifest_encoded_length: objects.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
+        vec![AnalysisNumericalObjectKind::Signal],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    workload.inputs[0].payload_digest = digest("tampered");
+    assert!(workload.validate().is_err());
+
+    workload.inputs[0].payload_digest = objects.manifest.payload_digest;
+    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let mut wrong_root = root;
+    wrong_root.authorization_scope = "other-study".into();
+    assert!(host.program_request(revision(), &[wrong_root]).is_err());
+}
+
+#[test]
+fn worker_capability_inventory_uses_generic_execution_capabilities() {
+    let formulation = digest("formulation");
+    let capabilities =
+        analysis_worker_capabilities([formulation], ["gpu.compute".to_string()], true);
+    assert!(
+        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(
+            "gpu.compute".into()
+        ))
+    );
+    assert!(
+        capabilities.contains(&runmat_execution::resource::Capability::Custom(format!(
+            "runmat.analysis.formulation:{formulation}"
+        )))
+    );
+}
+
+#[test]
+fn logical_task_identity_is_independent_of_pool_placement() {
+    let (study, execution_plan) = execution_identities();
+    let workload = AnalysisWorkloadRequest::new(
+        study,
+        execution_plan,
+        AnalysisWorkKind::EvaluateAccuracy,
+        Vec::new(),
+        vec![AnalysisNumericalObjectKind::AccuracyEvidence],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    let capabilities = workload.generic_capabilities().unwrap();
+    let context = |pool: &[u8]| AnalysisExecutionContext {
+        scope_id: ExecutionScopeId::derive(&[b"study-scope"]),
+        pool_id: PoolId::derive(&[pool]),
+        program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[b"analysis-program"]),
+        resources: runmat_execution::resource::ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 1024 * 1024,
+            scratch_bytes: 1024,
+            max_wall_millis: 60_000,
+            max_artifact_bytes: 1024 * 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: Vec::new(),
+            required_capabilities: capabilities.clone(),
+        },
+        retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    };
+    let first = build_analysis_task_submission(
+        &workload,
+        Vec::new(),
+        Vec::new(),
+        BTreeSet::new(),
+        context(b"pool-a"),
+    )
+    .unwrap();
+    let second = build_analysis_task_submission(
+        &workload,
+        Vec::new(),
+        Vec::new(),
+        BTreeSet::new(),
+        context(b"pool-b"),
+    )
+    .unwrap();
+    assert_ne!(first.request.pool_id, second.request.pool_id);
+    assert_eq!(first.request.id, second.request.id);
+}

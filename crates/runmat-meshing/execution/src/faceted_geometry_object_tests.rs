@@ -4,7 +4,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use crate::tests::MemoryCache;
 use crate::{
     import_faceted_geometry_input, import_faceted_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingArtifactAccess,
+    prepare_faceted_geometry_objects, ArtifactAccess,
 };
 
 #[test]
@@ -65,7 +65,7 @@ fn faceted_geometry_projects_to_one_driver_owned_input() {
     let objects =
         prepare_faceted_geometry_objects(document, solid, ObjectInventoryLimits::default())
             .unwrap();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: "faceted-geometry-run".into(),
         encryption_context: runmat_execution::Digest::sha256(b"faceted-geometry-context"),
     };

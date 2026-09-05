@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
+use runmat_execution_artifact::ArtifactAccess;
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
 use runmat_meshing_core::MeshingRequest;
 use runmat_meshing_execution::{
     execute_exact_meshing_dag, ExactMeshingDagRun, ExactMeshingDagRunError,
-    ExactMeshingDagRunResult, MeshingArtifactAccess, MeshingRunEvidenceContext,
+    ExactMeshingDagRunResult, MeshingRunEvidenceContext,
 };
 
 use crate::{
@@ -145,8 +146,8 @@ pub fn mesh_exact_geometry(
     })
 }
 
-fn session_artifact_access(session: &NativeProgramSession) -> MeshingArtifactAccess {
-    MeshingArtifactAccess {
+fn session_artifact_access(session: &NativeProgramSession) -> ArtifactAccess {
+    ArtifactAccess {
         authorization_scope: format!("native-meshing-session:{}", session.scope_id()),
         encryption_context: Digest::sha256(
             [

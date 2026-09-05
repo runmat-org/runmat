@@ -20,7 +20,7 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    build_task_submission, exact_meshing_worker_capabilities, MeshingArtifactAccess,
+    build_task_submission, exact_meshing_worker_capabilities, ArtifactAccess,
     MeshingExecutionContext, MeshingTaskEffectPolicy, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
@@ -424,7 +424,7 @@ impl Fixture {
                 MeshingCapabilityRequirement::DeterministicPlatformCohort { cohort },
             ],
         };
-        let access = MeshingArtifactAccess {
+        let access = ArtifactAccess {
             authorization_scope: "run-scope".into(),
             encryption_context: Digest::sha256(b"encryption-context"),
         };

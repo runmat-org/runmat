@@ -4,6 +4,7 @@ use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::cache::FilesystemObjectStore;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
+use runmat_execution_artifact::ArtifactAccess;
 use runmat_execution_runner_native::native_meshing_kernel_dispatcher;
 use runmat_geometry_io::{
     import_exact_cad, ExactCadImportOptions, GeometryFormat, GeometryImportContext,
@@ -17,8 +18,7 @@ use runmat_meshing_core::{
 };
 use runmat_meshing_execution::{
     execute_exact_meshing_dag, prepare_exact_geometry_input, prepare_exact_geometry_objects,
-    ExactMeshingDagRun, MeshingArtifactAccess, MeshingRunEvidenceContext, NoopMeshingProgress,
-    SerialExactMeshingExecutor,
+    ExactMeshingDagRun, MeshingRunEvidenceContext, NoopMeshingProgress, SerialExactMeshingExecutor,
 };
 
 const BOX: &[u8] = include_bytes!("../../runmat-geometry/io/tests/fixtures/box.brep");
@@ -76,7 +76,7 @@ fn execute_box_with_layout(
     let topology = imported.topology.clone();
     let document = imported.geometry_document().unwrap();
     let limits = ObjectInventoryLimits::default();
-    let access = MeshingArtifactAccess {
+    let access = ArtifactAccess {
         authorization_scope: "occt-box-serial-corpus".into(),
         encryption_context: Digest::sha256(b"occt-box-serial-corpus"),
     };

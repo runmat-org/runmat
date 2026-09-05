@@ -85,6 +85,11 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "meshing workloads require a meshing-capable execution host".into(),
         };
     }
+    if request.artifact.form == ExecutableForm::AnalysisWorkload {
+        return ProgramExecutionResponse::Failure {
+            message: "analysis workloads require an analysis-capable execution host".into(),
+        };
+    }
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request).await;
     }

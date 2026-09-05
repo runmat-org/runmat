@@ -16,7 +16,7 @@ use crate::object_support::{
     add_inventory_bytes, enforce_object_length, input_object_reference, logical_object, read_exact,
     validate_input_root,
 };
-use crate::{MeshingArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
+use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
 const EXACT_MANIFEST_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const EXACT_TOPOLOGY_SCHEMA: &str = "runmat.geometry.exact-topology.v2";
@@ -91,7 +91,7 @@ impl PreparedExactGeometryInput {
 
 pub fn prepare_exact_geometry_input(
     geometry_objects: PreparedExactGeometryObjects,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryInput> {
     access.validate()?;
@@ -119,7 +119,7 @@ pub fn import_exact_geometry_input(
     source: &impl CacheImport,
     document: GeometryDocument,
     root: &ValueRef,
-    access: MeshingArtifactAccess,
+    access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryInput> {
     access.validate()?;
@@ -361,7 +361,7 @@ pub(crate) fn validate_geometry_reference(
 fn exact_object_reference(
     object: &LogicalObject,
     root: &ObjectDescriptor,
-    access: &MeshingArtifactAccess,
+    access: &ArtifactAccess,
 ) -> MeshingExecutionResult<ValueRef> {
     let value_schema = if object.descriptor.digest == root.digest {
         EXACT_MANIFEST_SCHEMA
@@ -386,10 +386,7 @@ fn exact_object_reference(
     )
 }
 
-fn validate_exact_root(
-    root: &ValueRef,
-    access: &MeshingArtifactAccess,
-) -> MeshingExecutionResult<()> {
+fn validate_exact_root(root: &ValueRef, access: &ArtifactAccess) -> MeshingExecutionResult<()> {
     validate_input_root(
         root,
         access,
