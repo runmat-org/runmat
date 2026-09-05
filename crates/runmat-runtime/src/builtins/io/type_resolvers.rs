@@ -302,10 +302,6 @@ pub fn movefile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn path_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn rmdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -585,7 +581,6 @@ mod tests {
     assert_resolver!(ls_type_resolver, ls_type, &[], Type::String);
     assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
-    assert_resolver!(path_type_resolver, path_type, &[], Type::String);
     assert_resolver!(rmdir_type_resolver, rmdir_type, &[], Type::Num);
     assert_resolver!(rmpath_type_resolver, rmpath_type, &[], Type::String);
     assert_resolver!(savepath_type_resolver, savepath_type, &[], Type::Num);

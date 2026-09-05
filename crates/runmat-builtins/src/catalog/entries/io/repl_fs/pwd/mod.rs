@@ -8,7 +8,7 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, IoInferenceRule,
+    BuiltinSignatureDescriptor, IoInferenceRule, IoReplFsInferenceRule,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
@@ -57,7 +57,9 @@ pub const PWD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &PWD_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::CurrentDirectory),
+        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
+            IoReplFsInferenceRule::CurrentDirectory,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::DeterministicReadOnly,

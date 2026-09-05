@@ -334,7 +334,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         },
         "webread" | "webwrite" | "tcpclient" | "tcpserver" | "accept" | "read" | "readline"
         | "write" => network_io(),
-        "path" | "addpath" | "rmpath" => BuiltinSemantics {
+        "addpath" | "rmpath" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
             environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
             purity: BuiltinPurity::Impure,

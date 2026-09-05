@@ -29,9 +29,20 @@ pub enum BuiltinInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum IoInferenceRule {
-    ChangeDirectory,
+    Console(IoConsoleInferenceRule),
+    ReplFs(IoReplFsInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IoConsoleInferenceRule {
     ClearConsole,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IoReplFsInferenceRule {
+    ChangeDirectory,
     CurrentDirectory,
+    SearchPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

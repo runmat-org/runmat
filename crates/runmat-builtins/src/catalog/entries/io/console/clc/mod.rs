@@ -8,7 +8,7 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, IoInferenceRule,
+    BuiltinSignatureDescriptor, IoConsoleInferenceRule, IoInferenceRule,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
@@ -51,7 +51,9 @@ pub const CLC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &CLC_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ClearConsole),
+        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::Console(
+            IoConsoleInferenceRule::ClearConsole,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Impure,

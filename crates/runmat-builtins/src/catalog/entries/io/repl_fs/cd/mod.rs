@@ -83,7 +83,9 @@ pub const CD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &CD_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ChangeDirectory),
+        inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
+            IoReplFsInferenceRule::ChangeDirectory,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
