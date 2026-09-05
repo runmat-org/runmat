@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     let mut fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -95,7 +95,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
                     if version == &host.resolved_request.algorithms.tetrahedron
             )
         }));
-    let program = volume_stage.program_request(revision()).unwrap();
+    let program = stage_program(&volume_stage, &mut fixture.store);
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -161,7 +161,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     );
     assert_eq!(projection_stage.host().workload.inputs.len(), 3);
     let projection = execute_serial_stage(
-        &projection_stage.program_request(revision()).unwrap(),
+        &stage_program(&projection_stage, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
@@ -191,7 +191,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let projection_root = root(projection.publication().root_output());
     let validation_stage = planner.solver_validation(projection_root.clone()).unwrap();
     let validation = execute_serial_stage(
-        &validation_stage.program_request(revision()).unwrap(),
+        &stage_program(&validation_stage, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
@@ -218,7 +218,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         .solver_serialization(projection_root, validation_root.clone())
         .unwrap();
     let serialized = execute_serial_stage(
-        &serialization_stage.program_request(revision()).unwrap(),
+        &stage_program(&serialization_stage, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
@@ -305,7 +305,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         )
         .unwrap();
     assert!(execute_serial_stage(
-        &mismatched_publication.program_request(revision()).unwrap(),
+        &stage_program(&mismatched_publication, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
@@ -334,7 +334,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         MeshingStageKind::Publication
     );
     let published = execute_serial_stage(
-        &publication_stage.program_request(revision()).unwrap(),
+        &stage_program(&publication_stage, &mut fixture.store),
         &mut fixture.store,
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,

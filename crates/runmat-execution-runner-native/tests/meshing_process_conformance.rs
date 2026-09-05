@@ -269,6 +269,7 @@ async fn parent() {
     let directory = tempfile::tempdir().unwrap();
     let (host, request) = fixture();
     let session = NativeProgramSession::new(config(directory.path(), "--child")).unwrap();
+    seed_host_invocation(&mut session.object_store(), &host, &request);
     let task_submission = submission(&session, &host, &request);
     let task = session.submit(request.clone(), task_submission).unwrap();
     let success = tokio::time::timeout(Duration::from_secs(10), async {
@@ -366,6 +367,11 @@ async fn parent() {
     let (cancel_host, cancel_request) = fixture();
     let cancel_session =
         NativeProgramSession::new(config(cancellation_directory.path(), "--slow-child")).unwrap();
+    seed_host_invocation(
+        &mut cancel_session.object_store(),
+        &cancel_host,
+        &cancel_request,
+    );
     let cancel_store_root = cancel_session.object_store().root().to_path_buf();
     let cancel_task = cancel_session
         .submit(
@@ -480,6 +486,7 @@ async fn remote_conformance() {
         )
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
+        register_host_invocation(&pool, &host, &request);
         let completion = pool
             .submit(
                 submission_for(scope_id, pool_id, &host, &request),
@@ -550,6 +557,7 @@ async fn remote_conformance() {
             pool.register_execution_object(reference.clone(), object.bytes.clone())
                 .unwrap();
         }
+        register_host_invocation(&pool, &exact.host, &exact.request);
         let exact_completion = pool
             .submit(
                 submission_for(scope_id, pool_id, &exact.host, &exact.request),
@@ -589,6 +597,7 @@ async fn remote_conformance() {
                 .write_verified(object)
                 .expect("seed exact serial input");
         }
+        seed_host_invocation(&mut exact_serial_store, &exact.host, &exact.request);
         let exact_serial = execute_meshing_program_request(
             &exact.request,
             &mut exact_serial_store,
@@ -603,6 +612,7 @@ async fn remote_conformance() {
         assert_eq!(outputs, exact_success.outputs);
 
         let mut serial_store = TestStore::default();
+        seed_host_invocation(&mut serial_store, &host, &request);
         let serial = execute_meshing_program_request(
             &request,
             &mut serial_store,
@@ -633,6 +643,7 @@ async fn remote_conformance() {
         )
         .unwrap();
         cancel_pool.add_worker(channel.clone()).await.unwrap();
+        register_host_invocation(&cancel_pool, &host, &request);
         let cancelled = cancel_pool
             .submit(
                 submission_for(cancel_scope, pool_id, &host, &request),
@@ -722,6 +733,8 @@ fn remote_fixture(
         ),
     ];
     materializations.sort_by_key(|(recipe, _)| recipe.id().unwrap());
+    materializations.dedup_by_key(|(recipe, _)| recipe.id().unwrap());
+    assert_eq!(materializations.len(), 1);
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();
@@ -754,6 +767,38 @@ impl CacheExport for TestStore {
             .insert(object.descriptor.digest, object.bytes.clone());
         Ok(())
     }
+}
+
+fn seed_host_invocation(
+    store: &mut impl CacheExport,
+    host: &MeshingHostWorkload,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) {
+    let roots = MeshingHostWorkload::semantic_input_roots(request).unwrap();
+    let invocation = host
+        .prepare_program_request(request.recipe.program_revision.clone(), &roots)
+        .unwrap();
+    assert_eq!(invocation.request(), request);
+    invocation.write_to(store).unwrap();
+}
+
+fn register_host_invocation(
+    pool: &RemotePoolDriver,
+    host: &MeshingHostWorkload,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) {
+    let roots = MeshingHostWorkload::semantic_input_roots(request).unwrap();
+    let invocation = host
+        .prepare_program_request(request.recipe.program_revision.clone(), &roots)
+        .unwrap();
+    assert_eq!(invocation.request(), request);
+    let root = MeshingHostWorkload::invocation_root(request).unwrap();
+    assert_eq!(
+        root.logical_digest,
+        invocation.descriptor().descriptor.digest
+    );
+    pool.register_execution_object(root.clone(), invocation.descriptor().bytes.clone())
+        .unwrap();
 }
 
 fn worker_inventory() -> ResourceInventory {
@@ -791,20 +836,9 @@ fn submission_for(
     host: &MeshingHostWorkload,
     request: &runmat_execution_artifact::ProgramExecutionRequest,
 ) -> runmat_execution_runner::TaskSubmission {
-    let roots = request
-        .arguments
-        .iter()
-        .map(|value| match value {
-            ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err("meshing conformance inputs must be objects"),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
     build_task_submission(
-        &host.workload,
-        &host.stage_identity,
-        &host.resolved_request,
-        &roots,
+        host,
+        &request.arguments,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
@@ -907,7 +941,10 @@ fn fixture_for(
         ],
     };
     let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
-    let program = host.program_request(revision, &[]).unwrap();
+    let program = host
+        .prepare_program_request(revision, &[])
+        .unwrap()
+        .into_request();
     (host, program)
 }
 

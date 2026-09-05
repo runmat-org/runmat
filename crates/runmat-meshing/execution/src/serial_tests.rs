@@ -488,7 +488,7 @@ fn execute_surface_pipeline_with_fixture(
     let stage = &pass.partitions()[0];
     let partition = stage.host().workload.partition.clone();
     let host = stage.host().clone();
-    let program = stage.program_request(revision()).unwrap();
+    let program = stage_program(stage, &mut fixture.store);
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -519,7 +519,7 @@ fn execute_curve_pipeline_from(
     ValueRef,
     CompletedMeshingStage,
 ) {
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -535,7 +535,7 @@ fn execute_curve_pipeline_from(
         .unwrap();
     let mut partition_roots = Vec::with_capacity(pass.partitions().len());
     for stage in pass.partitions() {
-        let program = stage.program_request(revision()).unwrap();
+        let program = stage_program(stage, &mut fixture.store);
         let partition = execute_serial_stage(
             &program,
             &mut fixture.store,
@@ -550,7 +550,7 @@ fn execute_curve_pipeline_from(
     }
     let join = planner.curve_join(&pass, partition_roots).unwrap();
     let host = join.host().clone();
-    let program = join.program_request(revision()).unwrap();
+    let program = stage_program(&join, &mut fixture.store);
     let joined = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -635,14 +635,11 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     )
     .unwrap();
     let expected = completed.attempt_success();
-    let root = root(&fixture.program.arguments[0]);
     let scope_id = ExecutionScopeId::derive(&[b"serial-stage-scope"]);
     let pool_id = PoolId::derive(&[b"serial-stage-pool"]);
     let submission = build_task_submission(
-        &fixture.host.workload,
-        &fixture.host.stage_identity,
-        &fixture.host.resolved_request,
-        std::slice::from_ref(&root),
+        &fixture.host,
+        &fixture.program.arguments,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
@@ -1007,7 +1004,7 @@ fn stage_control_enforces_wall_time_and_serialization_enforces_artifact_bytes() 
 #[test]
 fn serial_stage_rehashes_every_input_before_invoking_the_kernel() {
     let mut fixture = Fixture::new();
-    let ValuePayload::Object(root) = &fixture.program.arguments[0] else {
+    let ValuePayload::Object(root) = &fixture.program.arguments[1] else {
         panic!("fixture input is not externalized")
     };
     fixture
@@ -1094,9 +1091,7 @@ impl Fixture {
             ],
         };
         let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(&root))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(&root), &mut store);
         Self {
             host,
             program,
@@ -1302,9 +1297,7 @@ impl Fixture {
         };
         let host =
             MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(input.root_input()))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
             program,
@@ -1382,9 +1375,7 @@ impl Fixture {
         };
         let host =
             MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
-        let program = host
-            .program_request(revision(), std::slice::from_ref(input.root_input()))
-            .unwrap();
+        let program = host_program(&host, std::slice::from_ref(input.root_input()), &mut store);
         Self {
             host,
             program,
@@ -1549,6 +1540,25 @@ fn revision() -> ProgramRevision {
         .unwrap(),
     )
     .unwrap()
+}
+
+fn host_program(
+    host: &MeshingHostWorkload,
+    roots: &[ValueRef],
+    store: &mut impl CacheExport,
+) -> runmat_execution_artifact::ProgramExecutionRequest {
+    let invocation = host.prepare_program_request(revision(), roots).unwrap();
+    invocation.write_to(store).unwrap();
+    invocation.into_request()
+}
+
+fn stage_program(
+    stage: &crate::PlannedMeshingStage,
+    store: &mut impl CacheExport,
+) -> runmat_execution_artifact::ProgramExecutionRequest {
+    let invocation = stage.prepare_invocation(revision()).unwrap();
+    invocation.write_to(store).unwrap();
+    invocation.into_request()
 }
 
 fn stable(seed: u8) -> StableDigest {

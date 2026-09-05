@@ -86,8 +86,10 @@ pub use geometry_objects::{
     PreparedExactGeometryObjects,
 };
 pub use host::{
-    MeshingHostWorkload, MESHING_HOST_ABI, MESHING_HOST_EXECUTION_MODE,
-    MESHING_HOST_TARGET_PROFILE, MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
+    MeshingHostWorkload, PreparedMeshingHostInvocation, MESHING_HOST_ABI,
+    MESHING_HOST_EXECUTION_MODE, MESHING_HOST_INVOCATION_MEDIA_TYPE,
+    MESHING_HOST_INVOCATION_VALUE_SCHEMA, MESHING_HOST_TARGET_PROFILE,
+    MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
 };
 pub use objects::{
     import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot,

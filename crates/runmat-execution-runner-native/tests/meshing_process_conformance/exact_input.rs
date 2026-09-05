@@ -14,6 +14,7 @@ pub(super) async fn native_conformance() {
     for object in &exact.input.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
+    seed_host_invocation(&mut store, &exact.host, &exact.request);
     let task = session
         .submit(
             exact.request.clone(),
@@ -205,8 +206,9 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> E
     let host =
         MeshingHostWorkload::new(workload, identity, request, access, Some(document)).unwrap();
     let request = host
-        .program_request(revision, std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision, std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
     ExactFixture {
         host,
         request,

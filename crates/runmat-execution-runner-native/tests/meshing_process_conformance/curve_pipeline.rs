@@ -24,6 +24,12 @@ pub(super) async fn native_conformance() {
     let session = NativeProgramSession::new(config(directory.path(), "--curve-child")).unwrap();
     let mut store = session.object_store();
     seed_exact_input(&mut store, &fixture.input);
+    seed_host_invocation(
+        &mut store,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
+    seed_host_invocation(&mut store, &fixture.join_host, &fixture.join_request);
 
     let partition = session
         .submit(
@@ -73,6 +79,12 @@ pub(super) async fn durable_conformance() {
     let supervisor = LocalSupervisor::open(configuration.clone()).unwrap();
     let mut store = supervisor.object_store().unwrap();
     seed_exact_input(&mut store, &fixture.input);
+    seed_host_invocation(
+        &mut store,
+        &fixture.partition_host,
+        &fixture.partition_request,
+    );
+    seed_host_invocation(&mut store, &fixture.join_host, &fixture.join_request);
 
     let partition = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
@@ -187,6 +199,8 @@ pub(super) async fn remote_conformance(
         pool.register_execution_object(reference.clone(), object.bytes.clone())
             .unwrap();
     }
+    register_host_invocation(pool, &fixture.partition_host, &fixture.partition_request);
+    register_host_invocation(pool, &fixture.join_host, &fixture.join_request);
     let partition = pool
         .submit(
             submission_for(
@@ -282,11 +296,13 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
         partition,
     );
     let partition_request = partition_host
-        .program_request(revision.clone(), std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision.clone(), std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
 
     let mut serial_store = TestStore::default();
     seed_exact_input(&mut serial_store, &input);
+    seed_host_invocation(&mut serial_store, &partition_host, &partition_request);
     let partition_response = execute_meshing_program_request(
         &partition_request,
         &mut serial_store,
@@ -322,11 +338,13 @@ pub(super) fn fixture(revision: ProgramRevision, authorization_scope: &str) -> C
         },
     );
     let join_request = join_host
-        .program_request(
+        .prepare_program_request(
             revision,
             &[input.root_input().clone(), partition_root.as_ref().clone()],
         )
-        .unwrap();
+        .unwrap()
+        .into_request();
+    seed_host_invocation(&mut serial_store, &join_host, &join_request);
     let join_response = execute_meshing_program_request(
         &join_request,
         &mut serial_store,

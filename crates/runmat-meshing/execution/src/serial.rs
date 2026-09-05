@@ -3,7 +3,6 @@ use crate::{
     import_result_publication, prepare_result_publication, prepare_stage_objects,
     MeshingExecutionError, MeshingHostWorkload, PreparedMeshingResultPublication,
 };
-use runmat_execution::value::ValuePayload;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ProgramExecutionRequest;
@@ -117,8 +116,8 @@ where
     S: CacheImport + CacheExport,
     K: MeshingStageKernel + ?Sized,
 {
-    let host = MeshingHostWorkload::from_program_request(request)?;
-    let roots = input_roots(request)?;
+    let host = MeshingHostWorkload::from_program_request(request, store)?;
+    let roots = MeshingHostWorkload::semantic_input_roots(request)?;
     let limits = effective_limits(&host, inventory_limits)?;
     let inputs = host
         .workload
@@ -321,21 +320,6 @@ fn validate_stage_streams(
         .into());
     }
     Ok(())
-}
-
-fn input_roots(
-    request: &ProgramExecutionRequest,
-) -> Result<Vec<runmat_execution::value::ValueRef>, MeshingExecutionError> {
-    request
-        .arguments
-        .iter()
-        .map(|value| match value {
-            ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
-                "serial meshing inputs must remain externalized artifact roots".into(),
-            )),
-        })
-        .collect()
 }
 
 fn effective_limits(

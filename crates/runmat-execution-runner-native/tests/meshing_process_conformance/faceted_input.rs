@@ -63,13 +63,15 @@ pub(super) async fn native_conformance() {
         MeshingHostWorkload::new(workload, identity, meshing_request, access, Some(document))
             .unwrap();
     let request = host
-        .program_request(revision(), std::slice::from_ref(input.root_input()))
-        .unwrap();
+        .prepare_program_request(revision(), std::slice::from_ref(input.root_input()))
+        .unwrap()
+        .into_request();
     let session = NativeProgramSession::new(config(directory.path(), "--faceted-child")).unwrap();
     let mut store = session.object_store();
     for object in &input.geometry_objects().objects {
         store.write_verified(object).unwrap();
     }
+    seed_host_invocation(&mut store, &host, &request);
     let task = session
         .submit(request.clone(), submission(&session, &host, &request))
         .unwrap();

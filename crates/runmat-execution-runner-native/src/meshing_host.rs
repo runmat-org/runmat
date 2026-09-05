@@ -92,7 +92,7 @@ pub fn execute_meshing_program_request<
     if let Err(error) = limits.validate() {
         return failure(error.to_string());
     }
-    let host = match MeshingHostWorkload::from_program_request(request) {
+    let host = match MeshingHostWorkload::from_program_request(request, store) {
         Ok(host) => host,
         Err(error) => return failure(error.to_string()),
     };

@@ -2,9 +2,11 @@
 
 use runmat_execution::value::{ValuePayload, ValueRef};
 use runmat_execution::{OutputContract, ProgramRevision};
+use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
-    ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact, ProgramBuildRecipe,
+    ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_geometry_core::{
     decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
@@ -23,8 +25,12 @@ pub const MESHING_HOST_EXECUTION_MODE: &str = "meshing";
 pub const MESHING_HOST_TARGET_PROFILE: &str = "portable-meshing-host-v2";
 const HOST_ENTRYPOINT: &str = "meshing_workload";
 const HOST_PREFIX: &[u8] = b"runmat-meshing-host-workload/v2\0";
+const HOST_PROGRAM_BYTES: &[u8] = b"runmat-meshing-stage-host\0";
 const MAX_HOST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_COMPONENT_BYTES: usize = 32 * 1024 * 1024;
+pub const MESHING_HOST_INVOCATION_MEDIA_TYPE: &str =
+    "application/vnd.runmat.meshing-host-invocation+cbor";
+pub const MESHING_HOST_INVOCATION_VALUE_SCHEMA: &str = "runmat.meshing.host-invocation";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshingHostWorkload {
@@ -34,6 +40,31 @@ pub struct MeshingHostWorkload {
     pub resolved_request: MeshingRequest,
     pub artifact_access: ArtifactAccess,
     pub geometry_document: Option<GeometryDocument>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedMeshingHostInvocation {
+    request: ProgramExecutionRequest,
+    descriptor: LogicalObject,
+}
+
+impl PreparedMeshingHostInvocation {
+    pub const fn request(&self) -> &ProgramExecutionRequest {
+        &self.request
+    }
+
+    pub const fn descriptor(&self) -> &LogicalObject {
+        &self.descriptor
+    }
+
+    pub fn write_to(&self, store: &mut impl CacheExport) -> MeshingExecutionResult<()> {
+        store.write_verified(&self.descriptor)?;
+        Ok(())
+    }
+
+    pub fn into_request(self) -> ProgramExecutionRequest {
+        self.request
+    }
 }
 
 impl MeshingHostWorkload {
@@ -213,18 +244,29 @@ impl MeshingHostWorkload {
         }
     }
 
-    pub fn program_request(
+    /// Materializes this run-scoped invocation beside its semantic inputs and returns a request
+    /// for the single immutable meshing host program.
+    ///
+    /// Dynamic stage identity never enters the executable artifact. This is required for remote
+    /// bundles, where every authorized executable is frozen before downstream stage roots exist.
+    pub fn prepare_program_request(
         &self,
         program_revision: ProgramRevision,
         input_roots: &[ValueRef],
-    ) -> MeshingExecutionResult<ProgramExecutionRequest> {
+    ) -> MeshingExecutionResult<PreparedMeshingHostInvocation> {
         self.validate()?;
         validate_inputs(&self.workload, input_roots, &self.artifact_access)?;
-        let executable_bytes = self.canonical_bytes()?;
-        let workload_option = format!(
-            "meshing-workload:{}",
-            runmat_execution::Digest::sha256(&executable_bytes)
-        );
+        let invocation = crate::object_support::logical_object(
+            "meshing/host-invocations",
+            ObjectNamespace::InputValue,
+            MESHING_HOST_INVOCATION_MEDIA_TYPE,
+            self.canonical_bytes()?,
+        )?;
+        let invocation_root = self.artifact_access.reference(
+            &invocation,
+            runmat_execution::value::ValueRefKind::DriverObject,
+            MESHING_HOST_INVOCATION_VALUE_SCHEMA,
+        )?;
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision,
@@ -235,44 +277,91 @@ impl MeshingHostWorkload {
             execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
             target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
             features: Default::default(),
-            compile_options: std::collections::BTreeSet::from([workload_option]),
+            compile_options: Default::default(),
             source_objects: Vec::new(),
             expected_artifact_id: None,
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::MeshingWorkload,
-            executable_bytes,
+            HOST_PROGRAM_BYTES.to_vec(),
         )?;
+        let mut arguments = Vec::with_capacity(input_roots.len() + 1);
+        arguments.push(ValuePayload::Object(Box::new(invocation_root)));
+        arguments.extend(
+            input_roots
+                .iter()
+                .cloned()
+                .map(|root| ValuePayload::Object(Box::new(root))),
+        );
         let request = ProgramExecutionRequest {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
             recipe,
             artifact,
             function: 0,
-            arguments: input_roots
-                .iter()
-                .cloned()
-                .map(|root| ValuePayload::Object(Box::new(root)))
-                .collect(),
+            arguments,
             requested_outputs: 1,
         };
         request.validate()?;
-        Ok(request)
+        Ok(PreparedMeshingHostInvocation {
+            request,
+            descriptor: invocation,
+        })
     }
 
-    pub fn from_program_request(request: &ProgramExecutionRequest) -> MeshingExecutionResult<Self> {
+    pub fn from_program_request<S: CacheImport>(
+        request: &ProgramExecutionRequest,
+        store: &S,
+    ) -> MeshingExecutionResult<Self> {
         request.validate_for_portable_host()?;
         if request.artifact.form != ExecutableForm::MeshingWorkload
             || request.recipe.execution_mode != MESHING_HOST_EXECUTION_MODE
             || request.recipe.target != ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE)
+            || request.artifact.executable_bytes != HOST_PROGRAM_BYTES
+            || !request.recipe.compile_options.is_empty()
         {
             return Err(MeshingExecutionError::Invalid(
                 "program request is not a meshing host workload".into(),
             ));
         }
-        let host = Self::from_canonical_bytes(&request.artifact.executable_bytes)?;
-        let roots = request
-            .arguments
+        let (invocation, inputs) = request.arguments.split_first().ok_or_else(|| {
+            MeshingExecutionError::Invalid(
+                "meshing host request is missing its invocation descriptor".into(),
+            )
+        })?;
+        let ValuePayload::Object(invocation_root) = invocation else {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing host invocation must remain externalized".into(),
+            ));
+        };
+        if invocation_root.kind != runmat_execution::value::ValueRefKind::DriverObject
+            || invocation_root.media_type != MESHING_HOST_INVOCATION_MEDIA_TYPE
+            || invocation_root.value_schema != MESHING_HOST_INVOCATION_VALUE_SCHEMA
+            || invocation_root.encoded_length == 0
+            || invocation_root.encoded_length > MAX_HOST_BYTES as u64
+        {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing host invocation reference is malformed".into(),
+            ));
+        }
+        let bytes = store.read_verified(invocation_root.logical_digest)?.ok_or(
+            MeshingExecutionError::MissingObject(invocation_root.logical_digest),
+        )?;
+        if bytes.len() as u64 != invocation_root.encoded_length
+            || runmat_execution::Digest::sha256(&bytes) != invocation_root.logical_digest
+        {
+            return Err(MeshingExecutionError::Identity(
+                "meshing host invocation bytes differ from their reference",
+            ));
+        }
+        let host = Self::from_canonical_bytes(&bytes)?;
+        host.artifact_access.validate_reference(
+            invocation_root,
+            runmat_execution::value::ValueRefKind::DriverObject,
+            MESHING_HOST_INVOCATION_MEDIA_TYPE,
+            MESHING_HOST_INVOCATION_VALUE_SCHEMA,
+        )?;
+        let roots = inputs
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(root) => Ok((**root).clone()),
@@ -283,6 +372,36 @@ impl MeshingHostWorkload {
             .collect::<MeshingExecutionResult<Vec<_>>>()?;
         validate_inputs(&host.workload, &roots, &host.artifact_access)?;
         Ok(host)
+    }
+
+    pub fn invocation_root(request: &ProgramExecutionRequest) -> MeshingExecutionResult<&ValueRef> {
+        match request.arguments.first() {
+            Some(ValuePayload::Object(root)) => Ok(root),
+            _ => Err(MeshingExecutionError::Invalid(
+                "meshing host request is missing its externalized invocation".into(),
+            )),
+        }
+    }
+
+    pub fn semantic_input_roots(
+        request: &ProgramExecutionRequest,
+    ) -> MeshingExecutionResult<Vec<ValueRef>> {
+        request
+            .arguments
+            .get(1..)
+            .ok_or_else(|| {
+                MeshingExecutionError::Invalid(
+                    "meshing host request is missing its invocation descriptor".into(),
+                )
+            })?
+            .iter()
+            .map(|value| match value {
+                ValuePayload::Object(root) => Ok((**root).clone()),
+                ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+                    "meshing host inputs must be externalized root manifests".into(),
+                )),
+            })
+            .collect()
     }
 }
 

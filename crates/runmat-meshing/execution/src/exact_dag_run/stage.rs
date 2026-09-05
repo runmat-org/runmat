@@ -87,10 +87,14 @@ impl<S: CacheImport + CacheExport> ExactMeshingDagExecutor for SerialExactMeshin
         stage: &PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
+        let invocation = stage
+            .prepare_invocation(revision)
+            .map_err(|error| MeshingStageExecutionError::new(error.to_string()))?;
+        invocation
+            .write_to(self.store)
+            .map_err(|error| MeshingStageExecutionError::new(error.to_string()))?;
         crate::execute_serial_stage(
-            &stage
-                .program_request(revision)
-                .map_err(|error| MeshingStageExecutionError::new(error.to_string()))?,
+            invocation.request(),
             self.store,
             self.kernel,
             self.cancellation,

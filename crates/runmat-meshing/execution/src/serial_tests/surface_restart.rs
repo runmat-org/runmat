@@ -261,7 +261,7 @@ fn serial_curve_refinement_consumes_the_surface_restart_pass() {
         pass_host.geometry_document.clone(),
     )
     .unwrap();
-    let program = host.program_request(revision(), &roots).unwrap();
+    let program = host_program(&host, &roots, &mut fixture.store);
     let refined = execute_serial_stage(
         &program,
         &mut fixture.store,
@@ -353,7 +353,7 @@ pub(super) fn execute_surface_join_pipeline_from_fixture(
         .unwrap();
     let join = planner.surface_join(&pass, vec![partition_root]).unwrap();
     let host = join.host().clone();
-    let program = join.program_request(revision()).unwrap();
+    let program = stage_program(&join, &mut fixture.store);
     let completed = execute_serial_stage(
         &program,
         &mut fixture.store,

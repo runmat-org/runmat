@@ -77,7 +77,12 @@ impl<'a> NativeExactMeshingExecutor<'a> {
         stage: &PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<NativeProgramTask, MeshingStageExecutionError> {
-        let program = stage.program_request(revision).map_err(stage_error)?;
+        let invocation = stage.prepare_invocation(revision).map_err(stage_error)?;
+        let mut object_store = self.session.object_store();
+        invocation
+            .write_to(&mut object_store)
+            .map_err(stage_error)?;
+        let program = invocation.into_request();
         let effect =
             if stage.host().workload.stage == runmat_meshing_core::MeshingStageKind::Publication {
                 MeshingTaskEffectPolicy::UnknownEffect
@@ -88,10 +93,8 @@ impl<'a> NativeExactMeshingExecutor<'a> {
                 }
             };
         let submission = build_task_submission(
-            &stage.host().workload,
-            &stage.host().stage_identity,
-            &stage.host().resolved_request,
-            stage.input_roots(),
+            stage.host(),
+            &program.arguments,
             BTreeSet::new(),
             &MeshingExecutionContext {
                 scope_id: self.session.scope_id(),

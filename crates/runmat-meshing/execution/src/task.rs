@@ -20,7 +20,8 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult,
+    ArtifactAccess, MeshingExecutionError, MeshingExecutionResult, MeshingHostWorkload,
+    MESHING_HOST_INVOCATION_MEDIA_TYPE, MESHING_HOST_INVOCATION_VALUE_SCHEMA,
     MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
@@ -53,20 +54,50 @@ pub enum MeshingTaskEffectPolicy {
 }
 
 pub fn build_task_submission(
-    workload: &MeshingWorkloadRequest,
-    stage_identity: &MeshingStageIdentity,
-    resolved_request: &MeshingRequest,
-    input_roots: &[ValueRef],
+    host: &MeshingHostWorkload,
+    program_inputs: &[ValuePayload],
     dependencies: BTreeSet<TaskId>,
     context: &MeshingExecutionContext,
     effect: MeshingTaskEffectPolicy,
 ) -> MeshingExecutionResult<TaskSubmission> {
+    host.validate()?;
+    let workload = &host.workload;
+    let stage_identity = &host.stage_identity;
+    let resolved_request = &host.resolved_request;
     workload.validate()?;
     stage_identity.validate()?;
     resolved_request.validate()?;
     context.artifact_access.validate()?;
     validate_identity_binding(workload, stage_identity, resolved_request)?;
-    validate_inputs(workload, input_roots, &context.artifact_access)?;
+    let (invocation, semantic_inputs) = program_inputs.split_first().ok_or_else(|| {
+        MeshingExecutionError::Invalid("meshing task is missing its invocation descriptor".into())
+    })?;
+    let ValuePayload::Object(invocation_root) = invocation else {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing task invocation must remain externalized".into(),
+        ));
+    };
+    context.artifact_access.validate_reference(
+        invocation_root,
+        ValueRefKind::DriverObject,
+        MESHING_HOST_INVOCATION_MEDIA_TYPE,
+        MESHING_HOST_INVOCATION_VALUE_SCHEMA,
+    )?;
+    if invocation_root.logical_digest != Digest::sha256(host.canonical_bytes()?) {
+        return Err(MeshingExecutionError::Identity(
+            "meshing invocation descriptor differs from its task workload",
+        ));
+    }
+    let input_roots = semantic_inputs
+        .iter()
+        .map(|input| match input {
+            ValuePayload::Object(root) => Ok((**root).clone()),
+            ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+                "meshing semantic inputs must remain externalized".into(),
+            )),
+        })
+        .collect::<MeshingExecutionResult<Vec<_>>>()?;
+    validate_inputs(workload, &input_roots, &context.artifact_access)?;
     let capabilities = map_capabilities(workload, stage_identity, resolved_request)?;
     let retry = map_retry(workload.stage, effect)?;
     let partition_identity = MeshingPartitionIdentity {
@@ -112,11 +143,7 @@ pub fn build_task_submission(
                     "runmat-meshing-host-entrypoint-v2\0{qualified_name}"
                 )),
             },
-            inputs: input_roots
-                .iter()
-                .cloned()
-                .map(|reference| ValuePayload::Object(Box::new(reference)))
-                .collect(),
+            inputs: program_inputs.to_vec(),
             outputs: OutputContract {
                 requested_outputs: 1,
             },

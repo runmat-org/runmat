@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join() {
     let mut fixture = Fixture::with_exact_tetrahedron_curve_partition();
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -75,7 +75,7 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
 #[test]
 fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance() {
     let fixture = Fixture::with_exact_tetrahedron_curve_partition();
-    let exact_root = root(&fixture.program.arguments[0]);
+    let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
         fixture.host.geometry_document.clone().unwrap(),
@@ -403,7 +403,7 @@ fn execute_planned_result(
     stage: &crate::PlannedMeshingStage,
     kernel: &dyn MeshingStageKernel,
 ) -> Result<CompletedMeshingStage, MeshingSerialExecutionError> {
-    let program = stage.program_request(revision()).unwrap();
+    let program = stage_program(stage, &mut fixture.store);
     execute_serial_stage(
         &program,
         &mut fixture.store,

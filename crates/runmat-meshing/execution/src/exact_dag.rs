@@ -6,7 +6,6 @@
 
 use runmat_execution::value::ValueRef;
 use runmat_execution::ProgramRevision;
-use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_geometry_core::ExactBRepTopology;
 use runmat_meshing_core::{
     CanonicalMeshingContract, GeometryRevisionRef, MeshingCapabilityRequirement, MeshingInputKind,
@@ -57,11 +56,12 @@ impl PlannedMeshingStage {
         &self.input_roots
     }
 
-    pub fn program_request(
+    pub fn prepare_invocation(
         &self,
         revision: ProgramRevision,
-    ) -> MeshingExecutionResult<ProgramExecutionRequest> {
-        self.host.program_request(revision, &self.input_roots)
+    ) -> MeshingExecutionResult<crate::PreparedMeshingHostInvocation> {
+        self.host
+            .prepare_program_request(revision, &self.input_roots)
     }
 }
 
