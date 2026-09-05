@@ -82,14 +82,14 @@ pub use faceted_geometry_objects::{
 pub use geometry_control::{GeometryEvaluationUsage, MeshingGeometryEvaluationControl};
 pub use geometry_objects::{
     import_exact_geometry_input, import_exact_geometry_objects, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, ExactGeometryObjectRoot, PreparedExactGeometryInput,
-    PreparedExactGeometryObjects,
+    prepare_exact_geometry_objects, prepare_exact_geometry_result, ExactGeometryObjectRoot,
+    PreparedExactGeometryInput, PreparedExactGeometryObjects,
 };
 pub use host::{
-    MeshingHostWorkload, PreparedMeshingHostInvocation, MESHING_HOST_ABI,
-    MESHING_HOST_EXECUTION_MODE, MESHING_HOST_INVOCATION_MEDIA_TYPE,
-    MESHING_HOST_INVOCATION_VALUE_SCHEMA, MESHING_HOST_TARGET_PROFILE,
-    MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
+    prepare_meshing_host_program, MeshingHostProgram, MeshingHostWorkload,
+    PreparedMeshingHostInvocation, MESHING_HOST_ABI, MESHING_HOST_EXECUTION_MODE,
+    MESHING_HOST_INVOCATION_MEDIA_TYPE, MESHING_HOST_INVOCATION_VALUE_SCHEMA,
+    MESHING_HOST_TARGET_PROFILE, MESHING_HOST_WORKLOAD_SCHEMA_VERSION,
 };
 pub use objects::{
     import_stage_objects, prepare_stage_objects, MeshingStageObjectRoot,

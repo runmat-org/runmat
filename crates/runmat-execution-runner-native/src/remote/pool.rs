@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::state::PoolState;
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
-use runmat_execution_artifact::{ProgramExecutionRequest, ProjectRevisionRecord};
+use runmat_execution_artifact::cache::CacheImport;
+use runmat_execution_artifact::{
+    ArtifactError, ArtifactResult, ProgramExecutionRequest, ProjectRevisionRecord,
+};
 use runmat_execution_runner::pool::ResizeRequest;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -38,6 +41,14 @@ pub struct RemotePoolDriver {
     programs: Mutex<HashMap<TaskId, ProgramExecutionRequest>>,
     completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
     progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
+}
+
+impl CacheImport for RemotePoolDriver {
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.execution_object_by_digest(digest)
+            .map(|bytes| bytes.map(|bytes| bytes.as_ref().to_vec()))
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+    }
 }
 
 impl RemotePoolDriver {

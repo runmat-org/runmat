@@ -12,6 +12,7 @@ use runmat_meshing_execution::{
     ExactMeshingDagRunResult, MeshingRunEvidenceContext,
 };
 
+use crate::exact_geometry_admission::same_requested_tolerance;
 use crate::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
     MeshingExecutionPolicy, NativeExactMeshingExecutor, NativeExecutionConfig,
@@ -159,21 +160,11 @@ fn session_artifact_access(session: &NativeProgramSession) -> ArtifactAccess {
     }
 }
 
-fn same_requested_tolerance(
-    requested: &runmat_geometry_core::GeometryTolerancePolicy,
-    admitted: &runmat_geometry_core::GeometryTolerancePolicy,
-) -> bool {
-    requested.absolute_floor_m == admitted.absolute_floor_m
-        && requested.model_relative_term == admitted.model_relative_term
-        && requested.requested_deviation_m == admitted.requested_deviation_m
-        && requested.maximum_healing_displacement_m == admitted.maximum_healing_displacement_m
-}
-
 #[cfg(test)]
 mod tests {
     use runmat_geometry_core::GeometryTolerancePolicy;
 
-    use super::same_requested_tolerance;
+    use crate::exact_geometry_admission::same_requested_tolerance;
 
     #[test]
     fn source_tolerance_is_resolved_by_import_but_user_policy_must_match() {

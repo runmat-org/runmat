@@ -190,7 +190,7 @@ fn exact_geometry_inputs_use_the_authoritative_geometry_object_shape() {
 
     fixture.submit(MeshingTaskEffectPolicy::UnknownEffect);
 
-    fixture.input.kind = ValueRefKind::ResultObject;
+    fixture.input.kind = ValueRefKind::WorkerObject;
     assert!(build_task_submission(
         &fixture.host(),
         &fixture.program_inputs(),

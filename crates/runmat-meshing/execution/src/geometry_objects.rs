@@ -1,4 +1,4 @@
-use runmat_execution::value::ValueRef;
+use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
@@ -13,8 +13,7 @@ use runmat_geometry_core::{
 };
 
 use crate::object_support::{
-    add_inventory_bytes, enforce_object_length, input_object_reference, logical_object, read_exact,
-    validate_input_root,
+    add_inventory_bytes, enforce_object_length, logical_object, read_exact,
 };
 use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
@@ -94,12 +93,30 @@ pub fn prepare_exact_geometry_input(
     access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    prepare_exact_geometry_value(geometry_objects, access, ValueRefKind::DriverObject, limits)
+}
+
+/// Projects a worker-admitted exact geometry closure as a reusable execution result.
+pub fn prepare_exact_geometry_result(
+    geometry_objects: PreparedExactGeometryObjects,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
+    prepare_exact_geometry_value(geometry_objects, access, ValueRefKind::ResultObject, limits)
+}
+
+fn prepare_exact_geometry_value(
+    geometry_objects: PreparedExactGeometryObjects,
+    access: ArtifactAccess,
+    kind: ValueRefKind,
+    limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<PreparedExactGeometryInput> {
     access.validate()?;
     geometry_objects.revalidate(limits)?;
     let input_objects = geometry_objects
         .objects
         .iter()
-        .map(|object| exact_object_reference(object, &geometry_objects.root, &access))
+        .map(|object| exact_object_reference(object, &geometry_objects.root, &access, kind))
         .collect::<MeshingExecutionResult<Vec<_>>>()?;
     let root_input = input_objects
         .iter()
@@ -133,7 +150,7 @@ pub fn import_exact_geometry_input(
         },
         limits,
     )?;
-    let prepared = prepare_exact_geometry_input(geometry_objects, access, limits)?;
+    let prepared = prepare_exact_geometry_value(geometry_objects, access, root.kind, limits)?;
     if prepared.root_input != *root {
         return Err(MeshingExecutionError::Identity(
             "imported exact geometry root differs from its execution reference",
@@ -362,6 +379,7 @@ fn exact_object_reference(
     object: &LogicalObject,
     root: &ObjectDescriptor,
     access: &ArtifactAccess,
+    kind: ValueRefKind,
 ) -> MeshingExecutionResult<ValueRef> {
     let value_schema = if object.descriptor.digest == root.digest {
         EXACT_MANIFEST_SCHEMA
@@ -378,22 +396,31 @@ fn exact_object_reference(
             }
         }
     };
-    input_object_reference(
-        object,
-        access,
-        value_schema,
-        "invalid exact geometry input reference",
-    )
+    let reference = access.reference(object, kind, value_schema)?;
+    ValuePayload::Object(Box::new(reference.clone()))
+        .validate(runmat_execution::value::ValueLimits::default())
+        .map_err(|_| {
+            MeshingExecutionError::Identity("invalid exact geometry execution reference")
+        })?;
+    Ok(reference)
 }
 
 fn validate_exact_root(root: &ValueRef, access: &ArtifactAccess) -> MeshingExecutionResult<()> {
-    validate_input_root(
+    if !matches!(
+        root.kind,
+        ValueRefKind::DriverObject | ValueRefKind::ResultObject
+    ) {
+        return Err(MeshingExecutionError::Identity(
+            "exact geometry root has a nonportable execution kind",
+        ));
+    }
+    access.validate_reference(
         root,
-        access,
+        root.kind,
         EXACT_BREP_MEDIA_TYPE,
         EXACT_MANIFEST_SCHEMA,
-        "exact geometry root is outside input artifact authority",
-    )
+    )?;
+    Ok(())
 }
 
 fn read_component(

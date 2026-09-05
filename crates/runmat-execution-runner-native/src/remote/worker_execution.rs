@@ -11,11 +11,15 @@ use runmat_meshing_execution::{MeshingProgressSink, MeshingStageKernel};
 use super::object_transfer::RemoteObjectStore;
 
 #[derive(Default)]
-pub(super) struct AttemptCancellation(AtomicBool);
+pub(super) struct AttemptCancellation(Arc<AtomicBool>);
 
 impl AttemptCancellation {
     pub(super) fn cancel(&self) {
         self.0.store(true, Ordering::Release);
+    }
+
+    pub(super) fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.0)
     }
 }
 
@@ -65,6 +69,19 @@ pub(super) async fn execute(
         let Some(host) = meshing_host else {
             return failure("remote worker has no meshing host capability");
         };
+        if program.recipe.execution_mode == crate::EXACT_MESHING_ROOT_EXECUTION_MODE {
+            drop(progress_sender);
+            return tokio::task::spawn_blocking(move || {
+                crate::exact_meshing_root::execute_exact_meshing_root_admission(
+                    &program,
+                    &mut objects,
+                    cancellation.flag(),
+                    host.limits,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| failure(&error.to_string()));
+        }
         return tokio::task::spawn_blocking(move || {
             let progress_error = Arc::new(Mutex::new(None));
             let mut progress = ChannelProgress {

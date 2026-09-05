@@ -13,6 +13,7 @@ runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
 runmat-value = { workspace = true }
 runmat-builtins = { workspace = true }
+runmat-canonical-codec = { workspace = true }
 runmat-core = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }

@@ -5,13 +5,14 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
     resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract,
-    MeshingRequestSettings, PlatformBuildIdentity, StableDigest,
+    MeshingRequestSettings,
 };
 use runmat_meshing_execution::MeshingRunEvidenceContext;
 use runmat_runtime::meshing::{
     MeshingExecutionOutput, MeshingExecutionProvider, MeshingExecutionRequest,
 };
 
+use crate::meshing_platform::{native_meshing_capability_cohort, native_meshing_platform};
 use crate::{
     mesh_exact_geometry, MeshingExecutionPolicy, NativeExactMeshingJob, NativeExactMeshingJobError,
     NativeExactMeshingResult, NativeExecutionConfig, NativeMeshingContactDefinition,
@@ -133,11 +134,7 @@ pub fn mesh_source_with_native_execution(
     let request_bytes = canonical_request
         .canonical_encode()
         .map_err(|error| NativeMeshingSourceError::RequestEncoding(error.to_string()))?;
-    let cohort = format!("native-{}-{}", std::env::consts::ARCH, std::env::consts::OS);
-    let build_digest = StableDigest::from_bytes(
-        *Digest::sha256(format!("runmat-meshing-build:{}", env!("CARGO_PKG_VERSION")).as_bytes())
-            .bytes(),
-    );
+    let cohort = native_meshing_capability_cohort();
     let program_revision = ProgramRevision::new(
         Digest::sha256(&request_bytes),
         Digest::sha256(&source_bytes),
@@ -167,12 +164,7 @@ pub fn mesh_source_with_native_execution(
             preferred_faces_per_partition: request.partition_policy.preferred_faces_per_partition,
             inventory_limits: ObjectInventoryLimits::default(),
             evidence: MeshingRunEvidenceContext {
-                platform: PlatformBuildIdentity {
-                    capability_cohort: cohort,
-                    target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
-                    build_digest,
-                    exact_kernel_abi: None,
-                },
+                platform: native_meshing_platform(Some(&cohort), None),
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },

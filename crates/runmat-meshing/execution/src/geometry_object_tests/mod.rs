@@ -245,7 +245,7 @@ fn exact_geometry_input_rejects_wrong_authority_and_object_kind() {
     .is_err());
 
     wrong = prepared.root_input().clone();
-    wrong.kind = ValueRefKind::ResultObject;
+    wrong.kind = ValueRefKind::WorkerObject;
     assert!(import_exact_geometry_input(
         &cache,
         prepared.geometry_objects().document.clone(),

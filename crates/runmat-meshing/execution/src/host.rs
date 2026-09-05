@@ -48,6 +48,37 @@ pub struct PreparedMeshingHostInvocation {
     descriptor: LogicalObject,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MeshingHostProgram {
+    pub recipe: ProgramBuildRecipe,
+    pub artifact: ProgramArtifact,
+}
+
+pub fn prepare_meshing_host_program(
+    program_revision: ProgramRevision,
+) -> MeshingExecutionResult<MeshingHostProgram> {
+    let recipe = ProgramBuildRecipe {
+        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision,
+        entrypoint: HOST_ENTRYPOINT.into(),
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
+        target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::MeshingWorkload,
+        HOST_PROGRAM_BYTES.to_vec(),
+    )?;
+    Ok(MeshingHostProgram { recipe, artifact })
+}
+
 impl PreparedMeshingHostInvocation {
     pub const fn request(&self) -> &ProgramExecutionRequest {
         &self.request
@@ -267,25 +298,8 @@ impl MeshingHostWorkload {
             runmat_execution::value::ValueRefKind::DriverObject,
             MESHING_HOST_INVOCATION_VALUE_SCHEMA,
         )?;
-        let recipe = ProgramBuildRecipe {
-            schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-            program_revision,
-            entrypoint: HOST_ENTRYPOINT.into(),
-            outputs: OutputContract {
-                requested_outputs: 1,
-            },
-            execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
-            target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
-            features: Default::default(),
-            compile_options: Default::default(),
-            source_objects: Vec::new(),
-            expected_artifact_id: None,
-        };
-        let artifact = ProgramArtifact::materialize(
-            &recipe,
-            ExecutableForm::MeshingWorkload,
-            HOST_PROGRAM_BYTES.to_vec(),
-        )?;
+        let MeshingHostProgram { recipe, artifact } =
+            prepare_meshing_host_program(program_revision)?;
         let mut arguments = Vec::with_capacity(input_roots.len() + 1);
         arguments.push(ValuePayload::Object(Box::new(invocation_root)));
         arguments.extend(

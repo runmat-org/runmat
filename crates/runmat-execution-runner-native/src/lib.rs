@@ -9,10 +9,12 @@ mod error;
 mod exact_geometry_admission;
 mod exact_meshing_executor;
 mod exact_meshing_job;
+mod exact_meshing_root;
 mod local_store;
 mod materialized_project;
 mod meshing_evaluator;
 mod meshing_host;
+mod meshing_platform;
 mod program_session;
 mod protocol;
 mod remote;
@@ -36,6 +38,11 @@ pub use exact_meshing_executor::{MeshingExecutionPolicy, NativeExactMeshingExecu
 pub use exact_meshing_job::{
     mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError,
     NativeExactMeshingResult,
+};
+pub use exact_meshing_root::{
+    decode_exact_meshing_root, prepare_exact_meshing_root, DecodedExactMeshingRoot,
+    ExactMeshingRootPreparation, ExactMeshingRootRequest, PreparedExactMeshingRoot,
+    EXACT_MESHING_ROOT_EXECUTION_MODE, EXACT_MESHING_ROOT_TARGET_PROFILE,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

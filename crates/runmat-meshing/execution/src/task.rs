@@ -202,8 +202,10 @@ pub(crate) fn validate_input(
                 && root.value_schema == STAGE_MANIFEST_SCHEMA
         }
         MeshingInputKind::ExactGeometry => {
-            root.kind == ValueRefKind::DriverObject
-                && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
+            matches!(
+                root.kind,
+                ValueRefKind::DriverObject | ValueRefKind::ResultObject
+            ) && root.media_type == runmat_geometry_core::EXACT_BREP_MEDIA_TYPE
                 && root.value_schema == EXACT_GEOMETRY_SCHEMA
         }
         MeshingInputKind::FacetedGeometry => {

@@ -208,6 +208,14 @@ impl CacheImport for RemoteExactMeshingExecutor {
 
 impl CacheExport for RemoteExactMeshingExecutor {
     fn write_verified(&mut self, object: &LogicalObject) -> ArtifactResult<()> {
+        if self
+            .pool
+            .execution_object_by_digest(object.descriptor.digest)
+            .map_err(|error| runmat_execution_artifact::ArtifactError::Invalid(error.to_string()))?
+            .is_some()
+        {
+            return Ok(());
+        }
         self.local_store.write_verified(object)?;
         let reference = self
             .artifact_access

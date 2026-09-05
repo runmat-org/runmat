@@ -227,7 +227,7 @@ pub struct PlatformBuildIdentity {
 }
 
 impl PlatformBuildIdentity {
-    fn validate(&self) -> Result<(), MeshingContractError> {
+    pub fn validate(&self) -> Result<(), MeshingContractError> {
         validate_token("capability cohort", &self.capability_cohort, 128)?;
         validate_token("target triple", &self.target_triple, 128)?;
         self.build_digest

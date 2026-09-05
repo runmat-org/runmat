@@ -18,20 +18,20 @@ use runmat_execution_transport_native::control::{
 use super::pool_reconcile::{reconcile_workers, validate_pool_intent};
 use super::pool_resources::{pool_inventory, task_resources};
 use super::RemotePoolDriver;
-use crate::{NativeExecutionError, NativeExecutionResult};
+use crate::{NativeExecutionError, NativeExecutionResult, EXACT_MESHING_ROOT_EXECUTION_MODE};
 
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(super) enum RemotePoolExecutionOutcome {
+pub(crate) enum RemotePoolExecutionOutcome {
     Completed(RemotePoolExecutionResult),
     Cancelled,
     Indeterminate(String),
 }
 
-pub(super) struct RemotePoolExecutionResult {
-    pub(super) response: ProgramExecutionResponse,
+pub(crate) struct RemotePoolExecutionResult {
+    pub(crate) response: ProgramExecutionResponse,
     pub(super) objects: super::result_objects::RemoteResultObjects,
 }
 
@@ -134,81 +134,37 @@ pub(super) async fn execute(
         validate_pool_intent(&worker_pool, desired_workers, &resources)?;
     }
 
-    let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
-    let task_id = TaskId::derive(&[authority.run_id.as_bytes(), b"remote-root"]);
-    let completion = pool.submit(
-        TaskSubmission {
-            request: TaskRequest {
-                id: task_id,
-                scope_id,
-                pool_id,
-                program_artifact_id: artifact_id,
-                callable: Callable {
-                    owner_identity: "remote-run".into(),
-                    qualified_name: request.recipe.entrypoint.clone(),
-                    entrypoint_digest: Digest::sha256(request.recipe.entrypoint.as_bytes()),
-                },
-                inputs: request.arguments.clone(),
-                outputs: OutputContract {
-                    requested_outputs: request.requested_outputs,
-                },
-                resources: task_resources(&resources)?,
-                retry: RetryPolicy::Never,
-                deadline_unix_millis: None,
-            },
-            dependencies: BTreeSet::new(),
-            priority: 0,
-        },
-        request,
-    )?;
-    let completion = completion.wait();
-    tokio::pin!(completion);
+    let run_id = authority.run_id.clone();
+    let exact_meshing = request.recipe.execution_mode == EXACT_MESHING_ROOT_EXECUTION_MODE;
+    let pool_for_execution = Arc::clone(&pool);
+    let resources_for_execution = resources.clone();
+    let mut execution = if exact_meshing {
+        Box::pin(super::exact_meshing::execute(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+    } else {
+        Box::pin(execute_single_root(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+        ))
+    };
     loop {
         if *cancellation.borrow() {
             pool.cancel(CancellationReason::User)?;
-            let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut completion).await;
+            let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
             return Ok(RemotePoolExecutionOutcome::Cancelled);
         }
         tokio::select! {
-            result = &mut completion => {
-                return match result {
-                    Ok(success) if success.result_objects.is_empty() => {
-                        match success.outputs.as_slice() {
-                            [value] => packaged(
-                                ProgramExecutionResponse::Success {
-                                    value: value.clone(),
-                                },
-                                Arc::clone(&pool),
-                            )
-                            .map(RemotePoolExecutionOutcome::Completed),
-                            _ => Err(protocol(
-                                "remote worker returned an invalid inline output count",
-                            )),
-                        }
-                    }
-                    Ok(success) => packaged(
-                        ProgramExecutionResponse::ExternalizedSuccess {
-                            outputs: success.outputs,
-                            result_objects: success.result_objects,
-                        },
-                        Arc::clone(&pool),
-                    )
-                    .map(RemotePoolExecutionOutcome::Completed),
-                    Err(message) => {
-                        let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
-                        if state == Some(TaskState::Indeterminate) {
-                            Ok(RemotePoolExecutionOutcome::Indeterminate(message))
-                        } else {
-                            packaged(ProgramExecutionResponse::Failure { message }, Arc::clone(&pool))
-                                .map(RemotePoolExecutionOutcome::Completed)
-                        }
-                    }
-                };
-            }
+            result = &mut execution => return result,
             changed = cancellation.changed() => {
                 if changed.is_ok() && *cancellation.borrow() {
                     pool.cancel(CancellationReason::User)?;
-                    let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut completion).await;
+                    let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
                     return Ok(RemotePoolExecutionOutcome::Cancelled);
                 }
             }
@@ -240,7 +196,115 @@ pub(super) async fn execute(
     }
 }
 
-fn packaged(
+async fn execute_single_root(
+    pool: Arc<RemotePoolDriver>,
+    request: ProgramExecutionRequest,
+    run_id: String,
+    resources: AllocationResources,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let (task_id, completion) = submit_root_task(
+        &pool,
+        &request,
+        &run_id,
+        b"remote-root",
+        &resources,
+        RetryPolicy::Never,
+    )?;
+    match completion.wait().await {
+        Ok(success) if success.result_objects.is_empty() => match success.outputs.as_slice() {
+            [value] => packaged(
+                ProgramExecutionResponse::Success {
+                    value: value.clone(),
+                },
+                pool,
+            )
+            .map(RemotePoolExecutionOutcome::Completed),
+            _ => Err(protocol(
+                "remote worker returned an invalid inline output count",
+            )),
+        },
+        Ok(success) => packaged(
+            ProgramExecutionResponse::ExternalizedSuccess {
+                outputs: success.outputs,
+                result_objects: success.result_objects,
+            },
+            pool,
+        )
+        .map(RemotePoolExecutionOutcome::Completed),
+        Err(message) => task_failure_outcome(pool, task_id, message),
+    }
+}
+
+pub(super) fn submit_root_task(
+    pool: &Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    run_id: &str,
+    task_domain: &[u8],
+    resources: &AllocationResources,
+    retry: RetryPolicy,
+) -> NativeExecutionResult<(TaskId, crate::RemoteTaskCompletion)> {
+    let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
+    let task_id = TaskId::derive(&[run_id.as_bytes(), task_domain]);
+    let completion = pool.submit(
+        TaskSubmission {
+            request: TaskRequest {
+                id: task_id,
+                scope_id: pool.scope_id(),
+                pool_id: pool.pool_id(),
+                program_artifact_id: artifact_id,
+                callable: Callable {
+                    owner_identity: "remote-run".into(),
+                    qualified_name: request.recipe.entrypoint.clone(),
+                    entrypoint_digest: Digest::sha256(request.recipe.entrypoint.as_bytes()),
+                },
+                inputs: request.arguments.clone(),
+                outputs: OutputContract {
+                    requested_outputs: request.requested_outputs,
+                },
+                resources: task_resources(resources)?,
+                retry,
+                deadline_unix_millis: None,
+            },
+            dependencies: BTreeSet::new(),
+            priority: 0,
+        },
+        request.clone(),
+    )?;
+    Ok((task_id, completion))
+}
+
+pub(super) fn task_failure_outcome(
+    pool: Arc<RemotePoolDriver>,
+    task_id: TaskId,
+    message: String,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
+    if state == Some(TaskState::Indeterminate) {
+        Ok(RemotePoolExecutionOutcome::Indeterminate(message))
+    } else {
+        packaged(ProgramExecutionResponse::Failure { message }, pool)
+            .map(RemotePoolExecutionOutcome::Completed)
+    }
+}
+
+pub(super) fn execution_failure_outcome(
+    pool: Arc<RemotePoolDriver>,
+    message: String,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    if pool
+        .snapshot()
+        .tasks
+        .values()
+        .any(|task| task.state == TaskState::Indeterminate)
+    {
+        Ok(RemotePoolExecutionOutcome::Indeterminate(message))
+    } else {
+        packaged(ProgramExecutionResponse::Failure { message }, pool)
+            .map(RemotePoolExecutionOutcome::Completed)
+    }
+}
+
+pub(super) fn packaged(
     response: ProgramExecutionResponse,
     pool: std::sync::Arc<RemotePoolDriver>,
 ) -> NativeExecutionResult<RemotePoolExecutionResult> {

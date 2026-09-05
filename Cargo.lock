@@ -6544,6 +6544,7 @@ dependencies = [
  "runmat-analysis-execution",
  "runmat-analysis-fea",
  "runmat-builtins",
+ "runmat-canonical-codec",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",

@@ -15,7 +15,8 @@ use runmat_meshing_execution::{
 
 use crate::NativeProgramSession;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeMeshingContactDefinition {
     pub side_a_face_selectors: Vec<String>,
     pub side_b_face_selectors: Vec<String>,
@@ -57,6 +58,10 @@ impl PreparedExactGeometryAdmission {
 
     pub fn healing_report(&self) -> Option<&runmat_geometry_core::GeometryHealingReport> {
         self.objects.healing_report.as_ref()
+    }
+
+    pub fn into_objects(self) -> PreparedExactGeometryObjects {
+        self.objects
     }
 }
 
@@ -164,6 +169,16 @@ fn invalid_contact_selector(selector: &str, reason: &str) -> ExactGeometryAdmiss
         "contact face selector",
         format!("{selector}: {reason}"),
     ))
+}
+
+pub(crate) fn same_requested_tolerance(
+    requested: &runmat_geometry_core::GeometryTolerancePolicy,
+    admitted: &runmat_geometry_core::GeometryTolerancePolicy,
+) -> bool {
+    requested.absolute_floor_m == admitted.absolute_floor_m
+        && requested.model_relative_term == admitted.model_relative_term
+        && requested.requested_deviation_m == admitted.requested_deviation_m
+        && requested.maximum_healing_displacement_m == admitted.maximum_healing_displacement_m
 }
 
 /// Binds a prepared exact closure to one session authority and persists it atomically.
