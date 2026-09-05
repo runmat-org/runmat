@@ -1194,6 +1194,38 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 192,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "hypotenuse runtime family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/hypot",
+    "crates/runmat-runtime/src/builtins/math/elementwise/hypot",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/hypot/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/hypot/host/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/hypot/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 224,
+});
+
+enforceMigratedBuiltinFamily({
+  name: "provider restoration service",
+  roots: [
+    "crates/runmat-runtime/src/builtins/common/provider_restore",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/common/provider_restore/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/common/provider_restore.rs",
+  ],
+  leafLineCeiling: 224,
+});
+
 for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/binary_containers.rs", 160],
   ["crates/runmat-builtins/src/catalog/inference/math/test_support.rs", 64],

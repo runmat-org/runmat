@@ -120,7 +120,7 @@ async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             match provider.unary_tanh(&handle).await {
                 Ok(output) => {
-                    return super::inverse_helpers::validate_real_unary_provider_output(
+                    return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                         provider,
                         &handle,
                         output,
@@ -137,7 +137,7 @@ async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    super::inverse_helpers::gather_value_compute_restore(
+    crate::builtins::common::provider_restore::gather_value_compute_restore(
         handle,
         BUILTIN_NAME,
         |value| match value {
@@ -513,9 +513,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn tanh_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
 
         let tensor = Tensor::new(vec![-1.25, -0.5, 0.0, 0.75, 1.5], vec![5, 1]).unwrap();
         let cpu_value = tanh_real(Value::Tensor(tensor.clone())).expect("cpu tanh");
@@ -525,18 +526,12 @@ pub(crate) mod tests {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .expect("wgpu provider")
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(tanh_gpu(handle)).expect("gpu tanh");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
-        let tol = match runmat_accelerate_api::provider()
-            .expect("wgpu provider")
-            .precision()
-        {
+        let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };

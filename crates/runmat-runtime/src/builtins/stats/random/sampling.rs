@@ -1627,7 +1627,7 @@ pub mod randsample {
                         "randsample: resident population owner is unavailable",
                     )
                 })?;
-            return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+            return crate::builtins::common::provider_restore::upload_value_like(
                 provider,
                 output,
                 "randsample",

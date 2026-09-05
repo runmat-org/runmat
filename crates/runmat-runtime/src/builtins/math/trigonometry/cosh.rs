@@ -121,7 +121,7 @@ async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if let Some(provider) = provider {
             match provider.unary_cosh(&handle).await {
                 Ok(output) => {
-                    return super::inverse_helpers::validate_real_unary_provider_output(
+                    return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                         provider,
                         &handle,
                         output,
@@ -138,7 +138,7 @@ async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    super::inverse_helpers::gather_value_compute_restore(
+    crate::builtins::common::provider_restore::gather_value_compute_restore(
         handle,
         BUILTIN_NAME,
         |value| match value {
@@ -630,25 +630,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn cosh_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let t = Tensor::new(vec![0.0, 0.25, 0.5, 0.75], vec![4, 1]).unwrap();
         let cpu = cosh_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
             shape: &t.shape,
         };
-        let h = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let h = provider.upload(&view).unwrap();
         let gpu = block_on(cosh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };

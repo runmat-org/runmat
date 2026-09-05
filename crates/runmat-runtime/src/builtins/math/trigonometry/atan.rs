@@ -124,15 +124,17 @@ async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-            atan_tensor(tensor).map(tensor::tensor_into_value)
-        })
+        return crate::builtins::common::provider_restore::gather_compute_restore(
+            handle,
+            BUILTIN_NAME,
+            |tensor| atan_tensor(tensor).map(tensor::tensor_into_value),
+        )
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.unary_atan(&handle).await {
             Ok(output) => {
-                return super::inverse_helpers::validate_real_unary_provider_output(
+                return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                     provider,
                     &handle,
                     output,
@@ -148,9 +150,11 @@ async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-        atan_tensor(tensor).map(tensor::tensor_into_value)
-    })
+    crate::builtins::common::provider_restore::gather_compute_restore(
+        handle,
+        BUILTIN_NAME,
+        |tensor| atan_tensor(tensor).map(tensor::tensor_into_value),
+    )
     .await
 }
 
@@ -355,7 +359,12 @@ async fn ensure_provider_real(value: Value, prototype: &GpuTensorHandle) -> Buil
             "provider output requested via 'like' but the prototype has no owner",
         )
     })?;
-    super::inverse_helpers::upload_value_like(provider, host, BUILTIN_NAME, prototype)
+    crate::builtins::common::provider_restore::upload_value_like(
+        provider,
+        host,
+        BUILTIN_NAME,
+        prototype,
+    )
 }
 
 fn is_complex_value(value: &Value) -> bool {
@@ -848,25 +857,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn atan_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let tensor = Tensor::new(vec![-2.0, -0.5, 0.0, 0.5, 2.0], vec![5, 1]).unwrap();
         let cpu = atan_real(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let handle = provider.upload(&view).unwrap();
         let gpu = block_on(atan_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };

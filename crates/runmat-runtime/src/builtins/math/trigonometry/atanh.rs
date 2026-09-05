@@ -106,7 +106,7 @@ async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match detect_gpu_requires_complex(provider, &handle).await? {
             Some(false) => match provider.unary_atanh(&handle).await {
                 Ok(output) => {
-                    return super::inverse_helpers::validate_real_unary_provider_output(
+                    return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                         provider,
                         &handle,
                         output,
@@ -218,7 +218,12 @@ async fn atanh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<
             BUILTIN_NAME,
         )?;
     }
-    super::inverse_helpers::upload_value_like(provider, output, BUILTIN_NAME, &handle)
+    crate::builtins::common::provider_restore::upload_value_like(
+        provider,
+        output,
+        BUILTIN_NAME,
+        &handle,
+    )
 }
 
 fn atanh_real(value: Value) -> BuiltinResult<Value> {
@@ -789,9 +794,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn atanh_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
 
         let tensor =
             Tensor::new(vec![-0.8, -0.4, 0.4, 0.8], vec![2, 2]).expect("tensor construction");
@@ -801,7 +807,6 @@ pub(crate) mod tests {
             .map(|&x| x.atanh())
             .collect();
 
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,

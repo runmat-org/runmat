@@ -23,6 +23,7 @@ pub mod linalg;
 pub mod matrix;
 pub mod path_search;
 pub mod path_state;
+pub(crate) mod provider_restore;
 pub mod random;
 pub mod random_args;
 pub mod residency;

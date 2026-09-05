@@ -88,14 +88,14 @@ const LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink { label: "norm", target: BuiltinDocumentationLinkTarget::Builtin("norm") },
     BuiltinDocumentationLink { label: "GPU arrays", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },
     BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
-    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs") },
+    BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/tree/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot") },
 ];
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Stable norm runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Stable norm runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/tree/main/crates/runmat-runtime/src/builtins/math/elementwise/hypot") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Shapes, classes, complex magnitudes, extensions, and errors", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Direct execution, fallback, ownership, and output validation", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU stable-norm parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot.rs::tests::hypot_wgpu_matches_cpu_elementwise" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Shapes, classes, complex magnitudes, extensions, and errors", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot/tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Direct execution, fallback, ownership, and output validation", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot/tests/provider.rs" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU stable-norm parity", location: "crates/runmat-runtime/src/builtins/math/elementwise/hypot/tests/wgpu.rs::hypot_wgpu_matches_cpu_elementwise" },
     ],
     notes: &[],
 };

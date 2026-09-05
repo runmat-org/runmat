@@ -132,7 +132,7 @@ async fn atan2_non_tabular(y: Value, x: Value) -> BuiltinResult<Value> {
             })?;
             let gathered = gpu_helpers::gather_tensor_async(&yh).await?;
             let output = atan2_host(Value::Tensor(gathered), other)?;
-            super::inverse_helpers::upload_value_like_protected(
+            crate::builtins::common::provider_restore::upload_value_like_protected(
                 provider,
                 output,
                 BUILTIN_NAME,
@@ -146,7 +146,7 @@ async fn atan2_non_tabular(y: Value, x: Value) -> BuiltinResult<Value> {
             })?;
             let gathered = gpu_helpers::gather_tensor_async(&xh).await?;
             let output = atan2_host(other, Value::Tensor(gathered))?;
-            super::inverse_helpers::upload_value_like_protected(
+            crate::builtins::common::provider_restore::upload_value_like_protected(
                 provider,
                 output,
                 BUILTIN_NAME,
@@ -202,7 +202,7 @@ async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult
     } else {
         &y
     };
-    super::inverse_helpers::upload_value_like_protected(
+    crate::builtins::common::provider_restore::upload_value_like_protected(
         owner,
         output,
         BUILTIN_NAME,
