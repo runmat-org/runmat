@@ -57,6 +57,11 @@ name = "meshing_process_conformance"
 path = "tests/meshing_process_conformance.rs"
 harness = false
 
+[[test]]
+name = "analysis_process_conformance"
+path = "tests/analysis_process_conformance.rs"
+harness = false
+
 [features]
 default = []
 occt-native = ["runmat-geometry-io/occt-native"]
