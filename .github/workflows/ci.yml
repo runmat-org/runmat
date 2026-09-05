@@ -384,7 +384,10 @@ jobs:
             libzmq3-dev pkg-config ca-certificates
 
       - name: Run FEA package tests
-        run: cargo test -p runmat-analysis-core -p runmat-analysis-fea
+        run: cargo test -p runmat-analysis-core -p runmat-analysis-fea -p runmat-analysis-execution
+
+      - name: Run FEA execution placement conformance
+        run: cargo test -p runmat-execution-runner-native --test analysis_process_conformance
 
       - name: Run FEA runtime contract tests
         run: cargo test -p runmat-runtime --test operation_contracts

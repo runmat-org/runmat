@@ -43,13 +43,26 @@ use runmat_meshing_core::{
 };
 
 fn main() {
-    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--child")) {
+    let mode = std::env::args_os().nth(1);
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--child")) {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()
             .block_on(runmat_execution_runner_native::run_worker_stdio())
             .unwrap();
+        return;
+    }
+    if mode.as_deref()
+        == Some(std::ffi::OsStr::new(
+            runmat_process_host::HiddenMode::ExecutionDriver.marker(),
+        ))
+    {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_durable_driver());
         return;
     }
     tokio::runtime::Builder::new_current_thread()
@@ -148,6 +161,90 @@ async fn parent() {
         .all(|diagnostic| !diagnostic.message.contains("artifact_path")));
 
     remote_conformance(process_payload).await;
+    durable_conformance(inline_payload).await;
+}
+
+async fn run_durable_driver() {
+    let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
+    let job_directory = invocation.job_directory().to_path_buf();
+    let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program {
+        submission,
+        ..
+    } = invocation
+    else {
+        panic!("analysis conformance driver received a script job")
+    };
+    let response =
+        runmat_execution_runner_native::supervisor::execute_program_batch(*submission).await;
+    let succeeded = matches!(
+        response,
+        ProgramExecutionResponse::Success { .. }
+            | ProgramExecutionResponse::ExternalizedSuccess { .. }
+    );
+    runmat_execution_runner_native::supervisor::complete_batch_driver_with_response(
+        &job_directory,
+        response,
+    )
+    .unwrap();
+    if !succeeded {
+        std::process::exit(1);
+    }
+}
+
+async fn durable_conformance(expected_payload: Vec<u8>) {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = runmat_execution_runner_native::supervisor::SupervisorPaths::new(
+        directory.path().join("durable-analysis"),
+    )
+    .unwrap();
+    let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
+        runmat_execution_runner_native::supervisor::LocalSupervisorConfig {
+            executable: std::env::current_exe().unwrap(),
+            paths,
+            max_stderr_bytes: 1024 * 1024,
+            max_object_bytes: 64 * 1024 * 1024,
+        },
+    )
+    .unwrap();
+    let (host, request, input_objects) = fixture(revision(), "durable-analysis");
+    let mut store = supervisor.object_store().unwrap();
+    for prepared in input_objects {
+        for object in prepared.objects {
+            store.write_verified(&object).unwrap();
+        }
+    }
+    let (record, duplicate) = supervisor
+        .submit_program(
+            runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
+                request,
+                Some("analysis-conformance".into()),
+                runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
+            ),
+        )
+        .await
+        .unwrap();
+    assert!(!duplicate);
+    let response = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            supervisor.reconcile().await.unwrap();
+            let attachment = supervisor.attach(record.handle.id, 0, 0).await.unwrap();
+            if attachment.record.state.is_terminal() {
+                break attachment.response.unwrap_or_else(|| {
+                    panic!(
+                        "durable analysis failed without response: {:?}",
+                        attachment.record.message
+                    )
+                });
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("durable analysis completion timeout");
+    let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = response else {
+        panic!("durable analysis did not externalize its result: {response:?}")
+    };
+    assert_eq!(import_result(&store, &outputs, &host), expected_payload);
 }
 
 async fn remote_conformance(expected_payload: Vec<u8>) {
