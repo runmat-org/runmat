@@ -55,7 +55,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) constraints: Vec<BoundConstraintPayload>,
     pub(super) boundaries: Vec<GeometryBoundBoundary>,
     pub(super) signals: Vec<PhysicalSignal>,
-    pub(super) excitations: Vec<ExcitationAction>,
+    pub(super) excitations: Vec<super::excitations::GeometryBoundExcitation>,
     pub(super) excitation_cases: Vec<ExcitationCase>,
     pub(super) steps: Vec<ProcedureStep>,
     pub(super) domains: Vec<DomainPayload>,
@@ -234,15 +234,15 @@ impl StudyConstructorOptions {
                     options.boundaries = boundary_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "signals" => {
-                    options.signals = typed_vec_from_value(STUDY_NAME, &pair[1], "signals")?;
+                    options.signals = signal_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "excitations" => {
                     options.excitations =
-                        typed_vec_from_value(STUDY_NAME, &pair[1], "excitations")?;
+                        super::excitations::bound_excitation_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "excitationcases" | "cases" => {
                     options.excitation_cases =
-                        typed_vec_from_value(STUDY_NAME, &pair[1], "excitation cases")?;
+                        super::excitations::excitation_case_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "steps" => options.steps = step_vec_from_value(STUDY_NAME, &pair[1])?,
                 "domains" => options.domains = domain_vec_from_value(STUDY_NAME, &pair[1])?,
@@ -286,7 +286,7 @@ struct ModelConstructorOptions {
     constraints: Vec<BoundConstraintPayload>,
     boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
-    excitations: Vec<ExcitationAction>,
+    excitations: Vec<super::excitations::GeometryBoundExcitation>,
     excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
@@ -410,13 +410,14 @@ fn parse_model_constructor_options(
             "boundaries" => {
                 options.boundaries = boundary_vec_from_value(builtin, pair.value)?;
             }
-            "signals" => options.signals = typed_vec_from_value(builtin, pair.value, "signals")?,
+            "signals" => options.signals = signal_vec_from_value(builtin, pair.value)?,
             "excitations" => {
-                options.excitations = typed_vec_from_value(builtin, pair.value, "excitations")?
+                options.excitations =
+                    super::excitations::bound_excitation_vec_from_value(builtin, pair.value)?
             }
             "excitationcases" | "cases" => {
                 options.excitation_cases =
-                    typed_vec_from_value(builtin, pair.value, "excitation cases")?
+                    super::excitations::excitation_case_vec_from_value(builtin, pair.value)?
             }
             "steps" => options.steps = step_vec_from_value(builtin, pair.value)?,
             "domains" => options.domains = domain_vec_from_value(builtin, pair.value)?,
@@ -633,7 +634,7 @@ fn build_model_from_parts(
     constraints: Vec<BoundConstraintPayload>,
     boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
-    excitations: Vec<ExcitationAction>,
+    excitations: Vec<super::excitations::GeometryBoundExcitation>,
     excitation_cases: Vec<ExcitationCase>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
@@ -725,12 +726,9 @@ fn build_model_from_parts(
     if !excitations.is_empty() {
         model.excitations = excitations
             .into_iter()
-            .map(|mut action| {
-                if let ExcitationTarget::Region(target) = &mut action.excitation_mut().target {
-                    target.region_id =
-                        resolve_region_selector(builtin, &target.region_id, geometry)?;
-                }
-                Ok(action)
+            .map(|bound| {
+                bound.require_geometry(builtin, geometry)?;
+                Ok(bound.action)
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
     }
@@ -995,22 +993,24 @@ fn bound_boundary_payload(
     Ok(boundary)
 }
 
-fn typed_vec_from_value<T: DeserializeOwned>(
+fn signal_vec_from_value(
     builtin: &'static str,
     value: &Value,
-    label: &str,
-) -> BuiltinResult<Vec<T>> {
+) -> BuiltinResult<Vec<PhysicalSignal>> {
     match value {
         Value::Cell(cell) => cell
             .data
             .iter()
-            .map(|item| json_deserialize(builtin, value_to_json(builtin, item)?, label))
+            .map(|item| super::signals::physical_signal_from_value(builtin, item))
             .collect(),
-        _ => Ok(vec![json_deserialize(
-            builtin,
-            value_to_json(builtin, value)?,
-            label,
+        Value::Object(_) => Ok(vec![super::signals::physical_signal_from_value(
+            builtin, value,
         )?]),
+        other => Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected a typed FEA signal object or cell array; got {other:?}"),
+        )),
     }
 }
 
@@ -1160,7 +1160,7 @@ fn interface_vec_from_value(
         .collect()
 }
 
-fn object_vec_from_value<T: DeserializeOwned>(
+pub(super) fn object_vec_from_value<T: DeserializeOwned>(
     builtin: &'static str,
     value: &Value,
     expected_class: &'static str,

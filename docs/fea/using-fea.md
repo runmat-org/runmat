@@ -166,14 +166,19 @@ steel = fea.material("steel", ...
 
 base = geometry.region(geom, "name:Base_Mount");
 fixed = fea.StructuralConstraint.fixed("fixed_base", base);
-tipLoad = fea.loadCase("tip_force", "name:Tip_Load", "force", ...
-    "Vector", [0 -1000 0]);
+loadPad = geometry.region(geom, "name:Tip_Load");
+forceSignal = fea.ForceSignal.constantNewtons("tip_force_signal", [0 -1000 0]);
+tipLoad = fea.StructuralExcitation.force( ...
+    "tip_force", "service_loads", loadPad, forceSignal);
+serviceLoads = fea.ExcitationCase.always("service_loads", {tipLoad});
 
 model = fea.model("bracket_static_model", geom, ...
     "Profile", "linear_static_structural", ...
     "Materials", {steel}, ...
     "Constraints", {fixed}, ...
-    "Loads", {tipLoad});
+    "Signals", {forceSignal}, ...
+    "Excitations", {tipLoad}, ...
+    "ExcitationCases", {serviceLoads});
 
 opts = fea.runOptions("linear_static", ...
     "DeterministicMode", true, ...
@@ -215,7 +220,7 @@ thermalModel = fea.model("cooled_bracket", geom, ...
 
 Use `Constraints` for prescribed values and kinematic relations, and `Boundaries` for natural or Robin operators. For fluid models, inlet velocity and wall motion are constraints; outlet pressure is a boundary. For thermal models, prescribed temperature is a constraint; heat flux and convection are boundaries.
 
-The same host-only physical-value boundary applies to `fea.material`, `fea.loadCase`, and the dimensioned quantity constructors. Domain constructors accept only the quantity classes required by their physics: for example, `fea.ElectromagneticDomain.atFrequency` requires `fea.Frequency`, and `fea.FluidDomain.newtonian` requires `fea.MassDensity`, `fea.DynamicViscosity`, and `fea.TurbulenceIntensity`. Bare numbers cannot silently acquire units. Numeric quantity inputs are checked before one binary64 model-storage conversion, so sufficiently wide integers can round. Numerical enforcement controls such as contact penalties and coupling relaxation belong to typed step or solver policy, not to interface physics. Geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
+The same host-only physical-value boundary applies to `fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors. Domain constructors accept only the quantity classes required by their physics: for example, `fea.ElectromagneticDomain.atFrequency` requires `fea.Frequency`, and `fea.FluidDomain.newtonian` requires `fea.MassDensity`, `fea.DynamicViscosity`, and `fea.TurbulenceIntensity`. Bare numbers cannot silently acquire units. Numeric quantity inputs are checked before one binary64 model-storage conversion, so sufficiently wide integers can round. Numerical enforcement controls such as contact penalties and coupling relaxation belong to typed step or solver policy, not to interface physics. Geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
 `fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. The complete per-family option/default table is in the [operation reference](./operation-reference).
 
@@ -267,7 +272,9 @@ The typed constructors are:
 | `fea.materialAssignment(...)` | Region-to-material assignment. |
 | `fea.<Family>Constraint.<kind>(...)` | Essential, kinematic, gauge, pairing, and reference constraints bound to a `geometry.Region`. |
 | `fea.<Family>Boundary.<kind>(...)` | Natural and Robin boundary operators such as pressure, heat flux, convection, radiation, impedance, and outlet pressure. |
-| `fea.loadCase(...)` | Force, moment/torque, pressure, body force, current density, or coil current. |
+| `fea.<Quantity>Signal.constant<Unit>(...)` | A constant, quantity-typed physical signal in the unit named by the constructor. |
+| `fea.<Family>Excitation.<action>(...)` | A typed spatial action binding a compatible signal to a `geometry.Region`. |
+| `fea.ExcitationCase.always(...)`, `.duringSteps(...)`, `.mutuallyExclusive(...)` | Group typed actions and declare their activation without changing either the signal or spatial action. |
 | `fea.<Family>Step.<procedure>(id)` | A concrete direct-solution procedure step; family and procedure are selected by the class method rather than text. |
 | `fea.ThermoMechanicalDomain.atReferenceTemperature(...)` | Thermo-mechanical constitutive reference state from a typed `fea.Temperature`. |
 | `fea.ElectroThermalDomain.atReferenceTemperature(...)` | Electro-thermal constitutive reference state from a typed `fea.Temperature`. |
@@ -285,11 +292,37 @@ The typed constructors are:
 
 Resolve typed region arguments with `geometry.region`. Its selector accepts a direct region id, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, or `tag:<tag>`. Constraints, boundaries, and interfaces then retain the resolved geometry identity and revision instead of an unqualified selector string.
 
-Moment loads are structural load resultants in N*m. Use `"moment"` as the canonical load kind; `"torque"` is accepted as an alias and resolves to the same model load kind. Direct moment loads require structural elements with rotational DOFs, such as beams or shells. Solid-only displacement regions reject direct moment loads because continuum solids do not own nodal rotations.
+Moment excitations are structural load resultants in N*m. Construct the vector with
+`fea.MomentSignal.constantNewtonMeters`, then bind it to a region with
+`fea.StructuralExcitation.moment`. Direct moments require structural elements with rotational
+degrees of freedom, such as beams or shells. Solid-only displacement regions reject them because
+continuum solids do not own nodal rotations.
+
+Signals, spatial actions, and activation cases are deliberately separate objects. This keeps an
+ordinary RunMat-generated history reusable across regions and cases, while a spatial action keeps
+its geometry revision and projection policy. A constant structural force is authored as follows:
 
 ```matlab
-tipMoment = fea.loadCase("tip_moment", "node:2", "moment", ...
-    "Vector", [0 0 125]);
+loadPad = geometry.region(geom, "name:load_pad");
+force = fea.ForceSignal.constantNewtons("tip_force_signal", [0 -1250 0]);
+tipLoad = fea.StructuralExcitation.force( ...
+    "tip_force", "service_loads", loadPad, force);
+serviceLoads = fea.ExcitationCase.always("service_loads", {tipLoad});
+
+model = fea.model("bracket", geom, ...
+    "Template", "linear_static_structural", ...
+    "Signals", {force}, ...
+    "Excitations", {tipLoad}, ...
+    "ExcitationCases", {serviceLoads});
+```
+
+```matlab
+tipNode = geometry.region(geom, "id:node:2");
+momentSignal = fea.MomentSignal.constantNewtonMeters( ...
+    "tip_moment_signal", [0 0 125]);
+tipMoment = fea.StructuralExcitation.moment( ...
+    "tip_moment", "torsion_case", tipNode, momentSignal);
+torsionCase = fea.ExcitationCase.always("torsion_case", {tipMoment});
 ```
 
 ## Project Entrypoints

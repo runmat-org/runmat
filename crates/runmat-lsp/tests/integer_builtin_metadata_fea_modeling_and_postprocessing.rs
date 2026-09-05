@@ -38,6 +38,59 @@ const FEA_INTEGER_CONSTRUCTORS: [&str; 5] = [
     "fea.material",
 ];
 
+const FEA_SIGNAL_CONSTRUCTORS: [&str; 22] = [
+    "fea.DisplacementSignal.constantMeters",
+    "fea.RotationSignal.constantRadians",
+    "fea.VelocitySignal.constantMetersPerSecond",
+    "fea.AccelerationSignal.constantMetersPerSecondSquared",
+    "fea.AngularVelocitySignal.constantRadiansPerSecond",
+    "fea.AngularAccelerationSignal.constantRadiansPerSecondSquared",
+    "fea.ForceSignal.constantNewtons",
+    "fea.MomentSignal.constantNewtonMeters",
+    "fea.TractionSignal.constantPascals",
+    "fea.PressureSignal.constantPascals",
+    "fea.BodyForceSignal.constantNewtonsPerCubicMeter",
+    "fea.TemperatureSignal.constantKelvin",
+    "fea.TemperatureDifferenceSignal.constantKelvin",
+    "fea.HeatFluxSignal.constantWattsPerSquareMeter",
+    "fea.HeatGenerationSignal.constantWattsPerCubicMeter",
+    "fea.ElectricPotentialSignal.constantVolts",
+    "fea.ElectricCurrentSignal.constantAmperes",
+    "fea.ElectricChargeSignal.constantCoulombs",
+    "fea.CurrentDensitySignal.constantAmperesPerSquareMeter",
+    "fea.ChargeDensitySignal.constantCoulombsPerCubicMeter",
+    "fea.MagneticVectorPotentialSignal.constantWebersPerMeter",
+    "fea.MassFlowSignal.constantKilogramsPerSecond",
+];
+
+const FEA_EXCITATION_CONSTRUCTORS: [&str; 25] = [
+    "fea.StructuralExcitation.force",
+    "fea.StructuralExcitation.moment",
+    "fea.StructuralExcitation.traction",
+    "fea.StructuralExcitation.pressure",
+    "fea.StructuralExcitation.bodyForce",
+    "fea.StructuralExcitation.baseDisplacement",
+    "fea.StructuralExcitation.baseVelocity",
+    "fea.StructuralExcitation.baseAcceleration",
+    "fea.ThermalExcitation.heatGeneration",
+    "fea.ThermalExcitation.heatFlux",
+    "fea.ThermalExcitation.temperatureField",
+    "fea.ThermalExcitation.ambientTemperature",
+    "fea.ElectricalExcitation.terminalVoltage",
+    "fea.ElectricalExcitation.current",
+    "fea.ElectricalExcitation.charge",
+    "fea.ElectricalExcitation.currentDensity",
+    "fea.MagneticExcitation.vectorPotential",
+    "fea.AcousticExcitation.pressure",
+    "fea.AcousticExcitation.normalVelocity",
+    "fea.FluidExcitation.inletVelocity",
+    "fea.FluidExcitation.massFlow",
+    "fea.FluidExcitation.wallMotion",
+    "fea.ExcitationCase.always",
+    "fea.ExcitationCase.duringSteps",
+    "fea.ExcitationCase.mutuallyExclusive",
+];
+
 const FEA_INTEGER_INAPPLICABLE: [&str; 15] = [
     "fea.ConjugateHeatTransferInterface.conductance",
     "fea.ConjugateHeatTransferInterface.perfect",
@@ -171,7 +224,11 @@ fn fea_packet_is_public_and_has_settled_integer_metadata() {
     let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
     let completions = completion_at(source, &analysis, &Position::new(0, 0));
 
-    for name in FEA_MODELING_AND_POSTPROCESSING_BUILTINS {
+    for name in FEA_MODELING_AND_POSTPROCESSING_BUILTINS
+        .into_iter()
+        .chain(FEA_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_EXCITATION_CONSTRUCTORS)
+    {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         let descriptor = builtin
             .descriptor
@@ -197,7 +254,10 @@ fn fea_packet_is_public_and_has_settled_integer_metadata() {
 
 #[test]
 fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
-    for name in FEA_INTEGER_CONSTRUCTORS {
+    for name in FEA_INTEGER_CONSTRUCTORS
+        .into_iter()
+        .chain(FEA_SIGNAL_CONSTRUCTORS)
+    {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_audit.is_none(), "{name}");
         assert!(
@@ -224,7 +284,10 @@ fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
 
 #[test]
 fn fea_non_numeric_roles_have_explicit_not_applicable_audits() {
-    for name in FEA_INTEGER_INAPPLICABLE {
+    for name in FEA_INTEGER_INAPPLICABLE
+        .into_iter()
+        .chain(FEA_EXCITATION_CONSTRUCTORS)
+    {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
         let audit = builtin

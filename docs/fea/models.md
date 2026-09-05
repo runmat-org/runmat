@@ -37,7 +37,7 @@ In a `.fea` file, `model.defaults: profile_scaffold` lets RunMat create the scaf
 
 ## Define Model Data
 
-Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint and boundary classes, `fea.loadCase(...)`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
+Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint, boundary, signal, and excitation classes, `fea.ExcitationCase`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
 
 ```yaml
 model:
@@ -74,7 +74,7 @@ steps:
 
 Region references can point directly at geometry region ids or use named aliases from the `regions` block.
 
-`type: moment` uses a global-frame vector in N*m. `type: torque` is accepted as an alias but resolves to the canonical `moment` load kind. Direct moment loads require rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`; displacement-only solid regions reject moment loads with an invalid-model error instead of silently converting them to forces.
+`type: moment` uses a global-frame vector in N*m. Direct moment loads require rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`; displacement-only solid regions reject moment loads with an invalid-model error instead of silently converting them to forces.
 
 ```yaml
 loads:

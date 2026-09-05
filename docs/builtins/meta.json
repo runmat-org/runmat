@@ -51796,6 +51796,96 @@
       ]
     },
     {
+      "name": "fea.AccelerationSignal.constantMetersPerSecondSquared",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.AccelerationSignal.constantMetersPerSecondSquared(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.AcousticBoundary.impedance",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -52249,6 +52339,164 @@
       }
     },
     {
+      "name": "fea.AcousticExcitation.normalVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.AcousticExcitation.normalVelocity(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.AcousticExcitation.pressure",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.AcousticExcitation.pressure(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.AcousticStep.harmonic",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -52305,6 +52553,366 @@
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
+    },
+    {
+      "name": "fea.AngularAccelerationSignal.constantRadiansPerSecondSquared",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.AngularAccelerationSignal.constantRadiansPerSecondSquared(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.AngularVelocitySignal.constantRadiansPerSecond",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.AngularVelocitySignal.constantRadiansPerSecond(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.BodyForceSignal.constantNewtonsPerCubicMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.BodyForceSignal.constantNewtonsPerCubicMeter(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.ChargeDensitySignal.constantCoulombsPerCubicMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.ChargeDensitySignal.constantCoulombsPerCubicMeter(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
     },
     {
       "name": "fea.ComplexPhase.degrees",
@@ -53407,6 +54015,96 @@
       }
     },
     {
+      "name": "fea.CurrentDensitySignal.constantAmperesPerSquareMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.CurrentDensitySignal.constantAmperesPerSquareMeter(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.Direction.vector",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -53739,6 +54437,96 @@
       ]
     },
     {
+      "name": "fea.DisplacementSignal.constantMeters",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.DisplacementSignal.constantMeters(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.DynamicViscosity.pascalSeconds",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -53761,6 +54549,96 @@
               "arity": "Required",
               "default": null,
               "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.ElectricChargeSignal.constantCoulombs",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.ElectricChargeSignal.constantCoulombs(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
             }
           ]
         }
@@ -53905,6 +54783,96 @@
       ]
     },
     {
+      "name": "fea.ElectricCurrentSignal.constantAmperes",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.ElectricCurrentSignal.constantAmperes(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.ElectricPotential.volts",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -53927,6 +54895,96 @@
               "arity": "Required",
               "default": null,
               "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.ElectricPotentialSignal.constantVolts",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.ElectricPotentialSignal.constantVolts(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
             }
           ]
         }
@@ -54413,6 +55471,322 @@
       }
     },
     {
+      "name": "fea.ElectricalExcitation.charge",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ElectricalExcitation.charge(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ElectricalExcitation.current",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ElectricalExcitation.current(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ElectricalExcitation.currentDensity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ElectricalExcitation.currentDensity(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ElectricalExcitation.terminalVoltage",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ElectricalExcitation.terminalVoltage(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.ElectroThermalDomain.atReferenceTemperature",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54700,6 +56074,215 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ExcitationCase.always",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "case = fea.ExcitationCase.always(id, actions)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation-case identifier."
+            },
+            {
+              "name": "actions",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed excitation object or cell array of typed excitations."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ExcitationCase.duringSteps",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "case = fea.ExcitationCase.duringSteps(id, actions, stepIds)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation-case identifier."
+            },
+            {
+              "name": "actions",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed excitation object or cell array of typed excitations."
+            },
+            {
+              "name": "stepIds",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Nonempty string or cell array of procedure-step identifiers."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ExcitationCase.mutuallyExclusive",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "case = fea.ExcitationCase.mutuallyExclusive(id, actions, groupId)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation-case identifier."
+            },
+            {
+              "name": "actions",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed excitation object or cell array of typed excitations."
+            },
+            {
+              "name": "groupId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Mutually-exclusive combination-group identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
       }
     },
     {
@@ -55344,6 +56927,243 @@
       }
     },
     {
+      "name": "fea.FluidExcitation.inletVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.FluidExcitation.inletVelocity(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.FluidExcitation.massFlow",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.FluidExcitation.massFlow(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.FluidExcitation.wallMotion",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.FluidExcitation.wallMotion(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.FluidStep.steadyState",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -55590,6 +57410,96 @@
       }
     },
     {
+      "name": "fea.ForceSignal.constantNewtons",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.ForceSignal.constantNewtons(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.Frequency.hertz",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -55778,6 +57688,186 @@
               "arity": "Required",
               "default": null,
               "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.HeatFluxSignal.constantWattsPerSquareMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.HeatFluxSignal.constantWattsPerSquareMeter(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.HeatGenerationSignal.constantWattsPerCubicMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.HeatGenerationSignal.constantWattsPerCubicMeter(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
             }
           ]
         }
@@ -56617,6 +58707,85 @@
       }
     },
     {
+      "name": "fea.MagneticExcitation.vectorPotential",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.MagneticExcitation.vectorPotential(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.MagneticVectorPotential.webersPerMeter",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -56700,6 +58869,96 @@
       ]
     },
     {
+      "name": "fea.MagneticVectorPotentialSignal.constantWebersPerMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.MagneticVectorPotentialSignal.constantWebersPerMeter(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.MassDensity.kilogramsPerCubicMeter",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -56779,6 +59038,186 @@
           "backend": "HostOnly",
           "overload": "ScalarOnly",
           "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.MassFlowSignal.constantKilogramsPerSecond",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.MassFlowSignal.constantKilogramsPerSecond(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.MomentSignal.constantNewtonMeters",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.MomentSignal.constantNewtonMeters(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
         }
       ]
     },
@@ -57320,6 +59759,96 @@
       ]
     },
     {
+      "name": "fea.PressureSignal.constantPascals",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.PressureSignal.constantPascals(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.ReferencePoint.fromCoordinates",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -57547,6 +60076,96 @@
           "backend": "HostOnly",
           "overload": "ScalarOnly",
           "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.RotationSignal.constantRadians",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.RotationSignal.constantRadians(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
         }
       ]
     },
@@ -58791,6 +61410,638 @@
       }
     },
     {
+      "name": "fea.StructuralExcitation.baseAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.baseAcceleration(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.baseDisplacement",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.baseDisplacement(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.baseVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.baseVelocity(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.bodyForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.bodyForce(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.force",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.force(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.moment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.moment(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.pressure",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.pressure(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.StructuralExcitation.traction",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.StructuralExcitation.traction(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.StructuralStep.modal",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -59294,6 +62545,186 @@
               "arity": "Required",
               "default": null,
               "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.TemperatureDifferenceSignal.constantKelvin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.TemperatureDifferenceSignal.constantKelvin(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.TemperatureSignal.constantKelvin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.TemperatureSignal.constantKelvin(id, value)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
             }
           ]
         }
@@ -59919,6 +63350,322 @@
       ]
     },
     {
+      "name": "fea.ThermalExcitation.ambientTemperature",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ThermalExcitation.ambientTemperature(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ThermalExcitation.heatFlux",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ThermalExcitation.heatFlux(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ThermalExcitation.heatGeneration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ThermalExcitation.heatGeneration(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
+      "name": "fea.ThermalExcitation.temperatureField",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "action = fea.ThermalExcitation.temperatureField(id, caseId, region, signal)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable excitation identifier."
+            },
+            {
+              "name": "caseId",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Identifier of the containing excitation case."
+            },
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region target."
+            },
+            {
+              "name": "signal",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed physical signal with the quantity required by this action."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor."
+      }
+    },
+    {
       "name": "fea.ThermalStep.transient",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -60091,6 +63838,96 @@
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
+    },
+    {
+      "name": "fea.TractionSignal.constantPascals",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.TractionSignal.constantPascals(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
     },
     {
       "name": "fea.Translation.meters",
@@ -60421,6 +64258,96 @@
           "backend": "HostOnly",
           "overload": "ScalarOnly",
           "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.VelocitySignal.constantMetersPerSecond",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "signal = fea.VelocitySignal.constantMetersPerSecond(id, components)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Stable signal identifier."
+            },
+            {
+              "name": "components",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "three-component dimensioned vector",
+          "inputs": [
+            {
+              "name": "components",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
         }
       ]
     },

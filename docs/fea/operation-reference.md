@@ -91,7 +91,9 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.load(path)` | Load a `.fea` study or sweep file and return `fea.Study` or `fea.Sweep`. |
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
-| `fea.<Family>Boundary.<kind>(...)`, `fea.loadCase(...)` | Create typed natural/Robin boundaries, loads, and sources. |
+| `fea.<Family>Boundary.<kind>(...)` | Create typed natural and Robin boundary operators. |
+| `fea.<Quantity>Signal.constant<Unit>(...)` | Create a quantity-typed constant physical signal. |
+| `fea.<Family>Excitation.<action>(...)`, `fea.ExcitationCase.<activation>(...)` | Bind signals to geometry, then group actions under a typed activation policy. |
 | `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
 | `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
@@ -134,7 +136,7 @@ Fluid inlet velocity, moving/no-slip/slip walls, and symmetry are kinematic cons
 
 Each interface joins two distinct `geometry.Region` values from one geometry revision. Contact does not choose an FSI or CHT transfer law, and coupled interfaces do not double as contact constraints. Their orientation is explicit: FSI and CHT use the fluid region as the primary side, with the structure or solid region as the secondary side.
 
-`fea.material`, `fea.loadCase`, and the dimensioned quantity constructors are RunMat-native host constructors. Finite real quantity inputs accept all eight built-in integer classes, preserve exact input through shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. Physics domains accept only the corresponding typed quantities and cannot contain loads, signals, solver choices, or enable flags. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
+`fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors are RunMat-native host constructors. Finite real quantity inputs accept all eight built-in integer classes, preserve exact input through shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. Physics domains accept only the corresponding typed quantities and cannot contain loads, signals, solver choices, or enable flags. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
 
 `fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
 
@@ -229,7 +231,7 @@ Top-level sweep fields:
 | `fail_fast` | No | Defaults to `true`. |
 | `studies` | Yes | List of nested study documents. Nested studies omit `kind`. |
 
-Load documents use `type` or `kind`. Structural moment loads use `type: moment` with `vector: [mx, my, mz]` in N*m. `type: torque` is accepted as an alias and resolves to the canonical moment load. Direct moment loads are valid only for structural regions whose elements provide rotational DOFs; non-structural run families and solid-only displacement regions reject them during validation or assembly.
+Load documents use `type` or `kind`. Structural moment loads use `type: moment` with `vector: [mx, my, mz]` in N*m. Direct moment loads are valid only for structural regions whose elements provide rotational DOFs; non-structural run families and solid-only displacement regions reject them during validation or assembly.
 
 Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
 
