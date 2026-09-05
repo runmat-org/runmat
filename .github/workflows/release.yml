@@ -360,6 +360,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          state_dir="${RUNNER_TEMP}/runmat-meshing-release-performance-${GITHUB_RUN_ID}"
+          export RUNMAT_EXECUTION_STATE_DIR="${state_dir}"
           python3 scripts/meshing/performance.py \
             --binary "${CARGO_TARGET_DIR}/release/examples/meshing-verification" \
             --profile stable \
