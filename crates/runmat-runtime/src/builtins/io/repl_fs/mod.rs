@@ -29,6 +29,7 @@ pub mod tempname;
 pub mod uigetdir;
 pub mod uigetfile;
 pub mod uiputfile;
+mod working_directory;
 pub mod xml;
 use once_cell::sync::Lazy;
 use runmat_value::Tensor;

@@ -7,6 +7,7 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        IoInferenceRule::ChangeDirectory => super::super::io::change_directory(request, entry),
         IoInferenceRule::ClearConsole => super::super::io::clear_console(request, entry),
         IoInferenceRule::CurrentDirectory => super::super::io::current_directory(request, entry),
     }

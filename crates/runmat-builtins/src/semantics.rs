@@ -341,13 +341,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "cd" | "chdir" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            environment_effect: Some(BuiltinEnvironmentEffect::WorkingDirectoryMutation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
         "rehash" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
             environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
