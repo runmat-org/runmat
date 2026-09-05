@@ -226,6 +226,7 @@ pub enum MathInferenceRule {
     AngleConversion(AngleConversionInferenceRule),
     Atan2,
     Bitwise(BitwiseInferenceRule),
+    ComplexConstruction,
     Discrete(DiscreteInferenceRule),
     ErrorFunction(ErrorFunctionInferenceRule),
     GammaFunction(GammaFunctionInferenceRule),

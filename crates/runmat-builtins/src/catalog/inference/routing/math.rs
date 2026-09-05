@@ -14,6 +14,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }
+        MathInferenceRule::ComplexConstruction => {
+            super::super::math::complex_construction::infer(request, entry)
+        }
         MathInferenceRule::Discrete(rule) => {
             super::super::math::discrete::infer(rule, request, entry)
         }
