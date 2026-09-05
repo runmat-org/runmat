@@ -1,4 +1,4 @@
-use super::{argument_error, finish_fixed, numeric_kind};
+use super::super::super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, NumericComponentRule};
 use runmat_types::{
     AliasFact, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact, MutationFact,

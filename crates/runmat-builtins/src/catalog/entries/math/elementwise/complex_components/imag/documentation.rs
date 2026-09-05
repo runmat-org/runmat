@@ -7,10 +7,10 @@ use crate::{
 };
 
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/imag.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex_components/imag") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::imag::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::imag::tests::imag_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::complex_components::imag::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::complex_components::imag::tests::provider::imag_gpu_provider_roundtrip" },
     ],
     notes: &[],
 };
@@ -95,14 +95,21 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Can `imag` participate in fusion?", answer: "Yes. Supported projection can be folded into adjacent elementwise kernels." },
 ];
 
-pub(in super::super) const IMAG_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
-    title: Some("imag"), slug: Some("imag"),
+    title: Some("imag"),
+    slug: Some("imag"),
     summary: "Extract imaginary components or produce class-correct zeros for real input.",
     description: "`imag(X)` returns each imaginary component. Real-valued input produces zeros with the same shape and documented class.",
     keywords: &["imag", "imaginary", "complex", "component", "elementwise", "gpu"],
     related: &["abs", "angle", "complex", "conj", "double", "gather", "gpuArray", "real", "sign", "single"],
-    sections: SECTIONS, examples: EXAMPLES, example_exemption: None, faqs: FAQS,
-    links: &[], media: &[], evidence: EVIDENCE, introduced: None,
+    sections: SECTIONS,
+    examples: EXAMPLES,
+    example_exemption: None,
+    faqs: FAQS,
+    links: &[],
+    media: &[],
+    evidence: EVIDENCE,
+    introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

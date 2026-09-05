@@ -1,5 +1,6 @@
 pub(super) mod angle_conversion;
 pub(super) mod bitwise;
+pub(super) mod complex_components;
 pub(super) mod discrete;
 pub(super) mod error_functions;
 pub(super) mod exponentials;

@@ -16,7 +16,7 @@ use runmat_value::{
 
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
+use crate::builtins::math::elementwise::complex_components::conjugate_integer_imaginary_storage;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "toeplitz";

@@ -54,7 +54,7 @@ pub(in crate::catalog::inference) fn infer(
             )
         }
         MathInferenceRule::NumericComponent(rule) => {
-            super::super::numeric_component::infer_numeric_component_call(request, entry, rule)
+            super::super::math::complex_components::infer(request, entry, rule)
         }
         MathInferenceRule::Rounding(function) => {
             super::super::math_rounding::infer_rounding(request, entry, function)
