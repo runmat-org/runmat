@@ -5,7 +5,6 @@ use crate::{
     ExcitationAction, ExcitationCaseActivation, ExcitationDistribution, ExcitationKinematics,
     ExcitationTarget, InitialCondition, InitialConditionTarget, InitialConditionValue,
     InitialValue, PhysicalQuantityKind, PhysicalSignal, ResponseSpectrum, SignalId, SignalShape,
-    SpectrumAbscissa, SpectrumDamping,
 };
 
 pub(crate) fn validate_model_excitations(
@@ -452,65 +451,10 @@ fn validate_response_spectra(
     for spectrum in spectra {
         let id = spectrum.spectrum_id.0.as_str();
         let result = (|| {
-            if id.trim().is_empty() || !ids.insert(id) {
+            if !ids.insert(id) {
                 return Err("response-spectrum ids must be non-empty and unique".to_string());
             }
-            let axis = match &spectrum.abscissa {
-                SpectrumAbscissa::FrequencyHertz(values)
-                | SpectrumAbscissa::PeriodSeconds(values) => values,
-            };
-            if (matches!(&spectrum.abscissa, SpectrumAbscissa::FrequencyHertz(_))
-                && spectrum.interpolation == crate::SpectrumInterpolation::LinearPeriod)
-                || (matches!(&spectrum.abscissa, SpectrumAbscissa::PeriodSeconds(_))
-                    && spectrum.interpolation == crate::SpectrumInterpolation::LinearFrequency)
-            {
-                return Err("spectrum interpolation must match its abscissa".to_string());
-            }
-            if axis.is_empty()
-                || axis.len() != spectrum.ordinates.len()
-                || axis.iter().any(|value| !value.is_finite() || *value <= 0.0)
-                || axis.windows(2).any(|pair| pair[0] >= pair[1])
-                || spectrum
-                    .ordinates
-                    .iter()
-                    .any(|value| !value.is_finite() || *value < 0.0)
-            {
-                return Err(
-                    "spectrum axes and ordinates must be aligned, positive, and increasing"
-                        .to_string(),
-                );
-            }
-            match spectrum.damping {
-                SpectrumDamping::Ratio(value)
-                    if !value.is_finite() || !(0.0..1.0).contains(&value) =>
-                {
-                    return Err("damping ratio must be between zero and one".to_string())
-                }
-                SpectrumDamping::QualityFactor(value) if !value.is_finite() || value <= 0.0 => {
-                    return Err("quality factor must be finite and positive".to_string())
-                }
-                _ => {}
-            }
-            if let crate::DirectionalCombination::PercentageRule { primary, secondary } =
-                spectrum.directional_combination
-            {
-                if !primary.is_finite()
-                    || !secondary.is_finite()
-                    || !(0.0..=1.0).contains(&primary)
-                    || !(0.0..=1.0).contains(&secondary)
-                    || primary < secondary
-                {
-                    return Err(
-                        "directional percentage coefficients must be finite fractions with primary not less than secondary"
-                            .to_string(),
-                    );
-                }
-            }
-            if spectrum.interpolation == crate::SpectrumInterpolation::LogLog
-                && spectrum.ordinates.iter().any(|value| *value <= 0.0)
-            {
-                return Err("log-log spectra require positive ordinates".to_string());
-            }
+            spectrum.validate_intrinsic()?;
             if let crate::SpectrumConstruction::DerivedFromAccelerationHistory {
                 source_signal_id,
                 ..
@@ -530,22 +474,6 @@ fn validate_response_spectra(
                             .to_string())
                     }
                 }
-            }
-            crate::validate_authored::validate_coordinate_frame(&spectrum.direction.frame)
-                .map_err(|error| error.to_string())?;
-            validate_direction(spectrum.direction.vector)?;
-            let truncation = spectrum.truncation;
-            if !truncation.minimum_cumulative_mass_ratio.is_finite()
-                || !(0.0..=1.0).contains(&truncation.minimum_cumulative_mass_ratio)
-                || !spectrum.evidence.sampling_adequacy_ratio.is_finite()
-                || !(0.0..=1.0).contains(&spectrum.evidence.sampling_adequacy_ratio)
-                || spectrum
-                    .evidence
-                    .max_interpolation_error
-                    .is_some_and(|value| !value.is_finite() || value < 0.0)
-                || spectrum.provenance_digest.trim().is_empty()
-            {
-                return Err("spectrum policy, evidence, and provenance must be valid".to_string());
             }
             Ok(())
         })();

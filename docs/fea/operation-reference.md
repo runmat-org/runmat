@@ -93,7 +93,11 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
 | `fea.<Family>Boundary.<kind>(...)` | Create typed natural and Robin boundary operators. |
 | `fea.<Quantity>Signal.constant<Unit>(...)` | Create a quantity-typed constant physical signal. |
+| `fea.SignalInterpolation.<policy>()`, `fea.SignalExtrapolation.<policy>()` | Create closed typed sampling policies. |
+| `fea.<Quantity>Signal.fromTimeSamples(id, times, values, interpolation, extrapolation)` | Create a quantity-typed sampled time history. |
 | `fea.<Family>Excitation.<action>(...)`, `fea.ExcitationCase.<activation>(...)` | Bind signals to geometry, then group actions under a typed activation policy. |
+| `fea.InitialConditionTarget.wholeModel()`, `fea.<Family>InitialCondition.<state>(...)` | Create whole-model or region-bound initial state from a typed signal sample. |
+| `fea.ResponseSpectrum.new(...)` and `fea.Spectrum*` policy classes | Create a typed modal response spectrum with explicit axis, direction, combination, evidence, and provenance. |
 | `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
 | `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
@@ -157,7 +161,7 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
-`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `Steps`, `Domains`, `Interfaces`, and `Mesh`. Direct integer values do not substitute for any identity or typed-object option.
+`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`, `Domains`, `Interfaces`, and `Mesh`. `fea.model` accepts the same model-component options. Direct integer values do not substitute for any identity or typed-object option.
 
 ### Run-option numeric contracts
 

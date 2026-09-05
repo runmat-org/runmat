@@ -53,6 +53,90 @@ const FEA_SIGNAL_CONSTRUCTORS: [&str; 22] = [
     "fea.MassFlowSignal.constantKilogramsPerSecond",
 ];
 
+const FEA_SAMPLED_SIGNAL_CONSTRUCTORS: [&str; 22] = [
+    "fea.DisplacementSignal.fromTimeSamples",
+    "fea.RotationSignal.fromTimeSamples",
+    "fea.VelocitySignal.fromTimeSamples",
+    "fea.AccelerationSignal.fromTimeSamples",
+    "fea.AngularVelocitySignal.fromTimeSamples",
+    "fea.AngularAccelerationSignal.fromTimeSamples",
+    "fea.ForceSignal.fromTimeSamples",
+    "fea.MomentSignal.fromTimeSamples",
+    "fea.TractionSignal.fromTimeSamples",
+    "fea.PressureSignal.fromTimeSamples",
+    "fea.BodyForceSignal.fromTimeSamples",
+    "fea.TemperatureSignal.fromTimeSamples",
+    "fea.TemperatureDifferenceSignal.fromTimeSamples",
+    "fea.HeatFluxSignal.fromTimeSamples",
+    "fea.HeatGenerationSignal.fromTimeSamples",
+    "fea.ElectricPotentialSignal.fromTimeSamples",
+    "fea.ElectricCurrentSignal.fromTimeSamples",
+    "fea.ElectricChargeSignal.fromTimeSamples",
+    "fea.CurrentDensitySignal.fromTimeSamples",
+    "fea.ChargeDensitySignal.fromTimeSamples",
+    "fea.MagneticVectorPotentialSignal.fromTimeSamples",
+    "fea.MassFlowSignal.fromTimeSamples",
+];
+
+const FEA_INITIAL_CONSTRUCTORS: [&str; 10] = [
+    "fea.InitialConditionTarget.wholeModel",
+    "fea.StructuralInitialCondition.displacement",
+    "fea.StructuralInitialCondition.velocity",
+    "fea.StructuralInitialCondition.angularVelocity",
+    "fea.ThermalInitialCondition.temperature",
+    "fea.ElectricalInitialCondition.potential",
+    "fea.MagneticInitialCondition.vectorPotential",
+    "fea.AcousticInitialCondition.pressure",
+    "fea.FluidInitialCondition.pressure",
+    "fea.FluidInitialCondition.velocity",
+];
+
+const FEA_SPECTRUM_NUMERIC_CONSTRUCTORS: [&str; 9] = [
+    "fea.SpectrumAxis.frequencyHertz",
+    "fea.SpectrumAxis.periodSeconds",
+    "fea.SpectrumDamping.ratio",
+    "fea.SpectrumDamping.qualityFactor",
+    "fea.SpectrumDirection.new",
+    "fea.DirectionalCombination.percentage",
+    "fea.ModalTruncation.new",
+    "fea.SpectrumEvidence.bounded",
+    "fea.ResponseSpectrum.new",
+];
+
+const FEA_TYPED_POLICY_CONSTRUCTORS: [&str; 31] = [
+    "fea.CoordinateFrame.globalFrame",
+    "fea.SignalInterpolation.stepLeft",
+    "fea.SignalInterpolation.stepRight",
+    "fea.SignalInterpolation.linear",
+    "fea.SignalInterpolation.cubicHermite",
+    "fea.SignalExtrapolation.reject",
+    "fea.SignalExtrapolation.holdEndpoint",
+    "fea.SignalExtrapolation.zero",
+    "fea.SpectrumResponse.relativeDisplacement",
+    "fea.SpectrumResponse.relativeVelocity",
+    "fea.SpectrumResponse.relativeAcceleration",
+    "fea.SpectrumResponse.absoluteAcceleration",
+    "fea.SpectrumResponse.pseudoVelocity",
+    "fea.SpectrumResponse.pseudoAcceleration",
+    "fea.SpectrumEnvelope.positive",
+    "fea.SpectrumEnvelope.negative",
+    "fea.SpectrumEnvelope.maximax",
+    "fea.SpectrumInterpolation.linearFrequency",
+    "fea.SpectrumInterpolation.linearPeriod",
+    "fea.SpectrumInterpolation.logLog",
+    "fea.SpectrumExtrapolation.reject",
+    "fea.SpectrumExtrapolation.holdEndpoint",
+    "fea.ModalCombination.srss",
+    "fea.ModalCombination.completeQuadratic",
+    "fea.ModalCombination.tenPercent",
+    "fea.ModalCombination.absoluteSum",
+    "fea.DirectionalCombination.srss",
+    "fea.DirectionalCombination.absoluteSum",
+    "fea.SpectrumConstruction.authoredDesign",
+    "fea.SpectrumConstruction.fromAccelerationHistoryExact",
+    "fea.SpectrumConstruction.fromAccelerationHistoryRecursive",
+];
+
 const FEA_EXCITATION_CONSTRUCTORS: [&str; 25] = [
     "fea.StructuralExcitation.force",
     "fea.StructuralExcitation.moment",
@@ -155,6 +239,9 @@ fn fea_integer_metadata_declares_host_only_native_contracts() {
     for name in FEA_INTEGER_CONSTRUCTORS
         .into_iter()
         .chain(FEA_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_SAMPLED_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().skip(1))
+        .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
     {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(
@@ -191,6 +278,8 @@ fn fea_integer_metadata_declares_host_only_native_contracts() {
     for name in FEA_INTEGER_INAPPLICABLE
         .into_iter()
         .chain(FEA_EXCITATION_CONSTRUCTORS)
+        .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
+        .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().take(1))
     {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(
@@ -235,6 +324,61 @@ fn typed_signal_excitation_and_case_compose_through_compiled_runmat_code() {
         "fea.ForceSignal",
         "fea.StructuralExcitation",
         "fea.ExcitationCase",
+        "fea.Model",
+    ] {
+        assert!(
+            values.iter().any(
+                |value| matches!(value, Value::Object(object) if object.class_name == class_name)
+            ),
+            "compiled source must construct {class_name}"
+        );
+    }
+}
+
+#[test]
+fn sampled_signal_initial_state_and_response_spectrum_compose_through_compiled_code() {
+    let path = std::env::temp_dir().join(format!(
+        "runmat-fea-typed-spectrum-{}.stl",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path,
+        "solid part\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid part\n",
+    )
+    .unwrap();
+    let source = format!(
+        r#"
+        geom = geometry.load("{}", "Units", "meter");
+        interpolation = fea.SignalInterpolation.linear();
+        extrapolation = fea.SignalExtrapolation.zero();
+        acceleration = fea.AccelerationSignal.fromTimeSamples("launch.acceleration", [0 0.01 0.02], [0 0 0; 2 0 0; 0 0 0], interpolation, extrapolation);
+        displacement = fea.DisplacementSignal.constantMeters("initial.displacement", [0 0 0]);
+        target = fea.InitialConditionTarget.wholeModel();
+        initial = fea.StructuralInitialCondition.displacement("initial", target, displacement, 0, "static");
+        axis = fea.SpectrumAxis.frequencyHertz([5 10 20]);
+        damping = fea.SpectrumDamping.ratio(0.05);
+        response = fea.SpectrumResponse.absoluteAcceleration();
+        envelope = fea.SpectrumEnvelope.maximax();
+        spectrumInterpolation = fea.SpectrumInterpolation.linearFrequency();
+        spectrumExtrapolation = fea.SpectrumExtrapolation.reject();
+        direction = fea.SpectrumDirection.new(fea.CoordinateFrame.globalFrame(), [1 0 0]);
+        modalCombination = fea.ModalCombination.completeQuadratic();
+        directionalCombination = fea.DirectionalCombination.srss();
+        truncation = fea.ModalTruncation.new(0.9, true, true, true);
+        construction = fea.SpectrumConstruction.authoredDesign();
+        evidence = fea.SpectrumEvidence.bounded(0.95, 0.01);
+        spectrum = fea.ResponseSpectrum.new("launch", axis, [12 18 9], damping, response, envelope, spectrumInterpolation, spectrumExtrapolation, direction, modalCombination, directionalCombination, truncation, construction, evidence, "sha256:launch-spectrum");
+        model = fea.model("launch-model", geom, "Template", "linear_static_structural", "Signals", {{acceleration, displacement}}, "InitialConditions", {{initial}}, "ResponseSpectra", {{spectrum}});
+        "#,
+        path.to_string_lossy()
+    );
+    let result = execute_source(&source);
+    let _ = std::fs::remove_file(&path);
+    let values = result.unwrap();
+    for class_name in [
+        "fea.AccelerationSignal",
+        "fea.StructuralInitialCondition",
+        "fea.ResponseSpectrum",
         "fea.Model",
     ] {
         assert!(

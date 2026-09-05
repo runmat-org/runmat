@@ -2,12 +2,16 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
-use crate::builtins::fea::values::{finite_numeric_scalar, finite_numeric_vector3};
+use crate::builtins::fea::values::{
+    finite_numeric_scalar, finite_numeric_vector, finite_numeric_vector3,
+    finite_numeric_vector3_samples,
+};
 use runmat_analysis_core::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ElectricCharge,
     ElectricChargeDensity, ElectricCurrentDensity, Force, HeatGenerationDensity, MassFlowRate,
-    Moment, Signal, SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance,
-    SignalRepresentation, SignalShape, SignalValue, Traction,
+    Moment, Signal, SignalApproximationEvidence, SignalAxis, SignalExtrapolation, SignalId,
+    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
+    SignalShape, SignalValue, TabulatedSignal, Traction,
 };
 
 pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = "fea.DisplacementSignal";
@@ -64,7 +68,6 @@ const VECTOR_INPUTS: [BuiltinParamDescriptor; 2] = [
         "Finite 1-by-3 or 3-by-1 vector in the canonical SI unit named by the constructor.",
     ),
 ];
-
 const fn required(
     name: &'static str,
     ty: BuiltinParamType,
@@ -449,6 +452,8 @@ scalar_signal!(
     PhysicalSignal::MassFlowRate
 );
 
+pub(crate) mod time_samples;
+
 pub(super) fn physical_signal_from_value(
     builtin: &'static str,
     value: &Value,
@@ -559,17 +564,50 @@ pub(super) fn ensure_signal_classes_registered() {
     });
     RUNTIME_CLASSES.ensure(|| {
         for (class_name, _, method_name, builtin_name) in signal_schemas() {
+            let mut methods =
+                HashMap::from([(method_name.into(), static_method(method_name, builtin_name))]);
+            methods.insert(
+                "fromTimeSamples".into(),
+                static_method("fromTimeSamples", time_sample_builtin(class_name)),
+            );
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.into(),
                 parent: None,
                 properties: immutable_properties(SIGNAL_FIELDS),
-                methods: HashMap::from([(
-                    method_name.into(),
-                    static_method(method_name, builtin_name),
-                )]),
+                methods,
             });
         }
     });
+}
+
+fn time_sample_builtin(class_name: &str) -> &'static str {
+    match class_name {
+        DISPLACEMENT_SIGNAL_CLASS => "fea.DisplacementSignal.fromTimeSamples",
+        ROTATION_SIGNAL_CLASS => "fea.RotationSignal.fromTimeSamples",
+        VELOCITY_SIGNAL_CLASS => "fea.VelocitySignal.fromTimeSamples",
+        ACCELERATION_SIGNAL_CLASS => "fea.AccelerationSignal.fromTimeSamples",
+        ANGULAR_VELOCITY_SIGNAL_CLASS => "fea.AngularVelocitySignal.fromTimeSamples",
+        ANGULAR_ACCELERATION_SIGNAL_CLASS => "fea.AngularAccelerationSignal.fromTimeSamples",
+        FORCE_SIGNAL_CLASS => "fea.ForceSignal.fromTimeSamples",
+        MOMENT_SIGNAL_CLASS => "fea.MomentSignal.fromTimeSamples",
+        TRACTION_SIGNAL_CLASS => "fea.TractionSignal.fromTimeSamples",
+        PRESSURE_SIGNAL_CLASS => "fea.PressureSignal.fromTimeSamples",
+        BODY_FORCE_SIGNAL_CLASS => "fea.BodyForceSignal.fromTimeSamples",
+        TEMPERATURE_SIGNAL_CLASS => "fea.TemperatureSignal.fromTimeSamples",
+        TEMPERATURE_DIFFERENCE_SIGNAL_CLASS => "fea.TemperatureDifferenceSignal.fromTimeSamples",
+        HEAT_FLUX_SIGNAL_CLASS => "fea.HeatFluxSignal.fromTimeSamples",
+        HEAT_GENERATION_SIGNAL_CLASS => "fea.HeatGenerationSignal.fromTimeSamples",
+        ELECTRIC_POTENTIAL_SIGNAL_CLASS => "fea.ElectricPotentialSignal.fromTimeSamples",
+        ELECTRIC_CURRENT_SIGNAL_CLASS => "fea.ElectricCurrentSignal.fromTimeSamples",
+        ELECTRIC_CHARGE_SIGNAL_CLASS => "fea.ElectricChargeSignal.fromTimeSamples",
+        CURRENT_DENSITY_SIGNAL_CLASS => "fea.CurrentDensitySignal.fromTimeSamples",
+        CHARGE_DENSITY_SIGNAL_CLASS => "fea.ChargeDensitySignal.fromTimeSamples",
+        MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS => {
+            "fea.MagneticVectorPotentialSignal.fromTimeSamples"
+        }
+        MASS_FLOW_SIGNAL_CLASS => "fea.MassFlowSignal.fromTimeSamples",
+        _ => unreachable!("signal schemas contain only known classes"),
+    }
 }
 
 fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
@@ -758,6 +796,7 @@ fn signal_schemas() -> [SignalSchema; 22] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::fea::signal_policies::{extrapolation_reject, interpolation_linear};
     use futures::executor::block_on;
 
     #[test]
@@ -792,5 +831,72 @@ mod tests {
         };
         object.class_name = FORCE_SIGNAL_CLASS.into();
         assert!(physical_signal_from_value("test", &Value::Object(object)).is_err());
+    }
+
+    #[test]
+    fn time_samples_preserve_vector_samples_and_closed_policies() {
+        let times = Value::Tensor(Tensor::new_2d(vec![0.0, 0.25], 2, 1).unwrap());
+        let values =
+            Value::Tensor(Tensor::new_2d(vec![0.0, 10.0, 1.0, 11.0, 2.0, 12.0], 2, 3).unwrap());
+        let signal = block_on(time_samples::force_time_samples(
+            "pulse".into(),
+            times,
+            values,
+            block_on(interpolation_linear()).unwrap(),
+            block_on(extrapolation_reject()).unwrap(),
+        ))
+        .unwrap();
+        let PhysicalSignal::Force(signal) = physical_signal_from_value("test", &signal).unwrap()
+        else {
+            panic!("typed class must contain a force signal")
+        };
+        assert_eq!(signal.evidence.sample_count, 2);
+        let SignalRepresentation::Tabulated(table) = signal.representation else {
+            panic!("time samples must create a tabulated signal")
+        };
+        assert_eq!(table.interpolation, SignalInterpolation::Linear);
+        assert_eq!(table.extrapolation, SignalExtrapolation::Reject);
+        assert_eq!(
+            table.values,
+            vec![
+                SignalOrdinate::Real(SignalValue::Vector3([
+                    Force::new(0.0),
+                    Force::new(1.0),
+                    Force::new(2.0),
+                ])),
+                SignalOrdinate::Real(SignalValue::Vector3([
+                    Force::new(10.0),
+                    Force::new(11.0),
+                    Force::new(12.0),
+                ])),
+            ]
+        );
+    }
+
+    #[test]
+    fn time_samples_reject_unsorted_axes_and_mismatched_values() {
+        let interpolation = block_on(interpolation_linear()).unwrap();
+        let extrapolation = block_on(extrapolation_reject()).unwrap();
+        let unsorted = Value::Tensor(Tensor::new_2d(vec![0.0, 0.5, 0.25], 3, 1).unwrap());
+        let values = Value::Tensor(Tensor::new_2d(vec![1.0, 2.0, 3.0], 3, 1).unwrap());
+        assert!(block_on(time_samples::pressure_time_samples(
+            "bad-axis".into(),
+            unsorted,
+            values,
+            interpolation.clone(),
+            extrapolation.clone(),
+        ))
+        .is_err());
+
+        let times = Value::Tensor(Tensor::new_2d(vec![0.0, 0.5], 2, 1).unwrap());
+        let values = Value::Tensor(Tensor::new_2d(vec![1.0], 1, 1).unwrap());
+        assert!(block_on(time_samples::pressure_time_samples(
+            "bad-values".into(),
+            times,
+            values,
+            interpolation,
+            extrapolation,
+        ))
+        .is_err());
     }
 }

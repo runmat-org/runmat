@@ -994,6 +994,104 @@ pub(super) fn finite_numeric_vector3(
     Ok(result)
 }
 
+pub(super) fn finite_numeric_vector(
+    builtin: &'static str,
+    value: &Value,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let Value::Tensor(tensor) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must be a real numeric row or column vector"),
+        ));
+    };
+    if tensor.shape.len() != 2
+        || (tensor.shape[0] != 1 && tensor.shape[1] != 1)
+        || tensor.shape[0].saturating_mul(tensor.shape[1]) == 0
+    {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must be a nonempty real numeric row or column vector"),
+        ));
+    }
+    (0..tensor.shape[0] * tensor.shape[1])
+        .map(|index| {
+            let value = numeric_to_f64(
+                tensor
+                    .numeric_value_at(index)
+                    .expect("validated numeric vector storage"),
+            );
+            if value.is_finite() {
+                Ok(value)
+            } else {
+                Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    format!("{label} must contain only finite values"),
+                ))
+            }
+        })
+        .collect()
+}
+
+pub(super) fn finite_numeric_vector3_samples(
+    builtin: &'static str,
+    value: &Value,
+    sample_count: usize,
+    label: &str,
+) -> BuiltinResult<Vec<[f64; 3]>> {
+    let Value::Tensor(tensor) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must be an N-by-3 or 3-by-N real numeric matrix"),
+        ));
+    };
+    let [rows, columns] = tensor.shape.as_slice() else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must be an N-by-3 or 3-by-N real numeric matrix"),
+        ));
+    };
+    let sample_rows = *rows == sample_count && *columns == 3;
+    let sample_columns = *rows == 3 && *columns == sample_count;
+    if sample_count == 0 || (!sample_rows && !sample_columns) {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must contain exactly {sample_count} three-component samples"),
+        ));
+    }
+    (0..sample_count)
+        .map(|sample| {
+            let mut components = [0.0; 3];
+            for (component, target) in components.iter_mut().enumerate() {
+                let index = if sample_rows {
+                    sample + component * sample_count
+                } else {
+                    component + sample * 3
+                };
+                *target = numeric_to_f64(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated three-component sample storage"),
+                );
+                if !target.is_finite() {
+                    return Err(builtin_error(
+                        builtin,
+                        &ERROR_INPUT,
+                        format!("{label} must contain only finite values"),
+                    ));
+                }
+            }
+            Ok(components)
+        })
+        .collect()
+}
+
 fn integer_to_f64(value: &IntValue) -> f64 {
     match value {
         IntValue::I8(value) => f64::from(*value),

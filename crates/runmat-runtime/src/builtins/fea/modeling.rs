@@ -57,6 +57,8 @@ pub(super) struct StudyConstructorOptions {
     pub(super) signals: Vec<PhysicalSignal>,
     pub(super) excitations: Vec<super::excitations::GeometryBoundExcitation>,
     pub(super) excitation_cases: Vec<ExcitationCase>,
+    pub(super) initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
+    pub(super) response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     pub(super) steps: Vec<ProcedureStep>,
     pub(super) domains: Vec<DomainPayload>,
     pub(super) interfaces: Vec<GeometryBoundInterface>,
@@ -103,6 +105,8 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             options.signals,
             options.excitations,
             options.excitation_cases,
+            options.initial_conditions,
+            options.response_spectra,
             options.steps,
             options.domains,
             options.interfaces,
@@ -244,6 +248,18 @@ impl StudyConstructorOptions {
                     options.excitation_cases =
                         super::excitations::excitation_case_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
+                "initialconditions" => {
+                    options.initial_conditions =
+                        super::initial_conditions::initial_condition_vec_from_value(
+                            STUDY_NAME, &pair[1],
+                        )?;
+                }
+                "responsespectra" => {
+                    options.response_spectra =
+                        super::response_spectra::response_spectrum_vec_from_value(
+                            STUDY_NAME, &pair[1],
+                        )?;
+                }
                 "steps" => options.steps = step_vec_from_value(STUDY_NAME, &pair[1])?,
                 "domains" => options.domains = domain_vec_from_value(STUDY_NAME, &pair[1])?,
                 "interfaces" => {
@@ -270,6 +286,8 @@ impl StudyConstructorOptions {
             || !self.signals.is_empty()
             || !self.excitations.is_empty()
             || !self.excitation_cases.is_empty()
+            || !self.initial_conditions.is_empty()
+            || !self.response_spectra.is_empty()
             || !self.steps.is_empty()
             || !self.domains.is_empty()
             || !self.interfaces.is_empty()
@@ -288,6 +306,8 @@ struct ModelConstructorOptions {
     signals: Vec<PhysicalSignal>,
     excitations: Vec<super::excitations::GeometryBoundExcitation>,
     excitation_cases: Vec<ExcitationCase>,
+    initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
+    response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<GeometryBoundInterface>,
@@ -366,6 +386,8 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         options.signals,
         options.excitations,
         options.excitation_cases,
+        options.initial_conditions,
+        options.response_spectra,
         options.steps,
         options.domains,
         options.interfaces,
@@ -418,6 +440,16 @@ fn parse_model_constructor_options(
             "excitationcases" | "cases" => {
                 options.excitation_cases =
                     super::excitations::excitation_case_vec_from_value(builtin, pair.value)?
+            }
+            "initialconditions" => {
+                options.initial_conditions =
+                    super::initial_conditions::initial_condition_vec_from_value(
+                        builtin, pair.value,
+                    )?
+            }
+            "responsespectra" => {
+                options.response_spectra =
+                    super::response_spectra::response_spectrum_vec_from_value(builtin, pair.value)?
             }
             "steps" => options.steps = step_vec_from_value(builtin, pair.value)?,
             "domains" => options.domains = domain_vec_from_value(builtin, pair.value)?,
@@ -636,6 +668,8 @@ fn build_model_from_parts(
     signals: Vec<PhysicalSignal>,
     excitations: Vec<super::excitations::GeometryBoundExcitation>,
     excitation_cases: Vec<ExcitationCase>,
+    initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
+    response_spectra: Vec<runmat_analysis_core::ResponseSpectrum>,
     steps: Vec<ProcedureStep>,
     domains: Vec<DomainPayload>,
     interfaces: Vec<GeometryBoundInterface>,
@@ -734,6 +768,18 @@ fn build_model_from_parts(
     }
     if !excitation_cases.is_empty() {
         model.excitation_cases = excitation_cases;
+    }
+    if !initial_conditions.is_empty() {
+        model.initial_conditions = initial_conditions
+            .into_iter()
+            .map(|bound| {
+                bound.require_geometry(builtin, geometry)?;
+                Ok(bound.condition)
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+    }
+    if !response_spectra.is_empty() {
+        model.response_spectra = response_spectra;
     }
     if !steps.is_empty() {
         model.sequence =

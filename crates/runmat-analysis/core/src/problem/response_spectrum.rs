@@ -25,6 +25,94 @@ pub struct ResponseSpectrum {
     pub provenance_digest: String,
 }
 
+impl ResponseSpectrum {
+    pub fn validate_intrinsic(&self) -> Result<(), String> {
+        if self.spectrum_id.0.trim().is_empty() {
+            return Err("response-spectrum id must not be empty".to_string());
+        }
+        let axis = match &self.abscissa {
+            SpectrumAbscissa::FrequencyHertz(values) | SpectrumAbscissa::PeriodSeconds(values) => {
+                values
+            }
+        };
+        if (matches!(&self.abscissa, SpectrumAbscissa::FrequencyHertz(_))
+            && self.interpolation == SpectrumInterpolation::LinearPeriod)
+            || (matches!(&self.abscissa, SpectrumAbscissa::PeriodSeconds(_))
+                && self.interpolation == SpectrumInterpolation::LinearFrequency)
+        {
+            return Err("spectrum interpolation must match its abscissa".to_string());
+        }
+        if axis.is_empty()
+            || axis.len() != self.ordinates.len()
+            || axis.iter().any(|value| !value.is_finite() || *value <= 0.0)
+            || axis.windows(2).any(|pair| pair[0] >= pair[1])
+            || self
+                .ordinates
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(
+                "spectrum axes and ordinates must be aligned, positive, and increasing".to_string(),
+            );
+        }
+        match self.damping {
+            SpectrumDamping::Ratio(value) if !value.is_finite() || !(0.0..1.0).contains(&value) => {
+                return Err("damping ratio must be between zero and one".to_string())
+            }
+            SpectrumDamping::QualityFactor(value) if !value.is_finite() || value <= 0.0 => {
+                return Err("quality factor must be finite and positive".to_string())
+            }
+            _ => {}
+        }
+        if let DirectionalCombination::PercentageRule { primary, secondary } =
+            self.directional_combination
+        {
+            if !primary.is_finite()
+                || !secondary.is_finite()
+                || !(0.0..=1.0).contains(&primary)
+                || !(0.0..=1.0).contains(&secondary)
+                || primary < secondary
+            {
+                return Err(
+                    "directional percentage coefficients must be finite fractions with primary not less than secondary"
+                        .to_string(),
+                );
+            }
+        }
+        if self.interpolation == SpectrumInterpolation::LogLog
+            && self.ordinates.iter().any(|value| *value <= 0.0)
+        {
+            return Err("log-log spectra require positive ordinates".to_string());
+        }
+        crate::validate_coordinate_frame(&self.direction.frame)
+            .map_err(|error| error.to_string())?;
+        if self.direction.vector.iter().any(|value| !value.is_finite())
+            || self
+                .direction
+                .vector
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                <= f64::EPSILON
+        {
+            return Err("spectrum direction must be finite and nonzero".to_string());
+        }
+        if !self.truncation.minimum_cumulative_mass_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.truncation.minimum_cumulative_mass_ratio)
+            || !self.evidence.sampling_adequacy_ratio.is_finite()
+            || !(0.0..=1.0).contains(&self.evidence.sampling_adequacy_ratio)
+            || self
+                .evidence
+                .max_interpolation_error
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+            || self.provenance_digest.trim().is_empty()
+        {
+            return Err("spectrum policy, evidence, and provenance must be valid".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpectrumAbscissa {

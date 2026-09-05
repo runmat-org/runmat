@@ -53,40 +53,28 @@ const FRAME_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Typed fea.Direction nonparallel reference axis.",
     },
 ];
-const NO_ARG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "frame = fea.CoordinateFrame.frame()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const FRAME_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "frame = fea.CoordinateFrame.frame(id, origin, primaryAxis, secondaryAxis)",
-    inputs: &FRAME_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const SIMPLE_FRAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NO_ARG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const AXIS_FRAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FRAME_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 macro_rules! simple_frame_builtin {
-    ($function:ident, $name:literal, $class:expr) => {
+    ($function:ident, $descriptor:ident, $signatures:ident, $name:literal, $label:literal, $class:expr) => {
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: &NO_INPUTS,
+            outputs: &OUT_ANY,
+        }];
+        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
         #[runtime_builtin(
-            name = $name,
-            category = "fea",
-            summary = "Create a typed coordinate frame.",
-            keywords = "fea,coordinate,frame,typed",
-            descriptor(crate::builtins::fea::constraints::support::frame::SIMPLE_FRAME_DESCRIPTOR),
-            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-            builtin_path = "crate::builtins::fea::constraints::support::frame"
-        )]
+                            name = $name,
+                            category = "fea",
+                            summary = "Create a typed coordinate frame.",
+                            keywords = "fea,coordinate,frame,typed",
+                            descriptor($descriptor),
+                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                            builtin_path = "crate::builtins::fea::constraints::support::frame"
+                        )]
         pub async fn $function() -> BuiltinResult<Value> {
             ensure_frame_classes_registered();
             Ok(Value::Object(ObjectInstance::new($class.into())))
@@ -96,33 +84,56 @@ macro_rules! simple_frame_builtin {
 
 simple_frame_builtin!(
     coordinate_frame_global_builtin,
-    "fea.CoordinateFrame.global",
+    GLOBAL_FRAME_DESCRIPTOR,
+    GLOBAL_FRAME_SIGNATURES,
+    "fea.CoordinateFrame.globalFrame",
+    "frame = fea.CoordinateFrame.globalFrame()",
     GLOBAL_FRAME_CLASS
 );
 simple_frame_builtin!(
     coordinate_frame_material_builtin,
+    MATERIAL_FRAME_DESCRIPTOR,
+    MATERIAL_FRAME_SIGNATURES,
     "fea.CoordinateFrame.material",
+    "frame = fea.CoordinateFrame.material()",
     MATERIAL_FRAME_CLASS
 );
 simple_frame_builtin!(
     coordinate_frame_element_builtin,
+    ELEMENT_FRAME_DESCRIPTOR,
+    ELEMENT_FRAME_SIGNATURES,
     "fea.CoordinateFrame.element",
+    "frame = fea.CoordinateFrame.element()",
     ELEMENT_FRAME_CLASS
 );
 simple_frame_builtin!(
     coordinate_frame_boundary_builtin,
+    BOUNDARY_FRAME_DESCRIPTOR,
+    BOUNDARY_FRAME_SIGNATURES,
     "fea.CoordinateFrame.boundaryNormalTangent",
+    "frame = fea.CoordinateFrame.boundaryNormalTangent()",
     BOUNDARY_FRAME_CLASS
 );
 
 macro_rules! axis_frame_builtin {
-    ($function:ident, $name:literal, $class:expr, $build:expr, $primary:literal, $secondary:literal) => {
+    ($function:ident, $descriptor:ident, $signatures:ident, $name:literal, $label:literal, $class:expr, $build:expr, $primary:literal, $secondary:literal) => {
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: &FRAME_INPUTS,
+            outputs: &OUT_ANY,
+        }];
+        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
         #[runtime_builtin(
             name = $name,
             category = "fea",
             summary = "Create a typed coordinate frame from an origin and two nonparallel directions.",
             keywords = "fea,coordinate,frame,axis,typed",
-            descriptor(crate::builtins::fea::constraints::support::frame::AXIS_FRAME_DESCRIPTOR),
+            descriptor($descriptor),
             integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
             builtin_path = "crate::builtins::fea::constraints::support::frame"
         )]
@@ -153,7 +164,10 @@ macro_rules! axis_frame_builtin {
 
 axis_frame_builtin!(
     coordinate_frame_cartesian_builtin,
+    CARTESIAN_FRAME_DESCRIPTOR,
+    CARTESIAN_FRAME_SIGNATURES,
     "fea.CoordinateFrame.cartesian",
+    "frame = fea.CoordinateFrame.cartesian(id, origin, xAxis, yAxis)",
     CARTESIAN_FRAME_CLASS,
     |frame_id, origin, x_axis, y_axis| CoordinateFrame::Cartesian(CartesianFrame {
         frame_id,
@@ -166,7 +180,10 @@ axis_frame_builtin!(
 );
 axis_frame_builtin!(
     coordinate_frame_cylindrical_builtin,
+    CYLINDRICAL_FRAME_DESCRIPTOR,
+    CYLINDRICAL_FRAME_SIGNATURES,
     "fea.CoordinateFrame.cylindrical",
+    "frame = fea.CoordinateFrame.cylindrical(id, origin, axis, radialReference)",
     CYLINDRICAL_FRAME_CLASS,
     |frame_id, origin, axis, radial_reference| CoordinateFrame::Cylindrical(AxialFrame {
         frame_id,
@@ -179,7 +196,10 @@ axis_frame_builtin!(
 );
 axis_frame_builtin!(
     coordinate_frame_spherical_builtin,
+    SPHERICAL_FRAME_DESCRIPTOR,
+    SPHERICAL_FRAME_SIGNATURES,
     "fea.CoordinateFrame.spherical",
+    "frame = fea.CoordinateFrame.spherical(id, origin, polarAxis, azimuthReference)",
     SPHERICAL_FRAME_CLASS,
     |frame_id, origin, polar_axis, azimuth_reference| CoordinateFrame::Spherical(SphericalFrame {
         frame_id,
@@ -331,7 +351,7 @@ pub(super) fn ensure_frame_classes_registered() {
             COORDINATE_FRAME_CLASS,
             EMPTY_FIELDS,
             [
-                ("global", "fea.CoordinateFrame.global"),
+                ("globalFrame", "fea.CoordinateFrame.globalFrame"),
                 ("material", "fea.CoordinateFrame.material"),
                 ("element", "fea.CoordinateFrame.element"),
                 (

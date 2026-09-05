@@ -273,8 +273,11 @@ The typed constructors are:
 | `fea.<Family>Constraint.<kind>(...)` | Essential, kinematic, gauge, pairing, and reference constraints bound to a `geometry.Region`. |
 | `fea.<Family>Boundary.<kind>(...)` | Natural and Robin boundary operators such as pressure, heat flux, convection, radiation, impedance, and outlet pressure. |
 | `fea.<Quantity>Signal.constant<Unit>(...)` | A constant, quantity-typed physical signal in the unit named by the constructor. |
+| `fea.<Quantity>Signal.fromTimeSamples(...)` | A quantity-typed sampled history with typed interpolation and extrapolation policy. |
 | `fea.<Family>Excitation.<action>(...)` | A typed spatial action binding a compatible signal to a `geometry.Region`. |
 | `fea.ExcitationCase.always(...)`, `.duringSteps(...)`, `.mutuallyExclusive(...)` | Group typed actions and declare their activation without changing either the signal or spatial action. |
+| `fea.<Family>InitialCondition.<state>(...)` | Sample a compatible typed signal into the model state before a named procedure step. |
+| `fea.ResponseSpectrum.new(...)` | Assemble response-spectrum data, evaluation policy, direction, modal rules, evidence, and provenance from typed components. |
 | `fea.<Family>Step.<procedure>(id)` | A concrete direct-solution procedure step; family and procedure are selected by the class method rather than text. |
 | `fea.ThermoMechanicalDomain.atReferenceTemperature(...)` | Thermo-mechanical constitutive reference state from a typed `fea.Temperature`. |
 | `fea.ElectroThermalDomain.atReferenceTemperature(...)` | Electro-thermal constitutive reference state from a typed `fea.Temperature`. |
@@ -323,6 +326,91 @@ momentSignal = fea.MomentSignal.constantNewtonMeters( ...
 tipMoment = fea.StructuralExcitation.moment( ...
     "tip_moment", "torsion_case", tipNode, momentSignal);
 torsionCase = fea.ExcitationCase.always("torsion_case", {tipMoment});
+```
+
+### Histories, initial state, and response spectra
+
+A sampled signal owns its physical quantity, time axis, values, interpolation, extrapolation,
+precision, evidence, and authored provenance. Closed choices are objects, not spelling-sensitive
+strings:
+
+```matlab
+interpolation = fea.SignalInterpolation.linear();
+extrapolation = fea.SignalExtrapolation.zero();
+
+launchAcceleration = fea.AccelerationSignal.fromTimeSamples( ...
+    "launch.acceleration", ...
+    [0 0.01 0.02], ...
+    [0 0 0; 2 0 0; 0 0 0], ...
+    interpolation, extrapolation);
+```
+
+The time axis must contain at least two finite, strictly increasing samples. Scalar signals accept
+one value per time. Vector signals accept either an N-by-3 or 3-by-N matrix and retain the sample
+ordering. Interpolation is one of `stepLeft`, `stepRight`, `linear`, or `cubicHermite`;
+extrapolation is `reject`, `holdEndpoint`, or `zero`.
+
+Initial conditions do not copy anonymous numbers into a solver option. They identify the typed
+signal sample that establishes state and the step that consumes it:
+
+```matlab
+zeroDisplacement = fea.DisplacementSignal.constantMeters( ...
+    "initial.displacement", [0 0 0]);
+wholeModel = fea.InitialConditionTarget.wholeModel();
+initialDisplacement = fea.StructuralInitialCondition.displacement( ...
+    "initial", wholeModel, zeroDisplacement, 0, "transient");
+```
+
+Use a `geometry.Region` instead of `wholeModel` to bind an initial condition to a volume region.
+The condition retains the geometry id and revision; model composition rejects a region from another
+asset or revision.
+Structural displacement, velocity, and angular velocity; thermal temperature; electrical
+potential; magnetic vector potential; acoustic pressure; and fluid pressure and velocity each
+have separate constructors and accept only a signal of the required quantity and shape.
+
+A response spectrum is equally explicit. The spectrum ordinates remain numeric data; every
+scientific choice around those data is a typed value:
+
+```matlab
+axis = fea.SpectrumAxis.frequencyHertz([5 10 20]);
+damping = fea.SpectrumDamping.ratio(0.05);
+response = fea.SpectrumResponse.absoluteAcceleration();
+envelope = fea.SpectrumEnvelope.maximax();
+spectrumInterpolation = fea.SpectrumInterpolation.linearFrequency();
+spectrumExtrapolation = fea.SpectrumExtrapolation.reject();
+direction = fea.SpectrumDirection.new( ...
+    fea.CoordinateFrame.globalFrame(), [1 0 0]);
+modalCombination = fea.ModalCombination.completeQuadratic();
+directionalCombination = fea.DirectionalCombination.srss();
+truncation = fea.ModalTruncation.new(0.90, true, true, true);
+construction = fea.SpectrumConstruction.authoredDesign();
+evidence = fea.SpectrumEvidence.bounded(0.95, 0.01);
+
+launchSpectrum = fea.ResponseSpectrum.new( ...
+    "launch", axis, [12 18 9], damping, response, envelope, ...
+    spectrumInterpolation, spectrumExtrapolation, direction, ...
+    modalCombination, directionalCombination, truncation, ...
+    construction, evidence, "sha256:launch-spectrum");
+```
+
+Frequency axes pair with linear-frequency interpolation; period axes pair with linear-period
+interpolation; either can use log-log interpolation when every ordinate is positive. Axis values
+must be positive and strictly increasing. Direction vectors are normalized in their typed
+coordinate frame. Damping, directional percentages, modal truncation, sampling adequacy, and
+interpolation-error evidence are range checked at construction and again with the complete model.
+`SpectrumConstruction.fromAccelerationHistoryExact(signal)` and
+`fromAccelerationHistoryRecursive(signal)` retain the source acceleration-signal identity; model
+validation then requires that exact time-domain signal to be present in `Signals`.
+
+Supply these objects through `InitialConditions` and `ResponseSpectra` alongside the signals they
+reference:
+
+```matlab
+model = fea.model("launch_model", geom, ...
+    "Template", "modal_structural", ...
+    "Signals", {launchAcceleration, zeroDisplacement}, ...
+    "InitialConditions", {initialDisplacement}, ...
+    "ResponseSpectra", {launchSpectrum});
 ```
 
 ## Project Entrypoints

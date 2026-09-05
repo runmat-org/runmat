@@ -63,8 +63,12 @@ pub(crate) mod classes;
 pub(crate) mod constraints;
 pub(crate) mod domains;
 pub(crate) mod excitations;
+pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
 mod modeling;
+pub(crate) mod response_spectra;
+pub(crate) mod response_spectrum_policies;
+pub(crate) mod signal_policies;
 pub(crate) mod signals;
 pub(crate) mod steps;
 #[cfg(test)]
@@ -103,8 +107,12 @@ pub(crate) fn ensure_value_classes_registered() {
     classes::ensure_fea_classes_registered();
     constraints::ensure_constraint_support_classes_registered();
     values::ensure_quantity_classes_registered();
+    signal_policies::ensure_signal_policy_classes_registered();
     signals::ensure_signal_classes_registered();
     excitations::ensure_excitation_classes_registered();
+    initial_conditions::ensure_initial_condition_classes_registered();
+    response_spectrum_policies::ensure_spectrum_policy_classes_registered();
+    response_spectra::ensure_response_spectrum_class_registered();
 }
 
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

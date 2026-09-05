@@ -63,6 +63,90 @@ const FEA_SIGNAL_CONSTRUCTORS: [&str; 22] = [
     "fea.MassFlowSignal.constantKilogramsPerSecond",
 ];
 
+const FEA_SAMPLED_SIGNAL_CONSTRUCTORS: [&str; 22] = [
+    "fea.DisplacementSignal.fromTimeSamples",
+    "fea.RotationSignal.fromTimeSamples",
+    "fea.VelocitySignal.fromTimeSamples",
+    "fea.AccelerationSignal.fromTimeSamples",
+    "fea.AngularVelocitySignal.fromTimeSamples",
+    "fea.AngularAccelerationSignal.fromTimeSamples",
+    "fea.ForceSignal.fromTimeSamples",
+    "fea.MomentSignal.fromTimeSamples",
+    "fea.TractionSignal.fromTimeSamples",
+    "fea.PressureSignal.fromTimeSamples",
+    "fea.BodyForceSignal.fromTimeSamples",
+    "fea.TemperatureSignal.fromTimeSamples",
+    "fea.TemperatureDifferenceSignal.fromTimeSamples",
+    "fea.HeatFluxSignal.fromTimeSamples",
+    "fea.HeatGenerationSignal.fromTimeSamples",
+    "fea.ElectricPotentialSignal.fromTimeSamples",
+    "fea.ElectricCurrentSignal.fromTimeSamples",
+    "fea.ElectricChargeSignal.fromTimeSamples",
+    "fea.CurrentDensitySignal.fromTimeSamples",
+    "fea.ChargeDensitySignal.fromTimeSamples",
+    "fea.MagneticVectorPotentialSignal.fromTimeSamples",
+    "fea.MassFlowSignal.fromTimeSamples",
+];
+
+const FEA_INITIAL_CONSTRUCTORS: [&str; 10] = [
+    "fea.InitialConditionTarget.wholeModel",
+    "fea.StructuralInitialCondition.displacement",
+    "fea.StructuralInitialCondition.velocity",
+    "fea.StructuralInitialCondition.angularVelocity",
+    "fea.ThermalInitialCondition.temperature",
+    "fea.ElectricalInitialCondition.potential",
+    "fea.MagneticInitialCondition.vectorPotential",
+    "fea.AcousticInitialCondition.pressure",
+    "fea.FluidInitialCondition.pressure",
+    "fea.FluidInitialCondition.velocity",
+];
+
+const FEA_SPECTRUM_NUMERIC_CONSTRUCTORS: [&str; 9] = [
+    "fea.SpectrumAxis.frequencyHertz",
+    "fea.SpectrumAxis.periodSeconds",
+    "fea.SpectrumDamping.ratio",
+    "fea.SpectrumDamping.qualityFactor",
+    "fea.SpectrumDirection.new",
+    "fea.DirectionalCombination.percentage",
+    "fea.ModalTruncation.new",
+    "fea.SpectrumEvidence.bounded",
+    "fea.ResponseSpectrum.new",
+];
+
+const FEA_TYPED_POLICY_CONSTRUCTORS: [&str; 31] = [
+    "fea.CoordinateFrame.globalFrame",
+    "fea.SignalInterpolation.stepLeft",
+    "fea.SignalInterpolation.stepRight",
+    "fea.SignalInterpolation.linear",
+    "fea.SignalInterpolation.cubicHermite",
+    "fea.SignalExtrapolation.reject",
+    "fea.SignalExtrapolation.holdEndpoint",
+    "fea.SignalExtrapolation.zero",
+    "fea.SpectrumResponse.relativeDisplacement",
+    "fea.SpectrumResponse.relativeVelocity",
+    "fea.SpectrumResponse.relativeAcceleration",
+    "fea.SpectrumResponse.absoluteAcceleration",
+    "fea.SpectrumResponse.pseudoVelocity",
+    "fea.SpectrumResponse.pseudoAcceleration",
+    "fea.SpectrumEnvelope.positive",
+    "fea.SpectrumEnvelope.negative",
+    "fea.SpectrumEnvelope.maximax",
+    "fea.SpectrumInterpolation.linearFrequency",
+    "fea.SpectrumInterpolation.linearPeriod",
+    "fea.SpectrumInterpolation.logLog",
+    "fea.SpectrumExtrapolation.reject",
+    "fea.SpectrumExtrapolation.holdEndpoint",
+    "fea.ModalCombination.srss",
+    "fea.ModalCombination.completeQuadratic",
+    "fea.ModalCombination.tenPercent",
+    "fea.ModalCombination.absoluteSum",
+    "fea.DirectionalCombination.srss",
+    "fea.DirectionalCombination.absoluteSum",
+    "fea.SpectrumConstruction.authoredDesign",
+    "fea.SpectrumConstruction.fromAccelerationHistoryExact",
+    "fea.SpectrumConstruction.fromAccelerationHistoryRecursive",
+];
+
 const FEA_EXCITATION_CONSTRUCTORS: [&str; 25] = [
     "fea.StructuralExcitation.force",
     "fea.StructuralExcitation.moment",
@@ -227,7 +311,11 @@ fn fea_packet_is_public_and_has_settled_integer_metadata() {
     for name in FEA_MODELING_AND_POSTPROCESSING_BUILTINS
         .into_iter()
         .chain(FEA_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_SAMPLED_SIGNAL_CONSTRUCTORS)
         .chain(FEA_EXCITATION_CONSTRUCTORS)
+        .chain(FEA_INITIAL_CONSTRUCTORS)
+        .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
+        .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
     {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         let descriptor = builtin
@@ -257,6 +345,9 @@ fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
     for name in FEA_INTEGER_CONSTRUCTORS
         .into_iter()
         .chain(FEA_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_SAMPLED_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().skip(1))
+        .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
     {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_audit.is_none(), "{name}");
@@ -287,6 +378,8 @@ fn fea_non_numeric_roles_have_explicit_not_applicable_audits() {
     for name in FEA_INTEGER_INAPPLICABLE
         .into_iter()
         .chain(FEA_EXCITATION_CONSTRUCTORS)
+        .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
+        .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().take(1))
     {
         let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered builtin");
         assert!(builtin.integer_capabilities.is_empty(), "{name}");
