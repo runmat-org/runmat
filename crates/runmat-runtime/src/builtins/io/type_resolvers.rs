@@ -213,10 +213,6 @@ pub fn addpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
-pub fn cd_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -556,7 +552,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(addpath_type_resolver, addpath_type, &[], Type::String);
-    assert_resolver!(cd_type_resolver, cd_type, &[], Type::String);
     assert_resolver!(copyfile_type_resolver, copyfile_type, &[], Type::Num);
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
     assert_resolver!(

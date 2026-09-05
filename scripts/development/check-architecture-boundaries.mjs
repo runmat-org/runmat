@@ -1300,6 +1300,38 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 192,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "working-directory mutation identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/cd",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/cd",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/cd/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/cd.rs",
+    "docs/builtins/reference/cd.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/cd.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+
+const cdRuntimePath = "crates/runmat-runtime/src/builtins/io/repl_fs/cd/mod.rs";
+if (/\b(?:category|summary|keywords|descriptor|type_resolver|accel)\s*=/.test(read(cdRuntimePath))) {
+  fail(`${cdRuntimePath} duplicates catalog-owned metadata or inference`);
+}
+if (/"(?:cd|chdir)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim cd authority");
+}
+if (/\bpub fn cd_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"))) {
+  fail("legacy runtime type resolver must not reclaim cd inference authority");
+}
+if (/\bgather_if_needed_async\b/.test(rustSources("crates/runmat-runtime/src/builtins/io/repl_fs/cd").map(({ text }) => text).join("\n"))) {
+  fail("cd must reject non-text values instead of gathering accelerator buffers");
+}
+
 if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(
   read("crates/runmat-runtime/src/builtins/io/repl_fs/pwd/mod.rs"),
 )) {
