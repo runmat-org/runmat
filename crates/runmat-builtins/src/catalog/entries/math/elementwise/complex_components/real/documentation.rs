@@ -7,10 +7,10 @@ use crate::{
 };
 
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/real.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex_components/real") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::real::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::real::tests::real_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::complex_components::real::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::complex_components::real::tests::provider::real_gpu_provider_roundtrip" },
     ],
     notes: &[],
 };
@@ -107,14 +107,21 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Can `real` participate in fusion?", answer: "Yes. The planner can fold supported real projection into adjacent elementwise kernels." },
 ];
 
-pub(in super::super) const REAL_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
-    title: Some("real"), slug: Some("real"),
+    title: Some("real"),
+    slug: Some("real"),
     summary: "Extract real components from numeric, logical, character, or complex values.",
     description: "`real(X)` returns each real component. Real-valued input passes through numerically, while complex input drops its imaginary component with class-preserving numeric rules.",
     keywords: &["real", "complex", "component", "elementwise", "gpu"],
     related: &["abs", "angle", "complex", "conj", "double", "gather", "gpuArray", "imag", "sign", "single"],
-    sections: SECTIONS, examples: EXAMPLES, example_exemption: None, faqs: FAQS,
-    links: &[], media: &[], evidence: EVIDENCE, introduced: None,
+    sections: SECTIONS,
+    examples: EXAMPLES,
+    example_exemption: None,
+    faqs: FAQS,
+    links: &[],
+    media: &[],
+    evidence: EVIDENCE,
+    introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

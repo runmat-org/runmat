@@ -9,11 +9,11 @@ use crate::{
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
     implementation: &[BuiltinDocumentationLink {
         label: "Runtime implementation",
-        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/conj.rs"),
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex_components/conj"),
     }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::conj::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::conj::tests::conj_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::complex_components::conj::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::complex_components::conj::tests::provider::conj_gpu_provider_roundtrip" },
     ],
     notes: &[],
 };
@@ -116,14 +116,21 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Can `conj` participate in fusion?", answer: "Yes for supported real floating-point expressions, where conjugation is identity. Complex and typed-integer cases use their dedicated paths." },
 ];
 
-pub(in super::super) const CONJ_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
-    title: Some("conj"), slug: Some("conj"),
+    title: Some("conj"),
+    slug: Some("conj"),
     summary: "Compute complex conjugates elementwise.",
     description: "`conj(X)` negates each imaginary component while preserving the input shape and numeric class; real values remain unchanged.",
     keywords: &["conj", "complex conjugate", "complex", "elementwise", "gpu"],
     related: &["abs", "angle", "complex", "double", "exp", "expm1", "gather", "gpuArray", "imag", "log", "log1p", "log2", "log10", "real", "sign", "single", "sqrt"],
-    sections: SECTIONS, examples: EXAMPLES, example_exemption: None, faqs: FAQS,
-    links: &[], media: &[], evidence: EVIDENCE, introduced: None,
+    sections: SECTIONS,
+    examples: EXAMPLES,
+    example_exemption: None,
+    faqs: FAQS,
+    links: &[],
+    media: &[],
+    evidence: EVIDENCE,
+    introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

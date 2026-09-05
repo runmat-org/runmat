@@ -1,7 +1,20 @@
-mod contracts;
-mod documentation;
+mod conj;
+mod imag;
+mod projection_contract;
+mod real;
 
-pub use contracts::*;
+pub use conj::{
+    CONJ_CATALOG_ENTRY, CONJ_CHARACTER_INPUT_EXTENSION, CONJ_DESCRIPTOR, CONJ_ERROR_INTERNAL,
+    CONJ_ERROR_INVALID_INPUT, CONJ_EXTENSIONS, CONJ_INTEGER_CAPABILITIES,
+};
+pub use imag::{
+    IMAG_CATALOG_ENTRY, IMAG_DESCRIPTOR, IMAG_ERROR_INTERNAL, IMAG_ERROR_INVALID_INPUT,
+    IMAG_INTEGER_CAPABILITIES,
+};
+pub use real::{
+    REAL_CATALOG_ENTRY, REAL_DESCRIPTOR, REAL_ERROR_INTERNAL, REAL_ERROR_INVALID_INPUT,
+    REAL_INTEGER_CAPABILITIES,
+};
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &CONJ_CATALOG_ENTRY,

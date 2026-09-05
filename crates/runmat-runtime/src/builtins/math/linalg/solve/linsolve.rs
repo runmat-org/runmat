@@ -27,7 +27,7 @@ use crate::builtins::common::{
     linalg::{diagonal_rcond, singular_value_rcond},
     tensor,
 };
-use crate::builtins::math::elementwise::conj::conjugate_integer_imaginary_storage;
+use crate::builtins::math::elementwise::complex_components::conjugate_integer_imaginary_storage;
 use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 

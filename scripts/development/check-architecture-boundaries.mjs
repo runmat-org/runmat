@@ -1115,6 +1115,43 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 224,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "complex-component family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_components",
+    "crates/runmat-builtins/src/catalog/inference/math/complex_components",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_components/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/complex_components/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/conj/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/conj/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/imag/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/imag/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/projection/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/real/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_components/real/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_components/contracts.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_components/documentation",
+    "crates/runmat-builtins/src/catalog/inference/numeric_component.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/conj.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/imag.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/real.rs",
+    "docs/builtins/reference/conj.json",
+    "docs/builtins/reference/imag.json",
+    "docs/builtins/reference/real.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/conj.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/imag.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/real.json",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 256,
+});
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],
