@@ -1318,6 +1318,45 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 192,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "search-path query and replacement identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path",
+    "crates/runmat-builtins/src/catalog/inference/io",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path.rs",
+    "docs/builtins/reference/path.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/path.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+
+for (const [sourcePath, ceiling] of new Map([
+  ["crates/runmat-builtins/src/catalog/inference/routing/io/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/inference/routing/io/console.rs", 32],
+  ["crates/runmat-builtins/src/catalog/inference/routing/io/repl_fs.rs", 32],
+])) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(`${sourcePath} exceeds its typed IO inference routing boundary (found ${lines} lines; maximum ${ceiling})`);
+  }
+}
+if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/inference/routing/io.rs"))) {
+  fail("flat IO inference routing must not replace the domain hierarchy");
+}
+const ioRouting = rustSources("crates/runmat-builtins/src/catalog/inference/routing/io")
+  .map(({ text }) => text)
+  .join("\n");
+if (/IoInferenceRule::(?:ClearConsole|ChangeDirectory|CurrentDirectory|SearchPath)\b/.test(ioRouting)) {
+  fail("IO inference routing must use typed domain subrules instead of a growing flat builtin list");
+}
+
 const cdRuntimePath = "crates/runmat-runtime/src/builtins/io/repl_fs/cd/mod.rs";
 if (/\b(?:category|summary|keywords|descriptor|type_resolver|accel)\s*=/.test(read(cdRuntimePath))) {
   fail(`${cdRuntimePath} duplicates catalog-owned metadata or inference`);
@@ -1330,6 +1369,17 @@ if (/\bpub fn cd_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_r
 }
 if (/\bgather_if_needed_async\b/.test(rustSources("crates/runmat-runtime/src/builtins/io/repl_fs/cd").map(({ text }) => text).join("\n"))) {
   fail("cd must reject non-text values instead of gathering accelerator buffers");
+}
+
+const pathRuntimePath = "crates/runmat-runtime/src/builtins/io/repl_fs/path/mod.rs";
+if (/\b(?:category|summary|keywords|descriptor|type_resolver|accel)\s*=/.test(read(pathRuntimePath))) {
+  fail(`${pathRuntimePath} duplicates catalog-owned metadata or inference`);
+}
+if (/"path"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim path authority");
+}
+if (/\bpub fn path_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"))) {
+  fail("legacy runtime type resolver must not reclaim path inference authority");
 }
 
 if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(
