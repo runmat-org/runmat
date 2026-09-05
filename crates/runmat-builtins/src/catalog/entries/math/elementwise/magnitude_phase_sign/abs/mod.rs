@@ -13,7 +13,9 @@ use crate::{
 };
 use runmat_types::EffectKind;
 
-use super::documentation::ABS_DOCUMENTATION;
+mod documentation;
+
+use documentation::ABS_DOCUMENTATION;
 
 const ABS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
@@ -118,7 +120,9 @@ pub const ABS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &ABS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::Abs),
+        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::MagnitudePhaseSign(
+            crate::MagnitudePhaseSignKind::Magnitude,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

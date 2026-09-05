@@ -7,10 +7,10 @@ use crate::{
 };
 
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/sign.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/sign/mod.rs") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::sign::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::sign::tests::sign_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::magnitude_phase_sign::sign::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::magnitude_phase_sign::sign::tests::provider::sign_gpu_provider_roundtrip" },
     ],
     notes: &[],
 };

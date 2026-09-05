@@ -223,7 +223,6 @@ pub enum StatsRandomInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum MathInferenceRule {
-    Abs,
     AngleConversion(AngleConversionInferenceRule),
     Atan2,
     Bitwise(BitwiseInferenceRule),
@@ -232,7 +231,7 @@ pub enum MathInferenceRule {
     GammaFunction(GammaFunctionInferenceRule),
     IntegerDivide,
     Hypot,
-    PhaseAngle,
+    MagnitudePhaseSign(MagnitudePhaseSignKind),
     Exponential(ExponentialKind),
     Logarithm(LogarithmKind),
     LogicalReduction(LogicalReductionKind),
@@ -244,7 +243,6 @@ pub enum MathInferenceRule {
     Rounding(RoundingFunction),
     Remainder(RemainderFunction),
     Round,
-    Signum,
     Trigonometric(TrigonometricFunction),
     Hyperbolic(HyperbolicFunction),
     PiScaledTrigonometric(PiScaledTrigonometricFunction),
@@ -252,6 +250,13 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MagnitudePhaseSignKind {
+    Magnitude,
+    Phase,
+    Sign,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

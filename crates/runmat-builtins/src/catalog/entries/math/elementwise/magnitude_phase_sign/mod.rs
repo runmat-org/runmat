@@ -1,7 +1,9 @@
 mod abs;
 mod angle;
-mod documentation;
 mod sign;
+
+#[cfg(test)]
+mod tests;
 
 pub use abs::*;
 pub use angle::*;
