@@ -137,9 +137,10 @@ fn atan2_rejects_mismatched_tabular_variables() {
     let error = atan2_builtin(table("A"), table("B"))
         .expect_err("mismatched tabular variables must reject");
     assert_eq!(error.identifier(), ATAN2_ERROR_INVALID_INPUT.identifier);
-    assert!(error
-        .message()
-        .contains("matching variable names and order"));
+    assert!(
+        error.message().contains("same variable names"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -480,22 +481,21 @@ fn atan2_gpu_host_mix_reads_typed_integer_lhs_exactly() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn atan2_wgpu_matches_cpu_elementwise() {
-    let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-    );
+    let _guard = test_support::accel_test_lock();
+    let Some(provider) = test_support::wgpu_provider_if_available() else {
+        return;
+    };
     let neg_zero = f64::from_bits(0x8000_0000_0000_0000);
     let y = Tensor::new(vec![0.0, neg_zero, neg_zero, 1.0, -1.0, 2.0], vec![2, 3]).unwrap();
     let x = Tensor::new(vec![neg_zero, neg_zero, 0.0, 1.0, 1.0, -1.0], vec![2, 3]).unwrap();
     let cpu = atan2_host(Value::Tensor(y.clone()), Value::Tensor(x.clone())).unwrap();
-    let hy = runmat_accelerate_api::provider()
-        .unwrap()
+    let hy = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &y.materialize_f64(),
             shape: &y.shape,
         })
         .unwrap();
-    let hx = runmat_accelerate_api::provider()
-        .unwrap()
+    let hx = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
             shape: &x.shape,
@@ -506,7 +506,7 @@ fn atan2_wgpu_matches_cpu_elementwise() {
     match cpu {
         Value::Tensor(ct) => {
             assert_eq!(ct.shape, gathered.shape);
-            let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+            let tol = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };

@@ -242,7 +242,7 @@ async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
         let result = determinant_from_value(gathered)?.into_value_for_prototype(&handle)?;
-        return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+        return crate::builtins::common::provider_restore::upload_value_like(
             provider, result, NAME, &handle,
         );
     }

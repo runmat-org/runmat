@@ -548,10 +548,9 @@ async fn diff_gpu(
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
             .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
-        let gathered =
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-                gathered, &handle, NAME,
-            )?;
+        let gathered = crate::builtins::common::provider_restore::align_floating_value_precision(
+            gathered, &handle, NAME,
+        )?;
         let output = match gathered {
             Value::ComplexTensor(tensor) => {
                 Value::ComplexTensor(diff_complex_tensor(tensor, order, Some(working_dim))?)
@@ -579,7 +578,7 @@ async fn diff_gpu(
                 )))
             }
         };
-        return crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+        return crate::builtins::common::provider_restore::upload_value_like(
             provider, output, NAME, &handle,
         );
     }
@@ -611,7 +610,7 @@ async fn diff_gpu(
         .await
         .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
     let Value::Tensor(tensor) =
-        crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
+        crate::builtins::common::provider_restore::align_floating_value_precision(
             Value::Tensor(tensor),
             &handle,
             NAME,
@@ -620,7 +619,7 @@ async fn diff_gpu(
         unreachable!("real floating gather remains a tensor")
     };
     let output = diff_tensor_host(tensor, order, Some(working_dim))?;
-    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+    crate::builtins::common::provider_restore::upload_value_like(
         provider,
         tensor::tensor_into_value(output),
         NAME,

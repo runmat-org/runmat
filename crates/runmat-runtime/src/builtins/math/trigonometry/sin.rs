@@ -1025,10 +1025,10 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     fn sin_wgpu_matches_cpu_elementwise() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("WGPU provider");
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let t = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {

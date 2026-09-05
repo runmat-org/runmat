@@ -106,15 +106,17 @@ async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-            asinh_tensor(tensor).map(tensor::tensor_into_value)
-        })
+        return crate::builtins::common::provider_restore::gather_compute_restore(
+            handle,
+            BUILTIN_NAME,
+            |tensor| asinh_tensor(tensor).map(tensor::tensor_into_value),
+        )
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.unary_asinh(&handle).await {
             Ok(output) => {
-                return super::inverse_helpers::validate_real_unary_provider_output(
+                return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                     provider,
                     &handle,
                     output,
@@ -130,9 +132,11 @@ async fn asinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    super::inverse_helpers::gather_compute_restore(handle, BUILTIN_NAME, |tensor| {
-        asinh_tensor(tensor).map(tensor::tensor_into_value)
-    })
+    crate::builtins::common::provider_restore::gather_compute_restore(
+        handle,
+        BUILTIN_NAME,
+        |tensor| asinh_tensor(tensor).map(tensor::tensor_into_value),
+    )
     .await
 }
 
@@ -441,25 +445,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn asinh_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let tensor = Tensor::new(vec![-3.0, -1.0, 0.0, 1.0, 3.0], vec![5, 1]).unwrap();
         let cpu = asinh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .expect("provider")
-            .upload(&view)
-            .expect("upload");
+        let handle = provider.upload(&view).expect("upload");
         let gpu = block_on(asinh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {
                 assert_eq!(gathered.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };

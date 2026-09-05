@@ -53,12 +53,11 @@ async fn apply_gpu(
         )
     })?;
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
-    let gathered =
-        crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-            gathered,
-            &handle,
-            conversion.name,
-        )?;
+    let gathered = crate::builtins::common::provider_restore::align_floating_value_precision(
+        gathered,
+        &handle,
+        conversion.name,
+    )?;
     crate::builtins::math::trigonometry::inverse_helpers::ensure_integer_exact_f64(
         &gathered,
         conversion.name,
@@ -72,7 +71,7 @@ async fn apply_gpu(
         Value::Num(value) => Value::Num(value * conversion.scale_f64),
         other => apply_real(conversion, other)?,
     };
-    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+    crate::builtins::common::provider_restore::upload_value_like(
         provider,
         output,
         conversion.name,

@@ -32,14 +32,13 @@ pub(super) fn restore(
         let protected = std::iter::once(resident.prototype.clone())
             .chain(restored.iter().filter_map(handle))
             .collect::<Vec<_>>();
-        let output =
-            crate::builtins::math::trigonometry::inverse_helpers::upload_value_like_protected(
-                resident.provider,
-                value,
-                "grp2idx",
-                &resident.prototype,
-                &protected,
-            );
+        let output = crate::builtins::common::provider_restore::upload_value_like_protected(
+            resident.provider,
+            value,
+            "grp2idx",
+            &resident.prototype,
+            &protected,
+        );
         let Ok(output) = output else {
             free_outputs(&restored, &resident.prototype);
             return Ok((host[0].clone(), host[1].clone()));

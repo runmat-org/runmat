@@ -366,35 +366,33 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
     let orientation = orientation_from_hint(num_input.hint);
     let quotient = convert_output(quotient_raw, orientation, single_output, complex_output)?;
     let remainder = convert_output(remainder_raw, orientation, single_output, complex_output)?;
-    let (quotient, remainder) = if let (Some(provider), Some(prototype)) =
-        (provider, resident_prototype.as_ref())
-    {
-        let quotient = if integer_or_logical {
-            quotient
-        } else {
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
+    let (quotient, remainder) =
+        if let (Some(provider), Some(prototype)) = (provider, resident_prototype.as_ref()) {
+            let quotient = if integer_or_logical {
+                quotient
+            } else {
+                crate::builtins::common::provider_restore::align_floating_value_precision(
+                    quotient,
+                    prototype,
+                    BUILTIN_NAME,
+                )?
+            };
+            let remainder = if integer_or_logical {
+                remainder
+            } else {
+                crate::builtins::common::provider_restore::align_floating_value_precision(
+                    remainder,
+                    prototype,
+                    BUILTIN_NAME,
+                )?
+            };
+            let quotient = crate::builtins::common::provider_restore::upload_value_like(
+                provider,
                 quotient,
-                prototype,
                 BUILTIN_NAME,
-            )?
-        };
-        let remainder = if integer_or_logical {
-            remainder
-        } else {
-            crate::builtins::math::trigonometry::inverse_helpers::align_floating_value_precision(
-                remainder,
                 prototype,
-                BUILTIN_NAME,
-            )?
-        };
-        let quotient = crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
-            provider,
-            quotient,
-            BUILTIN_NAME,
-            prototype,
-        )?;
-        let remainder =
-            match crate::builtins::math::trigonometry::inverse_helpers::upload_value_like(
+            )?;
+            let remainder = match crate::builtins::common::provider_restore::upload_value_like(
                 provider,
                 remainder,
                 BUILTIN_NAME,
@@ -410,10 +408,10 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
                     return Err(error);
                 }
             };
-        (quotient, remainder)
-    } else {
-        (quotient, remainder)
-    };
+            (quotient, remainder)
+        } else {
+            (quotient, remainder)
+        };
 
     Ok(DeconvEval {
         quotient,

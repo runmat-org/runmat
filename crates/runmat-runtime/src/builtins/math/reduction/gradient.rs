@@ -666,7 +666,7 @@ fn restore_gradient_outputs_if_supported(
         let protected = std::iter::once(prototype.clone())
             .chain(restored.iter().filter_map(gradient_output_handle).cloned())
             .collect::<Vec<_>>();
-        match crate::builtins::math::trigonometry::inverse_helpers::upload_value_protected(
+        match crate::builtins::common::provider_restore::upload_value_protected(
             provider, output, NAME, &protected,
         ) {
             Ok(output) => {

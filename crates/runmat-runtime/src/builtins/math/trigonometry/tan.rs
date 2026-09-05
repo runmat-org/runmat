@@ -1081,25 +1081,23 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn tan_wgpu_matches_cpu_elementwise() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        let _guard = test_support::accel_test_lock();
+        let Some(provider) = test_support::wgpu_provider_if_available() else {
+            return;
+        };
         let tensor = Tensor::new(vec![0.0, 0.25, -0.5, 1.0], vec![4, 1]).unwrap();
         let cpu = tan_real(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
             shape: &tensor.shape,
         };
-        let handle = runmat_accelerate_api::provider()
-            .unwrap()
-            .upload(&view)
-            .unwrap();
+        let handle = provider.upload(&view).unwrap();
         let gpu = block_on(tan_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
                 assert_eq!(gt.shape, ct.shape);
-                let tol = match runmat_accelerate_api::provider().unwrap().precision() {
+                let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
                 };

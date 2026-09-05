@@ -199,7 +199,7 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let output = gammaln_tensor(tensor)?;
-    crate::builtins::math::trigonometry::inverse_helpers::upload_value_like_protected(
+    crate::builtins::common::provider_restore::upload_value_like_protected(
         provider,
         output,
         BUILTIN_NAME,
