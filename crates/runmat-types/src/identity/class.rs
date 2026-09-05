@@ -190,7 +190,7 @@ const fn assert_valid_static(name: &str) {
 }
 
 pub mod standard {
-    use super::{StaticClassIdentity, StaticClassNamespace};
+    use super::{ClassIdentity, StaticClassIdentity, StaticClassNamespace};
 
     pub const LANGUAGE_CORRECTION_NAMESPACE: StaticClassNamespace =
         StaticClassNamespace::new("matlab.lang.correction");
@@ -255,6 +255,14 @@ pub mod standard {
         StaticClassIdentity::new("matlab.unittest.constraints.IsTrue");
     pub const UNIT_TEST_IS_FALSE: StaticClassIdentity =
         StaticClassIdentity::new("matlab.unittest.constraints.IsFalse");
+
+    /// Returns whether an identity belongs to the standard tabular family.
+    ///
+    /// Semantic consumers use this predicate instead of reconstructing the
+    /// family from display spellings or repeating its member list.
+    pub fn is_tabular(identity: &ClassIdentity) -> bool {
+        identity.is(TABLE) || identity.is(TIMETABLE)
+    }
 }
 
 #[cfg(test)]
@@ -286,5 +294,6 @@ mod tests {
         let table = ClassIdentity::new("table").unwrap();
         assert!(table.is(standard::TABLE));
         assert!(!table.is(standard::TIMETABLE));
+        assert!(standard::is_tabular(&table));
     }
 }

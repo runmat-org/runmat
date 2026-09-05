@@ -84,8 +84,7 @@ fn supported(input: &ValueFact) -> bool {
         ValueKindFact::Numeric(value) => value.domain == NumericDomain::Real,
         ValueKindFact::Logical | ValueKindFact::String | ValueKindFact::Cell(_) => true,
         ValueKindFact::Object(value) => value.runtime_class.as_ref().is_none_or(|class| {
-            class.is(runmat_types::standard::TABLE)
-                || class.is(runmat_types::standard::TIMETABLE)
+            runmat_types::standard::is_tabular(class)
                 || class.is(runmat_types::standard::CATEGORICAL)
                 || class.is(runmat_types::standard::DATETIME)
                 || class.is(runmat_types::standard::DURATION)
@@ -96,7 +95,7 @@ fn supported(input: &ValueFact) -> bool {
 }
 
 fn is_tabular(input: &ValueFact) -> bool {
-    matches!(&input.kind, ValueKindFact::Object(value) if value.runtime_class.as_ref().is_some_and(|class| class.is(runmat_types::standard::TABLE) || class.is(runmat_types::standard::TIMETABLE)))
+    matches!(&input.kind, ValueKindFact::Object(value) if value.runtime_class.as_ref().is_some_and(runmat_types::standard::is_tabular))
 }
 
 fn group_numbers(input: Option<&ValueFact>, table: bool) -> ValueFact {

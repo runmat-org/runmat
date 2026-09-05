@@ -83,10 +83,11 @@ pub(super) fn infer(
             return finish_fixed(entry, request, output, diagnostics);
         }
         ValueKindFact::Object(object) => {
-            if object.runtime_class.as_ref().is_some_and(|class| {
-                class.is(runmat_types::standard::TABLE)
-                    || class.is(runmat_types::standard::TIMETABLE)
-            }) {
+            if object
+                .runtime_class
+                .as_ref()
+                .is_some_and(runmat_types::standard::is_tabular)
+            {
                 object.properties.clear();
                 object.properties_complete = false;
                 output.alias = AliasFact::Unique;

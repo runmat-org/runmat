@@ -1,11 +1,12 @@
-mod documentation;
+mod log;
+mod log10;
 mod log1p;
 mod log2;
-mod natural_and_common;
 
+pub use log::*;
+pub use log10::*;
 pub use log1p::*;
 pub use log2::*;
-pub use natural_and_common::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &LOG_CATALOG_ENTRY,

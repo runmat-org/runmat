@@ -968,6 +968,52 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 256,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "logarithm family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms",
+    "crates/runmat-builtins/src/catalog/inference/math/logarithms",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/logarithms/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/logarithms/unary/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/logarithms/dissection/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log10/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log1p/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log2/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log10/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log1p/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log2/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/logarithms/log2/dissection/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/inference/math_logarithms.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms/natural_and_common.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms/log1p.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms/log2.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/logarithms/documentation",
+    "crates/runmat-runtime/src/builtins/math/elementwise/log.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/log10.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/log1p.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/log2.rs",
+    "docs/builtins/reference/log.json",
+    "docs/builtins/reference/log10.json",
+    "docs/builtins/reference/log1p.json",
+    "docs/builtins/reference/log2.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/log.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/log10.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/log1p.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/log2.json",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 256,
+});
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],
