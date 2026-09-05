@@ -103,7 +103,7 @@ fn execute_native_dag(
     request.resources.maximum_iterations = 1_000_000;
 
     let mut executor =
-        NativeExactMeshingExecutor::new(&session, NativeMeshingExecutionPolicy::default()).unwrap();
+        NativeExactMeshingExecutor::new(&session, MeshingExecutionPolicy::default()).unwrap();
     let result = runmat_meshing_execution::execute_exact_meshing_dag(
         runmat_meshing_execution::ExactMeshingDagRun {
             geometry: &geometry,

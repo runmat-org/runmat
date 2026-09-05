@@ -119,6 +119,25 @@ impl RemotePoolDriver {
         self.execution_objects.get(reference)
     }
 
+    pub fn execution_object_by_digest(
+        &self,
+        digest: Digest,
+    ) -> NativeExecutionResult<Option<Arc<[u8]>>> {
+        self.execution_objects.get_by_digest(digest)
+    }
+
+    pub const fn scope_id(&self) -> ExecutionScopeId {
+        self.scope_id
+    }
+
+    pub const fn pool_id(&self) -> PoolId {
+        self.pool_id
+    }
+
+    pub fn value_scope(&self) -> &str {
+        &self.value_scope
+    }
+
     pub async fn add_worker(
         self: &Arc<Self>,
         channel: Arc<dyn RemoteWorkerChannel>,

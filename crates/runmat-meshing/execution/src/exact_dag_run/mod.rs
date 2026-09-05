@@ -63,6 +63,17 @@ pub fn execute_exact_meshing_dag<E: ExactMeshingDagExecutor>(
     run: ExactMeshingDagRun<'_>,
     executor: &mut E,
 ) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
+    futures::executor::block_on(execute_exact_meshing_dag_async(run, executor))
+}
+
+/// Executes the canonical exact-meshing graph without imposing a blocking backend contract.
+///
+/// This is the single orchestration authority used by both the synchronous entry point and
+/// asynchronous local or remote executors.
+pub async fn execute_exact_meshing_dag_async<E: ExactMeshingDagExecutor>(
+    run: ExactMeshingDagRun<'_>,
+    executor: &mut E,
+) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
     validate_run(&run)?;
     register_inputs(&run, executor)?;
     let started = Instant::now();
@@ -81,14 +92,16 @@ pub fn execute_exact_meshing_dag<E: ExactMeshingDagExecutor>(
         run.program_revision.clone(),
         run.inventory_limits,
         &mut observations,
-    )?;
+    )
+    .await?;
     let curve_join = planner.curve_join(&curve_pass, curve_partitions)?;
     let curve = execute_planned_stage(
         executor,
         &curve_join,
         run.program_revision.clone(),
         run.inventory_limits,
-    )?;
+    )
+    .await?;
     observations.push(curve.evidence.clone());
 
     let surface = surface::execute_surface_dag(
@@ -98,18 +111,19 @@ pub fn execute_exact_meshing_dag<E: ExactMeshingDagExecutor>(
         curve.root,
         &run,
         &mut observations,
-    )?;
-    terminal::execute_terminal_dag(executor, &planner, &run, surface, observations, started)
+    )
+    .await?;
+    terminal::execute_terminal_dag(executor, &planner, &run, surface, observations, started).await
 }
 
-fn execute_partitions<E: ExactMeshingDagExecutor>(
+async fn execute_partitions<E: ExactMeshingDagExecutor>(
     executor: &mut E,
     stages: &[crate::PlannedMeshingStage],
     revision: ProgramRevision,
     limits: ObjectInventoryLimits,
     observations: &mut Vec<runmat_meshing_core::MeshingStageEvidence>,
 ) -> Result<Vec<runmat_execution::value::ValueRef>, ExactMeshingDagRunError> {
-    let successes = executor.execute_stages(stages, revision)?;
+    let successes = executor.execute_stages(stages, revision).await?;
     if successes.len() != stages.len() {
         return Err(crate::MeshingExecutionError::Invalid(
             "meshing executor returned the wrong partition result count".into(),

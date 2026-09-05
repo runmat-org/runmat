@@ -10,7 +10,7 @@ use crate::{
 use super::stage::{execute_planned_stage, ExactMeshingDagExecutor, ExecutedStage};
 use super::{ExactMeshingDagRun, ExactMeshingDagRunError, ExactMeshingDagRunResult};
 
-pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
+pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
     executor: &mut E,
     planner: &ExactMeshingDagPlanner,
     run: &ExactMeshingDagRun<'_>,
@@ -23,26 +23,30 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
         &planner.tetrahedralization(surface_root.clone())?,
         run,
         &mut observations,
-    )?;
+    )
+    .await?;
     let projection = execute(
         executor,
         &planner.solver_projection(surface_root, volume.root)?,
         run,
         &mut observations,
-    )?;
+    )
+    .await?;
     let projection_root = projection.root;
     let validation = execute(
         executor,
         &planner.solver_validation(projection_root.clone())?,
         run,
         &mut observations,
-    )?;
+    )
+    .await?;
     let serialized = execute(
         executor,
         &planner.solver_serialization(projection_root, validation.root)?,
         run,
         &mut observations,
-    )?;
+    )
+    .await?;
     let (artifact, serialized_artifact_bytes) =
         decode_serialized_artifact(executor, run, &serialized.root)?;
     let wall_time_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -71,7 +75,8 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
         &planner.solver_publication(serialized.root, evidence_input.root_input().clone())?,
         run.program_revision.clone(),
         run.inventory_limits,
-    )?;
+    )
+    .await?;
     decode_terminal_publication(
         executor,
         run,
@@ -81,7 +86,7 @@ pub(super) fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
     )
 }
 
-fn execute<E: ExactMeshingDagExecutor>(
+async fn execute<E: ExactMeshingDagExecutor>(
     executor: &mut E,
     stage: &crate::PlannedMeshingStage,
     run: &ExactMeshingDagRun<'_>,
@@ -92,7 +97,8 @@ fn execute<E: ExactMeshingDagExecutor>(
         stage,
         run.program_revision.clone(),
         run.inventory_limits,
-    )?;
+    )
+    .await?;
     observations.push(completed.evidence.clone());
     Ok(completed)
 }

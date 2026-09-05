@@ -40,6 +40,16 @@ impl RemoteTaskCompletion {
             .unwrap_or_else(|_| Err("remote task completion channel closed".into()))
     }
 
+    pub async fn wait_with_progress(
+        self,
+    ) -> (Result<AttemptSuccess, String>, Vec<ProgramProgress>) {
+        let result = self
+            .receiver
+            .await
+            .unwrap_or_else(|_| Err("remote task completion channel closed".into()));
+        (result, self.progress.drain())
+    }
+
     pub fn drain_progress(&self) -> Vec<ProgramProgress> {
         self.progress.drain()
     }

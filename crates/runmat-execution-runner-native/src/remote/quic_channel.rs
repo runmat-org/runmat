@@ -10,7 +10,7 @@ use runmat_execution_runner::{AttemptReport, AttemptRequest, WorkerSpec};
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayConnection};
 use runmat_execution_transport_native::transfer::ObjectChunk;
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 use uuid::Uuid;
 
 use super::protocol::{
@@ -31,6 +31,7 @@ struct PendingReply {
     frame_kind: FrameKind,
     attempt_id: Option<runmat_execution::identity::AttemptId>,
     sender: oneshot::Sender<RemoteWorkerReply>,
+    activity: mpsc::UnboundedSender<()>,
 }
 
 pub struct QuicRemoteWorkerChannel {
@@ -141,6 +142,13 @@ impl QuicRemoteWorkerChannel {
                         queue.pop_front();
                     }
                     queue.push_back(event.clone());
+                    if let Some(pending) = pending
+                        .lock()
+                        .expect("remote reply registry poisoned")
+                        .get(&reply.correlation_id)
+                    {
+                        let _ = pending.activity.send(());
+                    }
                     continue;
                 }
                 if let Some(pending) = pending
@@ -182,6 +190,7 @@ impl QuicRemoteWorkerChannel {
             command,
         };
         let (sender, receiver) = oneshot::channel();
+        let (activity, mut activity_receiver) = mpsc::unbounded_channel();
         self.pending
             .lock()
             .expect("remote reply registry poisoned")
@@ -191,6 +200,7 @@ impl QuicRemoteWorkerChannel {
                     frame_kind: kind,
                     attempt_id,
                     sender,
+                    activity,
                 },
             );
         let plaintext = serde_json::to_vec(&request).map_err(protocol)?;
@@ -207,10 +217,27 @@ impl QuicRemoteWorkerChannel {
                 .remove(&correlation_id);
             return Err(protocol(error));
         }
-        let reply = tokio::time::timeout(RESPONSE_TIMEOUT, receiver)
-            .await
-            .map_err(|_| protocol("remote worker response timed out"))?
-            .map_err(|_| protocol("remote worker route closed"))?;
+        tokio::pin!(receiver);
+        let mut activity_open = true;
+        let reply = loop {
+            tokio::select! {
+                reply = &mut receiver => {
+                    break reply.map_err(|_| protocol("remote worker route closed"))?;
+                }
+                activity = activity_receiver.recv(), if activity_open => {
+                    if activity.is_none() {
+                        activity_open = false;
+                    }
+                }
+                _ = tokio::time::sleep(RESPONSE_TIMEOUT) => {
+                    self.pending
+                        .lock()
+                        .expect("remote reply registry poisoned")
+                        .remove(&correlation_id);
+                    return Err(protocol("remote worker response timed out after inactivity"));
+                }
+            }
+        };
         match reply.outcome {
             RemoteWorkerOutcome::Rejected { message } => {
                 Err(NativeExecutionError::Protocol(message))

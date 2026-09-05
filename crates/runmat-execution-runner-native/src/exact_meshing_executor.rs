@@ -17,7 +17,7 @@ use runmat_meshing_execution::{
 use crate::{NativeProgramSession, NativeProgramTask, ProgramProgress};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct NativeMeshingExecutionPolicy {
+pub struct MeshingExecutionPolicy {
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
     pub maximum_relay_bytes: u64,
@@ -27,7 +27,7 @@ pub struct NativeMeshingExecutionPolicy {
     pub poll_interval: Duration,
 }
 
-impl Default for NativeMeshingExecutionPolicy {
+impl Default for MeshingExecutionPolicy {
     fn default() -> Self {
         Self {
             cpu_millicores: 1_000,
@@ -43,24 +43,16 @@ impl Default for NativeMeshingExecutionPolicy {
 
 pub struct NativeExactMeshingExecutor<'a> {
     session: &'a NativeProgramSession,
-    policy: NativeMeshingExecutionPolicy,
+    policy: MeshingExecutionPolicy,
     progress: Vec<ProgramProgress>,
 }
 
 impl<'a> NativeExactMeshingExecutor<'a> {
     pub fn new(
         session: &'a NativeProgramSession,
-        policy: NativeMeshingExecutionPolicy,
+        policy: MeshingExecutionPolicy,
     ) -> Result<Self, MeshingStageExecutionError> {
-        if policy.cpu_millicores == 0
-            || policy.maximum_attempts < 2
-            || policy.maximum_attempts > 16
-            || policy.poll_interval.is_zero()
-        {
-            return Err(MeshingStageExecutionError::new(
-                "native meshing execution policy contains an invalid bound",
-            ));
-        }
+        policy.validate()?;
         Ok(Self {
             session,
             policy,
@@ -71,7 +63,24 @@ impl<'a> NativeExactMeshingExecutor<'a> {
     pub fn drain_progress(&mut self) -> Vec<ProgramProgress> {
         std::mem::take(&mut self.progress)
     }
+}
 
+impl MeshingExecutionPolicy {
+    pub(crate) fn validate(self) -> Result<(), MeshingStageExecutionError> {
+        if self.cpu_millicores == 0
+            || self.maximum_attempts < 2
+            || self.maximum_attempts > 16
+            || self.poll_interval.is_zero()
+        {
+            return Err(MeshingStageExecutionError::new(
+                "meshing execution policy contains an invalid bound",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl NativeExactMeshingExecutor<'_> {
     fn submit_stage(
         &self,
         stage: &PlannedMeshingStage,
@@ -204,18 +213,18 @@ impl CacheExport for NativeExactMeshingExecutor<'_> {
 }
 
 impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
-    fn execute_stage(
-        &mut self,
-        stage: &PlannedMeshingStage,
+    async fn execute_stage<'a>(
+        &'a mut self,
+        stage: &'a PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
         let task = self.submit_stage(stage, revision)?;
         self.wait_for_task(task, stage)
     }
 
-    fn execute_stages(
-        &mut self,
-        stages: &[PlannedMeshingStage],
+    async fn execute_stages<'a>(
+        &'a mut self,
+        stages: &'a [PlannedMeshingStage],
         revision: ProgramRevision,
     ) -> Result<Vec<AttemptSuccess>, MeshingStageExecutionError> {
         let tasks = stages

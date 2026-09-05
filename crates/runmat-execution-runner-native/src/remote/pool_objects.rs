@@ -75,6 +75,22 @@ impl RemoteObjectCatalog {
         }
     }
 
+    pub(super) fn get_by_digest(&self, digest: Digest) -> NativeExecutionResult<Option<Arc<[u8]>>> {
+        let state = self.state.lock().expect("remote object catalog poisoned");
+        let reference = state
+            .objects
+            .values()
+            .find(|reference| reference.logical_digest == digest);
+        match reference {
+            Some(_) => self
+                .store
+                .read_verified(digest)
+                .map(|bytes| bytes.map(Arc::<[u8]>::from))
+                .map_err(protocol),
+            None => Ok(None),
+        }
+    }
+
     pub(super) fn contains(&self, reference: &ValueRef) -> NativeExecutionResult<bool> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {

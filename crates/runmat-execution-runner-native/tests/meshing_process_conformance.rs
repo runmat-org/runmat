@@ -31,20 +31,21 @@ use runmat_meshing_core::{
     MESHING_WORKLOAD_SCHEMA_VERSION,
 };
 use runmat_meshing_execution::{
-    build_task_submission, import_result_publication, prepare_exact_geometry_input,
-    prepare_exact_geometry_objects, prepare_faceted_geometry_input,
-    prepare_faceted_geometry_objects, MeshingExecutionContext, MeshingHostResponse,
-    MeshingHostWorkload, MeshingStageCheckpoint, MeshingStageInvocation, MeshingStageKernel,
-    MeshingTaskEffectPolicy, NoopMeshingProgress, PreparedExactGeometryInput,
-    ValidatedMeshingStageOutput,
+    build_task_submission, execute_exact_meshing_dag_async, import_result_publication,
+    prepare_exact_geometry_input, prepare_exact_geometry_objects, prepare_faceted_geometry_input,
+    prepare_faceted_geometry_objects, ExactMeshingDagRun, MeshingExecutionContext,
+    MeshingHostResponse, MeshingHostWorkload, MeshingRunEvidenceContext, MeshingStageCheckpoint,
+    MeshingStageInvocation, MeshingStageKernel, MeshingTaskEffectPolicy, NoopMeshingProgress,
+    PreparedExactGeometryInput, ValidatedMeshingStageOutput,
 };
 
 use runmat_execution_runner_native::{
     execute_meshing_program_request, native_meshing_kernel_dispatcher, run_meshing_worker_stdio,
-    run_remote_meshing_worker_quic, NativeExactMeshingExecutor, NativeMeshingExecutionPolicy,
+    run_remote_meshing_worker_quic, MeshingExecutionPolicy, NativeExactMeshingExecutor,
     NativeMeshingHostLimits, NativeProgramSession, QuicRemoteWorkerChannel,
-    RemoteMeshingWorkerQuicRequest, RemotePoolDriver, RemoteWorkerChannel,
-    RemoteWorkerChannelConfig, RemoteWorkerQuicRequest, NATIVE_OBJECT_STORE_ROOT_ENV,
+    RemoteExactMeshingExecutor, RemoteMeshingWorkerQuicRequest, RemotePoolDriver,
+    RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    NATIVE_OBJECT_STORE_ROOT_ENV,
 };
 
 #[path = "meshing_process_conformance/curve_pipeline.rs"]
@@ -171,6 +172,26 @@ impl MeshingStageKernel for SlowKernel {
 struct AdmissionThenCooperativeSlowKernel {
     calls: AtomicUsize,
     cancellation_observed: AtomicBool,
+}
+
+struct ProductionAndConformanceKernel {
+    production_request: StableDigest,
+    production: Arc<dyn MeshingStageKernel>,
+    conformance: Arc<AdmissionThenCooperativeSlowKernel>,
+}
+
+impl MeshingStageKernel for ProductionAndConformanceKernel {
+    fn execute(
+        &self,
+        invocation: MeshingStageInvocation<'_, '_>,
+    ) -> Result<ValidatedMeshingStageOutput, Box<MeshingFailure>> {
+        if invocation.host.resolved_request.canonical_digest().ok() == Some(self.production_request)
+        {
+            self.production.execute(invocation)
+        } else {
+            self.conformance.execute(invocation)
+        }
+    }
 }
 
 impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
@@ -416,6 +437,7 @@ async fn parent() {
 
 async fn remote_conformance() {
     let (host, request, exact, curve, bundle_bytes) = remote_fixture("remote-meshing-run");
+    let full_dag = full_dag_fixture("remote-meshing-run");
 
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
@@ -438,7 +460,11 @@ async fn remote_conformance() {
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([17; 32]).unwrap();
     let kernel = Arc::new(AdmissionThenCooperativeSlowKernel::default());
-    let server_kernel = Arc::clone(&kernel);
+    let server_kernel = Arc::new(ProductionAndConformanceKernel {
+        production_request: full_dag.1.canonical_digest().unwrap(),
+        production: Arc::new(native_meshing_kernel_dispatcher()),
+        conformance: Arc::clone(&kernel),
+    });
     let server = run_remote_meshing_worker_quic(RemoteMeshingWorkerQuicRequest {
         worker: RemoteWorkerQuicRequest {
             listener,
@@ -591,6 +617,49 @@ async fn remote_conformance() {
 
         curve_pipeline::remote_conformance(&pool, scope_id, pool_id, &curve).await;
 
+        let mut full_executor = RemoteExactMeshingExecutor::new(
+            Arc::clone(&pool),
+            full_dag.2.clone(),
+            MeshingExecutionPolicy::default(),
+            limits().inventory.max_object_bytes,
+        )
+        .unwrap();
+        let full_result = tokio::time::timeout(
+            Duration::from_secs(120),
+            execute_exact_meshing_dag_async(
+                ExactMeshingDagRun {
+                    geometry: &full_dag.0,
+                    request: full_dag.1.clone(),
+                    artifact_access: full_dag.2.clone(),
+                    capability_cohort: Some("native-cohort-v1".into()),
+                    program_revision: request.recipe.program_revision.clone(),
+                    preferred_edges_per_partition: 3,
+                    preferred_faces_per_partition: 2,
+                    inventory_limits: limits().inventory,
+                    evidence: MeshingRunEvidenceContext {
+                        platform: runmat_meshing_core::PlatformBuildIdentity {
+                            capability_cohort: "native-cohort-v1".into(),
+                            target_triple: "encrypted-remote-test".into(),
+                            build_digest: stable(72),
+                            exact_kernel_abi: Some("occt-v1".into()),
+                        },
+                        sizing: Vec::new(),
+                        cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+                    },
+                },
+                &mut full_executor,
+            ),
+        )
+        .await
+        .expect("full remote exact-meshing DAG timed out")
+        .unwrap();
+        full_result
+            .evidence
+            .validate(&full_result.artifact)
+            .unwrap();
+        assert_eq!(full_result.artifact.topology.volume_elements.len(), 4);
+        assert!(!full_executor.drain_progress().is_empty());
+
         let mut exact_serial_store = TestStore::default();
         for object in &exact.input.geometry_objects().objects {
             exact_serial_store
@@ -681,6 +750,47 @@ async fn remote_conformance() {
     let (server, ()) = tokio::join!(server, client);
     server.unwrap();
     assert!(kernel.cancellation_observed.load(Ordering::Acquire));
+}
+
+fn full_dag_fixture(
+    authorization_scope: &str,
+) -> (PreparedExactGeometryInput, MeshingRequest, ArtifactAccess) {
+    let access = ArtifactAccess {
+        authorization_scope: authorization_scope.into(),
+        encryption_context: Digest::sha256(b"native-meshing-encryption-context"),
+    };
+    let (document, topology, evaluators) = runmat_geometry_fixtures::exact_tetrahedron();
+    let objects = prepare_exact_geometry_objects(
+        document.clone(),
+        topology,
+        evaluators,
+        None,
+        None,
+        limits().inventory,
+    )
+    .unwrap();
+    let geometry =
+        prepare_exact_geometry_input(objects, access.clone(), limits().inventory).unwrap();
+    let mut request = request();
+    request.tolerance = document.tolerance;
+    request.metric.global_metric = MetricTensor3::isotropic_length_m(10.0).unwrap();
+    request.quality.curve.maximum_chordal_deviation_m = 0.1;
+    request.quality.curve.maximum_tangent_change_degrees = 180.0;
+    request.quality.curve.minimum_metric_edge_length = 0.01;
+    request.quality.curve.maximum_metric_edge_length = 10.0;
+    request.quality.surface.minimum_metric_angle_degrees = 0.1;
+    request.quality.surface.maximum_physical_aspect_ratio = 1_000.0;
+    request.quality.surface.maximum_chordal_deviation_m = 0.1;
+    request.quality.surface.maximum_normal_deviation_degrees = 180.0;
+    request.quality.volume.maximum_metric_edge_length = 2.0;
+    request.quality.volume.maximum_radius_edge_ratio = 10.0;
+    request.quality.volume.minimum_scaled_jacobian = 0.01;
+    request.resources.maximum_nodes = 10_000;
+    request.resources.maximum_elements = 10_000;
+    request.resources.maximum_search_work = 1_000_000;
+    request.resources.maximum_iterations = 1_000_000;
+    request.resources.maximum_wall_time_ms = 120_000;
+    (geometry, request, access)
 }
 
 fn remote_fixture(

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use quinn::{ClientConfig, Connection, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -169,6 +170,10 @@ impl QuicOverlayConnection {
 
 fn transport_config(limits: FrameLimits) -> Arc<quinn::TransportConfig> {
     let mut config = quinn::TransportConfig::default();
+    // Numerical kernels may legitimately run longer than QUIC's default idle interval. Transport
+    // liveness is maintained here; request inactivity and execution deadlines remain owned by the
+    // control channel and task contract respectively.
+    config.keep_alive_interval(Some(Duration::from_secs(10)));
     config.max_concurrent_uni_streams(64_u32.into());
     config.max_concurrent_bidi_streams(0_u32.into());
     config.receive_window(

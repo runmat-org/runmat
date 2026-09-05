@@ -16,6 +16,7 @@ mod meshing_host;
 mod program_session;
 mod protocol;
 mod remote;
+mod remote_exact_meshing_executor;
 mod runtime_meshing_provider;
 mod service;
 pub mod supervisor;
@@ -31,7 +32,7 @@ pub use exact_geometry_admission::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
     NativeMeshingContactDefinition, PreparedExactGeometryAdmission,
 };
-pub use exact_meshing_executor::{NativeExactMeshingExecutor, NativeMeshingExecutionPolicy};
+pub use exact_meshing_executor::{MeshingExecutionPolicy, NativeExactMeshingExecutor};
 pub use exact_meshing_job::{
     mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError,
     NativeExactMeshingResult,
@@ -50,6 +51,7 @@ pub use remote::{
     RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
     RemoteWorkerRelayRequest,
 };
+pub use remote_exact_meshing_executor::RemoteExactMeshingExecutor;
 pub use runmat_execution_artifact::cache::FilesystemObjectStore;
 pub use runtime_meshing_provider::{
     mesh_source_with_native_execution, native_meshing_execution_provider,

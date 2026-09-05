@@ -8,7 +8,7 @@ use crate::{import_result_publication, ExactMeshingDagPlanner};
 use super::stage::{execute_planned_stage, ExactMeshingDagExecutor};
 use super::{execute_partitions, ExactMeshingDagRun, ExactMeshingDagRunError};
 
-pub(super) fn execute_surface_dag<E: ExactMeshingDagExecutor>(
+pub(super) async fn execute_surface_dag<E: ExactMeshingDagExecutor>(
     executor: &mut E,
     planner: &ExactMeshingDagPlanner,
     topology: &ExactBRepTopology,
@@ -28,14 +28,16 @@ pub(super) fn execute_surface_dag<E: ExactMeshingDagExecutor>(
             run.program_revision.clone(),
             run.inventory_limits,
             observations,
-        )?;
+        )
+        .await?;
         let join = planner.surface_join(&pass, partition_roots.clone())?;
         let joined = execute_planned_stage(
             executor,
             &join,
             run.program_revision.clone(),
             run.inventory_limits,
-        )?;
+        )
+        .await?;
         observations.push(joined.evidence);
         if surface_converged(executor, &join, &joined.root, run.inventory_limits)? {
             return Ok(joined.root);
@@ -46,7 +48,8 @@ pub(super) fn execute_surface_dag<E: ExactMeshingDagExecutor>(
             &refinement,
             run.program_revision.clone(),
             run.inventory_limits,
-        )?;
+        )
+        .await?;
         observations.push(refined.evidence);
         pass = planner.next_surface_pass(
             &pass,

@@ -14,8 +14,8 @@ use runmat_meshing_execution::{
 
 use crate::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,
-    NativeExactMeshingExecutor, NativeExecutionConfig, NativeExecutionError,
-    NativeMeshingContactDefinition, NativeMeshingExecutionPolicy, NativeProgramSession,
+    MeshingExecutionPolicy, NativeExactMeshingExecutor, NativeExecutionConfig,
+    NativeExecutionError, NativeMeshingContactDefinition, NativeProgramSession,
 };
 
 pub struct NativeExactMeshingJob<'a> {
@@ -30,7 +30,7 @@ pub struct NativeExactMeshingJob<'a> {
     pub preferred_faces_per_partition: u32,
     pub inventory_limits: ObjectInventoryLimits,
     pub evidence: MeshingRunEvidenceContext,
-    pub execution: NativeMeshingExecutionPolicy,
+    pub execution: MeshingExecutionPolicy,
 }
 
 pub struct NativeExactMeshingResult {

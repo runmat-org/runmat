@@ -3,6 +3,7 @@ use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_runner::AttemptSuccess;
+use std::future::Future;
 
 use crate::{
     import_result_publication, import_stage_evidence_observation, MeshingProgressSink,
@@ -33,24 +34,27 @@ impl MeshingStageExecutionError {
 }
 
 pub trait ExactMeshingDagExecutor: CacheImport + CacheExport {
-    fn execute_stage(
-        &mut self,
-        stage: &PlannedMeshingStage,
+    fn execute_stage<'a>(
+        &'a mut self,
+        stage: &'a PlannedMeshingStage,
         revision: ProgramRevision,
-    ) -> Result<AttemptSuccess, MeshingStageExecutionError>;
+    ) -> impl Future<Output = Result<AttemptSuccess, MeshingStageExecutionError>> + 'a;
 
     /// Executes an algorithmically independent canonical partition batch. Implementations may
     /// schedule the batch concurrently but must return successes in the same order as `stages`.
     /// The default preserves the serial reference behavior.
-    fn execute_stages(
-        &mut self,
-        stages: &[PlannedMeshingStage],
+    fn execute_stages<'a>(
+        &'a mut self,
+        stages: &'a [PlannedMeshingStage],
         revision: ProgramRevision,
-    ) -> Result<Vec<AttemptSuccess>, MeshingStageExecutionError> {
-        stages
-            .iter()
-            .map(|stage| self.execute_stage(stage, revision.clone()))
-            .collect()
+    ) -> impl Future<Output = Result<Vec<AttemptSuccess>, MeshingStageExecutionError>> + 'a {
+        async move {
+            let mut successes = Vec::with_capacity(stages.len());
+            for stage in stages {
+                successes.push(self.execute_stage(stage, revision.clone()).await?);
+            }
+            Ok(successes)
+        }
     }
 }
 
@@ -82,9 +86,9 @@ impl<S: CacheExport> CacheExport for SerialExactMeshingExecutor<'_, S> {
 }
 
 impl<S: CacheImport + CacheExport> ExactMeshingDagExecutor for SerialExactMeshingExecutor<'_, S> {
-    fn execute_stage(
-        &mut self,
-        stage: &PlannedMeshingStage,
+    async fn execute_stage<'a>(
+        &'a mut self,
+        stage: &'a PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
         let invocation = stage
@@ -126,13 +130,13 @@ pub(super) struct ExecutedStage {
     pub evidence: runmat_meshing_core::MeshingStageEvidence,
 }
 
-pub(super) fn execute_planned_stage<E: ExactMeshingDagExecutor>(
+pub(super) async fn execute_planned_stage<E: ExactMeshingDagExecutor>(
     executor: &mut E,
     stage: &PlannedMeshingStage,
     revision: ProgramRevision,
     limits: ObjectInventoryLimits,
 ) -> Result<ExecutedStage, ExactMeshingDagRunError> {
-    let success = executor.execute_stage(stage, revision)?;
+    let success = executor.execute_stage(stage, revision).await?;
     admit_stage_success(executor, stage, success, limits)
 }
 

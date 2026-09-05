@@ -13,9 +13,8 @@ use runmat_runtime::meshing::{
 };
 
 use crate::{
-    mesh_exact_geometry, NativeExactMeshingJob, NativeExactMeshingJobError,
+    mesh_exact_geometry, MeshingExecutionPolicy, NativeExactMeshingJob, NativeExactMeshingJobError,
     NativeExactMeshingResult, NativeExecutionConfig, NativeMeshingContactDefinition,
-    NativeMeshingExecutionPolicy,
 };
 
 pub struct NativeMeshingSourceRequest {
@@ -177,7 +176,7 @@ pub fn mesh_source_with_native_execution(
                 sizing: Vec::new(),
                 cache_admission: CacheAdmissionDecision::Admitted,
             },
-            execution: NativeMeshingExecutionPolicy::default(),
+            execution: MeshingExecutionPolicy::default(),
         },
     )
     .map_err(NativeMeshingSourceError::from)
