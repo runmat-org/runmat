@@ -244,7 +244,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::General,
             ..BuiltinSemantics::unknown()
         },
-        "disp" | "clc" => console_io(),
+        "disp" => console_io(),
         "format" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment().with_ui(),
             environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),

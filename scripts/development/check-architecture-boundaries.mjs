@@ -1266,6 +1266,35 @@ enforceMigratedBuiltinFamily({
 });
 
 enforceMigratedBuiltinFamily({
+  name: "clear-console identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/console/clc",
+    "crates/runmat-builtins/src/catalog/inference/io",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/inference/io/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/clc.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/clc.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+
+const clcRuntimePath = "crates/runmat-runtime/src/builtins/io/clc.rs";
+const clcRuntime = read(clcRuntimePath);
+if (clcRuntime.split("\n").length > 96) {
+  fail(`${clcRuntimePath} exceeds its binding-and-control boundary`);
+}
+if (/\b(?:BuiltinDescriptor|BuiltinContractDeclaration)\s*=/.test(clcRuntime)) {
+  fail(`${clcRuntimePath} duplicates catalog-owned clc metadata`);
+}
+if (/"clc"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim clc authority");
+}
+
+enforceMigratedBuiltinFamily({
   name: "provider restoration service",
   roots: [
     "crates/runmat-runtime/src/builtins/common/provider_restore",

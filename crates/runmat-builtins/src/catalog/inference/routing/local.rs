@@ -13,6 +13,7 @@ pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
         BuiltinInferenceRule::Introspection(rule) => {
             super::introspection::infer(rule, request, entry)
         }
+        BuiltinInferenceRule::Io(rule) => super::io::infer(rule, request, entry),
         BuiltinInferenceRule::Logical(rule) => super::super::logical::infer(rule, request, entry),
         BuiltinInferenceRule::Parallel(rule) => super::parallel::infer(rule, request, entry),
     }

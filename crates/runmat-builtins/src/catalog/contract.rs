@@ -20,10 +20,16 @@ pub enum BuiltinInferenceRule {
     Aggregate(AggregateInferenceRule),
     Array(ArrayInferenceRule),
     Introspection(IntrospectionInferenceRule),
+    Io(IoInferenceRule),
     Logical(LogicalInferenceRule),
     Math(MathInferenceRule),
     Parallel(ParallelInferenceRule),
     Stats(StatsInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IoInferenceRule {
+    ClearConsole,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
