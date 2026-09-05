@@ -34,10 +34,8 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Exponential(kind) => {
             super::super::math::exponentials::infer(kind, request, entry)
         }
-        MathInferenceRule::Log1p => super::super::math_logarithms::infer_log1p(request, entry),
-        MathInferenceRule::Log2 => super::super::math_logarithms::infer_log2(request, entry),
-        MathInferenceRule::Logarithm(base) => {
-            super::super::math_logarithms::infer_logarithm(request, entry, base)
+        MathInferenceRule::Logarithm(kind) => {
+            super::super::math::logarithms::infer(kind, request, entry)
         }
         MathInferenceRule::LogicalReduction(kind) => {
             super::super::math_reduction::infer_logical(request, entry, kind)

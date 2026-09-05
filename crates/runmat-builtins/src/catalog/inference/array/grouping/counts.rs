@@ -111,7 +111,7 @@ fn table_fact() -> ValueFact {
 }
 
 fn is_tabular(input: &ValueFact) -> bool {
-    matches!(&input.kind, ValueKindFact::Object(value) if value.runtime_class.as_ref().is_some_and(|class| class.is(runmat_types::standard::TABLE) || class.is(runmat_types::standard::TIMETABLE)))
+    matches!(&input.kind, ValueKindFact::Object(value) if value.runtime_class.as_ref().is_some_and(runmat_types::standard::is_tabular))
 }
 
 fn host(kind: ValueKindFact, shape: ShapeFact) -> ValueFact {

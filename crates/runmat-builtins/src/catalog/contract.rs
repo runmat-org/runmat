@@ -234,9 +234,7 @@ pub enum MathInferenceRule {
     Hypot,
     PhaseAngle,
     Exponential(ExponentialKind),
-    Log1p,
-    Log2,
-    Logarithm(LogarithmBase),
+    Logarithm(LogarithmKind),
     LogicalReduction(LogicalReductionKind),
     Root(RootKind),
     NumericLimit(NumericLimitRule),
@@ -379,8 +377,10 @@ pub enum InverseHyperbolicFunction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum LogarithmBase {
+pub enum LogarithmKind {
     Natural,
+    OnePlus,
+    Binary,
     Common,
 }
 

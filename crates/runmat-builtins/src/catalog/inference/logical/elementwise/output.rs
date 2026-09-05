@@ -29,7 +29,7 @@ pub(super) fn tabular(input: &ValueFact) -> Option<ValueFact> {
         return None;
     };
     let class = object.runtime_class.as_ref()?;
-    if !class.is(standard::TABLE) && !class.is(standard::TIMETABLE) {
+    if !standard::is_tabular(class) {
         return None;
     }
     let mut output = input.clone();
@@ -48,9 +48,10 @@ pub(super) fn tabular_class(input: &ValueFact) -> Option<&runmat_types::ClassIde
     let ValueKindFact::Object(object) = &input.kind else {
         return None;
     };
-    object.runtime_class.as_ref().filter(|class| {
-        class.is(runmat_types::standard::TABLE) || class.is(runmat_types::standard::TIMETABLE)
-    })
+    object
+        .runtime_class
+        .as_ref()
+        .filter(|class| standard::is_tabular(class))
 }
 
 pub(super) fn unknown() -> ValueFact {

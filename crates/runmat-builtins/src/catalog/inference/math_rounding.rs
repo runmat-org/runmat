@@ -242,10 +242,10 @@ pub(super) fn infer_rounding(
             output.residency = input.residency.clone();
         }
         ValueKindFact::Object(object)
-            if object.runtime_class.as_ref().is_some_and(|class| {
-                class.is(runmat_types::standard::TABLE)
-                    || class.is(runmat_types::standard::TIMETABLE)
-            }) =>
+            if object
+                .runtime_class
+                .as_ref()
+                .is_some_and(runmat_types::standard::is_tabular) =>
         {
             object.properties.clear();
             object.properties_complete = false;
