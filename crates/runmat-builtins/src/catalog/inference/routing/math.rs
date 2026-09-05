@@ -44,10 +44,12 @@ pub(in crate::catalog::inference) fn infer(
             super::super::numeric_limit::infer_numeric_limit(request, entry, rule)
         }
         MathInferenceRule::NumericConversion(target) => {
-            super::super::numeric_conversion::infer_numeric_conversion_call(request, entry, target)
+            super::super::math::numeric_conversion::infer_numeric_conversion_call(
+                request, entry, target,
+            )
         }
         MathInferenceRule::NumericConversionWithLike(target) => {
-            super::super::numeric_conversion::infer_numeric_conversion_with_like_call(
+            super::super::math::numeric_conversion::infer_numeric_conversion_with_like_call(
                 request, entry, target,
             )
         }
