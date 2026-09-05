@@ -9,83 +9,86 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, MathInferenceRule,
+    BuiltinSignatureDescriptor, MathInferenceRule, ALL_INTEGER_CLASSES,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::documentation::ANGLE_DOCUMENTATION;
+mod documentation;
+
+use documentation::SIGN_DOCUMENTATION;
 
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "theta",
+    name: "Y",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Real phase angle in radians with the input floating-point class and shape.",
+    description: "Elementwise sign result. Numeric inputs retain their class; logical and character inputs return double.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "X",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Real or complex single- or double-precision input.",
+    description: "Real numeric, logical, character, or floating-point complex input.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "theta = angle(X)",
+    label: "Y = sign(X)",
     inputs: &INPUTS,
     outputs: &OUTPUTS,
 }];
 
-pub const ANGLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ANGLE.INVALID_INPUT",
-    identifier: Some("RunMat:angle:InvalidInput"),
-    when: "Input is not real or complex single- or double-precision data.",
-    message: "angle: invalid input",
+pub const SIGN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIGN.INVALID_INPUT",
+    identifier: Some("RunMat:sign:InvalidInput"),
+    when: "Input is not a supported numeric, logical, or character value.",
+    message: "sign: invalid input",
 };
-pub const ANGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ANGLE.INTERNAL",
-    identifier: Some("RunMat:angle:Internal"),
-    when: "Internal tensor conversion, allocation, or provider interaction fails.",
-    message: "angle: internal error",
+pub const SIGN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIGN.INTERNAL",
+    identifier: Some("RunMat:sign:Internal"),
+    when: "Internal tensor construction or provider interaction fails.",
+    message: "sign: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ANGLE_ERROR_INVALID_INPUT, ANGLE_ERROR_INTERNAL];
-pub const ANGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+const ERRORS: [BuiltinErrorDescriptor; 2] = [SIGN_ERROR_INVALID_INPUT, SIGN_ERROR_INTERNAL];
+pub const SIGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
 
-const REJECTED_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Real and componentwise-complex fixed-width integer classes are rejected before host or provider computation.",
-    }];
-pub const ANGLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
+const INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
+    classes: &ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::Documented,
+    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+    notes: "All eight real integer classes are transformed directly in native storage.",
+}];
+pub const SIGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "theta = angle(integer_X)",
-        inputs: &REJECTED_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
+        form: "Y = sign(integer_X)",
+        inputs: &INTEGER_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
+        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostAndGpu,
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "angle has no fixed-width integer overload. Scalars, arrays, typed complex integers, and resident integer handles reject without floating-point materialization.",
+        notes: "Signed values map to -1, 0, or 1 and unsigned values to 0 or 1 in the input class. Unsupported resident hooks use an exact owner-preserving fallback.",
     }];
 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
-pub const ANGLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    identity: BuiltinCatalogIdentity { name: "angle" },
+pub const SIGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity { name: "sign" },
     category: "math/elementwise",
-    documentation: ANGLE_DOCUMENTATION,
-    descriptor: &ANGLE_DESCRIPTOR,
+    documentation: SIGN_DOCUMENTATION,
+    descriptor: &SIGN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::PhaseAngle),
+        inference_rule: BuiltinInferenceRule::Math(MathInferenceRule::MagnitudePhaseSign(
+            crate::MagnitudePhaseSignKind::Sign,
+        )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,
@@ -98,7 +101,7 @@ pub const ANGLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     placement: BuiltinPlacementContract {
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Dynamic,
         fusion: BuiltinFusionPolicy::Candidate,
         distributed: crate::BuiltinDistributedPolicy::MapUnary,
     },
@@ -110,7 +113,7 @@ pub const ANGLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     },
     bindings: &BINDINGS,
     extensions: &[],
-    integer_capabilities: &ANGLE_INTEGER_CAPABILITIES,
+    integer_capabilities: &SIGN_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

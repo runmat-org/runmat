@@ -7,7 +7,6 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
-        MathInferenceRule::Abs => super::super::numeric_abs::infer_abs(request, entry),
         MathInferenceRule::AngleConversion(rule) => {
             super::super::math::angle_conversion::infer(rule, request, entry)
         }
@@ -28,8 +27,8 @@ pub(in crate::catalog::inference) fn infer(
             super::super::math::integer_division::infer(request, entry)
         }
         MathInferenceRule::Hypot => super::super::math_binary::infer_hypot(request, entry),
-        MathInferenceRule::PhaseAngle => {
-            super::super::math_components::infer_phase_angle(request, entry)
+        MathInferenceRule::MagnitudePhaseSign(kind) => {
+            super::super::math::magnitude_phase_sign::infer(kind, request, entry)
         }
         MathInferenceRule::Exponential(kind) => {
             super::super::math::exponentials::infer(kind, request, entry)
@@ -62,7 +61,6 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Remainder(function) => {
             super::super::math_binary::infer_remainder(request, entry, function)
         }
-        MathInferenceRule::Signum => super::super::math_components::infer_signum(request, entry),
         MathInferenceRule::Trigonometric(function) => {
             super::super::math_trigonometric::infer_trigonometric(request, entry, function)
         }

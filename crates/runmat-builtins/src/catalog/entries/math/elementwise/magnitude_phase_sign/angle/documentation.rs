@@ -7,10 +7,10 @@ use crate::{
 };
 
 const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
-    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/angle.rs") }],
+    implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/angle/mod.rs") }],
     verification: &[
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::angle::tests" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::angle::tests::angle_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "CPU and representation tests", location: "builtins::math::elementwise::magnitude_phase_sign::angle::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "Provider round-trip test", location: "builtins::math::elementwise::magnitude_phase_sign::angle::tests::provider::angle_gpu_provider_roundtrip" },
     ],
     notes: &[],
 };

@@ -1,11 +1,11 @@
-use super::{argument_error, finish_fixed, numeric_kind};
+use super::super::super::{argument_error, finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, NumericClass, NumericDomain, ValueFact,
     ValueKindFact,
 };
 
-pub(super) fn infer_abs(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let mut output = request.arguments.first().cloned().unwrap_or_else(|| {
         diagnostics.push(argument_error(

@@ -237,7 +237,6 @@ const legacyRootInferenceLeaves = new Set([
   "aggregate_semantics",
   "introspection_semantics",
   "math_binary",
-  "math_components",
   "math_degree_trigonometric",
   "math_exponential",
   "math_hyperbolic",
@@ -248,7 +247,6 @@ const legacyRootInferenceLeaves = new Set([
   "math_rounding",
   "math_trigonometric",
   "metadata_predicate",
-  "numeric_abs",
   "numeric_classification",
   "numeric_component",
   "numeric_conversion",
@@ -1012,6 +1010,46 @@ enforceMigratedBuiltinFamily({
   ],
   leafLineCeiling: 224,
   testLineCeiling: 256,
+});
+
+enforceMigratedBuiltinFamily({
+  name: "magnitude/phase/sign family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign",
+    "crates/runmat-builtins/src/catalog/inference/math/magnitude_phase_sign",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/magnitude_phase_sign/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/magnitude_phase_sign/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/abs/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/angle/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/sign/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/abs/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/angle/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/magnitude_phase_sign/sign/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/inference/numeric_abs.rs",
+    "crates/runmat-builtins/src/catalog/inference/math_components.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign/abs.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign/angle.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign/sign.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/magnitude_phase_sign/documentation",
+    "crates/runmat-runtime/src/builtins/math/elementwise/abs.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/angle.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/sign.rs",
+    "docs/builtins/reference/abs.json",
+    "docs/builtins/reference/angle.json",
+    "docs/builtins/reference/sign.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/abs.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/angle.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/sign.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 224,
 });
 
 const gammaFunctionBoundaries = new Map([
