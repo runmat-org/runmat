@@ -1246,6 +1246,26 @@ enforceMigratedBuiltinFamily({
 });
 
 enforceMigratedBuiltinFamily({
+  name: "heaviside identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/heaviside",
+    "crates/runmat-builtins/src/catalog/inference/math/heaviside",
+    "crates/runmat-runtime/src/builtins/math/elementwise/heaviside",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/heaviside/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/heaviside/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/heaviside.rs",
+    "docs/builtins/reference/heaviside.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/heaviside.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 224,
+});
+
+enforceMigratedBuiltinFamily({
   name: "provider restoration service",
   roots: [
     "crates/runmat-runtime/src/builtins/common/provider_restore",

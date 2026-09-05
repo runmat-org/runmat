@@ -26,6 +26,7 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::GammaFunction(rule) => {
             super::super::math::gamma_functions::infer(rule, request, entry)
         }
+        MathInferenceRule::Heaviside => super::super::math::heaviside::infer(request, entry),
         MathInferenceRule::IntegerDivide => {
             super::super::math::integer_division::infer(request, entry)
         }
