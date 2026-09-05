@@ -21,9 +21,9 @@ use runmat_value::{
 };
 
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "complex";
@@ -600,7 +600,7 @@ fn compose_integer_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<
 
     let shape = compatible_complex_shape(&real.tensor, &imag.tensor)?;
     let len = shape.iter().product();
-    let target = IntegerTarget::from_storage(prototype);
+    let target = IntegerClass::from_storage(prototype);
     let real_values = integer_component_values(&real.tensor, real.is_scalar_double, target, len)?;
     let imag_values = integer_component_values(&imag.tensor, imag.is_scalar_double, target, len)?;
     let storage = IntegerComplexStorage::new(real_values, imag_values)
@@ -613,7 +613,7 @@ fn compose_integer_complex(real: &RealInput, imag: &RealInput) -> BuiltinResult<
 fn integer_component_values(
     tensor: &Tensor,
     is_scalar_double: bool,
-    target: IntegerTarget,
+    target: IntegerClass,
     output_len: usize,
 ) -> BuiltinResult<IntegerStorage> {
     match tensor.integer_storage() {

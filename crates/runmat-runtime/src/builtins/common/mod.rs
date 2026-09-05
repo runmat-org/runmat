@@ -16,6 +16,7 @@ pub mod gpu_helpers;
 pub mod identifiers;
 pub mod indexing;
 pub mod integer_capability;
+pub(crate) mod integer_conversion;
 pub(crate) mod integer_value;
 pub mod json;
 pub mod linalg;

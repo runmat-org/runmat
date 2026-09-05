@@ -5,8 +5,8 @@ use num_traits::{Signed, ToPrimitive};
 use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::math::elementwise::extended_precision::Extended;
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 
 #[derive(Clone, Copy)]
 pub(crate) enum IntegerBinaryOp {
@@ -182,7 +182,7 @@ fn nonfinite_integer_remainder(
     integer_is_left: bool,
     operation: IntegerRemainderOp,
 ) -> IntValue {
-    let target = IntegerTarget::from_int_value(&integer);
+    let target = IntegerClass::from_int_value(&integer);
     if scalar.is_nan() || !integer_is_left {
         return target.cast_scalar(f64::NAN);
     }
@@ -340,7 +340,7 @@ pub(crate) fn integer_binary_scalar(
 struct IntegerOperand<'a> {
     storage: IntegerStorageRef<'a>,
     shape: Vec<usize>,
-    target: IntegerTarget,
+    target: IntegerClass,
 }
 
 enum IntegerStorageRef<'a> {
@@ -369,12 +369,12 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
         Value::Int(value) => Some(IntegerOperand {
             storage: IntegerStorageRef::Scalar(value),
             shape: vec![1, 1],
-            target: IntegerTarget::from_int_value(value),
+            target: IntegerClass::from_int_value(value),
         }),
         Value::Tensor(tensor) => tensor.integer_storage().map(|storage| IntegerOperand {
             storage: IntegerStorageRef::Array(storage),
             shape: tensor.shape.clone(),
-            target: IntegerTarget::from_storage(storage),
+            target: IntegerClass::from_storage(storage),
         }),
         _ => None,
     }
@@ -476,19 +476,19 @@ fn extended_integer_binary(
     extended_to_integer_like(result, &integer)
 }
 
-fn exact_integer_scalar(target: IntegerTarget, value: f64) -> Option<IntValue> {
+fn exact_integer_scalar(target: IntegerClass, value: f64) -> Option<IntValue> {
     if !value.is_finite() || value.fract() != 0.0 {
         return None;
     }
     let in_range = match target {
-        IntegerTarget::I8 => value >= i8::MIN as f64 && value < i8::MAX as f64 + 1.0,
-        IntegerTarget::I16 => value >= i16::MIN as f64 && value < i16::MAX as f64 + 1.0,
-        IntegerTarget::I32 => value >= i32::MIN as f64 && value < i32::MAX as f64 + 1.0,
-        IntegerTarget::I64 => value >= i64::MIN as f64 && value < 9_223_372_036_854_775_808.0,
-        IntegerTarget::U8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
-        IntegerTarget::U16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
-        IntegerTarget::U32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
-        IntegerTarget::U64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
+        IntegerClass::Int8 => value >= i8::MIN as f64 && value < i8::MAX as f64 + 1.0,
+        IntegerClass::Int16 => value >= i16::MIN as f64 && value < i16::MAX as f64 + 1.0,
+        IntegerClass::Int32 => value >= i32::MIN as f64 && value < i32::MAX as f64 + 1.0,
+        IntegerClass::Int64 => value >= i64::MIN as f64 && value < 9_223_372_036_854_775_808.0,
+        IntegerClass::UInt8 => value >= 0.0 && value < u8::MAX as f64 + 1.0,
+        IntegerClass::UInt16 => value >= 0.0 && value < u16::MAX as f64 + 1.0,
+        IntegerClass::UInt32 => value >= 0.0 && value < u32::MAX as f64 + 1.0,
+        IntegerClass::UInt64 => (0.0..18_446_744_073_709_551_616.0).contains(&value),
     };
     in_range.then(|| target.cast_scalar(value))
 }
@@ -899,7 +899,7 @@ fn storage_value(storage: &IntegerStorage, index: usize) -> IntValue {
 }
 
 fn integer_values_into_value(
-    target: IntegerTarget,
+    target: IntegerClass,
     values: Vec<IntValue>,
     shape: Vec<usize>,
 ) -> Result<Value, String> {

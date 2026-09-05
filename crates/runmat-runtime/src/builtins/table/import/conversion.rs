@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::integer_conversion::IntegerClassExt;
 use crate::builtins::common::tensor;
 
 pub(in crate::builtins::table) fn import_rows_to_cell(
@@ -190,7 +191,7 @@ pub(in crate::builtins::table) fn import_column(
 pub(in crate::builtins::table) fn import_integer_column(
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
-    target: crate::builtins::math::elementwise::integer_cast::IntegerTarget,
+    target: crate::builtins::common::integer_conversion::IntegerClass,
 ) -> BuiltinResult<Value> {
     let mut parsed = Vec::with_capacity(values.len());
     for value in &values {
@@ -204,7 +205,7 @@ pub(in crate::builtins::table) fn import_integer_column(
 fn integer_from_import_cell(
     value: &ImportCell,
     options: &ReadTableOptions,
-    target: crate::builtins::math::elementwise::integer_cast::IntegerTarget,
+    target: crate::builtins::common::integer_conversion::IntegerClass,
 ) -> BuiltinResult<runmat_value::IntValue> {
     let numeric = |value| Ok(target.cast_scalar(value));
     match value {
@@ -243,7 +244,7 @@ pub(in crate::builtins::table) fn import_numeric_column(
     // Integer text must reach the typed parser directly. Building an f64
     // compatibility vector first rounds values such as uint64::MAX before
     // `coerce_tensor_dtype` can materialize native storage.
-    if let Some(target) = integer_target_for_dtype(dtype) {
+    if let Some(target) = dtype.integer_class() {
         return import_integer_column(values, options, target);
     }
     let mut numeric = Vec::with_capacity(values.len());
@@ -254,24 +255,6 @@ pub(in crate::builtins::table) fn import_numeric_column(
     let tensor = Tensor::new(numeric, vec![values.len(), 1])
         .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
     Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype)))
-}
-
-fn integer_target_for_dtype(
-    dtype: NumericDType,
-) -> Option<crate::builtins::math::elementwise::integer_cast::IntegerTarget> {
-    use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
-
-    match dtype {
-        NumericDType::I8 => Some(IntegerTarget::I8),
-        NumericDType::I16 => Some(IntegerTarget::I16),
-        NumericDType::I32 => Some(IntegerTarget::I32),
-        NumericDType::I64 => Some(IntegerTarget::I64),
-        NumericDType::U8 => Some(IntegerTarget::U8),
-        NumericDType::U16 => Some(IntegerTarget::U16),
-        NumericDType::U32 => Some(IntegerTarget::U32),
-        NumericDType::U64 => Some(IntegerTarget::U64),
-        NumericDType::F32 | NumericDType::F64 => None,
-    }
 }
 
 pub(in crate::builtins::table) fn numeric_from_import_cell(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::integer_conversion::IntegerClassExt;
 use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
 pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -224,9 +225,7 @@ fn normalize_to_existing_class(existing: &[Value], values: &mut [Value]) -> Buil
     match first {
         Value::Int(first) => {
             let target =
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::from_int_value(
-                    first,
-                );
+                crate::builtins::common::integer_conversion::IntegerClass::from_int_value(first);
             for value in values {
                 *value = match value {
                     Value::Int(value) => Value::Int(target.cast_int(value)),

@@ -15,13 +15,13 @@ use runmat_value::{CharArray, ComplexTensor, IntValue, LogicalArray, NumericDTyp
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use runmat_builtins::shape_rules::infer_range_shape;
 use runmat_builtins::ResolveContext;
 
@@ -561,7 +561,7 @@ fn try_integer_sequence(
 
 fn integer_target_from_values<'a>(
     values: impl IntoIterator<Item = &'a Value>,
-) -> crate::BuiltinResult<Option<IntegerTarget>> {
+) -> crate::BuiltinResult<Option<IntegerClass>> {
     let mut target = None;
     for value in values {
         let Some(candidate) = typed_integer_target(value)? else {
@@ -581,9 +581,9 @@ fn integer_target_from_values<'a>(
     Ok(target)
 }
 
-fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTarget>> {
+fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerClass>> {
     match value {
-        Value::Int(value) => Ok(Some(IntegerTarget::from_int_value(value))),
+        Value::Int(value) => Ok(Some(IntegerClass::from_int_value(value))),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             if !tensor::is_scalar_tensor(tensor) {
                 return Err(colon_error_with_message(
@@ -591,7 +591,7 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
                     &COLON_ERROR_NON_SCALAR_INPUT,
                 ));
             }
-            Ok(tensor.integer_storage().map(IntegerTarget::from_storage))
+            Ok(tensor.integer_storage().map(IntegerClass::from_storage))
         }
         Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
             if complex_tensor_element_len(tensor) != 1 {
@@ -611,7 +611,7 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            Ok(Some(IntegerTarget::from_storage(&storage.real)))
+            Ok(Some(IntegerClass::from_storage(&storage.real)))
         }
         _ => Ok(None),
     }
@@ -619,12 +619,12 @@ fn typed_integer_target(value: &Value) -> crate::BuiltinResult<Option<IntegerTar
 
 fn integer_colon_value(
     value: &Value,
-    target: IntegerTarget,
+    target: IntegerClass,
     require_target_range: bool,
 ) -> crate::BuiltinResult<i128> {
     let integer = match value {
         Value::Int(value) => {
-            if IntegerTarget::from_int_value(value) != target {
+            if IntegerClass::from_int_value(value) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
@@ -642,7 +642,7 @@ fn integer_colon_value(
             let storage = tensor
                 .integer_storage()
                 .expect("typed tensor storage is present");
-            if IntegerTarget::from_storage(storage) != target {
+            if IntegerClass::from_storage(storage) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
@@ -668,7 +668,7 @@ fn integer_colon_value(
             {
                 return Err(colon_error(&COLON_ERROR_COMPLEX_IMAGINARY_NONZERO));
             }
-            if IntegerTarget::from_storage(&storage.real) != target {
+            if IntegerClass::from_storage(&storage.real) != target {
                 return Err(colon_error_with_message(
                     "colon: integer operands must have the same integer class",
                     &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
@@ -730,30 +730,30 @@ fn int_value_to_i128(value: &IntValue) -> i128 {
     }
 }
 
-fn integer_target_contains(target: IntegerTarget, value: i128) -> bool {
+fn integer_target_contains(target: IntegerClass, value: i128) -> bool {
     match target {
-        IntegerTarget::I8 => value >= i128::from(i8::MIN) && value <= i128::from(i8::MAX),
-        IntegerTarget::I16 => value >= i128::from(i16::MIN) && value <= i128::from(i16::MAX),
-        IntegerTarget::I32 => value >= i128::from(i32::MIN) && value <= i128::from(i32::MAX),
-        IntegerTarget::I64 => value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX),
-        IntegerTarget::U8 => value >= 0 && value <= i128::from(u8::MAX),
-        IntegerTarget::U16 => value >= 0 && value <= i128::from(u16::MAX),
-        IntegerTarget::U32 => value >= 0 && value <= i128::from(u32::MAX),
-        IntegerTarget::U64 => value >= 0 && value <= i128::from(u64::MAX),
+        IntegerClass::Int8 => value >= i128::from(i8::MIN) && value <= i128::from(i8::MAX),
+        IntegerClass::Int16 => value >= i128::from(i16::MIN) && value <= i128::from(i16::MAX),
+        IntegerClass::Int32 => value >= i128::from(i32::MIN) && value <= i128::from(i32::MAX),
+        IntegerClass::Int64 => value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX),
+        IntegerClass::UInt8 => value >= 0 && value <= i128::from(u8::MAX),
+        IntegerClass::UInt16 => value >= 0 && value <= i128::from(u16::MAX),
+        IntegerClass::UInt32 => value >= 0 && value <= i128::from(u32::MAX),
+        IntegerClass::UInt64 => value >= 0 && value <= i128::from(u64::MAX),
     }
 }
 
-fn integer_value_from_i128(target: IntegerTarget, value: i128) -> IntValue {
+fn integer_value_from_i128(target: IntegerClass, value: i128) -> IntValue {
     debug_assert!(integer_target_contains(target, value));
     match target {
-        IntegerTarget::I8 => IntValue::I8(value as i8),
-        IntegerTarget::I16 => IntValue::I16(value as i16),
-        IntegerTarget::I32 => IntValue::I32(value as i32),
-        IntegerTarget::I64 => IntValue::I64(value as i64),
-        IntegerTarget::U8 => IntValue::U8(value as u8),
-        IntegerTarget::U16 => IntValue::U16(value as u16),
-        IntegerTarget::U32 => IntValue::U32(value as u32),
-        IntegerTarget::U64 => IntValue::U64(value as u64),
+        IntegerClass::Int8 => IntValue::I8(value as i8),
+        IntegerClass::Int16 => IntValue::I16(value as i16),
+        IntegerClass::Int32 => IntValue::I32(value as i32),
+        IntegerClass::Int64 => IntValue::I64(value as i64),
+        IntegerClass::UInt8 => IntValue::U8(value as u8),
+        IntegerClass::UInt16 => IntValue::U16(value as u16),
+        IntegerClass::UInt32 => IntValue::U32(value as u32),
+        IntegerClass::UInt64 => IntValue::U64(value as u64),
     }
 }
 
@@ -1256,7 +1256,7 @@ pub(crate) mod tests {
             IntValue::U64(1),
         ];
         for value in values {
-            let target = IntegerTarget::from_int_value(&value);
+            let target = IntegerClass::from_int_value(&value);
             let typed_one = integer_value_from_i128(target, 1);
             let typed_three = integer_value_from_i128(target, 3);
             for result in [

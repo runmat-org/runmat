@@ -1713,7 +1713,7 @@ mod tests {
 
     #[test]
     fn test_and_training_typed_indices_follow_compatibility_mode_and_decode_exactly() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::set_seed(2030).unwrap();
         let partition = cv(
             Value::Num(8.0),

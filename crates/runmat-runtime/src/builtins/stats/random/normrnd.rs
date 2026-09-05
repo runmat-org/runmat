@@ -628,7 +628,7 @@ mod tests {
     #[test]
     fn normrnd_reads_typed_integer_parameters_and_size_exactly() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let mu = poisoned_int_tensor(IntegerStorage::I16(vec![5]), vec![1, 1]);
         let sigma = poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn normrnd_single_data_parameter_selects_single_output() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let mu = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
         let out = block_on(normrnd_builtin(vec![mu, Value::Num(1.0)])).unwrap();
@@ -679,7 +679,7 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn normrnd_wgpu_integer_parameter_preserves_class_and_explicit_intent() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(

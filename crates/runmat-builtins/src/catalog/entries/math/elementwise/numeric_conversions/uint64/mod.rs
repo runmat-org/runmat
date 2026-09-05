@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("uint64", "UINT64", NumericClass::UInt64, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as UINT64_CATALOG_ENTRY;
+pub use DESCRIPTOR as UINT64_DESCRIPTOR;
+pub use ERROR_INTERNAL as UINT64_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as UINT64_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as UINT64_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as UINT64_INTEGER_CAPABILITIES;

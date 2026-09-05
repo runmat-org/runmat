@@ -16,12 +16,12 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor,
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random, tensor};
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
 use runmat_builtins::{ResolveContext, Type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -510,7 +510,7 @@ enum OutputTemplate {
     Double,
     Single,
     Logical,
-    Integer(IntegerTarget),
+    Integer(IntegerClass),
     Like(Value),
 }
 
@@ -526,7 +526,7 @@ fn reject_disabled_wide_integer_extension(template: &OutputTemplate) -> crate::B
 
 fn output_template_uses_wide_integer(template: &OutputTemplate) -> bool {
     match template {
-        OutputTemplate::Integer(IntegerTarget::I64 | IntegerTarget::U64) => true,
+        OutputTemplate::Integer(IntegerClass::Int64 | IntegerClass::UInt64) => true,
         OutputTemplate::Like(value) => value_uses_wide_integer_class(value),
         _ => false,
     }
@@ -676,14 +676,20 @@ impl ParsedRandi {
                         idx += 1;
                         continue;
                     }
-                    "int8" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I8)),
-                    "int16" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I16)),
-                    "int32" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I32)),
-                    "int64" => class_override = Some(OutputTemplate::Integer(IntegerTarget::I64)),
-                    "uint8" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U8)),
-                    "uint16" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U16)),
-                    "uint32" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U32)),
-                    "uint64" => class_override = Some(OutputTemplate::Integer(IntegerTarget::U64)),
+                    "int8" => class_override = Some(OutputTemplate::Integer(IntegerClass::Int8)),
+                    "int16" => class_override = Some(OutputTemplate::Integer(IntegerClass::Int16)),
+                    "int32" => class_override = Some(OutputTemplate::Integer(IntegerClass::Int32)),
+                    "int64" => class_override = Some(OutputTemplate::Integer(IntegerClass::Int64)),
+                    "uint8" => class_override = Some(OutputTemplate::Integer(IntegerClass::UInt8)),
+                    "uint16" => {
+                        class_override = Some(OutputTemplate::Integer(IntegerClass::UInt16))
+                    }
+                    "uint32" => {
+                        class_override = Some(OutputTemplate::Integer(IntegerClass::UInt32))
+                    }
+                    "uint64" => {
+                        class_override = Some(OutputTemplate::Integer(IntegerClass::UInt64))
+                    }
                     other => {
                         return Err(builtin_error(format!(
                             "randi: unrecognised option '{other}'"
@@ -803,7 +809,7 @@ fn randi_single(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value>
 fn randi_integer(
     bounds: &Bounds,
     shape: &[usize],
-    target: IntegerTarget,
+    target: IntegerClass,
 ) -> crate::BuiltinResult<Value> {
     let values = generate_integer_values(bounds, tensor::element_count(shape))?;
     let storage = integer_storage_from_values(target, values)?;
@@ -849,13 +855,14 @@ async fn randi_like(
         Value::Tensor(tensor) => match tensor.numeric_dtype() {
             runmat_value::NumericDType::F32 => randi_single(bounds, shape),
             runmat_value::NumericDType::F64 => randi_double(bounds, shape),
-            dtype => randi_integer(
-                bounds,
-                shape,
-                integer_target_from_dtype(dtype).expect("non-floating tensor dtype is integer"),
-            ),
+            dtype => {
+                let Some(class) = dtype.integer_class() else {
+                    return Err(builtin_error("randi: unsupported numeric prototype class"));
+                };
+                randi_integer(bounds, shape, class)
+            }
         },
-        Value::Int(value) => randi_integer(bounds, shape, IntegerTarget::from_int_value(value)),
+        Value::Int(value) => randi_integer(bounds, shape, IntegerClass::from_int_value(value)),
         Value::Num(_) => randi_double(bounds, shape),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
             randi_double(bounds, shape)
@@ -878,7 +885,7 @@ async fn randi_like_gpu(
 ) -> crate::BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-            let target = integer_target_from_accelerator_type(integer_type);
+            let target = IntegerClass::from(integer_type);
             let values = generate_integer_values(bounds, tensor::element_count(shape))?;
             let storage = integer_storage_from_values(target, values)?;
             let view = integer_tensor_view(&storage, shape);
@@ -936,53 +943,53 @@ fn generate_integer_values(bounds: &Bounds, len: usize) -> crate::BuiltinResult<
 }
 
 fn integer_storage_from_values(
-    target: IntegerTarget,
+    target: IntegerClass,
     values: Vec<i128>,
 ) -> crate::BuiltinResult<IntegerStorage> {
     let storage = match target {
-        IntegerTarget::I8 => IntegerStorage::I8(
+        IntegerClass::Int8 => IntegerStorage::I8(
             values
                 .into_iter()
                 .map(|v| v.clamp(i8::MIN as i128, i8::MAX as i128) as i8)
                 .collect(),
         ),
-        IntegerTarget::I16 => IntegerStorage::I16(
+        IntegerClass::Int16 => IntegerStorage::I16(
             values
                 .into_iter()
                 .map(|v| v.clamp(i16::MIN as i128, i16::MAX as i128) as i16)
                 .collect(),
         ),
-        IntegerTarget::I32 => IntegerStorage::I32(
+        IntegerClass::Int32 => IntegerStorage::I32(
             values
                 .into_iter()
                 .map(|v| v.clamp(i32::MIN as i128, i32::MAX as i128) as i32)
                 .collect(),
         ),
-        IntegerTarget::I64 => IntegerStorage::I64(
+        IntegerClass::Int64 => IntegerStorage::I64(
             values
                 .into_iter()
                 .map(|v| v.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
                 .collect(),
         ),
-        IntegerTarget::U8 => IntegerStorage::U8(
+        IntegerClass::UInt8 => IntegerStorage::U8(
             values
                 .into_iter()
                 .map(|v| v.clamp(0, u8::MAX as i128) as u8)
                 .collect(),
         ),
-        IntegerTarget::U16 => IntegerStorage::U16(
+        IntegerClass::UInt16 => IntegerStorage::U16(
             values
                 .into_iter()
                 .map(|v| v.clamp(0, u16::MAX as i128) as u16)
                 .collect(),
         ),
-        IntegerTarget::U32 => IntegerStorage::U32(
+        IntegerClass::UInt32 => IntegerStorage::U32(
             values
                 .into_iter()
                 .map(|v| v.clamp(0, u32::MAX as i128) as u32)
                 .collect(),
         ),
-        IntegerTarget::U64 => IntegerStorage::U64(
+        IntegerClass::UInt64 => IntegerStorage::U64(
             values
                 .into_iter()
                 .map(|v| v.clamp(0, u64::MAX as i128) as u64)
@@ -990,35 +997,6 @@ fn integer_storage_from_values(
         ),
     };
     Ok(storage)
-}
-
-fn integer_target_from_accelerator_type(
-    element_type: runmat_accelerate_api::IntegerElementType,
-) -> IntegerTarget {
-    match element_type {
-        runmat_accelerate_api::IntegerElementType::I8 => IntegerTarget::I8,
-        runmat_accelerate_api::IntegerElementType::I16 => IntegerTarget::I16,
-        runmat_accelerate_api::IntegerElementType::I32 => IntegerTarget::I32,
-        runmat_accelerate_api::IntegerElementType::I64 => IntegerTarget::I64,
-        runmat_accelerate_api::IntegerElementType::U8 => IntegerTarget::U8,
-        runmat_accelerate_api::IntegerElementType::U16 => IntegerTarget::U16,
-        runmat_accelerate_api::IntegerElementType::U32 => IntegerTarget::U32,
-        runmat_accelerate_api::IntegerElementType::U64 => IntegerTarget::U64,
-    }
-}
-
-fn integer_target_from_dtype(dtype: NumericDType) -> Option<IntegerTarget> {
-    match dtype {
-        NumericDType::I8 => Some(IntegerTarget::I8),
-        NumericDType::I16 => Some(IntegerTarget::I16),
-        NumericDType::I32 => Some(IntegerTarget::I32),
-        NumericDType::I64 => Some(IntegerTarget::I64),
-        NumericDType::U8 => Some(IntegerTarget::U8),
-        NumericDType::U16 => Some(IntegerTarget::U16),
-        NumericDType::U32 => Some(IntegerTarget::U32),
-        NumericDType::U64 => Some(IntegerTarget::U64),
-        NumericDType::F32 | NumericDType::F64 => None,
-    }
 }
 
 fn integer_tensor_view<'a>(
@@ -1319,14 +1297,14 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cases = [
-            ("int8", IntegerTarget::I8),
-            ("int16", IntegerTarget::I16),
-            ("int32", IntegerTarget::I32),
-            ("int64", IntegerTarget::I64),
-            ("uint8", IntegerTarget::U8),
-            ("uint16", IntegerTarget::U16),
-            ("uint32", IntegerTarget::U32),
-            ("uint64", IntegerTarget::U64),
+            ("int8", IntegerClass::Int8),
+            ("int16", IntegerClass::Int16),
+            ("int32", IntegerClass::Int32),
+            ("int64", IntegerClass::Int64),
+            ("uint8", IntegerClass::UInt8),
+            ("uint16", IntegerClass::UInt16),
+            ("uint32", IntegerClass::UInt32),
+            ("uint64", IntegerClass::UInt64),
         ];
 
         for (class, target) in cases {
@@ -1343,7 +1321,7 @@ pub(crate) mod tests {
             };
             assert_eq!(tensor.shape, vec![2, 3]);
             let storage = tensor.integer_storage().expect("exact integer storage");
-            assert!(IntegerTarget::from_storage(storage) == target);
+            assert!(IntegerClass::from_storage(storage) == target);
             assert!(storage
                 .exact_values()
                 .iter()
@@ -1422,7 +1400,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_samples_complete_signed_and_unsigned_64_bit_domains_exactly() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         reset_rng_clean();
@@ -1468,7 +1446,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_full_width_sequence_is_reproducible_and_floating_outputs_remain_bounded() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("uint64 full-width bounds");

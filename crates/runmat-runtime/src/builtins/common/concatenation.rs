@@ -3,7 +3,7 @@
 //! This module provides language-compatible matrix concatenation operations.
 //! Supports both horizontal concatenation [A, B] and vertical concatenation [A; B].
 
-use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
+use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use runmat_value::{
     CharArray, IntValue, NumericDType, NumericScalar, NumericStorage, SymbolicArray, SymbolicExpr,
     Tensor, Value,
@@ -505,13 +505,13 @@ fn vcat_integer_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     Tensor::new_integer(target.storage(values), vec![new_rows, new_cols]).map_err(concat_error)
 }
 
-fn leftmost_tensor_integer_target(a: &Tensor, b: &Tensor) -> Option<IntegerTarget> {
+fn leftmost_tensor_integer_target(a: &Tensor, b: &Tensor) -> Option<IntegerClass> {
     a.integer_storage()
-        .map(IntegerTarget::from_storage)
-        .or_else(|| b.integer_storage().map(IntegerTarget::from_storage))
+        .map(IntegerClass::from_storage)
+        .or_else(|| b.integer_storage().map(IntegerClass::from_storage))
 }
 
-fn integer_value_at(target: IntegerTarget, tensor: &Tensor, index: usize) -> IntValue {
+fn integer_value_at(target: IntegerClass, tensor: &Tensor, index: usize) -> IntValue {
     match tensor.integer_storage() {
         Some(storage) => target.cast_int(
             &storage
@@ -1082,14 +1082,14 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
     Ok(Value::Tensor(result))
 }
 
-fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerClass> {
     let mut empty_target = None;
     for value in values {
         match value {
-            Value::Int(value) => return Some(IntegerTarget::from_int_value(value)),
+            Value::Int(value) => return Some(IntegerClass::from_int_value(value)),
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
-                    let target = IntegerTarget::from_storage(storage);
+                    let target = IntegerClass::from_storage(storage);
                     if !(tensor.rows() == 0 && tensor.cols() == 0) {
                         return Some(target);
                     }
@@ -1102,7 +1102,7 @@ fn leftmost_value_integer_target(values: &[Value]) -> Option<IntegerTarget> {
     empty_target
 }
 
-fn hcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult<Value> {
+fn hcat_integer_values(target: IntegerClass, values: &[Value]) -> BuiltinResult<Value> {
     let mut matrices = Vec::new();
     let mut rows = 0;
 
@@ -1136,7 +1136,7 @@ fn hcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult
     Ok(Value::Tensor(result))
 }
 
-fn vcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult<Value> {
+fn vcat_integer_values(target: IntegerClass, values: &[Value]) -> BuiltinResult<Value> {
     let mut matrices = Vec::new();
     let mut cols = 0;
 
@@ -1170,7 +1170,7 @@ fn vcat_integer_values(target: IntegerTarget, values: &[Value]) -> BuiltinResult
     Ok(Value::Tensor(result))
 }
 
-fn integer_matrix_from_value(target: IntegerTarget, value: &Value) -> BuiltinResult<Tensor> {
+fn integer_matrix_from_value(target: IntegerClass, value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Int(value) => {
             Tensor::new_integer(target.storage(vec![target.cast_int(value)]), vec![1, 1])

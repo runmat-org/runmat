@@ -1,5 +1,8 @@
 //! MATLAB-compatible `diag` builtin.
 
+use crate::builtins::common::integer_conversion::{
+    cast_complex_value, CastError, IntegerClass, IntegerClassExt,
+};
 use crate::builtins::common::{
     gpu_helpers,
     spec::{
@@ -7,9 +10,6 @@ use crate::builtins::common::{
         ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
     },
     tensor,
-};
-use crate::builtins::math::elementwise::integer_cast::{
-    cast_complex_value, CastError, IntegerTarget,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
@@ -508,7 +508,7 @@ enum OutputTemplate {
     Native,
     Logical,
     Double,
-    Integer(IntegerTarget),
+    Integer(IntegerClass),
     Like(Value),
 }
 
@@ -516,7 +516,7 @@ enum OutputTemplate {
 enum ClassOverride {
     Logical,
     Double,
-    Integer(IntegerTarget),
+    Integer(IntegerClass),
 }
 
 struct ParsedDiagArgs {
@@ -672,59 +672,8 @@ fn keyword_of(value: &Value) -> Option<String> {
     }
 }
 
-fn integer_target_from_keyword(keyword: &str) -> Option<IntegerTarget> {
-    match keyword {
-        "int8" => Some(IntegerTarget::I8),
-        "int16" => Some(IntegerTarget::I16),
-        "int32" => Some(IntegerTarget::I32),
-        "int64" => Some(IntegerTarget::I64),
-        "uint8" => Some(IntegerTarget::U8),
-        "uint16" => Some(IntegerTarget::U16),
-        "uint32" => Some(IntegerTarget::U32),
-        "uint64" => Some(IntegerTarget::U64),
-        _ => None,
-    }
-}
-
-fn integer_target_from_dtype(dtype: NumericDType) -> Option<IntegerTarget> {
-    match dtype {
-        NumericDType::I8 => Some(IntegerTarget::I8),
-        NumericDType::I16 => Some(IntegerTarget::I16),
-        NumericDType::I32 => Some(IntegerTarget::I32),
-        NumericDType::I64 => Some(IntegerTarget::I64),
-        NumericDType::U8 => Some(IntegerTarget::U8),
-        NumericDType::U16 => Some(IntegerTarget::U16),
-        NumericDType::U32 => Some(IntegerTarget::U32),
-        NumericDType::U64 => Some(IntegerTarget::U64),
-        NumericDType::F32 | NumericDType::F64 => None,
-    }
-}
-
-fn integer_target_from_storage(storage: &IntegerStorage) -> IntegerTarget {
-    match storage {
-        IntegerStorage::I8(_) => IntegerTarget::I8,
-        IntegerStorage::I16(_) => IntegerTarget::I16,
-        IntegerStorage::I32(_) => IntegerTarget::I32,
-        IntegerStorage::I64(_) => IntegerTarget::I64,
-        IntegerStorage::U8(_) => IntegerTarget::U8,
-        IntegerStorage::U16(_) => IntegerTarget::U16,
-        IntegerStorage::U32(_) => IntegerTarget::U32,
-        IntegerStorage::U64(_) => IntegerTarget::U64,
-    }
-}
-
-fn integer_target_from_int(value: &runmat_value::IntValue) -> IntegerTarget {
-    use runmat_value::IntValue;
-    match value {
-        IntValue::I8(_) => IntegerTarget::I8,
-        IntValue::I16(_) => IntegerTarget::I16,
-        IntValue::I32(_) => IntegerTarget::I32,
-        IntValue::I64(_) => IntegerTarget::I64,
-        IntValue::U8(_) => IntegerTarget::U8,
-        IntValue::U16(_) => IntegerTarget::U16,
-        IntValue::U32(_) => IntegerTarget::U32,
-        IntValue::U64(_) => IntegerTarget::U64,
-    }
+fn integer_target_from_keyword(keyword: &str) -> Option<IntegerClass> {
+    IntegerClass::from_class_name(keyword)
 }
 
 async fn try_parse_offset(value: &Value) -> BuiltinResult<Option<isize>> {
@@ -1672,7 +1621,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         }
         Value::ComplexTensor(proto_tensor) => {
             if let Some(storage) = proto_tensor.integer_storage() {
-                let target = integer_target_from_storage(&storage.real);
+                let target = storage.real.integer_class();
                 integer_value_from_value(value, target)
             } else {
                 complex_tensor_from_value_with_dtype(value, proto_tensor.numeric_dtype())
@@ -1683,7 +1632,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
             .map(Value::ComplexTensor),
         Value::Tensor(proto_tensor) => {
             let dtype = proto_tensor.numeric_dtype();
-            if let Some(target) = integer_target_from_dtype(dtype) {
+            if let Some(target) = dtype.integer_class() {
                 integer_value_from_value(value, target)
             } else {
                 floating_value_from_value(value, dtype)
@@ -1691,7 +1640,7 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
         }
         Value::Num(_) => double_value_from_value(value),
         Value::Int(prototype) => {
-            integer_value_from_value(value, integer_target_from_int(&prototype))
+            integer_value_from_value(value, prototype.integer_class())
         }
         Value::CharArray(_) => tensor_from_value(value).map(Value::Tensor),
         other => Err(diag_error(
@@ -1734,7 +1683,7 @@ async fn apply_gpu_like_template(
     let precision =
         runmat_accelerate_api::handle_precision(prototype).unwrap_or(provider.precision());
     let integer_target =
-        runmat_accelerate_api::handle_integer_type(prototype).map(integer_target_from_element_type);
+        runmat_accelerate_api::handle_integer_type(prototype).map(IntegerClass::from);
     let complex_target =
         runmat_accelerate_api::handle_storage(prototype) == GpuTensorStorage::ComplexInterleaved;
 
@@ -1819,22 +1768,6 @@ async fn apply_gpu_like_template(
     })
 }
 
-fn integer_target_from_element_type(
-    element_type: runmat_accelerate_api::IntegerElementType,
-) -> IntegerTarget {
-    use runmat_accelerate_api::IntegerElementType;
-    match element_type {
-        IntegerElementType::I8 => IntegerTarget::I8,
-        IntegerElementType::I16 => IntegerTarget::I16,
-        IntegerElementType::I32 => IntegerTarget::I32,
-        IntegerElementType::I64 => IntegerTarget::I64,
-        IntegerElementType::U8 => IntegerTarget::U8,
-        IntegerElementType::U16 => IntegerTarget::U16,
-        IntegerElementType::U32 => IntegerTarget::U32,
-        IntegerElementType::U64 => IntegerTarget::U64,
-    }
-}
-
 fn provider_precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
     match precision {
         ProviderPrecision::F32 => NumericDType::F32,
@@ -1849,7 +1782,7 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
     Ok(tensor::coerce_tensor_dtype(tensor, dtype))
 }
 
-fn integer_value_from_value(value: Value, target: IntegerTarget) -> BuiltinResult<Value> {
+fn integer_value_from_value(value: Value, target: IntegerClass) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => target
             .cast_tensor(tensor)

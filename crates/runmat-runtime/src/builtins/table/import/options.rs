@@ -894,7 +894,7 @@ impl SpreadsheetImportOptions {
 pub(in crate::builtins::table) enum ImportVariableType {
     Auto,
     Numeric(NumericDType),
-    Integer(crate::builtins::math::elementwise::integer_cast::IntegerTarget),
+    Integer(crate::builtins::common::integer_conversion::IntegerClass),
     Logical,
     Text(TextImportType),
     CellStr,
@@ -910,28 +910,28 @@ impl ImportVariableType {
             "double" => Ok(Self::Numeric(NumericDType::F64)),
             "single" => Ok(Self::Numeric(NumericDType::F32)),
             "int8" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I8,
+                crate::builtins::common::integer_conversion::IntegerClass::Int8,
             )),
             "int16" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I16,
+                crate::builtins::common::integer_conversion::IntegerClass::Int16,
             )),
             "int32" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I32,
+                crate::builtins::common::integer_conversion::IntegerClass::Int32,
             )),
             "int64" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::I64,
+                crate::builtins::common::integer_conversion::IntegerClass::Int64,
             )),
             "uint8" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U8,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt8,
             )),
             "uint16" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U16,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt16,
             )),
             "uint32" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U32,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt32,
             )),
             "uint64" => Ok(Self::Integer(
-                crate::builtins::math::elementwise::integer_cast::IntegerTarget::U64,
+                crate::builtins::common::integer_conversion::IntegerClass::UInt64,
             )),
             "logical" | "bool" | "boolean" => Ok(Self::Logical),
             "string" => Ok(Self::Text(TextImportType::String)),

@@ -1085,6 +1085,36 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 272,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "integer-conversion family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_conversions",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_conversion",
+    "crates/runmat-runtime/src/builtins/common/integer_conversion",
+    "crates/runmat-runtime/src/builtins/math/elementwise/integer_conversions",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_conversions/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_conversion/mod.rs",
+    "crates/runmat-runtime/src/builtins/common/integer_conversion/mod.rs",
+    "crates/runmat-runtime/src/builtins/common/integer_conversion/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/integer_conversions/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/integer_conversions/tests.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_conversions.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/numeric_conversions/documentation.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/int32.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/integer_cast.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/integer_cast_builtins.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/uint8.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/uint16.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/uint32.rs",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 224,
+});
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],

@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn unifrnd_typed_integer_roles_are_gated_and_wide_bounds_must_be_exact() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _provider_guard = reset_cpu_path();
         let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
         let bound_error = block_on(unifrnd_builtin(vec![

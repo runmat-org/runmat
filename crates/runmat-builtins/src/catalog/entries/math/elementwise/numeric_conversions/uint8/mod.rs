@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("uint8", "UINT8", NumericClass::UInt8, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as UINT8_CATALOG_ENTRY;
+pub use DESCRIPTOR as UINT8_DESCRIPTOR;
+pub use ERROR_INTERNAL as UINT8_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as UINT8_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as UINT8_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as UINT8_INTEGER_CAPABILITIES;

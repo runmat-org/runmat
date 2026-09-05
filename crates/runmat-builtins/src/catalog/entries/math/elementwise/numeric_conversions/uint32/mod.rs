@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("uint32", "UINT32", NumericClass::UInt32, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as UINT32_CATALOG_ENTRY;
+pub use DESCRIPTOR as UINT32_DESCRIPTOR;
+pub use ERROR_INTERNAL as UINT32_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as UINT32_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as UINT32_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as UINT32_INTEGER_CAPABILITIES;

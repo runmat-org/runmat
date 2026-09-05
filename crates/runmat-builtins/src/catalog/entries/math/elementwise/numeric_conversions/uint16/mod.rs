@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("uint16", "UINT16", NumericClass::UInt16, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as UINT16_CATALOG_ENTRY;
+pub use DESCRIPTOR as UINT16_DESCRIPTOR;
+pub use ERROR_INTERNAL as UINT16_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as UINT16_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as UINT16_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as UINT16_INTEGER_CAPABILITIES;

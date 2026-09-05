@@ -3,13 +3,13 @@
 use crate::builtins::common::arg_tokens::{tokens_from_context, tokens_from_values, ArgToken};
 use crate::builtins::common::concatenation::char_array_from_f64_with_prefix;
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::elementwise::integer_cast::{integer_values, IntegerTarget};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
@@ -898,14 +898,14 @@ fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResu
 
 /// MATLAB concatenation adopts the class of the leftmost integer operand,
 /// converting every other numeric or logical input to that class.
-fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_integer_target(values: &[Value]) -> Option<IntegerClass> {
     let mut empty_integer_target = None;
     for value in values {
         match value {
-            Value::Int(value) => return Some(IntegerTarget::from_int_value(value)),
+            Value::Int(value) => return Some(IntegerClass::from_int_value(value)),
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
-                    let target = IntegerTarget::from_storage(storage);
+                    let target = IntegerClass::from_storage(storage);
                     if !is_empty_concat_shape(&tensor.shape) {
                         return Some(target);
                     }
@@ -919,7 +919,7 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerTarget> {
 }
 
 fn cat_integer_tensors(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
     values: Vec<Value>,
     like: &LikeSpec,
@@ -929,7 +929,7 @@ fn cat_integer_tensors(
 }
 
 fn build_integer_cat_tensor(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
     values: Vec<Value>,
 ) -> BuiltinResult<Tensor> {
@@ -950,7 +950,7 @@ fn build_integer_cat_tensor(
 }
 
 fn integer_concat_input(
-    target: IntegerTarget,
+    target: IntegerClass,
     value: Value,
 ) -> BuiltinResult<(Vec<usize>, Vec<runmat_value::IntValue>)> {
     match value {
@@ -1062,7 +1062,7 @@ fn cat_complex_arrays(
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
+fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerClass> {
     let mut empty_target = None;
     for value in values {
         let Value::ComplexTensor(tensor) = value else {
@@ -1071,7 +1071,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
         let Some(storage) = tensor.integer_storage() else {
             continue;
         };
-        let target = IntegerTarget::from_storage(&storage.real);
+        let target = IntegerClass::from_storage(&storage.real);
         if !is_empty_concat_shape(&tensor.shape) {
             return Some(target);
         }
@@ -1081,7 +1081,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerTarget> {
 }
 
 fn cat_typed_complex_integer_arrays(
-    target: IntegerTarget,
+    target: IntegerClass,
     dim_zero: usize,
     values: Vec<Value>,
     like: &LikeSpec,
@@ -1117,7 +1117,7 @@ fn cat_typed_complex_integer_arrays(
 }
 
 fn typed_complex_integer_concat_input(
-    target: IntegerTarget,
+    target: IntegerClass,
     value: Value,
 ) -> BuiltinResult<(
     Vec<usize>,
