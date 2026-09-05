@@ -804,9 +804,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rng_wide_seed_is_gated_and_query_preserves_exact_seed() {
-        let _guard = random::test_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = random::test_guard();
         random::reset_rng();
         let wide = (1_u64 << 53) + 1;
         {

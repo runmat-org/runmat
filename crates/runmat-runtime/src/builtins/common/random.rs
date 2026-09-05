@@ -117,14 +117,6 @@ impl LegacyTokenState {
 
 static LEGACY_TOKENS: OnceLock<Mutex<LegacyTokenState>> = OnceLock::new();
 
-#[cfg(test)]
-static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
-
-#[cfg(test)]
-pub(crate) fn test_lock() -> &'static Mutex<()> {
-    TEST_MUTEX.get_or_init(|| Mutex::new(()))
-}
-
 fn fallback_rng_state() -> &'static Mutex<RuntimeRng> {
     RNG_STATE.get_or_init(|| Mutex::new(RuntimeRng::new()))
 }

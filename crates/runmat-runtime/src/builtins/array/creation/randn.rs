@@ -633,7 +633,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randn_column_and_resident_size_controls_follow_compatibility_mode() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset_rng_clean();
         let column = || {
             Value::Tensor(

@@ -16,7 +16,7 @@ use runmat_value::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,18 +477,8 @@ fn unsupported_data_dtype(dtype: &str) -> RuntimeError {
     ))
 }
 
-fn integer_target(dtype: &str) -> Option<IntegerTarget> {
-    match integer_dtype(dtype) {
-        Some("int8") => Some(IntegerTarget::I8),
-        Some("int16") => Some(IntegerTarget::I16),
-        Some("int32") => Some(IntegerTarget::I32),
-        Some("int64") => Some(IntegerTarget::I64),
-        Some("uint8") => Some(IntegerTarget::U8),
-        Some("uint16") => Some(IntegerTarget::U16),
-        Some("uint32") => Some(IntegerTarget::U32),
-        Some("uint64") => Some(IntegerTarget::U64),
-        _ => None,
-    }
+fn integer_target(dtype: &str) -> Option<IntegerClass> {
+    IntegerClass::from_class_name(dtype)
 }
 
 impl DataArrayPayload {

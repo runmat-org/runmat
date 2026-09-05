@@ -1,0 +1,13 @@
+mod documentation;
+
+use super::contract::*;
+use documentation::DOCUMENTATION;
+
+define_integer_conversion_contract!("int8", "INT8", NumericClass::Int8, DOCUMENTATION);
+
+pub use CATALOG_ENTRY as INT8_CATALOG_ENTRY;
+pub use DESCRIPTOR as INT8_DESCRIPTOR;
+pub use ERROR_INTERNAL as INT8_ERROR_INTERNAL;
+pub use ERROR_INVALID_ARGUMENT as INT8_ERROR_INVALID_ARGUMENT;
+pub use ERROR_INVALID_INPUT as INT8_ERROR_INVALID_INPUT;
+pub use INTEGER_CAPABILITIES as INT8_INTEGER_CAPABILITIES;

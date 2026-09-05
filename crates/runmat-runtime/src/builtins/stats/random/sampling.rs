@@ -2832,7 +2832,7 @@ mod tests {
 
     #[test]
     fn randsample_restores_exact_integer_population_to_its_owner() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         random::reset_rng();
         crate::builtins::common::test_support::with_test_provider(|provider| {
@@ -2969,7 +2969,7 @@ mod tests {
 
     #[test]
     fn unidrnd_typed_integer_roles_are_gated_and_wide_limits_must_be_exact() {
-        let _lock = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         random::reset_rng();
         let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
         let limit_error = block_on(unidrnd::unidrnd_builtin(vec![Value::Int(IntValue::U16(3))]))

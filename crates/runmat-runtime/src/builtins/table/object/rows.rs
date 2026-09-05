@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::builtins::math::elementwise::integer_cast::IntegerTarget;
+use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 
 pub(crate) fn selected_row_names(
     object: &ObjectInstance,
@@ -337,7 +337,7 @@ pub(super) fn concatenate_numeric_columns(values: &[&Value]) -> BuiltinResult<Va
         _ => None,
     });
     if let Some(prototype) = typed_prototype {
-        let target = IntegerTarget::from_storage(prototype);
+        let target = IntegerClass::from_storage(prototype);
         let mut exact = Vec::with_capacity(rows * total_cols);
         for value in values {
             let Value::Tensor(tensor) = value else {
