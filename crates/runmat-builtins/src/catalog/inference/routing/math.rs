@@ -44,7 +44,7 @@ pub(in crate::catalog::inference) fn infer(
         }
         MathInferenceRule::Root(kind) => super::super::math::roots::infer(kind, request, entry),
         MathInferenceRule::NumericLimit(rule) => {
-            super::super::numeric_limit::infer_numeric_limit(request, entry, rule)
+            super::super::math::numeric_limits::infer(request, entry, rule)
         }
         MathInferenceRule::NumericConversion(target) => {
             super::super::math::numeric_conversion::infer_numeric_conversion_call(

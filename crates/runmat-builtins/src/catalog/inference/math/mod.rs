@@ -12,6 +12,7 @@ pub(super) mod integer_division;
 pub(super) mod logarithms;
 pub(super) mod magnitude_phase_sign;
 pub(super) mod numeric_conversion;
+pub(super) mod numeric_limits;
 pub(super) mod powers_of_two;
 pub(super) mod remainder;
 pub(super) mod roots;

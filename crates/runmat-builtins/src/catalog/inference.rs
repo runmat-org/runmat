@@ -16,7 +16,6 @@ mod math_rounding;
 mod math_trigonometric;
 mod metadata_predicate;
 mod numeric_classification;
-mod numeric_limit;
 mod parallel_semantics;
 mod routing;
 mod scalar_logical_reduction;
