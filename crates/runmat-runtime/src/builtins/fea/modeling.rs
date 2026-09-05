@@ -44,8 +44,7 @@ impl Default for ModelDefaultsMode {
 #[derive(Debug, Default)]
 pub(super) struct StudyConstructorOptions {
     pub(super) template: Option<AnalysisModelTemplate>,
-    pub(super) backend: Option<ComputeBackend>,
-    pub(super) requirement: Option<FormulationRequirement>,
+    pub(super) execution: Option<AnalysisExecutionPlan>,
     pub(super) model_id: Option<String>,
     pub(super) model: Option<AnalysisModel>,
     pub(super) frame: Option<CoordinateFrame>,
@@ -79,10 +78,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let options = StudyConstructorOptions::parse(&args[2..])?;
     let supplied_mesh = options.mesh.clone();
     let template = resolve_study_template(&options)?;
-    let backend = options.backend.unwrap_or(ComputeBackend::Cpu);
-    let requirement = options
-        .requirement
-        .unwrap_or(FormulationRequirement::Production);
+    let supplied_execution = options.execution.clone();
     let model_id = options.model_id.clone().unwrap_or_else(|| {
         options
             .model
@@ -129,22 +125,18 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     if let Some(mesh) = supplied_mesh.as_ref() {
         crate::analysis::meshing::apply_boundary_region_ids(&mut model, &mesh.boundary_region_ids);
     }
-    let [procedure_step] = model.sequence.steps.as_slice() else {
-        return Err(builtin_error(
-            STUDY_NAME,
-            &ERROR_INPUT,
-            "fea.study currently requires a model with exactly one procedure step",
-        ));
-    };
-    let solver_options = AnalysisSolverOptions::defaults_for(procedure_step)
-        .map_err(|message| builtin_error(STUDY_NAME, &ERROR_INPUT, message))?;
-    let execution = AnalysisExecutionPlan {
-        steps: vec![AnalysisExecutionStep {
-            step_id: procedure_step.step_id.clone(),
-            backend,
-            requirement,
-            solver_options,
-        }],
+    let execution = match supplied_execution {
+        Some(execution) => {
+            execution
+                .validate_against(&model.sequence)
+                .map_err(|message| builtin_error(STUDY_NAME, &ERROR_INPUT, message))?;
+            execution
+        }
+        None => AnalysisExecutionPlan::for_sequence(
+            &model.sequence,
+            runmat_analysis_fea::ComputeBackend::Cpu,
+        )
+        .map_err(|message| builtin_error(STUDY_NAME, &ERROR_INPUT, message))?,
     };
     let persisted_mesh = supplied_mesh
         .as_ref()
@@ -198,13 +190,10 @@ impl StudyConstructorOptions {
                     let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
                     options.template = Some(parse_scalar_enum(&text, "Template")?);
                 }
-                "backend" => {
-                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.backend = Some(parse_scalar_enum(&text, "Backend")?);
-                }
-                "requirement" | "formulationrequirement" => {
-                    let text = scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?;
-                    options.requirement = Some(parse_scalar_enum(&text, "FormulationRequirement")?);
+                "execution" => {
+                    options.execution = Some(super::execution::execution_plan_from_value(
+                        STUDY_NAME, &pair[1],
+                    )?)
                 }
                 "modelid" => {
                     options.model_id = Some(scalar_string(&pair[1], STUDY_NAME, &ERROR_INPUT)?);

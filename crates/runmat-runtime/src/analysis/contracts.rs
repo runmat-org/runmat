@@ -11,8 +11,6 @@ use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use super::mesh_summary::AnalysisMeshSummary;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
     pub valid: bool,
@@ -2338,92 +2336,6 @@ pub struct AnalysisStudySpec {
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meshing_evidence_artifact_path: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct AnalysisStudyDiagramObservation {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_mime_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub physical_region_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub boundary_condition_region_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub driving_condition_region_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub structural_force_n: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confidence: Option<f64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyAuthoringIntent {
-    pub study_id: String,
-    #[serde(default)]
-    pub model_id: Option<String>,
-    pub geometry: GeometryAsset,
-    pub mesh_summary: AnalysisMeshSummary,
-    pub template: AnalysisModelTemplate,
-    pub backend: ComputeBackend,
-    pub requirement: FormulationRequirement,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-    #[serde(default)]
-    pub meshing_evidence_artifact_path: Option<String>,
-    #[serde(default)]
-    pub physical_region_id: Option<String>,
-    #[serde(default)]
-    pub boundary_condition_region_id: Option<String>,
-    #[serde(default)]
-    pub driving_condition_region_id: Option<String>,
-    #[serde(default)]
-    pub structural_force_n: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagram_observation: Option<AnalysisStudyDiagramObservation>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyAuthoringData {
-    pub study: AnalysisStudySpec,
-    pub evidence: AnalysisStudyAuthoringEvidence,
-    pub evidence_artifact_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyAuthoringEvidence {
-    pub schema_version: String,
-    pub mesh_id: String,
-    pub mesh_summary_schema_version: u16,
-    pub selected_physical_region_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_boundary_condition_region_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_driving_condition_region_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_driving_condition_kind: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selected_structural_force_n: Option<[f64; 3]>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagram_artifact_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagram_source_mime_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagram_summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagram_confidence: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub solver_mesh_artifact_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meshing_evidence_artifact_path: Option<String>,
-    pub physical_region_source: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub boundary_condition_region_source: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub driving_condition_region_source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

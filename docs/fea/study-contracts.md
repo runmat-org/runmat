@@ -304,6 +304,24 @@ CPU, GPU, remote, or distributed placement under the normal RunMat execution con
 frequency points, samples, branches, and partition-local observation work may scale out when the
 selected formulation supports it. Global reductions retain collective and partition evidence.
 
+The RunMat authoring boundary keeps those responsibilities explicit and typed:
+
+```matlab
+backend = fea.ComputeBackend.cpu();
+requirement = fea.FormulationRequirement.experimental();
+execution = fea.ExecutionPlan.defaults(sequence, backend, requirement);
+study = fea.study("bracket", geometry, ...
+    "Template", "linear_static_structural", ...
+    "Model", model, ...
+    "Execution", execution);
+```
+
+For a heterogeneous sequence, construct one `fea.SolverOptions` and `fea.ExecutionStep` per
+procedure step, then pass the ordered entries to `fea.ExecutionPlan.new(sequence, steps)`. The
+sequence remains the authority for physical order and state flow; the execution plan only binds
+those steps to solver options, requested backend, and required formulation maturity. Cluster
+selection belongs to the shared CLI/execution placement layer rather than either object.
+
 Changing placement cannot weaken an accuracy criterion, alter activation, invent a state
 transition, or turn an experimental formulation into a production one. Checkpoint and result
 artifacts retain sequence, topology, partition, formulation, observation, and accuracy identity so

@@ -27,31 +27,21 @@ runmat run studies/bracket_static.fea
 
 By default, FEA run output is human-readable and includes the `run_id`, status, quality gates, evidence path, and a `fea.results("<run_id>")` hint for post-processing. Use `runmat run --json studies/bracket_static.fea` when a script or CI job needs structured JSON. Use `runmat check --json studies/bracket_static.fea` for structured validation and plan output.
 
-## Minimal Study File
+## Smallest Runnable Study
 
-This is the smallest useful `.fea` study. The geometry path is resolved relative to the `.fea` file.
+The repository includes a complete typed static study and its geometry fixture:
 
-```yaml
-version: 1
-kind: study
-id: bracket_static
-
-geometry:
-  path: ../geometry/bracket.stl
-  units: meter
-
-model:
-  profile: linear_static_structural
-
-run:
-  backend: cpu
+```sh
+runmat check docs/fea/examples/structural-static-experimental.fea
+runmat run docs/fea/examples/structural-static-experimental.fea
 ```
 
-The default model mode is `profile_scaffold`. RunMat loads the geometry and creates a scaffold model from the selected profile during validation, planning, and running.
+The file is intentionally explicit. A study contains a typed model template, authored physical
+objects, one semantic `sequence`, and an `execution` entry for each step that will run. The
+sequence owns physics and dataflow; execution owns backend, formulation requirement, and solver
+options. Neither is inferred from a generic run kind.
 
-## Full Study Shape
-
-Use explicit fields when the study file should carry model data directly:
+The top-level shape is:
 
 ```yaml
 version: 1
@@ -66,58 +56,46 @@ geometry:
 
 model:
   id: bracket_static_model
-  profile: linear_static_structural
+  template: linear_static_structural
   defaults: none
   frame: global
 
 regions:
   fixed_base:
-    selector: "name:Base_Mount"
+    selector: { name: Base_Mount }
   load_face:
-    selector: "name:Tip_Load"
+    selector: { name: Tip_Load }
 
-materials:
-  aluminum_6061:
-    name: Aluminum 6061
-    mechanical:
-      youngs_modulus_pa: 69000000000.0
-      poisson_ratio: 0.33
+# Typed materials, assignments, constraints, signals, excitation cases,
+# excitations, initial conditions, response spectra, domains, and interfaces.
 
-material_assignments:
-  - region: fixed_base
-    material: aluminum_6061
-  - region: load_face
-    material: aluminum_6061
+sequence:
+  sequence_id: bracket_sequence
+  steps: []       # typed procedure-step records
+  dependencies: []
+  transitions: []
+  branches: []
 
-boundary_conditions:
-  - id: fixed_base
-    region: fixed_base
-    kind: fixed
-
-loads:
-  - id: tip_force
-    region: load_face
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-
-steps:
-  - id: static_step
-    kind: static
-
-run:
-  backend: cpu
-  options:
-    deterministic_mode: true
-    precision_mode: fp64
-    preconditioner_mode: auto
-    quality_policy: balanced
+execution:
+  - step: static
+    backend: cpu
+    requirement: production
 ```
 
-Supported region selectors are direct region ids, `id:<region-id>`, `region:<region-id>`, `name:<region-name>`, and `tag:<tag>`. CAD imports commonly expose tags such as `occt_face`, `cad_body`, `cad_layer`, and `cad_material`; inspect the loaded geometry before relying on a selector.
+The abbreviated sequence above documents structure; use the checked-in example for runnable step,
+activation, state, observation, and accuracy records. `model.defaults: template_scaffold` asks
+RunMat to provide template-owned model defaults; `none` requires the document to provide the
+physical model explicitly.
+
+Region selectors are closed objects containing exactly one of `id`, `name`, or `tag`. CAD imports
+commonly expose tags such as `occt_face`, `cad_body`, `cad_layer`, and `cad_material`; inspect the
+loaded geometry before relying on a selector. Prefix strings such as `name:Tip_Load` are not part
+of the `.fea` schema.
 
 ## Sweep File
 
-Use a sweep when several studies should be checked or run as one deterministic sequence. Nested studies use the same study fields but do not include `kind`.
+Use a sweep when several complete studies should be checked or run as one deterministic collection.
+Nested studies use the same typed study fields but omit `kind`.
 
 ```yaml
 version: 1
@@ -128,26 +106,23 @@ fail_fast: true
 studies:
   - version: 1
     id: bracket_aluminum
-    geometry:
-      path: ../geometry/bracket.stl
-      units: meter
-    model:
-      profile: linear_static_structural
-    run:
-      backend: cpu
+    geometry: { path: ../geometry/bracket.stl, units: meter }
+    model: { template: linear_static_structural }
+    sequence: # complete typed sequence, as in the runnable example
+    execution: # one typed entry per executable step
 
   - version: 1
     id: bracket_steel
-    geometry:
-      path: ../geometry/bracket.stl
-      units: meter
-    model:
-      profile: linear_static_structural
-    run:
-      backend: cpu
+    geometry: { path: ../geometry/bracket.stl, units: meter }
+    model: { template: linear_static_structural }
+    sequence: # complete typed sequence
+    execution: # one typed entry per executable step
 ```
 
-Sweeps execute sequentially in `v1`. `fail_fast: false` lets planning or running continue after a study-level failure and records failure entries in the sweep result.
+The fragment documents nesting and is not a complete runnable sweep because its sequence records
+are elided. `fail_fast: false` lets planning or running continue after a study-level failure and
+records failure entries in the sweep result. Scheduling policy is not encoded into the document
+schema; the execution service may run independent studies concurrently when placement permits.
 
 ## Run From `.m` Code
 
@@ -172,26 +147,27 @@ tipLoad = fea.StructuralExcitation.force( ...
     "tip_force", "service_loads", loadPad, forceSignal);
 serviceLoads = fea.ExcitationCase.always("service_loads", {tipLoad});
 
+step = fea.StructuralStep.static("static");
+sequence = fea.AnalysisSequence.new( ...
+    "bracket_sequence", {step}, cell(0, 0), cell(0, 0), cell(0, 0));
+backend = fea.ComputeBackend.cpu();
+requirement = fea.FormulationRequirement.experimental();
+execution = fea.ExecutionPlan.defaults(sequence, backend, requirement);
+
 model = fea.model("bracket_static_model", geom, ...
-    "Profile", "linear_static_structural", ...
+    "Template", "linear_static_structural", ...
     "Materials", {steel}, ...
     "Constraints", {fixed}, ...
     "Signals", {forceSignal}, ...
     "Excitations", {tipLoad}, ...
-    "ExcitationCases", {serviceLoads});
-
-opts = fea.runOptions("linear_static", ...
-    "DeterministicMode", true, ...
-    "PrecisionMode", "fp64", ...
-    "PreconditionerMode", "auto", ...
-    "QualityPolicy", "balanced");
+    "ExcitationCases", {serviceLoads}, ...
+    "Sequence", sequence);
 
 study = fea.study("bracket_static", geom, ...
-    "Profile", "linear_static_structural", ...
+    "Template", "linear_static_structural", ...
     "Mesh", solverMesh, ...
-    "Backend", "cpu", ...
-    "Model", model, ...
-    "RunOptions", opts);
+    "Execution", execution, ...
+    "Model", model);
 
 validation = fea.validate(study);
 plan = fea.plan(study);
@@ -222,7 +198,13 @@ Use `Constraints` for prescribed values and kinematic relations, and `Boundaries
 
 The same host-only physical-value boundary applies to `fea.material`, the quantity-specific signal constructors, and the dimensioned quantity constructors. Domain constructors accept only the quantity classes required by their physics: for example, `fea.ElectromagneticDomain.atFrequency` requires `fea.Frequency`, and `fea.FluidDomain.newtonian` requires `fea.MassDensity`, `fea.DynamicViscosity`, and `fea.TurbulenceIntensity`. Bare numbers cannot silently acquire units. Numeric quantity inputs are checked before one binary64 model-storage conversion, so sufficiently wide integers can round. Numerical enforcement controls such as contact penalties and coupling relaxation belong to typed step or solver policy, not to interface physics. Geometry/model revisions, plan counts, field shape/count metadata, and comparison count deltas are structural integers; they remain exact and do not enter the physical-value conversion. The conventional plotting handle remains a double at the scripting boundary. Resident numeric constructor fields are rejected because typed FEA object construction performs no provider execution.
 
-`fea.runOptions` distinguishes structural controls from physical solver settings. Mode, step, iteration, retry, backtrack, and tangent-refresh counts accept all eight integer classes and ordinary integral doubles exactly; tolerances, time steps, scales, ratios, frequencies, and residual thresholds cross one checked binary64 boundary. Logical settings require logical scalars. The complete per-family option/default table is in the [operation reference](./operation-reference).
+Execution is authored separately from the semantic sequence. `fea.ComputeBackend` and
+`fea.FormulationRequirement` are closed typed choices. `fea.SolverOptions.defaults(step)` selects
+the family-compatible default options for one procedure step;
+`fea.ExecutionPlan.defaults(sequence, backend, requirement)` does that for every step. Use
+`fea.ExecutionStep.new(...)` and `fea.ExecutionPlan.new(...)` when different steps require
+different backends or formulation maturity. Plan construction rejects missing, duplicate,
+out-of-order, and solver-incompatible step entries before a study can run.
 
 `fea.results` uses positive one-based exact vectors for `ModeIndices` and `TransientSnapshotIndices`, matching normal RunMat indexing. Its inclusion flags accept logical scalars or exact numeric zero and one. Selector shape, positivity, integrality, and range are validated before artifact lookup; resident selectors reject without provider access. Structural result metadata such as shapes, counts, indexes, byte sizes, iteration counts, and fingerprints remains exact, while field values and physical/timing/residual quantities remain double. `fea.trends("WindowSize", n)` applies the same exact structural rule to a positive scalar and defaults to 16.
 
@@ -287,9 +269,10 @@ The typed constructors are:
 | `fea.ContactInterface.frictionless(...)`, `fea.ContactInterface.coulomb(...)` | Contact between two typed regions, optionally with typed Coulomb friction. |
 | `fea.FluidStructureInterface.noSlip(...)` | No-slip fluid-to-structure transfer across two typed regions. |
 | `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Fluid-to-solid heat transfer with exactly one physical transfer law. |
-| `fea.runOptions(...)` | Family-specific solver and quality options. |
+| `fea.SolverOptions.defaults(step)` | Create typed solver options compatible with one procedure step. |
+| `fea.ExecutionStep.new(...)`, `fea.ExecutionPlan.new(...)`, `fea.ExecutionPlan.defaults(...)` | Bind each semantic procedure step to typed backend, formulation maturity, and solver options. |
 | `fea.model(...)` | Explicit model assembled from typed components. |
-| `fea.study(...)` | Study assembled from geometry, physics profile/model data, backend, and run options. |
+| `fea.study(...)` | Study assembled from geometry, a typed model template/model, sequence, backend, and formulation requirement. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
 | `plot(field, ...)` | Plot an `fea.Field` through the ordinary plotting function. |
 | `mesh(runOrResultsOrField, ...)` | Display solver topology, CAD geometry, or both through the ordinary mesh function. |
@@ -452,7 +435,7 @@ Rust hosts call runtime operations when they need the operation envelope, trace 
 use runmat_analysis_fea::ComputeBackend;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_run_linear_static_op, analysis_validate,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
+    AnalysisCreateModelIntentSpec, AnalysisModelTemplate,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -464,7 +447,7 @@ let model = analysis_create_model_op(
     &geometry,
     AnalysisCreateModelIntentSpec {
         model_id: "bracket_static_model".to_string(),
-        profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        template: AnalysisModelTemplate::LinearStaticStructural,
     },
     context.clone(),
 )?.data;
@@ -472,7 +455,7 @@ let model = analysis_create_model_op(
 analysis_validate(
     &model,
     geometry.units,
-    &runmat_analysis_core::ReferenceFrame::Global,
+    &runmat_analysis_core::CoordinateFrame::Global,
     context.clone(),
 )?;
 

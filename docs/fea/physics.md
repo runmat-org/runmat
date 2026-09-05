@@ -1,6 +1,9 @@
 # Physics Families
 
-Choose the physics family from the engineering question. The selected model profile determines required model data, selects the solver, validates run options, and shapes diagnostics, result payloads, and current support boundaries.
+Choose the physics family from the engineering question. The typed procedure step determines the
+family and procedure; its execution entry selects an eligible solver configuration. Together with
+the model, they determine required data, diagnostics, result payloads, and current support
+boundaries.
 
 ## Families
 
@@ -33,7 +36,8 @@ Choose the physics family from the engineering question. The selected model prof
 
 ## Run Options
 
-The `.fea` `run.options` block is typed by the solver selected from `model.profile`.
+Each `.fea` `execution` entry is typed by its referenced procedure step and optional
+`solver`/`options` pair.
 
 Common option themes include:
 

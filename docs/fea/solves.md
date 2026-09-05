@@ -103,28 +103,31 @@ Direct solve operations require an `AnalysisModel`. They are the right boundary 
 
 ## Run Options
 
-Run options are specified under `run.options` in `.fea`, or through typed runtime option structs in host code. The options are validated against the solver selected by `model.profile`.
+Solver options are specified by an `execution` entry in `.fea`, or through typed runtime option
+objects in host code. Each entry names a sequence step, backend, formulation requirement, and—when
+needed—a matching `solver`/`options` pair. Validation checks the options against that step's typed
+family and procedure.
 
 Example:
 
 ```yaml
-model:
-  profile: electromagnetic_static
-
-run:
-  backend: cpu
-  options:
-    deterministic_mode: true
-    precision_mode: fp64
-    quality_policy: balanced
-    residual_target: 1.0e-6
-    harmonic_tolerance: 1.0e-7
-    harmonic_max_iterations: 96
-    sweep_enabled: true
-    sweep_frequency_hz: [40.0, 60.0, 120.0]
+execution:
+  - step: harmonic
+    backend: cpu
+    requirement: experimental
+    solver: electromagnetic
+    options:
+      deterministic_mode: true
+      precision_mode: fp64
+      quality_policy: balanced
+      residual_target: 1.0e-6
+      harmonic_tolerance: 1.0e-7
+      harmonic_max_iterations: 96
+      sweep_enabled: true
+      sweep_frequency_hz: [40.0, 60.0, 120.0]
 ```
 
-Supplying options for the wrong selected solver is a validation issue.
+Supplying options for a solver that does not support the referenced step is a validation error.
 
 ## Results After A Run
 

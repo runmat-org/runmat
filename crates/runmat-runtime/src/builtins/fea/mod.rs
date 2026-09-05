@@ -6,11 +6,11 @@ use runmat_analysis_core::{
     CoordinateFrame, Displacement, DynamicViscosity, ElectricCurrent, ElectricPotential,
     ElectricalConstraint, ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain,
     EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint,
-    FluidConstraintKind, FluidStructureInterfaceModel, FluidStructureKinematics,
-    FormulationRequirement, Frequency, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
-    MagneticConstraint, MagneticConstraintKind, MagneticVectorPotential, MassDensity,
-    MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
+    FluidConstraintKind, FluidStructureInterfaceModel, FluidStructureKinematics, Frequency,
+    FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
+    MagneticConstraintKind, MagneticVectorPotential, MassDensity, MaterialAcousticModel,
+    MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
     PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
     PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
     RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
@@ -19,7 +19,6 @@ use runmat_analysis_core::{
     ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
-use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
@@ -59,12 +58,12 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(crate) mod accuracy;
 pub(crate) mod activations;
-mod author_study;
 pub(crate) mod boundaries;
 pub(crate) mod classes;
 pub(crate) mod constraints;
 pub(crate) mod domains;
 pub(crate) mod excitations;
+pub(crate) mod execution;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
 mod modeling;
@@ -92,7 +91,6 @@ use visualization::{mesh_request_from_args, plot_request_from_args};
 
 const LOAD_NAME: &str = "fea.load";
 const STUDY_NAME: &str = "fea.study";
-const AUTHOR_STUDY_NAME: &str = "fea.authorStudy";
 const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
@@ -114,6 +112,7 @@ pub(crate) fn ensure_value_classes_registered() {
     activations::ensure_activation_classes_registered();
     accuracy::ensure_accuracy_classes_registered();
     constraints::ensure_constraint_support_classes_registered();
+    execution::ensure_execution_classes_registered();
     values::ensure_quantity_classes_registered();
     signal_policies::ensure_signal_policy_classes_registered();
     signals::ensure_signal_classes_registered();
@@ -168,38 +167,7 @@ const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description:
-            "Required Template plus optional Mesh, Backend, Requirement, ModelId, and model setup options.",
-    },
-];
-const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Study id.",
-    },
-    BuiltinParamDescriptor {
-        name: "geometry",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "geometry.Asset returned by geometry.load.",
-    },
-    BuiltinParamDescriptor {
-        name: "meshAuthoringSummary",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Compact mesh authoring evidence summary.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Required Template plus Backend, Requirement, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
+            "Required Template plus optional Mesh, Execution, ModelId, and typed model setup options.",
     },
 ];
 const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -400,11 +368,6 @@ const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &OUT_ANY,
     },
 ];
-const AUTHOR_STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.authorStudy(id, geometry, meshSummary, Name, Value, ...)",
-    inputs: &IN_AUTHOR_STUDY_ARGS,
-    outputs: &OUT_ANY,
-}];
 const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "result = fea.validate(studyOrSweepOrPath)",
     inputs: &IN_INPUT,
@@ -512,12 +475,6 @@ pub const FEA_LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &STUDY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_AUTHOR_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &AUTHOR_STUDY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
@@ -761,18 +718,6 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         return load_document_object(PathBuf::from(path)).await;
     }
     create_study_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.authorStudy",
-    category = "fea",
-    summary = "Author a typed FEA study from compact mesh authoring evidence.",
-    keywords = "fea,study,author,mesh,evidence,agent",
-    descriptor(crate::builtins::fea::FEA_AUTHOR_STUDY_DESCRIPTOR),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_author_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    author_study::create_author_study_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -2611,13 +2556,6 @@ fn geometry_asset_from_value(builtin: &'static str, value: &Value) -> BuiltinRes
     object_json_property(builtin, object, GEOMETRY_ASSET_JSON_PROPERTY, &ERROR_INPUT)
 }
 
-fn geometry_asset_from_value_with_builtin(
-    value: &Value,
-    builtin: &'static str,
-) -> BuiltinResult<GeometryAsset> {
-    geometry_asset_from_value(builtin, value)
-}
-
 fn object_json_property<T: DeserializeOwned>(
     builtin: &'static str,
     object: &ObjectInstance,
@@ -2838,6 +2776,7 @@ mod tests {
         temperature_kelvin_builtin, turbulence_intensity_builtin,
     };
     use futures::executor::block_on;
+    use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
     use runmat_value::CellArray;
 
@@ -2885,66 +2824,48 @@ mod tests {
     }
 
     fn cell(values: Vec<Value>) -> Value {
-        let cols = values.len().max(1);
-        Value::Cell(CellArray::new(values, 1, cols).expect("cell should build"))
+        let shape = if values.is_empty() {
+            (0, 0)
+        } else {
+            (1, values.len())
+        };
+        Value::Cell(CellArray::new(values, shape.0, shape.1).expect("cell should build"))
     }
 
     #[test]
     fn study_options_accept_canonical_signal_excitation_and_case_values() {
-        let signal_id = runmat_analysis_core::SignalId("tip_force.signal".into());
-        let case_id = runmat_analysis_core::ExcitationCaseId("tip_force.case".into());
-        let excitation_id = runmat_analysis_core::ExcitationId("tip_force".into());
-        let signal = runmat_analysis_core::PhysicalSignal::Force(runmat_analysis_core::Signal {
-            signal_id: signal_id.clone(),
-            shape: runmat_analysis_core::SignalShape::Vector3,
-            frame: Some(CoordinateFrame::Global),
-            representation: runmat_analysis_core::SignalRepresentation::Constant(
-                runmat_analysis_core::SignalValue::Vector3(
-                    [0.0, -1_000.0, 0.0].map(runmat_analysis_core::Force::new),
-                ),
-            ),
-            precision: runmat_analysis_core::SignalPrecision::Real64,
-            evidence: runmat_analysis_core::SignalApproximationEvidence {
-                max_absolute_error: None,
-                max_relative_error: None,
-                derivative_max_absolute_error: None,
-                sample_count: 1,
-            },
-            provenance: runmat_analysis_core::SignalProvenance::Authored,
-        });
-        let excitation = runmat_analysis_core::ExcitationAction::Force(
-            runmat_analysis_core::AnalysisExcitation {
-                excitation_id: excitation_id.clone(),
-                case_id: case_id.clone(),
-                target: ExcitationTarget::Region(RegionTarget::boundary("tip")),
-                frame: CoordinateFrame::Global,
-                direction: None,
-                distribution: runmat_analysis_core::ExcitationDistribution::PreserveResultant,
-                kinematics: runmat_analysis_core::ExcitationKinematics::FixedFrame,
-                signal_id,
-                active_step_ids: vec!["static".into()],
-                combination_group: None,
-                projection: runmat_analysis_core::ProjectionRequirement {
-                    preserve_resultant: true,
-                    preserve_moment: false,
-                    relative_tolerance: 1.0e-9,
-                },
-            },
-        );
-        let case = runmat_analysis_core::ExcitationCase {
-            case_id,
-            action_ids: vec![excitation_id],
-            activation: runmat_analysis_core::ExcitationCaseActivation::Always,
-        };
-        let signal_value =
-            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.Signal", &signal)
-                .expect("canonical signal should convert to a RunMat object");
-        let excitation_value =
-            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.Excitation", &excitation)
-                .expect("canonical excitation should convert to a RunMat object");
-        let case_value =
-            serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, "fea.ExcitationCase", &case)
-                .expect("canonical excitation case should convert to a RunMat object");
+        crate::builtins::geometry::region::ensure_region_class_registered();
+        let mut region =
+            ObjectInstance::new(crate::builtins::geometry::region::GEOMETRY_REGION_CLASS.into());
+        region
+            .properties
+            .insert("geometry_id".into(), Value::String("geom".into()));
+        region
+            .properties
+            .insert("geometry_revision".into(), Value::Int(IntValue::U32(2)));
+        region
+            .properties
+            .insert("region_id".into(), Value::String("tip".into()));
+        region
+            .properties
+            .insert("name".into(), Value::String("Tip".into()));
+        let signal_value = block_on(signals::force_constant(
+            "tip_force.signal".into(),
+            Value::Tensor(Tensor::new_2d(vec![0.0, -1_000.0, 0.0], 1, 3).unwrap()),
+        ))
+        .expect("typed force signal should build");
+        let excitation_value = block_on(excitations::structural_force(
+            "tip_force".into(),
+            "service".into(),
+            Value::Object(region),
+            signal_value.clone(),
+        ))
+        .expect("typed structural excitation should build");
+        let case_value = block_on(excitations::excitation_case_always(
+            "service".into(),
+            excitation_value.clone(),
+        ))
+        .expect("typed excitation case should build");
 
         let options = StudyConstructorOptions::parse(&[
             Value::String("Signals".into()),
@@ -3825,7 +3746,7 @@ execution:
             Value::String("Constraints".to_string()),
             cell(vec![fixed]),
             Value::String("Steps".to_string()),
-            cell(vec![step]),
+            cell(vec![step.clone()]),
             Value::String("Domains".to_string()),
             cell(vec![domain]),
         ]))
@@ -3837,13 +3758,28 @@ execution:
             .expect("thermo-mechanical domain");
         assert_eq!(thermo.reference_temperature.kelvin, 293.15);
 
+        let sequence = block_on(sequences::sequence(vec![
+            Value::String("bracket_sequence".to_string()),
+            cell(vec![step]),
+            cell(Vec::new()),
+            cell(Vec::new()),
+            cell(Vec::new()),
+        ]))
+        .expect("sequence should build");
+        let execution = block_on(execution::execution_plan_defaults(
+            sequence,
+            block_on(execution::backend_cpu()).unwrap(),
+            block_on(execution::requirement_production()).unwrap(),
+        ))
+        .expect("execution should build");
+
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),
             geometry,
             Value::String("Template".to_string()),
             Value::String("linear_static_structural".to_string()),
-            Value::String("Backend".to_string()),
-            Value::String("cpu".to_string()),
+            Value::String("Execution".to_string()),
+            execution,
             Value::String("Model".to_string()),
             model,
         ]))

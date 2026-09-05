@@ -122,11 +122,11 @@ are staged before either destination is replaced, and a publication error rolls 
 ### Hand a mesh to FEA
 
 Meshing owns geometry discretization and persistent regions. FEA owns materials, assignments,
-loads, constraints, natural boundaries, solver configuration, fields, and result visualization:
+excitations, constraints, natural boundaries, solver configuration, fields, and result visualization:
 
 ```matlab
 study = fea.study("bracket_static", part, ...
-    "Profile", "linear_static_structural", ...
+    "Template", "linear_static_structural", ...
     "Mesh", solverMesh, ...
     "Materials", steel, ...
     "MaterialAssignments", assignments, ...
@@ -220,6 +220,9 @@ surface, and volume meshing operate on the B-rep and its evaluators.
 The `runmat mesh` command interprets source coordinates as metres. A `.fea` study declares source
 units explicitly, and RunMat normalizes the imported geometry before deriving its revision:
 
+Add a `mesh` block to a complete typed study. For example, this is the geometry, template, and
+meshing portion of the runnable structural fixture:
+
 ```yaml
 geometry:
   path: ../geometry/bracket.step
@@ -278,7 +281,7 @@ geometry:
   units: millimeter
 
 model:
-  profile: linear_static_structural
+  template: linear_static_structural
 
 mesh:
   element_order: tet10
@@ -288,8 +291,6 @@ mesh:
   maximum_grading_ratio: 1.3
   deterministic_seed: 42
 
-run:
-  backend: cpu
 ```
 
 Check and run it with:
@@ -299,12 +300,13 @@ runmat check studies/bracket_static.fea
 runmat run studies/bracket_static.fea
 ```
 
-The `mesh:` block is resolved into the same canonical request used by direct generation. Algorithm
+The complete sequence, constraints, excitation, and execution plan are in
+`docs/fea/examples/structural-static-experimental.fea`. The `mesh:` block is resolved into the same canonical request used by direct generation. Algorithm
 identities and implementation choices are recorded as evidence; they are not user-selectable
 backends. `maximum_grading_ratio` limits how quickly the requested size may change through adjacent
 regions. Lower values produce smoother transitions and can require more elements.
 
-For a linear-static profile, omitting `mesh:` uses the defaults shown above. An explicit `mesh:`
+For a linear-static structural template, omitting `mesh:` uses the defaults shown above. An explicit `mesh:`
 block pins those values in the study document and makes request changes visible in review and CI.
 
 ## What the Mesher Does

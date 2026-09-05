@@ -25,6 +25,11 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
             step, domain, {activation}, cell(0, 0), {state}, cell(0, 0), accuracy, restart);
         sequence = fea.AnalysisSequence.new( ...
             "production", {step}, cell(0, 0), cell(0, 0), cell(0, 0));
+        backend = fea.ComputeBackend.cpu();
+        requirement = fea.FormulationRequirement.production();
+        solverOptions = fea.SolverOptions.defaults(step);
+        executionStep = fea.ExecutionStep.new(step, backend, requirement, solverOptions);
+        execution = fea.ExecutionPlan.new(sequence, {executionStep});
         "#,
     )
     .expect("typed sequence should compile and execute");
@@ -34,6 +39,11 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
         "fea.StateOutput",
         "fea.StructuralStep",
         "fea.AnalysisSequence",
+        "fea.ComputeBackend",
+        "fea.FormulationRequirement",
+        "fea.SolverOptions",
+        "fea.ExecutionStep",
+        "fea.ExecutionPlan",
     ] {
         assert!(
             values.iter().any(

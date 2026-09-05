@@ -80,7 +80,6 @@ mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod formulation_admission;
-mod mesh_summary;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
@@ -89,7 +88,6 @@ mod result_policy;
 mod solver_mesh_artifact;
 mod solver_mesh_flow_topology;
 pub mod storage;
-mod study_authoring;
 mod study_execution;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
@@ -196,17 +194,16 @@ pub use contracts::{
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
     AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
     AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
-    AnalysisSolverOptions, AnalysisStudyAuthoringData, AnalysisStudyAuthoringEvidence,
-    AnalysisStudyAuthoringIntent, AnalysisStudyDiagramObservation, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
-    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactEnforcementOptions, ElectroThermalCouplingOptions,
-    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
-    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
+    AnalysisSolverOptions, AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData,
+    AnalysisStudySpec, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
+    AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry,
+    AnalysisStudySweepSpec, AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry,
+    AnalysisStudyValidateResult, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
+    AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult,
+    ContactEnforcementOptions, ElectroThermalCouplingOptions, ElectromagneticResultsData,
+    FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits,
+    ModalResultsData, NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions,
+    PrecisionMode, PreconditionerMode, ProductionPublicationReason,
     ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermalResultsData, ThermoMechanicalCouplingOptions,
     ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
@@ -232,10 +229,6 @@ pub use figures::{
     AnalysisFigureGenerationOptions, AnalysisFigureMeshSource, AnalysisGeneratedFigure,
     AnalysisGeneratedFigureKind,
 };
-pub use mesh_summary::{
-    AnalysisMeshBoundaryRegion, AnalysisMeshPhysicalRegion, AnalysisMeshRegionSummary,
-    AnalysisMeshSummary, AnalysisMeshTopologySummary, ANALYSIS_MESH_SUMMARY_SCHEMA_VERSION,
-};
 pub use operations::{
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
     analysis_trends_op,
@@ -243,12 +236,9 @@ pub use operations::{
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
-pub use study_authoring::analysis_author_study_op;
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "fea.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "fea.create_model/v1";
-const ANALYSIS_AUTHOR_STUDY_OPERATION: &str = "fea.author_study";
-const ANALYSIS_AUTHOR_STUDY_OP_VERSION: &str = "fea.author_study/v1";
 const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "fea.validate_study";
 const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "fea.validate_study/v1";
 const ANALYSIS_PLAN_STUDY_OPERATION: &str = "fea.plan_study";

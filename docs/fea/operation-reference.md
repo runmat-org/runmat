@@ -44,7 +44,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 
 | Operation version | Use |
 | --- | --- |
-| `fea.create_model/v1` | Build an `AnalysisModel` from geometry and a model profile intent. |
+| `fea.create_model/v1` | Build an `AnalysisModel` from geometry and a typed model-template intent. |
 | `fea.validate/v1` | Validate model units, frame, materials, loads, boundary conditions, domains, and geometry compatibility. |
 | `fea.run_linear_static/v1` | Run the linear static structural path. |
 | `fea.run_modal/v1` | Run modal analysis. |
@@ -105,9 +105,11 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.Observation.*`, `fea.ObservationTarget.*`, `fea.SamplingPolicy.*`, `fea.ReductionPolicy.*` | Plan field, history, probe, reduction, diagnostic, and monitor computation and retention. |
 | `fea.AccuracyCriterion.new(...)`, `fea.AccuracyPlan.new(...)` | Declare numerical evidence, acceptance tolerances, and bounded corrective action. |
 | `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
-| `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
+| `fea.ComputeBackend.cpu/gpu`, `fea.FormulationRequirement.production/experimental` | Create closed typed execution-policy choices. |
+| `fea.SolverOptions.defaults(step)` | Create family-compatible typed solver options for a procedure step. |
+| `fea.ExecutionStep.new(...)`, `fea.ExecutionPlan.new/defaults(...)` | Compose a validated per-step execution plan. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
-| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, physics profile/model data, backend, and run options. |
+| `fea.study(id, geometry, Name, Value, ...)` | Create a `fea.Study` from geometry, optional validated `Mesh`, typed template/model data, sequence, backend, and formulation requirement. |
 | `fea.sweep(id, studies, Name, Value, ...)` | Create a deterministic sweep from `fea.Study` objects. |
 | `fea.validate(study)` | Validate a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.plan(study)` | Plan a `.fea` path, `fea.Study`, or `fea.Sweep`. |
@@ -161,32 +163,35 @@ These constructors, planning operations, field projections, comparisons, and plo
 | `fea.ThermalStep.transient`, `fea.ElectromagneticStep.harmonic`, `fea.AcousticStep.harmonic` | `step = fea.<Family>Step.<procedure>(id)` | Only currently supported family/procedure combinations are constructible. |
 | `fea.FluidStep.steadyState/transient` | `step = fea.FluidStep.<procedure>(id)` | Steady-state produces a static domain; transient produces a time domain. |
 | `fea.ThermoMechanicalStep.transient`, `fea.ElectroThermalStep.transient/nonlinear`, `fea.ConjugateHeatTransferStep.steadyState/transient`, `fea.FluidStructureStep.transient` | `step = fea.<CoupledFamily>Step.<procedure>(id)` | Coupled family and procedure are fixed by the concrete method and cannot be supplied as strings. |
-| `fea.study` | `study = fea.study(path)` or `study = fea.study(id, geometry, Name, Value, ...)` | The path must resolve to a study. Constructor identity, geometry class, option spelling, component classes, and profile/run-kind agreement are checked before construction. |
+| `fea.study` | `study = fea.study(path)` or `study = fea.study(id, geometry, Name, Value, ...)` | The path must resolve to a study. Constructor identity, geometry class, option spelling, component classes, sequence, and template/step agreement are checked before construction. |
 | `fea.sweep` | `sweep = fea.sweep(id, studies, Name, Value, ...)` | The id and study object classes are checked before `FailFast`; `FailFast` is a logical scalar and defaults to true. |
 | `fea.validate` | `result = fea.validate(studyOrSweepOrPath)` | Object/path identity is checked before document validation; no solver executes. |
 | `fea.run` | `run = fea.run(studyOrSweepOrPath)` | Object/path identity and document validity are checked before the selected solver executes. |
 | `fea.results` | `results = fea.results(runOrRunId, Name, Value, ...)` | Run identity, option pairing, option values, and selector shape/range are checked before artifact lookup. An existing `fea.Results` object is accepted without options. |
 | `fea.trends` | `trends = fea.trends(Name, Value, ...)` | `WindowSize` is checked before artifact-store access. |
 
-`fea.study` defaults to profile `linear_static_structural`, backend `cpu`, defaults mode `profile_scaffold`, and a sanitized `<study-id>_model` model id when none is supplied. Its constructor options include `Template`, `Backend`, `Requirement`, `ModelId`, `Model`, `Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`, `Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`, `Sequence`, `Domains`, `Interfaces`, and `Mesh`. `Steps` and `Sequence` are mutually exclusive. `fea.model` accepts the same model-component options. Direct integer values do not substitute for any identity or typed-object option.
+`fea.study` requires `Template`, defaults to a CPU/production execution entry for every sequence
+step, uses defaults mode `template_scaffold`, and creates a sanitized `<study-id>_model` model id
+when none is supplied. Its constructor options include `Template`, `Execution`, `ModelId`, `Model`,
+`Frame`, `Defaults`, `Materials`, `MaterialAssignments`/`Assignments`, `Constraints`, `Boundaries`,
+`Signals`, `Excitations`, `ExcitationCases`/`Cases`, `InitialConditions`, `ResponseSpectra`, `Steps`,
+`Sequence`, `Domains`, `Interfaces`, and `Mesh`. `Steps` and `Sequence` are mutually exclusive.
+`fea.model` accepts the model-component subset. Direct integer values do not substitute for any
+identity or typed-object option.
 
-### Run-option numeric contracts
+### Execution-plan contracts
 
-`fea.runOptions(solver, Name, Value, ...)` accepts solver families `linear_static`, `modal`, `acoustic`, `thermal`, `transient`, `cfd`, `cht`, `fsi`, `nonlinear`, and `electromagnetic`. Every family defaults `DeterministicMode=false`, `PrecisionMode="fp64"`, and `QualityPolicy="balanced"`; linear static also defaults `PreconditionerMode="auto"`.
+| Builtin | Contract |
+| --- | --- |
+| `fea.ComputeBackend.cpu()` / `.gpu()` | Select requested compute placement without claiming where work actually ran. Result provenance records actual execution and fallback separately. |
+| `fea.FormulationRequirement.production()` / `.experimental()` | Require production-qualified formulations or explicitly admit experimental ones. Production requests never silently downgrade. |
+| `fea.SolverOptions.defaults(step)` | Select the solver-option variant from the typed family, procedure, and solution space carried by `step`. Unsupported combinations reject. |
+| `fea.ExecutionStep.new(step, backend, requirement, solverOptions)` | Bind one procedure-step id to compatible typed solver options and execution policy. |
+| `fea.ExecutionPlan.new(sequence, steps)` | Require exactly one ordered execution entry for every semantic sequence step. |
+| `fea.ExecutionPlan.defaults(sequence, backend, requirement)` | Build the complete validated plan with family-compatible defaults. |
 
-| Solver | Exact structural options and defaults | Binary64 options and defaults |
-| --- | --- | --- |
-| `modal` | `ModeCount=3` | `ResidualWarnThreshold=1e-3` |
-| `acoustic` | `ModeCount=3` | `ResidualWarnThreshold=1e-3` |
-| `thermal` | `StepCount=10` | `TimeStepS=1e-2`, `ResidualWarnThreshold=1e-4` |
-| `transient` | `StepCount=10`, `MaxLinearIters=128`, `MaxStepRetries=4` | `TimeStepS=1e-3`, `MinTimeStepS=1e-6`, `MaxTimeStepS=2e-2`, `Tolerance=1e-8`, `ResidualTarget=1e-6`, `AdaptMinScale=0.8`, `AdaptMaxScale=1.25`, `AdaptGrowthExponent=0.35`, `AdaptRetryGrowthCap=1.05`, `AdaptNonconvergedShrink=0.75`, `DtBucketRelTolerance=0` |
-| `cfd` | `StepCount=12`, `MaxLinearIters=128` | `TimeStepS=1e-3`, `Tolerance=1e-8`, `ResidualWarnThreshold=1e-5` |
-| `cht` | `StepCount=12`, `MaxLinearIters=128` | `TimeStepS=1e-3`, `Tolerance=1e-8`, `ResidualWarnThreshold=1e-4` |
-| `fsi` | `StepCount=12`, `MaxLinearIters=128` | `TimeStepS=1e-3`, `Tolerance=1e-8`, `ResidualWarnThreshold=1e-4` |
-| `nonlinear` | `IncrementCount=12`, `MaxNewtonIters=24`, `MaxLineSearchBacktracks=6`, `TangentRefreshInterval=2` | `Tolerance=1e-6`, `ResidualConvergenceFactor=5`, `IncrementNormTolerance=1e-7`, `LineSearchReduction=0.5` |
-| `electromagnetic` | `HarmonicMaxIterations=96` | `ResidualTarget=1e-6`, `HarmonicTolerance=1e-7`, `SweepFrequencyHz=[]` |
-
-The table defines 18 integer-capability forms: one exact structural and one binary64 physical form for each of the nine numeric solver families. Exact controls accept all eight integer classes and ordinary integral doubles and retain their exact values through validation. Physical controls accept real scalars and perform one explicit binary64 conversion after field, solver, and scalar-shape validation; solver-specific finiteness and range checks run before execution. Logical options require logical scalars. Structural output properties remain exact; physical properties remain double.
+`fea.study(..., "Execution", execution)` accepts only a `fea.ExecutionPlan`. The retired string
+`Backend`, `Requirement`, and solver-kind dispatch forms are not compatibility aliases.
 
 ### Results query options
 
@@ -221,14 +226,20 @@ Top-level study fields:
 | `kind` | Yes | `study`. |
 | `id` | Yes | Stable study id. |
 | `geometry` | Yes | Geometry file path, units, and import options. |
-| `model` | Yes | Model id, profile, defaults mode, and frame. |
-| `run` | Yes | Run family, backend, and family-specific options. |
+| `model` | Yes | Model id, typed template, defaults mode, and frame. |
+| `sequence` | Yes | Typed procedure steps, activation, state flow, observations, accuracy, dependencies, transitions, branches, and restart policy. |
+| `execution` | Yes | Per-step backend, formulation requirement, and optional typed solver/options pair. |
 | `regions` | No | Named aliases for geometry region selectors. |
 | `materials` | No | Material definitions keyed by material id. |
 | `material_assignments` | No | Region-to-material assignments. |
-| `boundary_conditions` | No | Constraints and boundary data. |
-| `loads` | No | Forces, moments/torques, pressures, body forces, current densities, or coil currents. |
-| `steps` | No | Analysis steps. |
+| `constraints` | No | Typed prescribed-unknown and kinematic constraints. |
+| `boundaries` | No | Typed natural, flux, impedance, and Robin boundary operators. |
+| `connectors` | No | Typed relations between model targets. |
+| `signals` | No | Typed physical values over static, time, frequency, or parameter domains. |
+| `excitation_cases` | No | Named activation and combination groups for excitations. |
+| `excitations` | No | Typed forces, moments, pressures, sources, flow inputs, and other driving actions. |
+| `initial_conditions` | No | Typed state applied before a named procedure step. |
+| `response_spectra` | No | Typed modal response-spectrum inputs and combination policy. |
 | `domains` | No | Thermo-mechanical, electro-thermal, electromagnetic, or CFD domain data. |
 | `interfaces` | No | Contact or coupling interfaces. |
 
@@ -242,7 +253,10 @@ Top-level sweep fields:
 | `fail_fast` | No | Defaults to `true`. |
 | `studies` | Yes | List of nested study documents. Nested studies omit `kind`. |
 
-Load documents use `type` or `kind`. Structural moment loads use `type: moment` with `vector: [mx, my, mz]` in N*m. Direct moment loads are valid only for structural regions whose elements provide rotational DOFs; non-structural run families and solid-only displacement regions reject them during validation or assembly.
+Excitations are closed typed records. Structural moment excitations use the `moment` variant and a
+moment-valued signal. Direct moments are valid only for structural targets whose elements provide
+rotational DOFs; incompatible families and displacement-only solid regions reject them during
+validation or assembly.
 
 Rotational structural runs may return `structural.rotation` and `structural.reaction_moment` fields. Beam-specific moment resultants use `structural.beam_torsion_moment` and `structural.beam_bending_moment`; shell-specific resultants use `structural.shell_bending_moment`.
 

@@ -18,25 +18,28 @@ A model attaches physics data to geometry. It defines what material exists where
 | Interfaces | Contact and coupling interfaces between regions. |
 | Sequence | Typed procedure steps, activation lifecycles, state transitions, observations, accuracy plans, branches, and restart policy. |
 
-## Model Profiles
+## Model Templates
 
-Profiles create the starting model shape and select the solver used by `run`:
+Templates create a family-appropriate starting model shape. Procedure steps and execution entries,
+not the template name, determine what is solved:
 
-| Profile | Selected solver |
+| Template | Starting model shape |
 | --- | --- |
-| `linear_static_structural` | `linear_static` |
-| `modal_structural` | `modal` |
-| `acoustic_harmonic` | `acoustic` |
-| `thermal_standalone` | `thermal` |
-| `transient_structural` | `transient` |
-| `nonlinear_structural` | `nonlinear` |
-| `thermo_mechanical_coupled` | `transient` |
-| `electromagnetic_static` | `electromagnetic` |
-| `cfd_steady_state`, `cfd_transient` | `cfd` |
-| `cht_coupled` | `cht` |
-| `fsi_coupled` | `fsi` |
+| `linear_static_structural` | Structural solid model with a static procedure scaffold |
+| `modal_structural` | Structural model with a modal-extraction scaffold |
+| `acoustic_harmonic` | Acoustic frequency-domain model |
+| `thermal_transient` | Transient thermal model |
+| `transient_structural` | Transient structural model |
+| `nonlinear_structural` | Nonlinear structural model |
+| `thermo_mechanical_coupled` | Coupled thermomechanical model |
+| `electromagnetic_harmonic` | Harmonic electromagnetic model |
+| `cfd_steady_state`, `cfd_transient` | Steady or transient fluid model |
+| `cht_coupled` | Conjugate heat-transfer model |
+| `fsi_coupled` | Fluid-structure interaction model |
 
-In a `.fea` file, `model.defaults: profile_scaffold` lets RunMat create the scaffold from the profile. `model.defaults: none` starts from an empty model and expects the file to provide the model data it needs.
+In a `.fea` file, `model.defaults: template_scaffold` lets RunMat create defaults owned by the
+selected template. `model.defaults: none` starts from an empty model and expects the file to
+provide the physical data it needs.
 
 ## Define Model Data
 
@@ -49,7 +52,7 @@ and restart contracts are described in [Procedure Sequences, Observations, and A
 ```yaml
 model:
   id: bracket_static_model
-  profile: linear_static_structural
+  template: linear_static_structural
   defaults: none
   frame: global
 
@@ -63,33 +66,24 @@ material_assignments:
   - region: bracket_body
     material: steel
 
-boundary_conditions:
-  - id: fixed_base
-    region: bracket_base
-    kind: fixed
-
-loads:
-  - id: tip_force
-    region: bracket_tip
-    type: force
-    vector: [0.0, -1000.0, 0.0]
-
-steps:
-  - id: static_step
-    kind: static
+constraints: # typed AnalysisConstraint records
+signals: # typed physical signal records
+excitation_cases: # typed excitation-case records
+excitations: # typed ExcitationAction records
+sequence: # typed AnalysisSequence record
+execution: # per-step backend, requirement, and solver options
 ```
 
-Region references can point directly at geometry region ids or use named aliases from the `regions` block.
+Region references use typed `RegionTarget` records and can name aliases from the `regions` block.
 
-`type: moment` uses a global-frame vector in N*m. Direct moment loads require rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`; displacement-only solid regions reject moment loads with an invalid-model error instead of silently converting them to forces.
+Direct moment excitations use a typed moment signal and coordinate frame. They require
+rotational-DOF structural elements. Beam nodes and shell/plate nodes can own `rx`, `ry`, and `rz`;
+displacement-only solid regions reject moments with an invalid-model error instead of silently
+converting them to forces.
 
-```yaml
-loads:
-  - id: tip_moment
-    region: node:2
-    type: moment
-    vector: [0.0, 0.0, 125.0]
-```
+In RunMat code, construct this with a moment-valued signal and
+`fea.StructuralExcitation.moment(...)`; in `.fea`, serialize the corresponding typed signal and
+`moment` excitation variants. There is no parallel generic `loads` schema.
 
 When rotational DOFs are present, structural results include `structural.rotation` and `structural.reaction_moment`. Beam results can also include `structural.beam_torsion_moment`, `structural.beam_bending_moment`, `structural.beam_bending_stress`, and `structural.beam_torsion_stress`; shell results can include `structural.shell_membrane_force`, `structural.shell_bending_moment`, `structural.shell_transverse_shear`, and `structural.shell_von_mises`.
 
@@ -100,7 +94,7 @@ Validation checks the model and study shape before a run starts. It catches prob
 - empty study or model ids,
 - missing geometry meshes,
 - unspecified units,
-- legacy run-kind/profile mismatches,
+- sequence-step and execution-plan mismatches,
 - missing required steps,
 - invalid family-specific options,
 - missing or incompatible domain data.
@@ -110,6 +104,8 @@ Validation checks the model and study shape before a run starts. It catches prob
 
 ## Scaffolds And Engineering Data
 
-Profile scaffolds are useful for tests, examples, early integration, and simple exploratory runs. Engineering runs should explicitly review or provide the materials, assignments, loads, constraints, domains, and assumptions that matter for the result.
+Template scaffolds are useful for tests, examples, early integration, and simple exploratory runs.
+Engineering runs should explicitly review or provide the materials, assignments, excitations,
+constraints, domains, and assumptions that matter for the result.
 
 Validation proves the model is shaped correctly enough to run. Verification and validation evidence is still required before treating a result as production-grade physics. See [Verification & Validation](/docs/fea/validation).

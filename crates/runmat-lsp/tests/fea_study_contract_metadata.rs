@@ -22,6 +22,12 @@ const REPRESENTATIVE_STUDY_CONTRACTS: &[&str] = &[
     "fea.AccuracyPlan.new",
     "fea.ProcedureStep.configure",
     "fea.AnalysisSequence.new",
+    "fea.ComputeBackend.cpu",
+    "fea.FormulationRequirement.production",
+    "fea.SolverOptions.defaults",
+    "fea.ExecutionStep.new",
+    "fea.ExecutionPlan.new",
+    "fea.ExecutionPlan.defaults",
 ];
 
 fn signature_help(source: &str, lookup: &str) -> SignatureHelp {
@@ -83,6 +89,14 @@ fn sequence_and_observation_signatures_are_available_during_authoring() {
         (
             "AnalysisSequence.new",
             "sequence = fea.AnalysisSequence.new(0, 0, 0, 0, 0);",
+        ),
+        (
+            "ExecutionStep.new",
+            "executionStep = fea.ExecutionStep.new(0, 0, 0, 0);",
+        ),
+        (
+            "ExecutionPlan.new",
+            "execution = fea.ExecutionPlan.new(0, 0);",
         ),
     ] {
         let help = signature_help(source, lookup);

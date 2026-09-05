@@ -47,11 +47,12 @@ Study validation records include:
 Study planning records include:
 
 - model id,
-- selected solver,
-- requested backend,
+- semantic procedure sequence,
+- per-step requested backend and formulation requirement,
+- selected solver variant,
 - operation sequence,
 - selected run operation and version,
-- run options,
+- per-step solver options,
 - study fingerprint,
 - plan artifact path.
 
