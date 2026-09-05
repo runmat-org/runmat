@@ -97,6 +97,52 @@ fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
 }
 
 #[test]
+fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        digest("portable-mesh"),
+        b"a manifest-plus-chunk mesh payload",
+        7,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let (study, execution_plan) = execution_identities();
+    let workload = AnalysisWorkloadRequest::new(
+        study,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        vec![AnalysisWorkloadInput {
+            kind: input.manifest.kind,
+            logical_identity: input.manifest.logical_identity,
+            payload_digest: input.manifest.payload_digest,
+            manifest_digest: input.root.digest,
+            manifest_encoded_length: input.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
+        vec![AnalysisNumericalObjectKind::Field],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+    let prepared =
+        prepare_analysis_program(&host, revision(), std::slice::from_ref(&input)).unwrap();
+    assert_eq!(prepared.inputs.arguments, prepared.request.arguments);
+    assert_eq!(prepared.inputs.objects.len(), input.objects.len());
+    assert!(prepared.inputs.objects.iter().all(|object| {
+        object.reference.authorization_scope == host.artifact_access.authorization_scope
+            && object.reference.kind == ValueRefKind::DriverObject
+    }));
+    prepared.inputs.validate().unwrap();
+
+    let mut wrong = input;
+    wrong.manifest.logical_identity = digest("substituted");
+    assert!(prepare_analysis_program(&host, revision(), &[wrong]).is_err());
+}
+
+#[test]
 fn workload_rejects_identity_and_access_tampering() {
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::Signal,

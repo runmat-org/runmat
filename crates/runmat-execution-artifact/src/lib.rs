@@ -17,10 +17,11 @@ pub use error::{ArtifactError, ArtifactResult};
 pub use object::{ArtifactAccess, LogicalObject, ObjectDescriptor, ObjectNamespace};
 pub use program::{
     ExecutableForm, NativeObjectPayload, NativeTargetIdentity, ProgramArtifact, ProgramArtifactId,
-    ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionRequest, ProgramExecutionResponse, ProgramRecipeId, ProgramTarget,
-    ProgramTargetCohort, MAX_PROGRAM_EXECUTION_ARGUMENTS, MAX_PROGRAM_EXECUTION_RESULT_OBJECTS,
-    NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION, PROGRAM_ARTIFACT_SCHEMA_VERSION,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-    PROGRAM_TARGET_SCHEMA_VERSION,
+    ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ProgramExecutionOutputs, ProgramExecutionRequest, ProgramExecutionResponse, ProgramRecipeId,
+    ProgramTarget, ProgramTargetCohort, MAX_PROGRAM_EXECUTION_ARGUMENTS,
+    MAX_PROGRAM_EXECUTION_OBJECT_BYTES, MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES,
+    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION,
+    PROGRAM_ARTIFACT_SCHEMA_VERSION, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1, PROGRAM_TARGET_SCHEMA_VERSION,
 };

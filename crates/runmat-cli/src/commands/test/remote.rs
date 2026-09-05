@@ -174,6 +174,7 @@ impl WorkerBackend for RemoteTestBackend {
             let inputs = serde_json::to_vec(&ProgramExecutionInputs {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
                 arguments: Vec::new(),
+                objects: Vec::new(),
             })
             .map_err(protocol)?;
             let active_run = Arc::clone(&session.active_run);

@@ -14,8 +14,8 @@ use runmat_execution_artifact::encryption::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
+    ProgramExecutionOutputs, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_transport_native::control::{
     DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
@@ -162,6 +162,81 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
         .unwrap();
     let response = run_encrypted_remote_request(run_id, bundle).await;
     assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+}
+
+#[tokio::test]
+async fn remote_driver_commits_verified_externalized_results() {
+    let run_id = "run-externalized-result";
+    let bytes = b"canonical analysis result object".to_vec();
+    let reference = runmat_execution::value::ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        id: runmat_execution::identity::ValueId::derive(&[b"remote-result", &bytes]),
+        logical_digest: Digest::sha256(&bytes),
+        encoded_length: bytes.len() as u64,
+        media_type: "application/vnd.runmat.analysis-object".into(),
+        value_schema: "runmat.analysis-object.v1".into(),
+        encryption_context: Digest::sha256(b"remote-result-encryption"),
+        kind: runmat_execution::value::ValueRefKind::ResultObject,
+        authorization_scope: run_id.into(),
+        resident_fence: None,
+    };
+    let outputs = ProgramExecutionOutputs {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        response: ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
+                reference.clone(),
+            ))],
+            result_objects: vec![reference.clone()],
+        },
+        objects: vec![ProgramExecutionObject { reference, bytes }],
+    };
+    outputs.validate().unwrap();
+    let control = FakeControl {
+        bootstrap: DriverBootstrap {
+            project_revision: "unused".into(),
+            endpoint_fingerprint: "unused".into(),
+            run_key_envelope: Vec::new(),
+            artifacts: Vec::new(),
+            checkpoint: None,
+            cancellation_requested: false,
+            driver_resources: resource_request(),
+            desired_worker_count: 0,
+            worker_resources: resource_request(),
+        },
+        state: Mutex::new(FakeState::default()),
+    };
+    let run_key = RunKeyMaterial::from_entropy([41; 32]).unwrap();
+    let config = RemoteDriverConfig {
+        authority: DriverAuthority {
+            server_url: "https://control.invalid".into(),
+            run_id: run_id.into(),
+            org_id: "org-1".into(),
+            project_id: "project-1".into(),
+            allocation_lease_id: "allocation-1".into(),
+            driver_lease_id: "driver-1".into(),
+            fencing_token: 1,
+            credential: "driver-secret".into(),
+        },
+        endpoint_identity_file: PathBuf::from("unused"),
+    };
+    super::driver::commit_response(&control, &config, &run_key, outputs)
+        .await
+        .unwrap();
+    let state = control.state.lock().unwrap();
+    assert_eq!(
+        state.transitions,
+        vec![(DriverRunTarget::Succeeded, Some("stored-1".into()))]
+    );
+    let plaintext = open_object(
+        &run_key,
+        &state.stored[0].2,
+        run_id,
+        EncryptionPurpose::Result,
+    )
+    .unwrap();
+    let committed: ProgramExecutionOutputs = serde_json::from_slice(&plaintext).unwrap();
+    committed.validate().unwrap();
+    assert_eq!(committed.objects.len(), 1);
 }
 
 #[tokio::test]
@@ -460,6 +535,7 @@ async fn run_encrypted_remote_request(
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         arguments: Vec::new(),
+        objects: Vec::new(),
     })
     .unwrap();
 
@@ -550,7 +626,9 @@ async fn run_encrypted_remote_request(
         EncryptionPurpose::Result,
     )
     .unwrap();
-    serde_json::from_slice::<ProgramExecutionResponse>(&result).unwrap()
+    let outputs = serde_json::from_slice::<ProgramExecutionOutputs>(&result).unwrap();
+    outputs.validate().unwrap();
+    outputs.response
 }
 
 fn resource_request() -> runmat_execution_transport_native::control::ResourceRequest {

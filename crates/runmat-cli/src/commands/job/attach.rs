@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use runmat_execution_artifact::encryption::EncryptionPurpose;
-use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_artifact::{ProgramExecutionOutputs, ProgramExecutionResponse};
 use runmat_server_client::auth::{
     resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
 };
@@ -76,6 +76,10 @@ pub async fn cancel(run_id: &str, json: bool) -> Result<()> {
 }
 
 pub(crate) async fn await_result(run_id: &str) -> Result<ProgramExecutionResponse> {
+    Ok(await_outputs(run_id).await?.response)
+}
+
+pub(crate) async fn await_outputs(run_id: &str) -> Result<ProgramExecutionOutputs> {
     let (client, saved) = saved_client(run_id).await?;
     loop {
         let run = client
@@ -98,8 +102,12 @@ pub(crate) async fn await_result(run_id: &str) -> Result<ProgramExecutionRespons
                 EncryptionPurpose::Result,
                 &ciphertext,
             )?;
-            return serde_json::from_slice(&plaintext)
-                .context("remote result payload is malformed");
+            let outputs: ProgramExecutionOutputs =
+                serde_json::from_slice(&plaintext).context("remote result payload is malformed")?;
+            outputs
+                .validate()
+                .context("remote result payload failed integrity validation")?;
+            return Ok(outputs);
         }
         if let Some(artifact_id) = &run.diagnostic_artifact_id {
             let ciphertext = client
@@ -168,14 +176,20 @@ async fn print_terminal(
             .await?;
         let plaintext =
             super::crypto::open_run_object(&key, &run.id, EncryptionPurpose::Result, &ciphertext)?;
-        let response: ProgramExecutionResponse =
+        let outputs: ProgramExecutionOutputs =
             serde_json::from_slice(&plaintext).context("remote result payload is malformed")?;
+        outputs
+            .validate()
+            .context("remote result payload failed integrity validation")?;
+        let result_object_count = outputs.objects.len();
+        let response = outputs.response;
         if json {
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "run": run,
                     "result": response,
+                    "resultObjectCount": result_object_count,
                 }))?
             );
         } else {
@@ -184,8 +198,15 @@ async fn print_terminal(
                 ProgramExecutionResponse::Success { value } => {
                     println!("{}", serde_json::to_string_pretty(&value)?);
                 }
-                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-                    bail!("remote result requires an artifact-aware consumer")
+                ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs,
+                    result_objects,
+                } => {
+                    println!(
+                        "{} externalized output(s), {} verified result object(s)",
+                        outputs.len(),
+                        result_objects.len()
+                    );
                 }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
             }

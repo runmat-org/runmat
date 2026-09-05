@@ -10,7 +10,7 @@ use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, ExecutionHpkeSuite, ExecutionRecipientKey,
     PortableExecutionEncryption, PortableExecutionPrivateKey,
 };
-use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_artifact::{ProgramExecutionOutputs, ProgramExecutionResponse};
 use runmat_server_client::auth::resolve_project_id;
 use runmat_server_client::execution::public_error;
 use runmat_server_client::public_api::types;
@@ -269,14 +269,20 @@ async fn recover(
             EncryptionPurpose::Result,
             &ciphertext,
         )?;
-        let result: ProgramExecutionResponse =
+        let outputs: ProgramExecutionOutputs =
             serde_json::from_slice(&plaintext).context("recovered result payload is malformed")?;
+        outputs
+            .validate()
+            .context("recovered result payload failed integrity validation")?;
+        let result_object_count = outputs.objects.len();
+        let result = outputs.response;
         if json {
             println!(
                 "{}",
                 serde_json::to_string(&serde_json::json!({
                     "runId": run_id,
                     "result": result,
+                    "resultObjectCount": result_object_count,
                 }))?
             );
         } else {
@@ -284,8 +290,15 @@ async fn recover(
                 ProgramExecutionResponse::Success { value } => {
                     println!("{}", serde_json::to_string_pretty(&value)?);
                 }
-                ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-                    bail!("recovered result requires an artifact-aware consumer")
+                ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs,
+                    result_objects,
+                } => {
+                    println!(
+                        "{} externalized output(s), {} verified result object(s)",
+                        outputs.len(),
+                        result_objects.len()
+                    );
                 }
                 ProgramExecutionResponse::Failure { message } => bail!("{message}"),
             }

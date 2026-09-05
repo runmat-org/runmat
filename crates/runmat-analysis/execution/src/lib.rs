@@ -6,6 +6,7 @@ mod object;
 mod response;
 mod serial;
 mod task;
+mod transport;
 mod workload;
 
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
@@ -20,6 +21,7 @@ pub use serial::{
     CompletedAnalysisWorkload,
 };
 pub use task::{build_analysis_task_submission, AnalysisExecutionContext};
+pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{
     analysis_worker_capabilities, AnalysisCapabilityRequirement, AnalysisWorkloadInput,
     AnalysisWorkloadRequest,

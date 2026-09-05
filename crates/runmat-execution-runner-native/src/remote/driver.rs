@@ -6,8 +6,8 @@ use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, PortableExecutionEncryption,
 };
 use runmat_execution_artifact::{
-    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionOutputs,
+    ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverControlPlane,
@@ -101,7 +101,7 @@ pub(super) async fn run_remote_driver(
         .await?,
     )
     .map_err(protocol)?;
-    let inputs: ProgramExecutionInputs = serde_json::from_slice(
+    let mut inputs: ProgramExecutionInputs = serde_json::from_slice(
         &open_download(
             control.as_ref(),
             &run_key,
@@ -114,6 +114,15 @@ pub(super) async fn run_remote_driver(
     .map_err(protocol)?;
     descriptor.validate().map_err(protocol)?;
     inputs.validate().map_err(protocol)?;
+    if inputs
+        .objects
+        .iter()
+        .any(|object| object.reference.authorization_scope != config.authority.run_id)
+    {
+        return Err(protocol(
+            "program input object is outside the admitted run authority",
+        ));
+    }
     bundle.validate().map_err(protocol)?;
     if bundle.manifest.program_revision != descriptor.recipe.program_revision
         || !bundle
@@ -133,6 +142,7 @@ pub(super) async fn run_remote_driver(
             "bundle, program, and admitted project revision do not converge",
         ));
     }
+    let input_objects = std::mem::take(&mut inputs.objects);
     let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
     let materialized_project = (bootstrap.desired_worker_count == 0
         && bundle.requires_source_project())
@@ -172,17 +182,43 @@ pub(super) async fn run_remote_driver(
     let uses_remote_pool = bootstrap.desired_worker_count > 0;
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
-            Ok(
-                super::pool_execution::RemotePoolExecutionOutcome::Completed(
-                    crate::execute_host_program_request_with_project(
-                        request,
-                        materialized_project
-                            .as_ref()
-                            .map(|project| project.handoff()),
-                    )
-                    .await,
-                ),
-            )
+            let objects = super::object_transfer::RemoteObjectStore::default();
+            for object in input_objects {
+                objects.register(object)?;
+            }
+            let response = if request.artifact.form
+                == runmat_execution_artifact::ExecutableForm::AnalysisWorkload
+            {
+                let mut objects = objects.clone();
+                crate::execute_analysis_program_request(
+                    &request,
+                    &mut objects,
+                    &crate::NativeAnalysisKernel,
+                    crate::NativeAnalysisHostLimits::default(),
+                )
+            } else {
+                if !request.arguments.is_empty()
+                    && request.arguments.iter().any(|argument| {
+                        matches!(argument, runmat_execution::value::ValuePayload::Object(_))
+                    })
+                {
+                    return Err(protocol(
+                        "driver-local execution does not support this externalized workload",
+                    ));
+                }
+                crate::execute_host_program_request_with_project(
+                    request,
+                    materialized_project
+                        .as_ref()
+                        .map(|project| project.handoff()),
+                )
+                .await
+            };
+            let outputs = ProgramExecutionOutputs::from_response(response, |reference| {
+                objects.object(reference, &config.authority.run_id)
+            })
+            .map_err(protocol)?;
+            Ok(super::pool_execution::RemotePoolExecutionOutcome::Completed(outputs))
         } else {
             super::pool_execution::execute(super::pool_execution::RemotePoolExecution {
                 control: control.as_ref(),
@@ -190,6 +226,7 @@ pub(super) async fn run_remote_driver(
                 run_key: &run_key,
                 bundle_archive,
                 request,
+                input_objects,
                 desired_workers: bootstrap.desired_worker_count,
                 resources: bootstrap.worker_resources,
                 cancellation: cancellation_receiver,
@@ -301,16 +338,21 @@ async fn report_usage(
     Ok(())
 }
 
-async fn commit_response(
+pub(super) async fn commit_response(
     control: &dyn DriverControlPlane,
     config: &RemoteDriverConfig,
     run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
-    response: ProgramExecutionResponse,
+    outputs: ProgramExecutionOutputs,
 ) -> NativeExecutionResult<()> {
-    match response {
+    outputs.validate().map_err(protocol)?;
+    match outputs.response {
         ProgramExecutionResponse::Success { value } => {
-            let plaintext = serde_json::to_vec(&ProgramExecutionResponse::Success { value })
-                .map_err(protocol)?;
+            let plaintext = serde_json::to_vec(&ProgramExecutionOutputs {
+                schema_version: outputs.schema_version,
+                response: ProgramExecutionResponse::Success { value },
+                objects: outputs.objects,
+            })
+            .map_err(protocol)?;
             let result = store_encrypted(
                 control,
                 config,
@@ -331,25 +373,36 @@ async fn commit_response(
             )
             .await
         }
-        ProgramExecutionResponse::ExternalizedSuccess { .. } => {
-            let message = "remote externalized results require verified artifact transfer";
-            let diagnostic = store_encrypted(
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: response_outputs,
+            result_objects,
+        } => {
+            let plaintext = serde_json::to_vec(&ProgramExecutionOutputs {
+                schema_version: outputs.schema_version,
+                response: ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs: response_outputs,
+                    result_objects,
+                },
+                objects: outputs.objects,
+            })
+            .map_err(protocol)?;
+            let result = store_encrypted(
                 control,
                 config,
                 run_key,
-                DriverArtifactKind::Diagnostic,
-                EncryptionPurpose::DetailedEvent,
-                message.as_bytes(),
+                DriverArtifactKind::Result,
+                EncryptionPurpose::Result,
+                &plaintext,
                 None,
             )
             .await?;
             transition(
                 control,
                 config,
-                DriverRunTarget::Failed,
-                Some("artifact-transfer-unavailable"),
+                DriverRunTarget::Succeeded,
                 None,
-                Some(diagnostic),
+                Some(result),
+                None,
             )
             .await
         }

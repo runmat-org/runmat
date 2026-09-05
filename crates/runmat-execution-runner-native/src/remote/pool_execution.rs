@@ -6,7 +6,10 @@ use runmat_execution::state::TaskState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, OutputContract, TaskId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
-use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
+use runmat_execution_artifact::{
+    ArtifactError, ProgramExecutionObject, ProgramExecutionOutputs, ProgramExecutionRequest,
+    ProgramExecutionResponse,
+};
 use runmat_execution_runner::{PoolSpec, TaskSubmission};
 use runmat_execution_transport_native::control::{
     DriverAuthority, DriverControlPlane, ResourceRequest as AllocationResources,
@@ -22,7 +25,7 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) enum RemotePoolExecutionOutcome {
-    Completed(ProgramExecutionResponse),
+    Completed(ProgramExecutionOutputs),
     Cancelled,
     Indeterminate(String),
 }
@@ -33,6 +36,7 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) run_key: &'a RunKeyMaterial,
     pub(super) bundle_archive: Vec<u8>,
     pub(super) request: ProgramExecutionRequest,
+    pub(super) input_objects: Vec<ProgramExecutionObject>,
     pub(super) desired_workers: u32,
     pub(super) resources: AllocationResources,
     pub(super) cancellation: tokio::sync::watch::Receiver<bool>,
@@ -47,6 +51,7 @@ pub(super) async fn execute(
         run_key,
         bundle_archive,
         request,
+        input_objects,
         desired_workers,
         resources,
         mut cancellation,
@@ -67,6 +72,9 @@ pub(super) async fn execute(
         bundle_archive,
         authority.run_id.clone(),
     )?;
+    for object in input_objects {
+        pool.register_execution_object(object.reference, object.bytes)?;
+    }
     let mut worker_pool = control
         .resize_workers(authority, 0, desired_workers, resources.clone())
         .await
@@ -161,30 +169,33 @@ pub(super) async fn execute(
                 return match result {
                     Ok(success) if success.result_objects.is_empty() => {
                         match success.outputs.as_slice() {
-                            [value] => Ok(RemotePoolExecutionOutcome::Completed(
+                            [value] => packaged(
                                 ProgramExecutionResponse::Success {
                                     value: value.clone(),
                                 },
-                            )),
+                                &pool,
+                            )
+                            .map(RemotePoolExecutionOutcome::Completed),
                             _ => Err(protocol(
                                 "remote worker returned an invalid inline output count",
                             )),
                         }
                     }
-                    Ok(success) => Ok(RemotePoolExecutionOutcome::Completed(
+                    Ok(success) => packaged(
                         ProgramExecutionResponse::ExternalizedSuccess {
                             outputs: success.outputs,
                             result_objects: success.result_objects,
                         },
-                    )),
+                        &pool,
+                    )
+                    .map(RemotePoolExecutionOutcome::Completed),
                     Err(message) => {
                         let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
                         if state == Some(TaskState::Indeterminate) {
                             Ok(RemotePoolExecutionOutcome::Indeterminate(message))
                         } else {
-                            Ok(RemotePoolExecutionOutcome::Completed(
-                                ProgramExecutionResponse::Failure { message },
-                            ))
+                            packaged(ProgramExecutionResponse::Failure { message }, &pool)
+                                .map(RemotePoolExecutionOutcome::Completed)
                         }
                     }
                 };
@@ -222,6 +233,18 @@ pub(super) async fn execute(
             }
         }
     }
+}
+
+fn packaged(
+    response: ProgramExecutionResponse,
+    pool: &RemotePoolDriver,
+) -> NativeExecutionResult<ProgramExecutionOutputs> {
+    ProgramExecutionOutputs::from_response(response, |reference| {
+        pool.execution_object(reference)
+            .map(|bytes| bytes.map(|bytes| bytes.to_vec()))
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+    })
+    .map_err(protocol)
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

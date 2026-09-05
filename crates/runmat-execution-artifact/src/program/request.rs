@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
+use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionInputs};
 use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
@@ -37,31 +37,6 @@ impl ProgramExecutionDescriptor {
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
         self.validate()?;
         self.artifact.target.validate_for_portable_host()
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProgramExecutionInputs {
-    pub schema_version: u16,
-    pub arguments: Vec<ValuePayload>,
-}
-
-impl ProgramExecutionInputs {
-    pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
-            || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
-        {
-            return Err(ArtifactError::Invalid(
-                "program inputs use an unsupported schema or exceed their bound".into(),
-            ));
-        }
-        for argument in &self.arguments {
-            argument
-                .validate(ValueLimits::default())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-        }
-        Ok(())
     }
 }
 
@@ -206,7 +181,15 @@ fn validate_externalized_success(
     outputs: &[ValuePayload],
     result_objects: &[ValueRef],
 ) -> ArtifactResult<()> {
-    if outputs.len() != usize::from(request.requested_outputs)
+    validate_externalized_inventory(outputs, result_objects, request.requested_outputs)
+}
+
+pub(super) fn validate_externalized_inventory(
+    outputs: &[ValuePayload],
+    result_objects: &[ValueRef],
+    requested_outputs: u16,
+) -> ArtifactResult<()> {
+    if outputs.len() != usize::from(requested_outputs)
         || result_objects.is_empty()
         || result_objects.len() > MAX_PROGRAM_EXECUTION_RESULT_OBJECTS
     {

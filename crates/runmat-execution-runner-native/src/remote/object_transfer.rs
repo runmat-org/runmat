@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
-use runmat_execution_artifact::{ArtifactError, ArtifactResult, LogicalObject};
+use runmat_execution_artifact::{
+    ArtifactError, ArtifactResult, LogicalObject, ProgramExecutionObject,
+};
 use runmat_execution_transport_native::transfer::{ObjectChunk, ResumeState};
 
 use super::protocol::{RemoteWorkerCommand, RemoteWorkerOutcome};
@@ -35,6 +37,24 @@ pub(super) struct RemoteObjectCache {
 pub(super) struct RemoteObjectStore(Arc<Mutex<RemoteObjectCache>>);
 
 impl RemoteObjectStore {
+    pub(super) fn register(&self, object: ProgramExecutionObject) -> NativeExecutionResult<()> {
+        object.validate().map_err(protocol)?;
+        self.0
+            .lock()
+            .expect("remote object store poisoned")
+            .register(object.reference, object.bytes)
+    }
+
+    pub(super) fn object(
+        &self,
+        reference: &ValueRef,
+        authorization_scope: &str,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        validate_reference(reference, authorization_scope)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        self.read_verified(reference.logical_digest)
+    }
+
     pub(super) fn handle(
         &self,
         command: RemoteWorkerCommand,
@@ -67,6 +87,33 @@ impl CacheExport for RemoteObjectStore {
 }
 
 impl RemoteObjectCache {
+    fn register(&mut self, reference: ValueRef, bytes: Vec<u8>) -> NativeExecutionResult<()> {
+        validate_reference(&reference, &reference.authorization_scope)?;
+        validate_bytes(&reference, &bytes)?;
+        if let Some((stored, existing)) = self.complete.get(&reference.id) {
+            return if stored == &reference && existing == &bytes {
+                Ok(())
+            } else {
+                Err(protocol(
+                    "remote object id was reused for different content",
+                ))
+            };
+        }
+        if self.complete.len().saturating_add(self.partial.len()) >= MAX_REMOTE_OBJECTS {
+            return Err(protocol("remote object inventory exceeds its count bound"));
+        }
+        let next_total = self
+            .buffered_bytes
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| protocol("remote object inventory byte total overflowed"))?;
+        if next_total > MAX_REMOTE_OBJECT_TOTAL_BYTES {
+            return Err(protocol("remote object inventory exceeds its byte bound"));
+        }
+        self.buffered_bytes = next_total;
+        self.complete.insert(reference.id, (reference, bytes));
+        Ok(())
+    }
+
     pub(super) fn probe(
         &mut self,
         reference: &ValueRef,
@@ -447,5 +494,29 @@ mod tests {
             RemoteWorkerOutcome::ObjectChunk { chunk, complete }
                 if chunk.bytes == bytes && complete
         ));
+    }
+
+    #[test]
+    fn encrypted_input_inventory_seeds_the_verified_execution_store() {
+        let bytes = b"transported analysis manifest".to_vec();
+        let mut reference = reference(&bytes);
+        reference.kind = ValueRefKind::DriverObject;
+        let store = RemoteObjectStore::default();
+        store
+            .register(ProgramExecutionObject {
+                reference: reference.clone(),
+                bytes: bytes.clone(),
+            })
+            .unwrap();
+        assert_eq!(
+            store.read_verified(reference.logical_digest).unwrap(),
+            Some(bytes)
+        );
+        assert!(store
+            .register(ProgramExecutionObject {
+                reference,
+                bytes: b"substituted".to_vec(),
+            })
+            .is_err());
     }
 }

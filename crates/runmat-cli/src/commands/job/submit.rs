@@ -158,6 +158,7 @@ pub async fn submit(
             .into_iter()
             .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
             .collect(),
+        objects: Vec::new(),
     })?;
     let mut bundle_archive = Vec::new();
     write_bundle(&bundle, &mut bundle_archive, ArchiveLimits::default())?;
@@ -200,6 +201,34 @@ pub(crate) async fn submit_prepared(
     prepared: PreparedRemoteExecution,
     options: RemoteSubmissionOptions,
 ) -> Result<types::RunResponse> {
+    let revision = prepared.revision.clone();
+    let bundle_archive_size = prepared.bundle_archive.len();
+    let mut prepared = Some(prepared);
+    submit_scoped(
+        revision,
+        bundle_archive_size,
+        move |_| {
+            prepared
+                .take()
+                .context("remote execution content was prepared more than once")
+        },
+        options,
+    )
+    .await
+}
+
+/// Submit content whose access-bound references can only be finalized after the Server assigns
+/// the run identity. The declared revision and bundle size class are admission inputs; the factory
+/// must preserve both when it binds the encrypted content to `run_id`.
+pub(crate) async fn submit_scoped<F>(
+    revision: ProgramRevision,
+    bundle_archive_size: usize,
+    prepare: F,
+    options: RemoteSubmissionOptions,
+) -> Result<types::RunResponse>
+where
+    F: FnOnce(&str) -> Result<PreparedRemoteExecution>,
+{
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
@@ -218,7 +247,7 @@ pub(crate) async fn submit_prepared(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let request_digest = request_digest(
         &idempotency_key,
-        &prepared.revision,
+        &revision,
         &options.cluster,
         &options.queue,
         options.workers,
@@ -234,24 +263,16 @@ pub(crate) async fn submit_prepared(
                 queue: options.queue,
                 request_digest,
                 recovery_recipient_fingerprint: recovery_fingerprint,
-                project_revision: project_revision_identity(&prepared.revision),
-                bundle_ciphertext_size_class: size_class(prepared.bundle_archive.len()),
+                project_revision: project_revision_identity(&revision),
+                bundle_ciphertext_size_class: size_class(bundle_archive_size),
                 compatibility_fingerprints: HashMap::from([
                     (
                         "runtime".into(),
-                        prepared
-                            .revision
-                            .environment()
-                            .runtime_fingerprint
-                            .to_string(),
+                        revision.environment().runtime_fingerprint.to_string(),
                     ),
                     (
                         "catalog".into(),
-                        prepared
-                            .revision
-                            .environment()
-                            .catalog_fingerprint
-                            .to_string(),
+                        revision.environment().catalog_fingerprint.to_string(),
                     ),
                 ]),
                 resources: types::ResourceRequestBody {
@@ -282,6 +303,12 @@ pub(crate) async fn submit_prepared(
         .into_inner();
     if let Some(observer) = &options.on_run_created {
         observer(run.id.clone());
+    }
+    let prepared = prepare(&run.id)?;
+    if prepared.revision != revision
+        || size_class(prepared.bundle_archive.len()) != size_class(bundle_archive_size)
+    {
+        bail!("run-scoped execution content changed its admitted revision or bundle size class");
     }
     let admission = wait_for_admission(&client, &project_id, &run.id).await?;
     let identity = admission
