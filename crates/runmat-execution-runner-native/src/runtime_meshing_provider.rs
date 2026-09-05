@@ -4,7 +4,7 @@ use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
-    resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract,
+    resolve_meshing_request, CacheAdmissionDecision, CanonicalMeshingContract, MeshingRequest,
     MeshingRequestSettings,
 };
 use runmat_meshing_execution::MeshingRunEvidenceContext;
@@ -122,15 +122,7 @@ pub fn mesh_source_with_native_execution(
         request.expected_source_sha256,
     )?;
     let import_options = request.import_options;
-    let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
-        source_tolerance_m: 0.0,
-        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
-        model_relative_term: import_options.analysis.model_relative_tolerance,
-        requested_deviation_m: import_options.analysis.requested_deviation_m,
-        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
-    };
-    let canonical_request = resolve_meshing_request(tolerance, request.settings)
-        .map_err(|error| NativeMeshingSourceError::InvalidRequest(error.to_string()))?;
+    let canonical_request = resolve_native_meshing_request(&import_options, request.settings)?;
     let request_bytes = canonical_request
         .canonical_encode()
         .map_err(|error| NativeMeshingSourceError::RequestEncoding(error.to_string()))?;
@@ -172,6 +164,21 @@ pub fn mesh_source_with_native_execution(
         },
     )
     .map_err(NativeMeshingSourceError::from)
+}
+
+pub fn resolve_native_meshing_request(
+    import_options: &ExactCadImportOptions,
+    settings: MeshingRequestSettings,
+) -> Result<MeshingRequest, NativeMeshingSourceError> {
+    let tolerance = runmat_geometry_core::GeometryTolerancePolicy {
+        source_tolerance_m: 0.0,
+        absolute_floor_m: import_options.analysis.absolute_tolerance_floor_m,
+        model_relative_term: import_options.analysis.model_relative_tolerance,
+        requested_deviation_m: import_options.analysis.requested_deviation_m,
+        maximum_healing_displacement_m: import_options.analysis.maximum_healing_displacement_m,
+    };
+    resolve_meshing_request(tolerance, settings)
+        .map_err(|error| NativeMeshingSourceError::InvalidRequest(error.to_string()))
 }
 
 fn verify_expected_source_sha256(

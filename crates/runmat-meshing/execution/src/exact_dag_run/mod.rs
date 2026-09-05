@@ -10,9 +10,10 @@ use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_meshing_core::{
-    CacheAdmissionDecision, MeshingEvidence, MeshingFailure, MeshingFailureCategory,
-    MeshingOperation, MeshingRequest, MeshingStageKind, PlatformBuildIdentity,
-    SizingResolutionEvidence, SolverMeshArtifact, MESHING_FAILURE_SCHEMA_VERSION,
+    CacheAdmissionDecision, CanonicalMeshingContract, MeshingChunkMediaType, MeshingEvidence,
+    MeshingFailure, MeshingFailureCategory, MeshingOperation, MeshingRequest, MeshingStageEvidence,
+    MeshingStageKind, PlatformBuildIdentity, SizingResolutionEvidence, SolverMeshArtifact,
+    MESHING_FAILURE_SCHEMA_VERSION,
 };
 
 use crate::{ArtifactAccess, ExactMeshingDagPlanner, PreparedExactGeometryInput};
@@ -45,6 +46,100 @@ pub struct ExactMeshingDagRunResult {
     pub result_objects: Vec<runmat_execution::value::ValueRef>,
     pub artifact: SolverMeshArtifact,
     pub evidence: MeshingEvidence,
+}
+
+pub fn import_exact_meshing_result(
+    source: &impl runmat_execution_artifact::cache::CacheImport,
+    root: runmat_execution::value::ValueRef,
+    result_objects: Vec<runmat_execution::value::ValueRef>,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
+    let publication = crate::import_result_publication(source, &root, access.clone(), limits)?;
+    if publication.result_objects().len().checked_add(1) != Some(result_objects.len())
+        || publication
+            .result_objects()
+            .iter()
+            .any(|reference| !result_objects.contains(reference))
+    {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal result inventory differs from its canonical publication".into(),
+        ));
+    }
+    let observations = result_objects
+        .iter()
+        .filter(|reference| {
+            reference.media_type == crate::STAGE_EVIDENCE_MEDIA_TYPE
+                || reference.value_schema == crate::STAGE_EVIDENCE_VALUE_SCHEMA
+        })
+        .collect::<Vec<_>>();
+    let [observation] = observations.as_slice() else {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal result requires exactly one publication-stage observation".into(),
+        ));
+    };
+    access
+        .validate_reference(
+            observation,
+            runmat_execution::value::ValueRefKind::ResultObject,
+            crate::STAGE_EVIDENCE_MEDIA_TYPE,
+            crate::STAGE_EVIDENCE_VALUE_SCHEMA,
+        )
+        .map_err(crate::MeshingExecutionError::from)?;
+    let observation_bytes = source
+        .read_verified(observation.logical_digest)
+        .map_err(crate::MeshingExecutionError::from)?
+        .ok_or_else(|| {
+            ExactMeshingDagRunError::Invalid(
+                "terminal publication-stage observation is unavailable".into(),
+            )
+        })?;
+    if observation.encoded_length != observation_bytes.len() as u64
+        || observation.logical_digest != runmat_execution::Digest::sha256(&observation_bytes)
+    {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal publication-stage observation differs from its reference".into(),
+        ));
+    }
+    let observation = MeshingStageEvidence::canonical_decode(&observation_bytes)?;
+    observation.validate()?;
+    if observation.stage != MeshingStageKind::Publication
+        || observation.stage_result_digest.bytes() != root.logical_digest.bytes()
+    {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal stage observation does not bind the publication root".into(),
+        ));
+    }
+    let streams = publication.stage_objects().decoded_streams()?;
+    let [artifact_stream, evidence_stream] = streams.as_slice() else {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal publication has an invalid stream shape".into(),
+        ));
+    };
+    let ([artifact_bytes], [evidence_bytes]) = (
+        artifact_stream.records.as_slice(),
+        evidence_stream.records.as_slice(),
+    ) else {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal publication has an invalid record shape".into(),
+        ));
+    };
+    if artifact_stream.media_type != MeshingChunkMediaType::SolverMeshArtifact
+        || evidence_stream.media_type != MeshingChunkMediaType::MeshingEvidence
+    {
+        return Err(ExactMeshingDagRunError::Invalid(
+            "terminal publication has invalid media types".into(),
+        ));
+    }
+    let artifact = SolverMeshArtifact::canonical_decode(artifact_bytes)?;
+    let evidence = MeshingEvidence::canonical_decode(evidence_bytes)?;
+    evidence.validate(&artifact)?;
+    Ok(ExactMeshingDagRunResult {
+        root,
+        result_objects,
+        artifact,
+        evidence,
+    })
 }
 
 #[derive(Debug, thiserror::Error)]

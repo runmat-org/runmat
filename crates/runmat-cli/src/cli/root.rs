@@ -13,7 +13,7 @@ use crate::cli::value_types::{
 };
 use crate::cli::ColorMode;
 use crate::cli::TestArgs;
-use crate::cli::{BatchCommand, ClusterCommand, JobCommand, PackageCommand};
+use crate::cli::{BatchCommand, ClusterCommand, ExecutionTargetArgs, JobCommand, PackageCommand};
 
 #[derive(Parser, Clone)]
 #[command(
@@ -244,6 +244,8 @@ pub enum Commands {
     Mesh {
         /// STEP, IGES, or B-rep source geometry
         source: PathBuf,
+        #[command(flatten)]
+        execution: ExecutionTargetArgs,
         /// Coordinate units used by source geometry that does not declare its units
         #[arg(long, value_enum, default_value = "meter")]
         source_units: MeshSourceUnitsArg,
@@ -541,6 +543,40 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn mesh_uses_the_shared_remote_placement_surface() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "mesh",
+            "part.step",
+            "--cluster",
+            "engineering",
+            "--queue",
+            "cpu",
+            "--workers",
+            "16",
+            "--trust-identity",
+            "sha256:trusted-node",
+            "--detach",
+        ])
+        .unwrap();
+        let Some(Commands::Mesh { execution, .. }) = cli.command else {
+            panic!("expected mesh command")
+        };
+        assert_eq!(
+            execution.resolve().unwrap(),
+            crate::cli::ExecutionTarget::Remote(crate::cli::RemoteExecutionTarget {
+                cluster: "engineering".into(),
+                project: None,
+                queue: "cpu".into(),
+                trust_identity: "sha256:trusted-node".into(),
+                idempotency_key: None,
+                workers: 16,
+                detach: true,
+            })
+        );
     }
 
     #[test]

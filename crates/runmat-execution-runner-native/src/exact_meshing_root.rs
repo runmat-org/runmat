@@ -821,10 +821,7 @@ mod tests {
         use runmat_execution_transport_native::frame::FrameLimits;
         use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
         use runmat_geometry_io::{import_exact_cad, GeometryFormat};
-        use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
-        use runmat_meshing_execution::{
-            exact_meshing_worker_capabilities, import_result_publication,
-        };
+        use runmat_meshing_execution::exact_meshing_worker_capabilities;
 
         use crate::{
             native_meshing_kernel_dispatcher, run_remote_meshing_worker_quic,
@@ -1041,18 +1038,15 @@ mod tests {
                 panic!("remote exact root returned an invalid terminal root")
             };
             assert!(result_objects.contains(root));
-            let publication = import_result_publication(
+            let terminal = runmat_meshing_execution::import_exact_meshing_result(
                 pool.as_ref(),
-                root,
+                root.as_ref().clone(),
+                result_objects,
                 access,
                 ObjectInventoryLimits::default(),
             )
             .unwrap();
-            let streams = publication.stage_objects().decoded_streams().unwrap();
-            let artifact = SolverMeshArtifact::canonical_decode(&streams[0].records[0]).unwrap();
-            let evidence = MeshingEvidence::canonical_decode(&streams[1].records[0]).unwrap();
-            evidence.validate(&artifact).unwrap();
-            assert!(!artifact.topology.volume_elements.is_empty());
+            assert!(!terminal.artifact.topology.volume_elements.is_empty());
             pool.remove_worker(worker.id, false).await.unwrap();
         };
         let (server_result, ()) = tokio::join!(server, client);

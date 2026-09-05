@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use runmat_execution_artifact::encryption::EncryptionPurpose;
-use runmat_execution_artifact::{ProgramExecutionOutputs, ProgramExecutionResponse};
+use runmat_execution_artifact::{
+    ProgramExecutionObject, ProgramExecutionOutputs, ProgramExecutionResponse,
+};
 use runmat_server_client::auth::{
     resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
 };
@@ -129,6 +131,35 @@ pub(crate) async fn await_outputs(run_id: &str) -> Result<ProgramExecutionOutput
             run.state
         );
     }
+}
+
+pub(crate) async fn await_downloaded_outputs(
+    run_id: &str,
+) -> Result<(ProgramExecutionOutputs, Vec<ProgramExecutionObject>)> {
+    let outputs = await_outputs(run_id).await?;
+    let (client, saved) = saved_client(run_id).await?;
+    let key = saved.key()?;
+    let mut objects = Vec::with_capacity(outputs.objects.len());
+    for location in &outputs.objects {
+        let ciphertext = client
+            .download_artifact(
+                &saved.project_id,
+                &location.artifact_id,
+                &saved.endpoint_fingerprint,
+            )
+            .await?;
+        let bytes =
+            super::crypto::open_run_object(&key, run_id, EncryptionPurpose::Result, &ciphertext)?;
+        let object = ProgramExecutionObject {
+            reference: location.reference.clone(),
+            bytes,
+        };
+        object
+            .validate()
+            .context("remote result object failed integrity validation")?;
+        objects.push(object);
+    }
+    Ok((outputs, objects))
 }
 
 pub async fn attach(run_id: &str, no_follow: bool, json: bool) -> Result<()> {

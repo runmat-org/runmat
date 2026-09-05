@@ -70,8 +70,8 @@ pub use exact_dag::{
     ExactCurvePassPlan, ExactMeshingDagPlanner, ExactSurfacePassPlan, PlannedMeshingStage,
 };
 pub use exact_dag_run::{
-    execute_exact_meshing_dag, execute_exact_meshing_dag_async, ExactMeshingDagExecutor,
-    ExactMeshingDagRun, ExactMeshingDagRunError, ExactMeshingDagRunResult,
+    execute_exact_meshing_dag, execute_exact_meshing_dag_async, import_exact_meshing_result,
+    ExactMeshingDagExecutor, ExactMeshingDagRun, ExactMeshingDagRunError, ExactMeshingDagRunResult,
     MeshingRunEvidenceContext, MeshingStageExecutionError, SerialExactMeshingExecutor,
 };
 pub use faceted_geometry_objects::{

@@ -1,5 +1,6 @@
 mod batch;
 mod cluster;
+mod execution_target;
 mod job;
 mod package;
 mod parse;
@@ -13,6 +14,7 @@ pub use cluster::{
     ClusterCommand, ClusterStateArg, NodeJoinArgs, NodeJoinCommand, NodeServiceCommand,
     NodeStateArg, NodeTrustTier,
 };
+pub use execution_target::{ExecutionTarget, ExecutionTargetArgs, RemoteExecutionTarget};
 pub use job::{JobCommand, JobRecoveryCommand};
 pub use package::{
     PackageCacheCommand, PackageCommand, PackageInspectArgs, PackageKeyCommand, PackageKeyTarget,

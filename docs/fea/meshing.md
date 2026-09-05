@@ -253,6 +253,13 @@ does not substitute a bounding box or display tessellation for the exact CAD mod
 | `--evidence <path>` | Evidence destination | Source name with `.meshing-evidence.cbor` |
 | `--json` | Print a machine-readable summary | Off |
 | `--force` | Atomically replace existing destinations | Off |
+| `--cluster <id>` | Execute through the named remote cluster | Local execution |
+| `--project <id>` | Remote project; otherwise use the active project | Active project |
+| `--queue <name>` | Remote scheduler queue | `default` |
+| `--workers <count>` | Remote worker capacity; zero selects the meshing minimum | `0` |
+| `--trust-identity <fingerprint>` | Pinned identity required for a remote endpoint | None |
+| `--idempotency-key <key>` | Stable identity for safe submission retries | Generated |
+| `--detach` | Return after remote submission without creating local outputs | Off |
 
 Smaller target sizes usually create more elements. Deviation is independent: curved geometry may
 need boundary edges much shorter than the global target to stay within the geometric error bound.
@@ -454,11 +461,29 @@ shared-edge identity and constrained-volume correctness.
 
 ### Remote execution
 
-Remote meshing is exposed to native host integrations through the same canonical stage requests and
-the general remote pool. A remote worker must advertise the matching meshing algorithm, exact CAD
-kernel and ABI, platform, memory/scratch class, and requested element-order capabilities. Geometry,
-stage objects, progress, and results remain application-encrypted; the Server sees only coarse run,
-allocation, quota, retention, and ciphertext metadata.
+Pass `--cluster` to send the same meshing request through the general remote pool. The source CAD
+must be inside a RunMat project so the submitted run can be bound to an exact project revision:
+
+```sh
+runmat mesh geometry/bracket.step \
+  --target-size 0.005 \
+  --cluster engineering \
+  --queue cpu \
+  --workers 16 \
+  --trust-identity sha256:<endpoint-fingerprint>
+```
+
+The CLI waits for the Server-assigned run identity before authorizing and encrypting the chunked CAD
+closure. The Server never receives the CAD, mesh, evidence, or decryption key as plaintext. Workers
+admit the CAD, derive their own exact-kernel and platform identity, and execute the same canonical
+stage DAG used locally. A worker must advertise the matching meshing algorithm, exact CAD kernel and
+ABI, platform, memory/scratch class, and requested element-order capabilities.
+
+Without `--detach`, the CLI downloads every terminal result object, checks its digest and run
+authority, reconstructs and jointly validates the solver mesh and evidence, and only then writes the
+two requested local files. `--detach` returns the durable run ID and deliberately creates no local
+files; `--output`, `--evidence`, and `--force` therefore reject in detached mode. Use `runmat job
+show`, `runmat job attach`, or `runmat job cancel` with that run ID for lifecycle control.
 
 Operators prepare capacity with the `runmat cluster` workflow:
 
@@ -473,12 +498,6 @@ runmat cluster join run
 The last two commands normally run on an execution node. Production deployments usually install the
 node as an operating-system service; see [Remote Execution](/docs/execution/remote) for trust,
 enrollment, service, queue, and recovery setup.
-
-The standalone `runmat mesh` command currently targets local native workers and does not accept a
-`--cluster` option. Product hosts that enable remote meshing supply their existing execution target,
-cluster, queue, trust, and worker policy to the meshing DAG executor. Do not use `runmat job submit`
-with a CAD pathname as a substitute: that command submits a packaged RunMat program, and a local CAD
-path is not implicitly uploaded with it.
 
 Placement context remains outside `MeshingRequest`. Running the same logical request locally or on
 a compatible remote pool therefore preserves the canonical mesh identity.

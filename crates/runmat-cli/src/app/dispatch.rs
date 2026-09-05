@@ -59,6 +59,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         }
         Commands::Mesh {
             source,
+            execution,
             source_units,
             output,
             evidence,
@@ -69,19 +70,27 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             seed,
             force,
             json,
-        } => mesh::execute(mesh::MeshCommand {
-            source,
-            source_units,
-            output,
-            evidence,
-            target_size_m: target_size,
-            maximum_deviation_m: deviation,
-            element_order,
-            maximum_elements: max_elements,
-            deterministic_seed: seed,
-            force,
-            json,
-        }),
+        } => {
+            mesh::execute_with_target(
+                mesh::MeshCommand {
+                    source,
+                    source_units,
+                    output,
+                    evidence,
+                    target_size_m: target_size,
+                    maximum_deviation_m: deviation,
+                    element_order,
+                    maximum_elements: max_elements,
+                    deterministic_seed: seed,
+                    force,
+                    json,
+                },
+                execution,
+                cli,
+                config,
+            )
+            .await
+        }
         Commands::Compile {
             file,
             output,

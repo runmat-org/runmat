@@ -62,7 +62,8 @@ pub use remote_exact_meshing_executor::RemoteExactMeshingExecutor;
 pub use runmat_execution_artifact::cache::FilesystemObjectStore;
 pub use runtime_meshing_provider::{
     mesh_source_with_native_execution, native_meshing_execution_provider,
-    NativeMeshingPartitionPolicy, NativeMeshingSourceError, NativeMeshingSourceRequest,
+    resolve_native_meshing_request, NativeMeshingPartitionPolicy, NativeMeshingSourceError,
+    NativeMeshingSourceRequest,
 };
 pub use service::NativeExecutionService;
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
