@@ -8,5 +8,6 @@ pub(in crate::catalog::inference) fn infer(
 ) -> CallInference {
     match rule {
         IoInferenceRule::ClearConsole => super::super::io::clear_console(request, entry),
+        IoInferenceRule::CurrentDirectory => super::super::io::current_directory(request, entry),
     }
 }

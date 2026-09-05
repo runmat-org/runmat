@@ -1282,6 +1282,38 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 192,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "current-directory identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/pwd",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/pwd",
+  ],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/pwd/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/pwd.rs",
+    "docs/builtins/reference/pwd.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/pwd.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+
+if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(
+  read("crates/runmat-runtime/src/builtins/io/repl_fs/pwd/mod.rs"),
+)) {
+  fail("pwd runtime binding duplicates catalog-owned metadata or inference");
+}
+if (/"pwd"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim pwd authority");
+}
+if (/\bpub fn pwd_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy runtime type resolver must not reclaim pwd inference authority");
+}
+
 const clcRuntimePath = "crates/runmat-runtime/src/builtins/io/clc.rs";
 const clcRuntime = read(clcRuntimePath);
 if (clcRuntime.split("\n").length > 96) {

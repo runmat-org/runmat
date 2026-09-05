@@ -30,6 +30,7 @@ pub enum BuiltinInferenceRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum IoInferenceRule {
     ClearConsole,
+    CurrentDirectory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

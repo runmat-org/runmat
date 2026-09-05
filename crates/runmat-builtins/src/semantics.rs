@@ -269,7 +269,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         },
 
         "jsondecode" | "jsonencode" | "fullfile" => pure(BuiltinSemanticKind::General),
-        "pwd" | "getenv" => BuiltinSemantics {
+        "getenv" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
             purity: BuiltinPurity::DeterministicReadOnly,
             semantic_kind: BuiltinSemanticKind::General,

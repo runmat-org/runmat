@@ -1,10 +1,9 @@
 //! Clear-console control event.
 
-use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::{build_runtime_error, console, BuiltinResult};
+use crate::{console, runtime_descriptor_error, BuiltinResult};
 
 const BUILTIN_NAME: &str = "clc";
 
@@ -22,12 +21,7 @@ async fn clc_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn argument_count_error() -> crate::RuntimeError {
-    let descriptor: &'static BuiltinErrorDescriptor = &runmat_builtins::CLC_ERROR_ARG_COUNT;
-    let mut builder = build_runtime_error(descriptor.message).with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = descriptor.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
+    runtime_descriptor_error(BUILTIN_NAME, &runmat_builtins::CLC_ERROR_ARG_COUNT)
 }
 
 fn empty_return_value() -> Value {
