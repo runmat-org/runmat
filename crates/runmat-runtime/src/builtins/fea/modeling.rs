@@ -1,9 +1,22 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct DomainPayload {
-    pub(super) kind: String,
-    pub(super) data: serde_json::Value,
+#[derive(Debug, Clone)]
+pub(super) enum DomainPayload {
+    ThermoMechanical(ThermoMechanicalDomain),
+    ElectroThermal(ElectroThermalDomain),
+    Electromagnetic(ElectromagneticDomain),
+    Fluid(CfdDomain),
+}
+
+impl DomainPayload {
+    fn family_name(&self) -> &'static str {
+        match self {
+            Self::ThermoMechanical(_) => "thermo-mechanical",
+            Self::ElectroThermal(_) => "electro-thermal",
+            Self::Electromagnetic(_) => "electromagnetic",
+            Self::Fluid(_) => "fluid",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -608,107 +621,6 @@ pub(super) fn create_material_assignment_object_from_args(
     })
 }
 
-pub(super) fn create_domain_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.is_empty() {
-        return Err(builtin_error(
-            DOMAIN_NAME,
-            &ERROR_INPUT,
-            "fea.domain requires a domain kind",
-        ));
-    }
-    let kind_text = scalar_string(&args[0], DOMAIN_NAME, &ERROR_INPUT)?;
-    let kind = normalize_token(&kind_text);
-    let fields = json_fields_from_name_values(DOMAIN_NAME, &args[1..])?;
-    let payload = match kind.as_str() {
-        "thermomechanical" => DomainPayload {
-            kind: "thermo_mechanical".to_string(),
-            data: typed_domain_data::<ThermoMechanicalDomain>(
-                DOMAIN_NAME,
-                "thermo_mechanical domain",
-                json_with_overrides(
-                    DOMAIN_NAME,
-                    serde_json::json!({
-                        "enabled": true,
-                        "reference_temperature_k": 293.15,
-                        "applied_temperature_delta_k": 0.0,
-                        "field_artifact_id": null,
-                        "field_source": null,
-                        "region_temperature_deltas": [],
-                        "temperature_signal_id": null
-                    }),
-                    fields,
-                    "thermo_mechanical domain",
-                )?,
-            )?,
-        },
-        "electrothermal" => DomainPayload {
-            kind: "electro_thermal".to_string(),
-            data: typed_domain_data::<ElectroThermalDomain>(
-                DOMAIN_NAME,
-                "electro_thermal domain",
-                json_with_overrides(
-                    DOMAIN_NAME,
-                    serde_json::json!({
-                        "enabled": true,
-                        "reference_temperature_k": 293.15,
-                        "applied_voltage_v": 0.0,
-                        "region_conductivity_scales": [],
-                        "electric_potential_signal_id": null
-                    }),
-                    fields,
-                    "electro_thermal domain",
-                )?,
-            )?,
-        },
-        "electromagnetic" => DomainPayload {
-            kind: "electromagnetic".to_string(),
-            data: typed_domain_data::<ElectromagneticDomain>(
-                DOMAIN_NAME,
-                "electromagnetic domain",
-                json_with_overrides(
-                    DOMAIN_NAME,
-                    serde_json::json!({
-                        "enabled": true,
-                        "reference_frequency_hz": 0.0,
-                        "applied_current_a": 0.0
-                    }),
-                    fields,
-                    "electromagnetic domain",
-                )?,
-            )?,
-        },
-        "cfd" => DomainPayload {
-            kind: "cfd".to_string(),
-            data: typed_domain_data::<CfdDomain>(
-                DOMAIN_NAME,
-                "cfd domain",
-                json_with_overrides(
-                    DOMAIN_NAME,
-                    serde_json::json!({
-                        "enabled": true,
-                        "solve_family": "steady_state",
-                        "reference_density_kg_per_m3": 1.225,
-                        "dynamic_viscosity_pa_s": 1.8e-5,
-                        "inlet_velocity_m_per_s": 0.0,
-                        "turbulence_intensity": 0.0,
-                        "inlet_velocity_signal_id": null
-                    }),
-                    fields,
-                    "cfd domain",
-                )?,
-            )?,
-        },
-        other => {
-            return Err(builtin_error(
-                DOMAIN_NAME,
-                &ERROR_INPUT,
-                format!("unsupported FEA domain kind `{other}`"),
-            ));
-        }
-    };
-    domain_to_object(payload)
-}
-
 fn build_model_from_parts(
     builtin: &'static str,
     geometry: &GeometryAsset,
@@ -830,45 +742,11 @@ fn build_model_from_parts(
             AnalysisSequence::from_steps(format!("{}.sequence", model.model_id.0), steps);
     }
     for domain in domains {
-        match domain.kind.as_str() {
-            "thermo_mechanical" => {
-                let mut domain: ThermoMechanicalDomain =
-                    json_deserialize(builtin, domain.data, "thermo_mechanical domain")?;
-                for entry in &mut domain.region_temperature_deltas {
-                    entry.region_id = resolve_region_selector(builtin, &entry.region_id, geometry)?;
-                }
-                if let Some(source) = &mut domain.field_source {
-                    for region_id in &mut source.expected_region_ids {
-                        *region_id = resolve_region_selector(builtin, region_id, geometry)?;
-                    }
-                }
-                model.thermo_mechanical = Some(domain);
-            }
-            "electro_thermal" => {
-                let mut domain: ElectroThermalDomain =
-                    json_deserialize(builtin, domain.data, "electro_thermal domain")?;
-                for entry in &mut domain.region_conductivity_scales {
-                    entry.region_id = resolve_region_selector(builtin, &entry.region_id, geometry)?;
-                }
-                model.electro_thermal = Some(domain);
-            }
-            "electromagnetic" => {
-                model.electromagnetic = Some(json_deserialize(
-                    builtin,
-                    domain.data,
-                    "electromagnetic domain",
-                )?);
-            }
-            "cfd" => {
-                model.cfd = Some(json_deserialize(builtin, domain.data, "cfd domain")?);
-            }
-            other => {
-                return Err(builtin_error(
-                    builtin,
-                    &ERROR_INPUT,
-                    format!("unsupported domain payload `{other}`"),
-                ));
-            }
+        match domain {
+            DomainPayload::ThermoMechanical(domain) => model.thermo_mechanical = Some(domain),
+            DomainPayload::ElectroThermal(domain) => model.electro_thermal = Some(domain),
+            DomainPayload::Electromagnetic(domain) => model.electromagnetic = Some(domain),
+            DomainPayload::Fluid(domain) => model.cfd = Some(domain),
         }
     }
     if !interfaces.is_empty() {
@@ -984,17 +862,6 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
         &ERROR_INTERNAL,
         FEA_MATERIAL_ASSIGNMENT_CLASS,
         &assignment,
-    )
-}
-
-fn domain_to_object(domain: DomainPayload) -> BuiltinResult<Value> {
-    serializable_to_object_preserving_integers(
-        DOMAIN_NAME,
-        &ERROR_INTERNAL,
-        FEA_DOMAIN_CLASS,
-        &domain,
-        &[],
-        &["revision"],
     )
 }
 
@@ -1190,11 +1057,65 @@ fn step_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Ve
         .collect()
 }
 
-fn domain_vec_from_value(
+pub(super) fn domain_vec_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<Vec<DomainPayload>> {
-    object_vec_from_value(builtin, value, FEA_DOMAIN_CLASS)
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected typed FEA domain object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    let domains = values
+        .into_iter()
+        .map(|value| {
+            let Value::Object(object) = value else {
+                unreachable!("domain inputs were classified above")
+            };
+            match object.class_name.as_str() {
+                FEA_THERMOMECHANICAL_DOMAIN_CLASS => {
+                    object_payload(builtin, value, FEA_THERMOMECHANICAL_DOMAIN_CLASS)
+                        .map(DomainPayload::ThermoMechanical)
+                }
+                FEA_ELECTROTHERMAL_DOMAIN_CLASS => {
+                    object_payload(builtin, value, FEA_ELECTROTHERMAL_DOMAIN_CLASS)
+                        .map(DomainPayload::ElectroThermal)
+                }
+                FEA_ELECTROMAGNETIC_DOMAIN_CLASS => {
+                    object_payload(builtin, value, FEA_ELECTROMAGNETIC_DOMAIN_CLASS)
+                        .map(DomainPayload::Electromagnetic)
+                }
+                FEA_FLUID_DOMAIN_CLASS => {
+                    object_payload(builtin, value, FEA_FLUID_DOMAIN_CLASS).map(DomainPayload::Fluid)
+                }
+                other => Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    format!("unsupported FEA domain class `{other}`"),
+                )),
+            }
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let mut families = HashSet::new();
+    for domain in &domains {
+        if !families.insert(domain.family_name()) {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!(
+                    "duplicate {} FEA domain; provide at most one domain per physics family",
+                    domain.family_name()
+                ),
+            ));
+        }
+    }
+    Ok(domains)
 }
 
 fn interface_vec_from_value(

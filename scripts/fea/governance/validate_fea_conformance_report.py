@@ -330,33 +330,7 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_hit_ratio",
         "transient_prepared_cache_misses",
     },
-    "thermo_ramp_smooth_field_artifact_gpu_provider": {
-        "thermo_ramp_smooth_temporal_variation",
-        "thermo_ramp_smooth_spatial_gradient_index",
-        "thermo_ramp_smooth_spatial_coverage_ratio",
-        "thermo_ramp_smooth_field_extrapolation_ratio",
-        "thermo_ramp_smooth_field_clamp_ratio",
-        "thermo_ramp_smooth_constitutive_temperature_factor",
-        "thermo_ramp_smooth_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
     "thermo_shock_oscillatory_gpu_provider": {
-        "thermo_shock_oscillatory_temporal_variation",
-        "thermo_shock_oscillatory_spatial_gradient_index",
-        "thermo_shock_oscillatory_spatial_coverage_ratio",
-        "thermo_shock_oscillatory_field_extrapolation_ratio",
-        "thermo_shock_oscillatory_field_clamp_ratio",
-        "thermo_shock_constitutive_temperature_factor",
-        "thermo_shock_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_shock_oscillatory_field_artifact_gpu_provider": {
         "thermo_shock_oscillatory_temporal_variation",
         "thermo_shock_oscillatory_spatial_gradient_index",
         "thermo_shock_oscillatory_spatial_coverage_ratio",
@@ -1281,9 +1255,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_BOUNDARY",
     },
     "nonlinear_invalid_plasticity_options": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "nonlinear_invalid_contact_options": {
         "validate_ok": True,
@@ -1291,9 +1266,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
     },
     "thermal_standalone_ramp_invalid_material": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_MATERIAL",
+        "run_error_code": None,
     },
     "thermal_standalone_ramp_invalid_source": {
         "validate_ok": True,
@@ -1306,19 +1282,16 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_THERMAL.INVALID_THERMAL_BOUNDARY",
     },
     "electro_thermal_invalid_voltage": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_SIGNAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        "run_error_code": None,
     },
-    "electro_thermal_invalid_conductivity_scale": {
-        "validate_ok": True,
+    "electro_thermal_invalid_conductivity": {
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_MATERIAL",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
-    },
-    "electro_thermal_unmapped_region": {
-        "validate_ok": True,
-        "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
+        "run_error_code": None,
     },
     "electro_thermal_joule_benign_rejected": {
         "validate_ok": True,
@@ -1331,9 +1304,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID",
     },
     "cfd_invalid_domain_options": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_CFD.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "cfd_invalid_boundary_conditions": {
         "validate_ok": True,
@@ -1346,9 +1320,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING",
     },
     "cht_coupled_invalid_cfd_domain": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_CHT.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "fsi_coupled_invalid_interface_mapping": {
         "validate_ok": True,
@@ -1356,9 +1331,10 @@ REQUIRED_ERROR_FIXTURES = {
         "run_error_code": "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING",
     },
     "fsi_coupled_invalid_cfd_domain": {
-        "validate_ok": True,
+        "validate_ok": False,
+        "validate_error_code": "RM.FEA.VALIDATE.INVALID_DOMAIN",
         "run_ok": False,
-        "run_error_code": "RM.FEA.RUN_FSI.INVALID_OPTIONS",
+        "run_error_code": None,
     },
     "structural_invalid_moment_without_rotational_dofs": {
         "validate_ok": True,
@@ -1555,15 +1531,7 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
-    "thermo_ramp_smooth_field_artifact_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
     "thermo_shock_oscillatory_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_shock_oscillatory_field_artifact_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -1788,9 +1756,7 @@ def main() -> int:
             "thermo_gradient_benign_gpu_provider",
             "thermo_gradient_pathological_gpu_provider",
             "thermo_ramp_smooth_gpu_provider",
-            "thermo_ramp_smooth_field_artifact_gpu_provider",
             "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_oscillatory_field_artifact_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
         }:
             missing_fields = sorted(
@@ -1800,18 +1766,6 @@ def main() -> int:
                 errors.append(
                     f"fixture {fixture_id} missing thermo summary fields: {', '.join(missing_fields)}"
                 )
-            if "field_artifact" in fixture_id:
-                for required_field in (
-                    "thermo_field_artifact_id",
-                    "thermo_field_artifact_approved",
-                    "thermo_field_artifact_age_days",
-                    "thermo_field_artifact_provenance_valid",
-                ):
-                    if required_field not in record:
-                        errors.append(
-                            f"fixture {fixture_id} missing thermo artifact field: {required_field}"
-                        )
-
         if fixture_id in {
             "nonlinear_plasticity_benchmark_gpu_provider",
         }:

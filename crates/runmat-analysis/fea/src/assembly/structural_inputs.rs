@@ -33,6 +33,8 @@ pub(super) fn apply_synthetic_structural_rhs(excitations: &RealizedExcitations, 
                     rhs[base + 1] -= value.real * 1.0e-3;
                 }
             }
+            RealizedExcitationKind::TemperatureField(_)
+            | RealizedExcitationKind::TerminalVoltage(_) => {}
             _ => unreachable!("structural input validation must reject unsupported loads"),
         }
     }
@@ -131,6 +133,13 @@ pub(super) fn validate_structural_inputs(
     basis: StructuralProjectionBasis,
 ) -> Result<(), StructuralAssemblyError> {
     for excitation in excitations.iter() {
+        if matches!(
+            excitation.kind,
+            RealizedExcitationKind::TemperatureField(_)
+                | RealizedExcitationKind::TerminalVoltage(_)
+        ) {
+            continue;
+        }
         let (kind, supported) = match (&excitation.kind, basis) {
             (RealizedExcitationKind::Force(_), _) => (StructuralLoadKind::Force, true),
             (
@@ -168,11 +177,14 @@ pub(super) fn validate_structural_inputs(
                 (StructuralLoadKind::HeatGeneration, false)
             }
             (RealizedExcitationKind::HeatFlux(_), _) => (StructuralLoadKind::HeatFlux, false),
+            (RealizedExcitationKind::TemperatureField(_), _) => {
+                unreachable!("temperature fields are coupling inputs, not structural loads")
+            }
             (RealizedExcitationKind::AmbientTemperature(_), _) => {
                 (StructuralLoadKind::AmbientTemperature, false)
             }
             (RealizedExcitationKind::TerminalVoltage(_), _) => {
-                (StructuralLoadKind::TerminalVoltage, false)
+                unreachable!("terminal voltage is a coupling input, not a structural load")
             }
             (RealizedExcitationKind::ElectricCurrent(_), _) => {
                 (StructuralLoadKind::ElectricCurrent, false)
@@ -285,6 +297,7 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
         RealizedExcitationKind::BaseAcceleration(_) => StructuralLoadKind::BaseAcceleration,
         RealizedExcitationKind::HeatGeneration(_) => StructuralLoadKind::HeatGeneration,
         RealizedExcitationKind::HeatFlux(_) => StructuralLoadKind::HeatFlux,
+        RealizedExcitationKind::TemperatureField(_) => StructuralLoadKind::TemperatureField,
         RealizedExcitationKind::AmbientTemperature(_) => StructuralLoadKind::AmbientTemperature,
         RealizedExcitationKind::TerminalVoltage(_) => StructuralLoadKind::TerminalVoltage,
         RealizedExcitationKind::ElectricCurrent(_) => StructuralLoadKind::ElectricCurrent,

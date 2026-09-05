@@ -7,15 +7,22 @@ use runmat_lsp::core::analysis::{
     analyze_document_with_compat, completion_at, signature_help_at, CompatMode,
 };
 
-const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 13] = [
+const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 20] = [
     "fea.ConjugateHeatTransferInterface.conductance",
     "fea.ConjugateHeatTransferInterface.perfect",
     "fea.ConjugateHeatTransferInterface.resistance",
     "fea.ContactInterface.coulomb",
     "fea.ContactInterface.frictionless",
     "fea.FluidStructureInterface.noSlip",
+    "fea.ThermoMechanicalDomain.atReferenceTemperature",
+    "fea.ElectroThermalDomain.atReferenceTemperature",
+    "fea.ElectromagneticDomain.atFrequency",
+    "fea.FluidDomain.newtonian",
+    "fea.Frequency.hertz",
+    "fea.MassDensity.kilogramsPerCubicMeter",
+    "fea.DynamicViscosity.pascalSeconds",
+    "fea.TurbulenceIntensity.ratio",
     "fea.compare",
-    "fea.domain",
     "fea.field",
     "fea.material",
     "fea.materialAssignment",
@@ -23,15 +30,25 @@ const FEA_MODELING_AND_POSTPROCESSING_BUILTINS: [&str; 13] = [
     "fea.plan",
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 2] = ["fea.domain", "fea.material"];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 5] = [
+    "fea.Frequency.hertz",
+    "fea.MassDensity.kilogramsPerCubicMeter",
+    "fea.DynamicViscosity.pascalSeconds",
+    "fea.TurbulenceIntensity.ratio",
+    "fea.material",
+];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 11] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 15] = [
     "fea.ConjugateHeatTransferInterface.conductance",
     "fea.ConjugateHeatTransferInterface.perfect",
     "fea.ConjugateHeatTransferInterface.resistance",
     "fea.ContactInterface.coulomb",
     "fea.ContactInterface.frictionless",
     "fea.FluidStructureInterface.noSlip",
+    "fea.ThermoMechanicalDomain.atReferenceTemperature",
+    "fea.ElectroThermalDomain.atReferenceTemperature",
+    "fea.ElectromagneticDomain.atFrequency",
+    "fea.FluidDomain.newtonian",
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
@@ -96,7 +113,35 @@ fn fea_modeling_and_postprocessing_descriptors_are_visible_to_signature_help() {
             "out = fea.FluidStructureInterface.noSlip(\"fsi\", 0, 0);",
         ),
         ("compare", "out = fea.compare(\"base\", \"candidate\");"),
-        ("domain", "out = fea.domain(\"electromagnetic\");"),
+        (
+            "ThermoMechanicalDomain.atReferenceTemperature",
+            "out = fea.ThermoMechanicalDomain.atReferenceTemperature(fea.Temperature.kelvin(293));",
+        ),
+        (
+            "ElectroThermalDomain.atReferenceTemperature",
+            "out = fea.ElectroThermalDomain.atReferenceTemperature(fea.Temperature.kelvin(293));",
+        ),
+        (
+            "ElectromagneticDomain.atFrequency",
+            "out = fea.ElectromagneticDomain.atFrequency(fea.Frequency.hertz(60));",
+        ),
+        (
+            "FluidDomain.newtonian",
+            "out = fea.FluidDomain.newtonian(fea.MassDensity.kilogramsPerCubicMeter(1), fea.DynamicViscosity.pascalSeconds(1), fea.TurbulenceIntensity.ratio(0));",
+        ),
+        ("Frequency.hertz", "out = fea.Frequency.hertz(60);"),
+        (
+            "MassDensity.kilogramsPerCubicMeter",
+            "out = fea.MassDensity.kilogramsPerCubicMeter(1);",
+        ),
+        (
+            "DynamicViscosity.pascalSeconds",
+            "out = fea.DynamicViscosity.pascalSeconds(1);",
+        ),
+        (
+            "TurbulenceIntensity.ratio",
+            "out = fea.TurbulenceIntensity.ratio(0);",
+        ),
         ("field", "out = fea.field(\"run\", \"stress\");"),
         (
             "material",

@@ -123,7 +123,6 @@ artifact_root = ".runmat/fea"
 artifact_max_runs = 12
 artifact_max_runs_per_kind = 3
 study_artifact_root = ".runmat/studies"
-thermo_field_artifact_root = ".runmat/thermo-fields"
 "#,
     )
     .unwrap();
@@ -142,9 +141,5 @@ thermo_field_artifact_root = ".runmat/thermo-fields"
     assert_eq!(
         runtime.fea.study_artifact_root.as_deref(),
         Some(std::path::Path::new(".runmat/studies"))
-    );
-    assert_eq!(
-        runtime.fea.thermo_field_artifact_root.as_deref(),
-        Some(std::path::Path::new(".runmat/thermo-fields"))
     );
 }

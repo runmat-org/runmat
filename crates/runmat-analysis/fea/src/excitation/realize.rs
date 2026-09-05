@@ -14,7 +14,7 @@ use super::model::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ExcitationSamplePoint {
-    Constant,
+    Initial,
     FrequencyHertz(f64),
 }
 
@@ -24,9 +24,8 @@ pub(crate) fn realize_model_excitations(
     let sample = model
         .electromagnetic
         .as_ref()
-        .filter(|domain| domain.enabled)
-        .map(|domain| ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency_hz))
-        .unwrap_or(ExcitationSamplePoint::Constant);
+        .map(|domain| ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz))
+        .unwrap_or(ExcitationSamplePoint::Initial);
     let step_id = model
         .sequence
         .steps
@@ -155,19 +154,34 @@ macro_rules! vector_action {
     };
 }
 
+macro_rules! directional_vector_action {
+    ($action:expr, $signal:expr, $variant:path, $field:ident, $sample:expr) => {
+        match $signal {
+            $variant(signal) => {
+                sample_signal(signal, $sample, |value| value.$field).and_then(|value| {
+                    expect_vector3_or_direction(value, $action.excitation().direction)
+                })
+            }
+            _ => Err(quantity_mismatch()),
+        }
+    };
+}
+
 fn realize_kind(
     action: &ExcitationAction,
     signal: &PhysicalSignal,
     sample: ExcitationSamplePoint,
 ) -> Result<RealizedExcitationKind, RealizationError> {
     Ok(match action {
-        ExcitationAction::Force(_) => RealizedExcitationKind::Force(vector_action!(
+        ExcitationAction::Force(_) => RealizedExcitationKind::Force(directional_vector_action!(
+            action,
             signal,
             PhysicalSignal::Force,
             newtons,
             sample
         )?),
-        ExcitationAction::Moment(_) => RealizedExcitationKind::Moment(vector_action!(
+        ExcitationAction::Moment(_) => RealizedExcitationKind::Moment(directional_vector_action!(
+            action,
             signal,
             PhysicalSignal::Moment,
             newton_meters,
@@ -191,17 +205,27 @@ fn realize_kind(
             newtons_per_cubic_meter,
             sample
         )?),
-        ExcitationAction::BaseDisplacement(_) => RealizedExcitationKind::BaseDisplacement(
-            vector_action!(signal, PhysicalSignal::Displacement, meters, sample)?,
-        ),
-        ExcitationAction::BaseVelocity(_) => RealizedExcitationKind::BaseVelocity(vector_action!(
-            signal,
-            PhysicalSignal::Velocity,
-            meters_per_second,
-            sample
-        )?),
+        ExcitationAction::BaseDisplacement(_) => {
+            RealizedExcitationKind::BaseDisplacement(directional_vector_action!(
+                action,
+                signal,
+                PhysicalSignal::Displacement,
+                meters,
+                sample
+            )?)
+        }
+        ExcitationAction::BaseVelocity(_) => {
+            RealizedExcitationKind::BaseVelocity(directional_vector_action!(
+                action,
+                signal,
+                PhysicalSignal::Velocity,
+                meters_per_second,
+                sample
+            )?)
+        }
         ExcitationAction::BaseAcceleration(_) => {
-            RealizedExcitationKind::BaseAcceleration(vector_action!(
+            RealizedExcitationKind::BaseAcceleration(directional_vector_action!(
+                action,
                 signal,
                 PhysicalSignal::Acceleration,
                 meters_per_second_squared,
@@ -222,6 +246,9 @@ fn realize_kind(
             watts_per_square_meter,
             sample
         )?),
+        ExcitationAction::TemperatureField(_) => RealizedExcitationKind::TemperatureField(
+            scalar_action!(signal, PhysicalSignal::Temperature, kelvin, sample)?,
+        ),
         ExcitationAction::AmbientTemperature(_) => RealizedExcitationKind::AmbientTemperature(
             scalar_action!(signal, PhysicalSignal::Temperature, kelvin, sample)?,
         ),
@@ -256,21 +283,30 @@ fn realize_kind(
         ExcitationAction::NormalVelocity(_) => RealizedExcitationKind::NormalVelocity(
             scalar_action!(signal, PhysicalSignal::Velocity, meters_per_second, sample)?,
         ),
-        ExcitationAction::InletVelocity(_) => RealizedExcitationKind::InletVelocity(
-            vector_action!(signal, PhysicalSignal::Velocity, meters_per_second, sample)?,
-        ),
+        ExcitationAction::InletVelocity(_) => {
+            RealizedExcitationKind::InletVelocity(directional_vector_action!(
+                action,
+                signal,
+                PhysicalSignal::Velocity,
+                meters_per_second,
+                sample
+            )?)
+        }
         ExcitationAction::MassFlow(_) => RealizedExcitationKind::MassFlow(scalar_action!(
             signal,
             PhysicalSignal::MassFlowRate,
             kilograms_per_second,
             sample
         )?),
-        ExcitationAction::WallMotion(_) => RealizedExcitationKind::WallMotion(vector_action!(
-            signal,
-            PhysicalSignal::Velocity,
-            meters_per_second,
-            sample
-        )?),
+        ExcitationAction::WallMotion(_) => {
+            RealizedExcitationKind::WallMotion(directional_vector_action!(
+                action,
+                signal,
+                PhysicalSignal::Velocity,
+                meters_per_second,
+                sample
+            )?)
+        }
     })
 }
 
@@ -324,9 +360,10 @@ fn sample_abscissa(
 ) -> Result<f64, RealizationError> {
     match (sample, axis) {
         (ExcitationSamplePoint::FrequencyHertz(value), SignalAxis::FrequencyHertz(_)) => Ok(value),
-        (ExcitationSamplePoint::Constant, _) => Err(RealizationError::new(
-            "tabulated excitation requires an explicit domain sample point",
-        )),
+        (ExcitationSamplePoint::Initial, axis) => axis_values(axis)
+            .first()
+            .copied()
+            .ok_or_else(|| RealizationError::new("tabulated signal has no samples")),
         _ => Err(RealizationError::new(
             "excitation sample point does not match the signal domain",
         )),
@@ -499,6 +536,26 @@ fn expect_vector3(value: SampledValue) -> Result<ComplexVector3, RealizationErro
     match value {
         SampledValue::Vector3(value) => Ok(value),
         SampledValue::Scalar(_) => Err(RealizationError::new("excitation requires vector3 signal")),
+    }
+}
+
+fn expect_vector3_or_direction(
+    value: SampledValue,
+    direction: Option<runmat_analysis_core::Direction>,
+) -> Result<ComplexVector3, RealizationError> {
+    match value {
+        SampledValue::Vector3(value) => Ok(value),
+        SampledValue::Scalar(value) => {
+            let direction = direction.ok_or_else(|| {
+                RealizationError::new("scalar directional excitation requires a direction")
+            })?;
+            Ok(ComplexVector3 {
+                real: direction.vector.map(|component| component * value.real),
+                imaginary: direction
+                    .vector
+                    .map(|component| component * value.imaginary),
+            })
+        }
     }
 }
 

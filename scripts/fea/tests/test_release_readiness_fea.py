@@ -29,10 +29,6 @@ def report(
     thermo_spatial_coverage_ratio=None,
     thermo_field_extrapolation_ratio=None,
     thermo_field_clamp_ratio=None,
-    thermo_field_artifact_id=None,
-    thermo_field_artifact_approved=None,
-    thermo_field_artifact_age_days=None,
-    thermo_field_artifact_provenance_valid=None,
     plastic_nonlinear_severity=None,
     plastic_load_realization_ratio=None,
     plastic_load_amplification_ratio=None,
@@ -95,20 +91,6 @@ def report(
     if thermo_field_clamp_ratio is not None:
         for rec in records:
             rec["thermo_field_clamp_ratio"] = thermo_field_clamp_ratio
-    if thermo_field_artifact_id is not None:
-        for rec in records:
-            rec["thermo_field_artifact_id"] = thermo_field_artifact_id
-    if thermo_field_artifact_approved is not None:
-        for rec in records:
-            rec["thermo_field_artifact_approved"] = thermo_field_artifact_approved
-    if thermo_field_artifact_age_days is not None:
-        for rec in records:
-            rec["thermo_field_artifact_age_days"] = thermo_field_artifact_age_days
-    if thermo_field_artifact_provenance_valid is not None:
-        for rec in records:
-            rec["thermo_field_artifact_provenance_valid"] = (
-                thermo_field_artifact_provenance_valid
-            )
     if plastic_nonlinear_severity is not None:
         for rec in records:
             rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
@@ -186,8 +168,6 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
-            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
@@ -527,16 +507,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND",
             "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK",
-            "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK",
-            "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
-            "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
 
     def test_pass_when_all_signals_healthy(self):
         os.environ["RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK"] = "true"
-        os.environ["RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK"] = "true"
         latest = report(
             passed=True,
             publishable=True,
@@ -557,7 +533,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "pass")
         self.assertEqual(result["reasons"], [])
 
-    def test_warns_when_artifact_verification_is_missing(self):
+    def test_warns_when_artifact_replay_verification_is_missing(self):
         latest = report(
             passed=True,
             publishable=True,
@@ -578,7 +554,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "warn")
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ARTIFACT_REPLAY_UNVERIFIED", codes)
-        self.assertIn("ARTIFACT_COMPAT_UNVERIFIED", codes)
 
     def test_fail_on_protected_branch_with_conformance_failure(self):
         latest = report(passed=False, publishable=False, gpu_ms=130.0)
@@ -7176,104 +7151,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING", codes)
 
-    def test_thermo_artifact_backed_required_reason_is_emitted(self):
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-        )
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_ARTIFACT_REQUIRED", codes)
-
-    def test_thermo_artifact_unapproved_reason_is_emitted(self):
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_artifact_id="artifact-1",
-            thermo_field_artifact_approved=False,
-        )
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_ARTIFACT_UNAPPROVED", codes)
-
-    def test_thermo_artifact_stale_reason_is_emitted(self):
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS"] = "7"
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_artifact_id="artifact-1",
-            thermo_field_artifact_approved=True,
-            thermo_field_artifact_age_days=10.0,
-        )
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_ARTIFACT_STALE", codes)
-
-    def test_thermo_artifact_provenance_invalid_reason_is_emitted(self):
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_artifact_id="artifact-1",
-            thermo_field_artifact_approved=True,
-            thermo_field_artifact_provenance_valid=False,
-        )
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_ARTIFACT_PROVENANCE_INVALID", codes)
-
-    def test_thermo_field_promotion_blocked_reason_is_emitted(self):
-        latest = report(passed=True, publishable=True, gpu_ms=100.0)
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-            thermo_promotion_report={
-                "blocked": True,
-                "reasons": ["THERMO_FIELD_PROMOTION_TREND_DRIFT_BLOCKED:1.4>1.2"],
-            },
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_PROMOTION_BLOCKED", codes)
-
-    def test_release_profile_requires_non_default_thermo_signing_key(self):
-        os.environ["GITHUB_REF_NAME"] = "main"
-        latest = report(passed=True, publishable=True, gpu_ms=100.0)
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_SIGNING_KEY_UNSAFE", codes)
-
     def test_thermo_field_clamp_ratio_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -7334,9 +7211,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field extrapolation trend threshold", summary)
         self.assertIn("Thermo field clamp trend ratio", summary)
         self.assertIn("Thermo field clamp trend threshold", summary)
-        self.assertIn("Thermo artifact-backed required", summary)
-        self.assertIn("Thermo field artifact max age days", summary)
-        self.assertIn("Thermo signing key safe", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo field clamp breach rate", summary)

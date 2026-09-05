@@ -92,7 +92,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.material(...)`, `fea.materialAssignment(...)` | Create typed material data and region assignments. |
 | `fea.<Family>Constraint.<kind>(...)` | Create typed essential, kinematic, gauge, pairing, and reference constraints. |
 | `fea.<Family>Boundary.<kind>(...)`, `fea.loadCase(...)` | Create typed natural/Robin boundaries, loads, and sources. |
-| `fea.<Family>Step.<procedure>(id)`, `fea.domain(...)` | Create concrete typed analysis steps and physics domains. |
+| `fea.<Family>Step.<procedure>(id)`, `fea.<Physics>Domain.<constructor>(...)` | Create concrete typed analysis steps and physics domains. |
 | `fea.ContactInterface.frictionless(...)`, `.coulomb(...)`; `fea.FluidStructureInterface.noSlip(...)`; `fea.ConjugateHeatTransferInterface.perfect(...)`, `.conductance(...)`, `.resistance(...)` | Create a concrete typed interface between two `geometry.Region` values. |
 | `fea.runOptions(kind, Name, Value, ...)` | Create family-specific run options. |
 | `fea.model(id, geometry, Name, Value, ...)` | Assemble an explicit model from geometry and typed components. |
@@ -134,7 +134,7 @@ Fluid inlet velocity, moving/no-slip/slip walls, and symmetry are kinematic cons
 
 Each interface joins two distinct `geometry.Region` values from one geometry revision. Contact does not choose an FSI or CHT transfer law, and coupled interfaces do not double as contact constraints. Their orientation is explicit: FSI and CHT use the fluid region as the primary side, with the structure or solid region as the secondary side.
 
-`fea.material`, `fea.loadCase`, and `fea.domain` are RunMat-native host constructors. Their documented finite real physical fields accept all eight built-in integer classes, preserve exact input through kind/field/shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. The nested thermo-field-source revision is a structural nonnegative integer and remains exact. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
+`fea.material`, `fea.loadCase`, and the dimensioned quantity constructors are RunMat-native host constructors. Finite real quantity inputs accept all eight built-in integer classes, preserve exact input through shape validation, and then cross one binary64 model-storage boundary; sufficiently wide integers can round, and resident numeric fields are rejected without provider dispatch. Physics domains accept only the corresponding typed quantities and cannot contain loads, signals, solver choices, or enable flags. Interface constructors accept only typed `geometry.Region` selections and, where required, a semantic physical parameter. CHT selects exactly one of perfect transfer, conductance, or resistance, so redundant or contradictory transfer laws cannot be authored. Contact penalty, stabilization, damping, and relaxation are numerical policy owned by the step and solver rather than interface physics.
 
 `fea.materialAssignment`, `fea.model`, `fea.plan`, `fea.field`, and `fea.compare` accept structural objects and text rather than integer arrays. FEA objects overload the ordinary `plot` and `mesh` functions through the runtime object protocol; numeric calls keep their MATLAB-compatible behavior. Discrete output metadata remains integer typed: model and geometry revisions, plan counts and indexes, field shape/component/element/size metadata, and comparison count deltas do not pass through a physical-value binary64 boundary. The conventional figure handle remains a double at the scripting boundary. Input arity and structural identity are validated before artifact lookup, planning, field projection, comparison, or figure creation.
 
@@ -244,7 +244,6 @@ Use `[runtime.fea]`:
 | `artifact_max_runs` | Optional global retained run limit. |
 | `artifact_max_runs_per_kind` | Optional retained run limit per family. |
 | `study_artifact_root` | Study validate, plan, run, and sweep artifact root. |
-| `thermo_field_artifact_root` | Thermo-field artifact root for coupled thermal paths. |
 
 Preferred environment variables:
 
@@ -255,7 +254,6 @@ Preferred environment variables:
 | `RUNMAT_FEA_ARTIFACT_MAX_RUNS` | Optional global retained run limit. |
 | `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND` | Optional retained run limit per family. |
 | `RUNMAT_FEA_STUDY_ARTIFACT_ROOT` | Study validate, plan, run, and sweep artifact root. |
-| `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT` | Thermo-field artifact root. |
 
 ## Evolution Rules
 

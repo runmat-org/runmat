@@ -73,7 +73,6 @@ plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_ta
 # artifact_store = "filesystem" # default; use "in_memory" for ephemeral/test runs
 # artifact_root = "artifacts"
 # study_artifact_root = "artifacts/studies"
-# thermo_field_artifact_root = "artifacts/thermo-fields"
 # artifact_max_runs = 0
 # artifact_max_runs_per_kind = 0
 "#;

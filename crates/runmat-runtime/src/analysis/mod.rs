@@ -14,7 +14,7 @@ use runmat_analysis_core::{
     FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
     MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, PrescribedValue,
     Pressure, ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
-    ThermalInterfaceTransfer, Velocity,
+    Temperature, ThermalInterfaceTransfer, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -45,7 +45,6 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::operations::{
@@ -93,13 +92,11 @@ pub mod storage;
 mod study_authoring;
 mod study_execution;
 
-use excitation_authoring::{
-    append_constant_excitation, append_electric_potential_history, append_temperature_history,
-    append_velocity_history, ConstantExcitation,
-};
+use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use excitation_query::{
-    cfd_velocity_scales, electric_potential_scales, has_nonzero_electromagnetic_source,
-    pressure_sources, thermo_temperature_scales,
+    applied_temperature_delta_k, applied_voltage_v, cfd_velocity_scales, electric_potential_scales,
+    has_nonzero_electromagnetic_source, nominal_inlet_velocity_m_per_s, pressure_sources,
+    regional_temperature_deltas_k, thermo_temperature_scales,
 };
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
@@ -111,7 +108,6 @@ use study_execution::execute_study_step;
 pub struct FeaRuntimeConfig {
     pub artifact_root: Option<PathBuf>,
     pub study_artifact_root: Option<PathBuf>,
-    pub thermo_field_artifact_root: Option<PathBuf>,
 }
 
 fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
@@ -207,13 +203,12 @@ pub use contracts::{
     AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
     AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactEnforcementOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectromagneticResultsData, FallbackEvent, FallbackReason,
-    FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
-    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalCouplingOptions,
+    AnalysisValidateResult, ContactEnforcementOptions, ElectroThermalCouplingOptions,
+    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
+    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
+    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
+    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, ThermalResultsData, ThermoMechanicalCouplingOptions,
     ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
     ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
@@ -569,7 +564,7 @@ pub fn analysis_create_model_op(
                 ConstantExcitation::ElectricCurrent {
                     real_amperes: 100.0,
                     imaginary_amperes: 0.0,
-                    frequency_hz: Some(60.0),
+                    frequency_hz: None,
                 },
             )),
             vec![ProcedureStep::electromagnetic_harmonic(
@@ -614,49 +609,31 @@ pub fn analysis_create_model_op(
 
     let cfd = match intent.template {
         AnalysisModelTemplate::CfdSteadyState => Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.05,
-            inlet_velocity_signal_id: None,
+            density: runmat_analysis_core::MassDensity::new(1.225),
+            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.05),
         }),
         AnalysisModelTemplate::CfdTransient => Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 5.0,
-            turbulence_intensity: 0.08,
-            inlet_velocity_signal_id: None,
+            density: runmat_analysis_core::MassDensity::new(1.225),
+            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.08),
         }),
         AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 4.5,
-            turbulence_intensity: 0.07,
-            inlet_velocity_signal_id: None,
+            density: runmat_analysis_core::MassDensity::new(1.225),
+            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.07),
         }),
         AnalysisModelTemplate::FsiCoupled => Some(runmat_analysis_core::CfdDomain {
-            enabled: true,
-            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-            reference_density_kg_per_m3: 1.225,
-            dynamic_viscosity_pa_s: 1.81e-5,
-            inlet_velocity_m_per_s: 4.0,
-            turbulence_intensity: 0.06,
-            inlet_velocity_signal_id: None,
+            density: runmat_analysis_core::MassDensity::new(1.225),
+            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+            turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
         }),
         _ => None,
     };
     let electromagnetic = match intent.template {
         AnalysisModelTemplate::ElectromagneticHarmonic => {
             Some(runmat_analysis_core::ElectromagneticDomain {
-                enabled: true,
-                reference_frequency_hz: 60.0,
-                applied_current_a: 100.0,
+                reference_frequency: runmat_analysis_core::Frequency::new(60.0),
             })
         }
         _ => None,
@@ -664,34 +641,16 @@ pub fn analysis_create_model_op(
     let thermo_mechanical = match intent.template {
         AnalysisModelTemplate::ThermoMechanicalCoupled => {
             Some(runmat_analysis_core::ThermoMechanicalDomain {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 60.0,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                temperature_signal_id: None,
+                reference_temperature: Temperature::new(293.15),
             })
         }
         AnalysisModelTemplate::ThermalTransient => {
             Some(runmat_analysis_core::ThermoMechanicalDomain {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 20.0,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                temperature_signal_id: None,
+                reference_temperature: Temperature::new(293.15),
             })
         }
         AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::ThermoMechanicalDomain {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 35.0,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            temperature_signal_id: None,
+            reference_temperature: Temperature::new(293.15),
         }),
         _ => None,
     };
@@ -705,10 +664,12 @@ pub fn analysis_create_model_op(
             | AnalysisModelTemplate::ChtCoupled
             | AnalysisModelTemplate::FsiCoupled
     ) {
-        let default_cfd_inlet_velocity = cfd
-            .as_ref()
-            .map(|domain| domain.inlet_velocity_m_per_s)
-            .unwrap_or(0.0);
+        let default_cfd_inlet_velocity = match intent.template {
+            AnalysisModelTemplate::CfdSteadyState | AnalysisModelTemplate::CfdTransient => 5.0,
+            AnalysisModelTemplate::ChtCoupled => 4.5,
+            AnalysisModelTemplate::FsiCoupled => 4.0,
+            _ => unreachable!("fluid defaults are created only for fluid templates"),
+        };
         conditions.extend([
             fluid_constraint_condition(
                 "bc_default_cfd_inlet",
@@ -779,67 +740,6 @@ pub fn analysis_create_model_op(
     if let Some((excitation_id, excitation)) = default_excitation {
         append_constant_excitation(&mut model, excitation_id, load_region_id, excitation);
     }
-    if let Some((reference_temperature_k, applied_temperature_delta_k)) =
-        model.thermo_mechanical.as_ref().map(|domain| {
-            (
-                domain.reference_temperature_k,
-                domain.applied_temperature_delta_k,
-            )
-        })
-    {
-        let signal_id = append_temperature_history(
-            &mut model,
-            "domain.temperature",
-            vec![0.0, 1.0],
-            vec![
-                reference_temperature_k,
-                reference_temperature_k + applied_temperature_delta_k,
-            ],
-        );
-        model
-            .thermo_mechanical
-            .as_mut()
-            .expect("thermo-mechanical domain exists")
-            .temperature_signal_id = Some(signal_id);
-    }
-    if let Some(applied_voltage_v) = model
-        .electro_thermal
-        .as_ref()
-        .map(|domain| domain.applied_voltage_v)
-    {
-        let signal_id = append_electric_potential_history(
-            &mut model,
-            "domain.electric_potential",
-            vec![0.0, 1.0],
-            vec![0.5 * applied_voltage_v, applied_voltage_v],
-        );
-        model
-            .electro_thermal
-            .as_mut()
-            .expect("electro-thermal domain exists")
-            .electric_potential_signal_id = Some(signal_id);
-    }
-    if model.cfd.as_ref().is_some_and(|domain| {
-        domain.solve_family == runmat_analysis_core::CfdSolveFamily::Transient
-    }) {
-        let inlet_velocity_m_per_s = model
-            .cfd
-            .as_ref()
-            .expect("CFD domain exists")
-            .inlet_velocity_m_per_s;
-        let signal_id = append_velocity_history(
-            &mut model,
-            "domain.inlet_velocity",
-            vec![0.0, 1.0],
-            vec![0.5 * inlet_velocity_m_per_s, inlet_velocity_m_per_s],
-        );
-        model
-            .cfd
-            .as_mut()
-            .expect("CFD domain exists")
-            .inlet_velocity_signal_id = Some(signal_id);
-    }
-
     validate_model_against_geometry(&model, geometry.units, &CoordinateFrame::Global).map_err(
         |error| {
             operation_error(
@@ -1831,13 +1731,7 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Modal.name(),
-        AnalysisOperation::Modal.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
@@ -1857,7 +1751,7 @@ pub fn analysis_run_modal_with_options_op(
     }
     let electro_options = model_electro_coupling_options(model);
     if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
             return Err(operation_error(
                 AnalysisOperation::Modal.name(),
                 AnalysisOperation::Modal.version(),
@@ -2240,13 +2134,7 @@ pub fn analysis_run_acoustic_with_options_op(
         ));
     }
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Acoustic.name(),
-        AnalysisOperation::Acoustic.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
@@ -2266,7 +2154,7 @@ pub fn analysis_run_acoustic_with_options_op(
     }
     let electro_options = model_electro_coupling_options(model);
     if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
             return Err(operation_error(
                 AnalysisOperation::Acoustic.name(),
                 AnalysisOperation::Acoustic.version(),
@@ -3358,16 +3246,12 @@ fn acoustic_axis_derivative(
     }
 }
 
-fn cfd_reynolds_number(domain: &runmat_analysis_core::CfdDomain) -> f64 {
-    cfd_reynolds_number_for_velocity(domain, domain.inlet_velocity_m_per_s)
-}
-
 fn cfd_reynolds_number_for_velocity(
     domain: &runmat_analysis_core::CfdDomain,
     inlet_velocity_m_per_s: f64,
 ) -> f64 {
-    domain.reference_density_kg_per_m3 * inlet_velocity_m_per_s.abs()
-        / domain.dynamic_viscosity_pa_s
+    domain.density.kilograms_per_cubic_meter * inlet_velocity_m_per_s.abs()
+        / domain.dynamic_viscosity.pascal_seconds
 }
 
 fn cfd_profile_scale(profile_scales: &[f64], step_index: usize) -> f64 {
@@ -3514,7 +3398,7 @@ struct CfdBoundarySummary {
 }
 
 impl CfdBoundarySummary {
-    fn implicit_channel(domain: &runmat_analysis_core::CfdDomain, node_count: usize) -> Self {
+    fn implicit_channel(model: &AnalysisModel, node_count: usize) -> Self {
         Self {
             inlet_boundary_count: 1,
             outlet_boundary_count: 1,
@@ -3524,16 +3408,12 @@ impl CfdBoundarySummary {
             authored_boundary_count: 0,
             boundary_coverage_ratio: 1.0,
             wall_boundary_coverage_ratio: 1.0,
-            nominal_inlet_velocity_m_per_s: domain.inlet_velocity_m_per_s,
+            nominal_inlet_velocity_m_per_s: nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
             outlet_pressure_pa: 0.0,
         }
     }
 
-    fn from_model(
-        model: &AnalysisModel,
-        domain: &runmat_analysis_core::CfdDomain,
-        node_count: usize,
-    ) -> Self {
+    fn from_model(model: &AnalysisModel, node_count: usize) -> Self {
         let mut inlet_velocity_sum = 0.0_f64;
         let mut outlet_pressure_sum = 0.0_f64;
         let mut summary = Self {
@@ -3545,7 +3425,7 @@ impl CfdBoundarySummary {
             authored_boundary_count: 0,
             boundary_coverage_ratio: 0.0,
             wall_boundary_coverage_ratio: 0.0,
-            nominal_inlet_velocity_m_per_s: domain.inlet_velocity_m_per_s,
+            nominal_inlet_velocity_m_per_s: nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
             outlet_pressure_pa: 0.0,
         };
 
@@ -3587,7 +3467,7 @@ impl CfdBoundarySummary {
         }
 
         if summary.authored_boundary_count == 0 {
-            return Self::implicit_channel(domain, node_count);
+            return Self::implicit_channel(model, node_count);
         }
 
         if summary.inlet_boundary_count > 0 {
@@ -3714,12 +3594,13 @@ struct CfdKnownAnswerMetrics {
 }
 
 fn recover_cfd_velocity_pressure(
+    model: &AnalysisModel,
     domain: &runmat_analysis_core::CfdDomain,
     topology: &CfdDomainTopology,
     step_index: usize,
     profile_scales: &[f64],
 ) -> (Vec<f64>, Vec<f64>) {
-    let boundary_summary = CfdBoundarySummary::implicit_channel(domain, topology.node_count);
+    let boundary_summary = CfdBoundarySummary::implicit_channel(model, topology.node_count);
     let solution = solve_cfd_velocity_pressure(
         domain,
         &boundary_summary,
@@ -3755,7 +3636,7 @@ fn solve_cfd_velocity_pressure(
         0.3164 / reynolds.powf(0.25)
     };
     let friction_gradient_pa_per_m = 0.5
-        * domain.reference_density_kg_per_m3
+        * domain.density.kilograms_per_cubic_meter
         * inlet_velocity
         * inlet_velocity.abs()
         * friction_factor
@@ -3797,7 +3678,8 @@ fn solve_cfd_velocity_pressure(
             }
             let gradient = (pressure[node + 1] - pressure[node - 1]) / (2.0 * topology.dx_m);
             let pressure_driven_speed = ((-2.0 * gradient * hydraulic_diameter_m)
-                / (domain.reference_density_kg_per_m3.max(1.0e-12) * friction_factor.max(1.0e-12)))
+                / (domain.density.kilograms_per_cubic_meter.max(1.0e-12)
+                    * friction_factor.max(1.0e-12)))
             .max(0.0)
             .sqrt();
             axial_velocity[node] = 0.50 * axial_velocity[node] + 0.50 * pressure_driven_speed;
@@ -3845,7 +3727,7 @@ fn solve_cfd_velocity_pressure(
         let xi = node as f64 / denom;
         let recirculation = (2.0 * std::f64::consts::PI * xi).sin()
             * axial
-            * domain.turbulence_intensity.clamp(0.0, 1.0)
+            * domain.turbulence_intensity.ratio.clamp(0.0, 1.0)
             * 0.02;
         velocity.extend_from_slice(&[axial, recirculation, 0.0]);
     }
@@ -4025,7 +3907,7 @@ fn recover_cfd_wall_shear_stress(
     field_count: usize,
 ) -> Vec<f64> {
     let mut shear = vec![0.0; field_count * 3];
-    let viscosity = domain.dynamic_viscosity_pa_s;
+    let viscosity = domain.dynamic_viscosity.pascal_seconds;
     for index in 0..field_count {
         let base = index * 3;
         shear[base] = viscosity * velocity.get(base).copied().unwrap_or(0.0);
@@ -4042,19 +3924,19 @@ fn cfd_residual_norms(
     step_count: usize,
 ) -> (Vec<f64>, Vec<f64>) {
     let node_count = pressure.len().max(1);
-    let reynolds = cfd_reynolds_number(domain).max(1.0);
+    let mean_axial_velocity = (0..node_count)
+        .map(|node| velocity.get(node * 3).copied().unwrap_or(0.0))
+        .sum::<f64>()
+        / node_count as f64;
+    let reynolds = cfd_reynolds_number_for_velocity(domain, mean_axial_velocity).max(1.0);
     let hydraulic_diameter_m = topology.hydraulic_diameter_m.max(1.0e-12);
     let friction_factor = if reynolds <= 2300.0 {
         64.0 / reynolds
     } else {
         0.3164 / reynolds.powf(0.25)
     };
-    let mean_axial_velocity = (0..node_count)
-        .map(|node| velocity.get(node * 3).copied().unwrap_or(0.0))
-        .sum::<f64>()
-        / node_count as f64;
     let friction_gradient_pa_per_m = 0.5
-        * domain.reference_density_kg_per_m3.max(1.0e-12)
+        * domain.density.kilograms_per_cubic_meter.max(1.0e-12)
         * mean_axial_velocity
         * mean_axial_velocity.abs()
         * friction_factor
@@ -4079,10 +3961,7 @@ fn cfd_residual_norms(
         continuity_base += divergence.abs();
         momentum_base += (pressure_gradient + friction_gradient_pa_per_m).abs();
     }
-    let velocity_scale = mean_axial_velocity
-        .abs()
-        .max(domain.inlet_velocity_m_per_s)
-        .max(1.0e-9);
+    let velocity_scale = mean_axial_velocity.abs().max(1.0e-9);
     let pressure_scale = pressure
         .iter()
         .copied()
@@ -4133,7 +4012,10 @@ fn build_cfd_run_fields(
         AnalysisField::host_f64(
             FEA_FIELD_CFD_REYNOLDS_NUMBER,
             vec![1],
-            vec![cfd_reynolds_number(domain)],
+            vec![cfd_reynolds_number_for_velocity(
+                domain,
+                solution.nominal_inlet_velocity_m_per_s,
+            )],
         ),
     ]
 }
@@ -4141,6 +4023,7 @@ fn build_cfd_run_fields(
 fn cfd_assembly_diagnostic(
     topology: &CfdDomainTopology,
     domain: &runmat_analysis_core::CfdDomain,
+    inlet_velocity_m_per_s: f64,
     time_step_s: f64,
     pressure_drop_pa: f64,
     mass_balance_residual: f64,
@@ -4149,9 +4032,9 @@ fn cfd_assembly_diagnostic(
     let face_area_m2 = topology.face_area_m2();
     let control_volume_volume_m3 = topology.control_volume_volume_m3();
     let nominal_mass_flow_rate_kg_per_s =
-        domain.reference_density_kg_per_m3 * domain.inlet_velocity_m_per_s * face_area_m2;
+        domain.density.kilograms_per_cubic_meter * inlet_velocity_m_per_s * face_area_m2;
     let courant_number =
-        domain.inlet_velocity_m_per_s.abs() * time_step_s.max(0.0) / topology.dx_m.max(1.0e-12);
+        inlet_velocity_m_per_s.abs() * time_step_s.max(0.0) / topology.dx_m.max(1.0e-12);
     runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_ASSEMBLY".to_string(),
         severity: if mass_balance_residual <= residual_warn_threshold {
@@ -4373,11 +4256,13 @@ fn solve_cfd_finite_volume_run(
     let topology = CfdDomainTopology::from_model(model, solver_mesh);
     let node_count = topology.node_count;
     let step_count = options.step_count.max(1);
-    let field_step = match domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
-        runmat_analysis_core::CfdSolveFamily::Transient => step_count.saturating_sub(1),
+    let transient = identity.procedure() == AnalysisProcedure::TransientResponse;
+    let field_step = if transient {
+        step_count.saturating_sub(1)
+    } else {
+        0
     };
-    let boundary_summary = CfdBoundarySummary::from_model(model, domain, node_count);
+    let boundary_summary = CfdBoundarySummary::from_model(model, node_count);
     let profile_scales = cfd_velocity_scales(model, domain);
     let solution = solve_cfd_velocity_pressure(
         domain,
@@ -4433,6 +4318,7 @@ fn solve_cfd_finite_volume_run(
             cfd_assembly_diagnostic(
                 &solution.topology,
                 domain,
+                solution.nominal_inlet_velocity_m_per_s,
                 options.time_step_s,
                 solution.pressure_drop_pa,
                 solution.mass_balance_residual,
@@ -4492,10 +4378,7 @@ fn solve_cfd_finite_volume_run(
                 severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
                 message: format!(
                     "solve_family={} step_count={} time_step_s={} transient_profile_point_count={} transient_scale_min={} transient_scale_max={} transient_scale_variation={}",
-                    match domain.solve_family {
-                        runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
-                        runmat_analysis_core::CfdSolveFamily::Transient => "transient",
-                    },
+                    if transient { "transient" } else { "steady_state" },
                     step_count,
                     options.time_step_s,
                     profile_scales.len(),
@@ -4546,7 +4429,7 @@ fn build_cht_run_fields(
     let node_count = topology.node_count;
     let profile_scales = cfd_velocity_scales(model, domain);
     let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(domain, topology, 0, &profile_scales);
+        recover_cfd_velocity_pressure(model, domain, topology, 0, &profile_scales);
     let mean_axial_velocity = mean_cfd_axial_velocity(&fluid_velocity);
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -4897,7 +4780,7 @@ fn cht_advection_shift_k(
     let reynolds_ratio = (cfd_reynolds_number_for_velocity(domain, mean_axial_velocity_m_per_s)
         / 1.0e5)
         .clamp(0.0, 5.0);
-    thermal_span_k * reynolds_ratio * domain.turbulence_intensity.clamp(0.0, 1.0) * 2.0e-3
+    thermal_span_k * reynolds_ratio * domain.turbulence_intensity.ratio.clamp(0.0, 1.0) * 2.0e-3
 }
 
 fn cht_interface_conductance_w_per_m2k(model: &AnalysisModel) -> Option<f64> {
@@ -4957,11 +4840,7 @@ struct ChtKnownAnswerMetrics {
     known_answer_coverage_ratio: f64,
 }
 
-fn cht_known_answer_metrics(
-    domain: &runmat_analysis_core::CfdDomain,
-    closure: &ChtInterfaceClosure,
-) -> ChtKnownAnswerMetrics {
-    let reynolds = cfd_reynolds_number(domain);
+fn cht_known_answer_metrics(reynolds: f64, closure: &ChtInterfaceClosure) -> ChtKnownAnswerMetrics {
     let advection_shift_coverage_ratio = if reynolds.is_finite()
         && reynolds > 0.0
         && closure.max_advection_temperature_shift_k.is_finite()
@@ -5062,7 +4941,7 @@ fn build_fsi_run_fields(
 
     for step_index in 0..step_count {
         let (fluid_velocity, fluid_pressure) =
-            recover_cfd_velocity_pressure(domain, topology, step_index, &profile_scales);
+            recover_cfd_velocity_pressure(model, domain, topology, step_index, &profile_scales);
         let interface_step = solve_fsi_partitioned_interface(
             &fluid_pressure,
             topology,
@@ -5808,49 +5687,8 @@ pub fn analysis_run_cfd_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    let expected_cfd_procedure = match cfd_domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
-        runmat_analysis_core::CfdSolveFamily::Transient => AnalysisProcedure::TransientResponse,
-    };
-    if cfd_procedure != expected_cfd_procedure {
-        return Err(operation_error(
-            AnalysisOperation::Cfd.name(),
-            AnalysisOperation::Cfd.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.PROCEDURE_MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "cfd procedure step does not match model.cfd.solve_family",
-            BTreeMap::from([
-                ("procedure".to_string(), format!("{cfd_procedure:?}")),
-                (
-                    "expected_procedure".to_string(),
-                    format!("{expected_cfd_procedure:?}"),
-                ),
-            ]),
-        ));
-    }
-
-    if !cfd_domain.enabled {
-        return Err(operation_error(
-            AnalysisOperation::Cfd.name(),
-            AnalysisOperation::Cfd.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cfd requires cfd domain enabled=true",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    }
-    if !cfd_domain.reference_density_kg_per_m3.is_finite()
-        || cfd_domain.reference_density_kg_per_m3 <= 0.0
+    if !cfd_domain.density.kilograms_per_cubic_meter.is_finite()
+        || cfd_domain.density.kilograms_per_cubic_meter <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Cfd.name(),
@@ -5865,11 +5703,13 @@ pub fn analysis_run_cfd_with_options_op(
             "fea.run_cfd requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
-                cfd_domain.reference_density_kg_per_m3.to_string(),
+                cfd_domain.density.kilograms_per_cubic_meter.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
+    if !cfd_domain.dynamic_viscosity.pascal_seconds.is_finite()
+        || cfd_domain.dynamic_viscosity.pascal_seconds <= 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Cfd.name(),
             AnalysisOperation::Cfd.version(),
@@ -5883,11 +5723,15 @@ pub fn analysis_run_cfd_with_options_op(
             "fea.run_cfd requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity_pa_s.to_string(),
+                cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
+    if !nominal_inlet_velocity_m_per_s(model)
+        .unwrap_or(0.0)
+        .is_finite()
+        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Cfd.name(),
             AnalysisOperation::Cfd.version(),
@@ -5901,13 +5745,15 @@ pub fn analysis_run_cfd_with_options_op(
             "fea.run_cfd requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
-                cfd_domain.inlet_velocity_m_per_s.to_string(),
+                nominal_inlet_velocity_m_per_s(model)
+                    .unwrap_or(0.0)
+                    .to_string(),
             )]),
         ));
     }
-    if !cfd_domain.turbulence_intensity.is_finite()
-        || cfd_domain.turbulence_intensity < 0.0
-        || cfd_domain.turbulence_intensity > 1.0
+    if !cfd_domain.turbulence_intensity.ratio.is_finite()
+        || cfd_domain.turbulence_intensity.ratio < 0.0
+        || cfd_domain.turbulence_intensity.ratio > 1.0
     {
         return Err(operation_error(
             AnalysisOperation::Cfd.name(),
@@ -5922,7 +5768,7 @@ pub fn analysis_run_cfd_with_options_op(
             "fea.run_cfd requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
-                cfd_domain.turbulence_intensity.to_string(),
+                cfd_domain.turbulence_intensity.ratio.to_string(),
             )]),
         ));
     }
@@ -6081,22 +5927,23 @@ pub fn analysis_run_cfd_with_options_op(
     }
 
     let flow_topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
-    let flow_boundary_summary = CfdBoundarySummary::from_model(model, cfd_domain, 2);
+    let flow_boundary_summary = CfdBoundarySummary::from_model(model, 2);
     let flow_inlet_velocity = flow_boundary_summary.nominal_inlet_velocity_m_per_s;
     let reynolds_number = cfd_reynolds_number_for_velocity(cfd_domain, flow_inlet_velocity);
-    let solve_family = match cfd_domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
-        runmat_analysis_core::CfdSolveFamily::Transient => "transient",
+    let solve_family = match cfd_procedure {
+        AnalysisProcedure::Static => "steady_state",
+        AnalysisProcedure::TransientResponse => "transient",
+        _ => unreachable!("CFD admission accepts only static or transient response"),
     };
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
             "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
-            cfd_domain.reference_density_kg_per_m3,
-            cfd_domain.dynamic_viscosity_pa_s,
+            cfd_domain.density.kilograms_per_cubic_meter,
+            cfd_domain.dynamic_viscosity.pascal_seconds,
             flow_inlet_velocity,
-            cfd_domain.turbulence_intensity,
+            cfd_domain.turbulence_intensity.ratio,
             reynolds_number,
             solve_family,
             cfd_velocity_scales(model, cfd_domain).len(),
@@ -6331,48 +6178,8 @@ pub fn analysis_run_cht_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    let expected_cht_procedure = match cfd_domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => AnalysisProcedure::Static,
-        runmat_analysis_core::CfdSolveFamily::Transient => AnalysisProcedure::TransientResponse,
-    };
-    if cht_procedure != expected_cht_procedure {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.PROCEDURE_MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "CHT procedure step does not match model.cfd.solve_family",
-            BTreeMap::from([
-                ("procedure".to_string(), format!("{cht_procedure:?}")),
-                (
-                    "expected_procedure".to_string(),
-                    format!("{expected_cht_procedure:?}"),
-                ),
-            ]),
-        ));
-    }
-    if !cfd_domain.enabled {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires cfd domain enabled=true",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    }
-    if !cfd_domain.reference_density_kg_per_m3.is_finite()
-        || cfd_domain.reference_density_kg_per_m3 <= 0.0
+    if !cfd_domain.density.kilograms_per_cubic_meter.is_finite()
+        || cfd_domain.density.kilograms_per_cubic_meter <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -6387,11 +6194,13 @@ pub fn analysis_run_cht_with_options_op(
             "fea.run_cht requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
-                cfd_domain.reference_density_kg_per_m3.to_string(),
+                cfd_domain.density.kilograms_per_cubic_meter.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
+    if !cfd_domain.dynamic_viscosity.pascal_seconds.is_finite()
+        || cfd_domain.dynamic_viscosity.pascal_seconds <= 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
             AnalysisOperation::Cht.version(),
@@ -6405,11 +6214,15 @@ pub fn analysis_run_cht_with_options_op(
             "fea.run_cht requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity_pa_s.to_string(),
+                cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
+    if !nominal_inlet_velocity_m_per_s(model)
+        .unwrap_or(0.0)
+        .is_finite()
+        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
             AnalysisOperation::Cht.version(),
@@ -6423,13 +6236,15 @@ pub fn analysis_run_cht_with_options_op(
             "fea.run_cht requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
-                cfd_domain.inlet_velocity_m_per_s.to_string(),
+                nominal_inlet_velocity_m_per_s(model)
+                    .unwrap_or(0.0)
+                    .to_string(),
             )]),
         ));
     }
-    if !cfd_domain.turbulence_intensity.is_finite()
-        || cfd_domain.turbulence_intensity < 0.0
-        || cfd_domain.turbulence_intensity > 1.0
+    if !cfd_domain.turbulence_intensity.ratio.is_finite()
+        || cfd_domain.turbulence_intensity.ratio < 0.0
+        || cfd_domain.turbulence_intensity.ratio > 1.0
     {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -6444,7 +6259,7 @@ pub fn analysis_run_cht_with_options_op(
             "fea.run_cht requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
-                cfd_domain.turbulence_intensity.to_string(),
+                cfd_domain.turbulence_intensity.ratio.to_string(),
             )]),
         ));
     }
@@ -6520,13 +6335,7 @@ pub fn analysis_run_cht_with_options_op(
         ));
     }
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Cht.name(),
-        AnalysisOperation::Cht.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     let Some(thermo_options) = thermo_options else {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -6614,13 +6423,19 @@ pub fn analysis_run_cht_with_options_op(
 
     let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let node_count = topology.node_count;
-    let field_step = match cfd_domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
-        runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
+    let field_step = if cht_procedure == AnalysisProcedure::TransientResponse {
+        options.step_count.saturating_sub(1)
+    } else {
+        0
     };
     let cfd_profile_scales = cfd_velocity_scales(model, cfd_domain);
-    let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, &topology, field_step, &cfd_profile_scales);
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(
+        model,
+        cfd_domain,
+        &topology,
+        field_step,
+        &cfd_profile_scales,
+    );
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
@@ -6650,20 +6465,24 @@ pub fn analysis_run_cht_with_options_op(
     run.solver_method = SolverMethod::ChtConjugateProjection;
     run.preconditioner = SolverPreconditioner::ThermalCfdProjection;
     run.fields.extend(cht_fields);
-    let reynolds_number = cfd_reynolds_number(cfd_domain);
+    let reynolds_number = cfd_reynolds_number_for_velocity(
+        cfd_domain,
+        nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+    );
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
             "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
-            cfd_domain.reference_density_kg_per_m3,
-            cfd_domain.dynamic_viscosity_pa_s,
-            cfd_domain.inlet_velocity_m_per_s,
-            cfd_domain.turbulence_intensity,
+            cfd_domain.density.kilograms_per_cubic_meter,
+            cfd_domain.dynamic_viscosity.pascal_seconds,
+            nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+            cfd_domain.turbulence_intensity.ratio,
             reynolds_number,
-            match cfd_domain.solve_family {
-                runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
-                runmat_analysis_core::CfdSolveFamily::Transient => "transient",
+            if cht_procedure == AnalysisProcedure::TransientResponse {
+                "transient"
+            } else {
+                "steady_state"
             },
             cfd_profile_scales.len(),
             topology.basis.as_str(),
@@ -6698,6 +6517,7 @@ pub fn analysis_run_cht_with_options_op(
     run.diagnostics.push(cfd_assembly_diagnostic(
         &topology,
         cfd_domain,
+        mean_cfd_axial_velocity(&fluid_velocity),
         options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
         max_cfd_continuity_residual,
@@ -6760,7 +6580,7 @@ pub fn analysis_run_cht_with_options_op(
             cht_interface_closure.max_thermal_network_residual_ratio,
         ),
     });
-    let cht_known_answer = cht_known_answer_metrics(cfd_domain, &cht_interface_closure);
+    let cht_known_answer = cht_known_answer_metrics(reynolds_number, &cht_interface_closure);
     run.diagnostics.push(cht_known_answer_diagnostic(
         &cht_known_answer,
         options.residual_warn_threshold,
@@ -7007,38 +6827,8 @@ pub fn analysis_run_fsi_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    if cfd_domain.solve_family != runmat_analysis_core::CfdSolveFamily::Transient {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.PROCEDURE_MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "transient FSI requires model.cfd.solve_family=transient",
-            BTreeMap::new(),
-        ));
-    }
-    if !cfd_domain.enabled {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires cfd domain enabled=true",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    }
-    if !cfd_domain.reference_density_kg_per_m3.is_finite()
-        || cfd_domain.reference_density_kg_per_m3 <= 0.0
+    if !cfd_domain.density.kilograms_per_cubic_meter.is_finite()
+        || cfd_domain.density.kilograms_per_cubic_meter <= 0.0
     {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
@@ -7053,11 +6843,13 @@ pub fn analysis_run_fsi_with_options_op(
             "fea.run_fsi requires finite positive reference_density_kg_per_m3",
             BTreeMap::from([(
                 "reference_density_kg_per_m3".to_string(),
-                cfd_domain.reference_density_kg_per_m3.to_string(),
+                cfd_domain.density.kilograms_per_cubic_meter.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
+    if !cfd_domain.dynamic_viscosity.pascal_seconds.is_finite()
+        || cfd_domain.dynamic_viscosity.pascal_seconds <= 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
             AnalysisOperation::Fsi.version(),
@@ -7071,11 +6863,15 @@ pub fn analysis_run_fsi_with_options_op(
             "fea.run_fsi requires finite positive dynamic_viscosity_pa_s",
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
-                cfd_domain.dynamic_viscosity_pa_s.to_string(),
+                cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
             )]),
         ));
     }
-    if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
+    if !nominal_inlet_velocity_m_per_s(model)
+        .unwrap_or(0.0)
+        .is_finite()
+        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
             AnalysisOperation::Fsi.version(),
@@ -7089,13 +6885,15 @@ pub fn analysis_run_fsi_with_options_op(
             "fea.run_fsi requires finite non-negative inlet_velocity_m_per_s",
             BTreeMap::from([(
                 "inlet_velocity_m_per_s".to_string(),
-                cfd_domain.inlet_velocity_m_per_s.to_string(),
+                nominal_inlet_velocity_m_per_s(model)
+                    .unwrap_or(0.0)
+                    .to_string(),
             )]),
         ));
     }
-    if !cfd_domain.turbulence_intensity.is_finite()
-        || cfd_domain.turbulence_intensity < 0.0
-        || cfd_domain.turbulence_intensity > 1.0
+    if !cfd_domain.turbulence_intensity.ratio.is_finite()
+        || cfd_domain.turbulence_intensity.ratio < 0.0
+        || cfd_domain.turbulence_intensity.ratio > 1.0
     {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
@@ -7110,7 +6908,7 @@ pub fn analysis_run_fsi_with_options_op(
             "fea.run_fsi requires turbulence_intensity in [0, 1]",
             BTreeMap::from([(
                 "turbulence_intensity".to_string(),
-                cfd_domain.turbulence_intensity.to_string(),
+                cfd_domain.turbulence_intensity.ratio.to_string(),
             )]),
         ));
     }
@@ -7224,13 +7022,15 @@ pub fn analysis_run_fsi_with_options_op(
     let solve_start = Instant::now();
     let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
     let node_count = topology.node_count;
-    let field_step = match cfd_domain.solve_family {
-        runmat_analysis_core::CfdSolveFamily::SteadyState => 0,
-        runmat_analysis_core::CfdSolveFamily::Transient => options.step_count.saturating_sub(1),
-    };
+    let field_step = options.step_count.saturating_sub(1);
     let cfd_profile_scales = cfd_velocity_scales(model, cfd_domain);
-    let (fluid_velocity, fluid_pressure) =
-        recover_cfd_velocity_pressure(cfd_domain, &topology, field_step, &cfd_profile_scales);
+    let (fluid_velocity, fluid_pressure) = recover_cfd_velocity_pressure(
+        model,
+        cfd_domain,
+        &topology,
+        field_step,
+        &cfd_profile_scales,
+    );
     let (cfd_residual_momentum, cfd_residual_continuity) = cfd_residual_norms(
         &fluid_velocity,
         &fluid_pressure,
@@ -7271,21 +7071,21 @@ pub fn analysis_run_fsi_with_options_op(
         diagnostics: Vec::new(),
         fields: fsi_fields,
     };
-    let reynolds_number = cfd_reynolds_number(cfd_domain);
+    let reynolds_number = cfd_reynolds_number_for_velocity(
+        cfd_domain,
+        nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+    );
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
         code: "FEA_CFD_FLOW".to_string(),
         severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
         message: format!(
             "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
-            cfd_domain.reference_density_kg_per_m3,
-            cfd_domain.dynamic_viscosity_pa_s,
-            cfd_domain.inlet_velocity_m_per_s,
-            cfd_domain.turbulence_intensity,
+            cfd_domain.density.kilograms_per_cubic_meter,
+            cfd_domain.dynamic_viscosity.pascal_seconds,
+            nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+            cfd_domain.turbulence_intensity.ratio,
             reynolds_number,
-            match cfd_domain.solve_family {
-                runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
-                runmat_analysis_core::CfdSolveFamily::Transient => "transient",
-            },
+            "transient",
             cfd_profile_scales.len(),
             topology.basis.as_str(),
             topology.control_volume_count,
@@ -7317,6 +7117,7 @@ pub fn analysis_run_fsi_with_options_op(
     run.diagnostics.push(cfd_assembly_diagnostic(
         &topology,
         cfd_domain,
+        mean_cfd_axial_velocity(&fluid_velocity),
         options.time_step_s,
         pressure_drop_from_nodal_pressure(&fluid_pressure),
         max_cfd_continuity_residual,
@@ -7584,13 +7385,7 @@ pub fn analysis_run_thermal_with_options_op(
     let thermal_procedure = thermal_step.procedure;
     validate_thermal_run_model(model, &context)?;
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Thermal.name(),
-        AnalysisOperation::Thermal.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     let Some(thermo_options) = thermo_options else {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
@@ -7920,13 +7715,7 @@ pub fn analysis_run_transient_with_options_op(
         ));
     }
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Transient.name(),
-        AnalysisOperation::Transient.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
@@ -7946,7 +7735,7 @@ pub fn analysis_run_transient_with_options_op(
     }
     let electro_options = model_electro_coupling_options(model);
     if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
             return Err(operation_error(
                 AnalysisOperation::Transient.name(),
                 AnalysisOperation::Transient.version(),
@@ -8508,13 +8297,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         ));
     }
 
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::Nonlinear.name(),
-        AnalysisOperation::Nonlinear.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
@@ -8534,7 +8317,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     }
     let electro_options = model_electro_coupling_options(model);
     if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
             return Err(operation_error(
                 AnalysisOperation::Nonlinear.name(),
                 AnalysisOperation::Nonlinear.version(),
@@ -9023,13 +8806,7 @@ pub fn analysis_run_linear_static_with_options(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let thermo_options = resolve_thermo_coupling_options(
-        model,
-        model_thermo_coupling_options(model),
-        AnalysisOperation::LinearStatic.name(),
-        AnalysisOperation::LinearStatic.version(),
-        &context,
-    )?;
+    let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
@@ -9049,7 +8826,7 @@ pub fn analysis_run_linear_static_with_options(
     }
     let electro_options = model_electro_coupling_options(model);
     if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
             return Err(operation_error(
                 AnalysisOperation::LinearStatic.name(),
                 AnalysisOperation::LinearStatic.version(),
@@ -9615,22 +9392,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    if !em_domain.enabled {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires electromagnetic domain enabled=true",
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-        ));
-    }
-    if !em_domain.reference_frequency_hz.is_finite() || em_domain.reference_frequency_hz <= 0.0 {
+    if !em_domain.reference_frequency.hertz.is_finite()
+        || em_domain.reference_frequency.hertz <= 0.0
+    {
         return Err(operation_error(
             AnalysisOperation::Electromagnetic.name(),
             AnalysisOperation::Electromagnetic.version(),
@@ -9644,25 +9408,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
             "fea.run_electromagnetic requires finite positive reference_frequency_hz",
             BTreeMap::from([(
                 "reference_frequency_hz".to_string(),
-                em_domain.reference_frequency_hz.to_string(),
-            )]),
-        ));
-    }
-    if !em_domain.applied_current_a.is_finite() || em_domain.applied_current_a <= 0.0 {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires finite positive applied_current_a",
-            BTreeMap::from([(
-                "applied_current_a".to_string(),
-                em_domain.applied_current_a.to_string(),
+                em_domain.reference_frequency.hertz.to_string(),
             )]),
         ));
     }
@@ -9723,7 +9469,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     validate_electromagnetic_run_model(model, &context)?;
 
     let sweep_frequency_hz = normalize_em_sweep_frequency_hz(
-        em_domain.reference_frequency_hz,
+        em_domain.reference_frequency.hertz,
         options.sweep_enabled,
         &options.sweep_frequency_hz,
     )
@@ -9764,7 +9510,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     for frequency_hz in &sweep_frequency_hz {
         let mut sweep_model = model.clone();
         if let Some(domain) = sweep_model.electromagnetic.as_mut() {
-            domain.reference_frequency_hz = *frequency_hz;
+            domain.reference_frequency.hertz = *frequency_hz;
         }
         let sweep_run =
             run_electromagnetic_with_options(&sweep_model, backend, solve_options.clone())
@@ -9779,7 +9525,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
     }
     let sweep_metrics = summarize_em_sweep(&sweep_frequency_hz, &sweep_peak_flux_density);
     let primary_index =
-        nearest_frequency_index(&sweep_frequency_hz, em_domain.reference_frequency_hz).unwrap_or(0);
+        nearest_frequency_index(&sweep_frequency_hz, em_domain.reference_frequency.hertz)
+            .unwrap_or(0);
     let em_run = sweep_runs[primary_index].clone();
     let mut run = em_run.run.clone();
     run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -9801,7 +9548,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     });
     if sweep_metrics.sweep_count > 1 {
         run.diagnostics.push(em_sweep_known_answer_diagnostic(
-            em_domain.reference_frequency_hz,
+            em_domain.reference_frequency.hertz,
             &sweep_frequency_hz,
             &sweep_metrics,
         ));
@@ -10828,23 +10575,6 @@ fn study_evidence_root() -> PathBuf {
         })
 }
 
-fn thermo_field_artifact_root() -> PathBuf {
-    let config = current_fea_runtime_config();
-    config
-        .thermo_field_artifact_root
-        .or_else(|| {
-            std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
-                .ok()
-                .map(PathBuf::from)
-        })
-        .unwrap_or_else(|| {
-            config
-                .artifact_root
-                .unwrap_or_else(default_fea_artifact_root)
-                .join("thermo-fields")
-        })
-}
-
 fn persist_study_evidence(
     study_fingerprint: &str,
     stage: &str,
@@ -10893,18 +10623,6 @@ fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
     }
-}
-
-fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
-    match runmat_filesystem::metadata(path.into()) {
-        Ok(_) => Ok(true),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err),
-    }
-}
-
-fn fs_read_to_string(path: impl Into<PathBuf>) -> std::io::Result<String> {
-    runmat_filesystem::read_to_string(path.into())
 }
 
 fn render_topology_from_solver_mesh(
@@ -11039,34 +10757,17 @@ fn model_thermo_coupling_options(model: &AnalysisModel) -> Option<ThermoMechanic
     };
 
     Some(ThermoMechanicalCouplingOptions {
-        enabled: domain.enabled,
-        reference_temperature_k: domain.reference_temperature_k,
-        applied_temperature_delta_k: domain.applied_temperature_delta_k,
+        reference_temperature_k: domain.reference_temperature.kelvin,
+        applied_temperature_delta_k: applied_temperature_delta_k(model, domain).unwrap_or(0.0),
         thermal_expansion_coefficient: expansion,
-        field_artifact_id: domain.field_artifact_id.clone(),
-        field_source: domain
-            .field_source
-            .as_ref()
-            .map(|source| ThermoFieldSource {
-                source_id: source.source_id.clone(),
-                revision: source.revision,
-                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                    runmat_analysis_core::ThermoFieldInterpolationMode::Linear => {
-                        ThermoFieldInterpolationMode::Linear
-                    }
-                    runmat_analysis_core::ThermoFieldInterpolationMode::Step => {
-                        ThermoFieldInterpolationMode::Step
-                    }
-                }),
-                expected_region_ids: source.expected_region_ids.clone(),
-            }),
-        region_temperature_deltas: domain
-            .region_temperature_deltas
-            .iter()
-            .map(|delta| ThermoRegionTemperatureDelta {
-                region_id: delta.region_id.clone(),
-                temperature_delta_k: delta.temperature_delta_k,
-            })
+        region_temperature_deltas: regional_temperature_deltas_k(model, domain)
+            .into_iter()
+            .map(
+                |(region_id, temperature_delta_k)| ThermoRegionTemperatureDelta {
+                    region_id,
+                    temperature_delta_k,
+                },
+            )
             .collect(),
         sampled_time_profile: sampled_scale_points(thermo_temperature_scales(model, domain)),
     })
@@ -11099,19 +10800,10 @@ fn model_electro_coupling_options(model: &AnalysisModel) -> Option<ElectroTherma
     };
 
     Some(ElectroThermalCouplingOptions {
-        enabled: domain.enabled,
-        reference_temperature_k: domain.reference_temperature_k,
-        applied_voltage_v: domain.applied_voltage_v,
+        reference_temperature_k: domain.reference_temperature.kelvin,
+        applied_voltage_v: applied_voltage_v(model).unwrap_or(0.0),
         base_electrical_conductivity_s_per_m: base_conductivity,
         resistive_heating_coefficient: resistive_coeff,
-        region_conductivity_scales: domain
-            .region_conductivity_scales
-            .iter()
-            .map(|scale| ElectroRegionConductivityScale {
-                region_id: scale.region_id.clone(),
-                conductivity_scale: scale.conductivity_scale,
-            })
-            .collect(),
         sampled_time_profile: sampled_scale_points(electric_potential_scales(model, domain)),
     })
 }
@@ -11184,25 +10876,9 @@ fn to_fea_thermo_mechanical_context(
     options: Option<ThermoMechanicalCouplingOptions>,
 ) -> Option<runmat_analysis_fea::FeaThermoMechanicalContext> {
     options.map(|tm| runmat_analysis_fea::FeaThermoMechanicalContext {
-        enabled: tm.enabled,
         reference_temperature_k: tm.reference_temperature_k,
         applied_temperature_delta_k: tm.applied_temperature_delta_k,
         thermal_expansion_coefficient: tm.thermal_expansion_coefficient,
-        field_source: tm
-            .field_source
-            .map(|source| runmat_analysis_fea::FeaThermoFieldSource {
-                source_id: source.source_id,
-                revision: source.revision,
-                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                    contracts::ThermoFieldInterpolationMode::Linear => {
-                        runmat_analysis_fea::FeaThermoFieldInterpolationMode::Linear
-                    }
-                    contracts::ThermoFieldInterpolationMode::Step => {
-                        runmat_analysis_fea::FeaThermoFieldInterpolationMode::Step
-                    }
-                }),
-                expected_region_ids: source.expected_region_ids,
-            }),
         region_temperature_deltas: tm
             .region_temperature_deltas
             .into_iter()
@@ -11224,24 +10900,10 @@ fn to_fea_electro_thermal_context(
     options: Option<ElectroThermalCouplingOptions>,
 ) -> Option<runmat_analysis_fea::FeaElectroThermalContext> {
     options.map(|et| runmat_analysis_fea::FeaElectroThermalContext {
-        enabled: et.enabled,
         reference_temperature_k: et.reference_temperature_k,
         applied_voltage_v: et.applied_voltage_v,
         base_electrical_conductivity_s_per_m: et.base_electrical_conductivity_s_per_m,
         resistive_heating_coefficient: et.resistive_heating_coefficient,
-        region_conductivity_scales: et
-            .region_conductivity_scales
-            .into_iter()
-            .map(
-                |ElectroRegionConductivityScale {
-                     region_id,
-                     conductivity_scale,
-                 }| runmat_analysis_fea::FeaElectroRegionConductivityScale {
-                    region_id,
-                    conductivity_scale,
-                },
-            )
-            .collect(),
         sampled_time_profile: et.sampled_time_profile,
     })
 }
@@ -11274,9 +10936,6 @@ fn validate_thermo_coupling_options(
     model: &AnalysisModel,
     options: &ThermoMechanicalCouplingOptions,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.enabled {
-        return Ok(());
-    }
     if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
         return Err((
             "thermo coupling requires finite positive reference_temperature_k".to_string(),
@@ -11353,6 +11012,13 @@ fn validate_thermo_coupling_options(
         .material_assignments
         .iter()
         .map(|assignment| assignment.region_id.as_str())
+        .chain(
+            model
+                .structural
+                .iter()
+                .flat_map(|structural| structural.elements.iter())
+                .map(|element| element.region_id.as_str()),
+        )
         .collect::<HashSet<_>>();
 
     for delta in &options.region_temperature_deltas {
@@ -11368,23 +11034,12 @@ fn validate_thermo_coupling_options(
                 ]),
             ));
         }
-    }
-
-    if let Some(source) = options.field_source.as_ref() {
-        if source.source_id.trim().is_empty() {
+        if !model_region_ids.is_empty() && !model_region_ids.contains(delta.region_id.as_str()) {
             return Err((
-                "thermo field_source requires a non-empty source_id".to_string(),
-                BTreeMap::new(),
+                "thermo region_temperature_deltas region_id must exist in model material assignments"
+                    .to_string(),
+                BTreeMap::from([("region_id".to_string(), delta.region_id.clone())]),
             ));
-        }
-        for expected_region in &source.expected_region_ids {
-            if !model_region_ids.contains(expected_region.as_str()) {
-                return Err((
-                    "thermo field_source expected_region_ids must exist in model material assignments"
-                        .to_string(),
-                    BTreeMap::from([("region_id".to_string(), expected_region.clone())]),
-                ));
-            }
         }
     }
 
@@ -11392,12 +11047,8 @@ fn validate_thermo_coupling_options(
 }
 
 fn validate_electro_coupling_options(
-    model: &AnalysisModel,
     options: &ElectroThermalCouplingOptions,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.enabled {
-        return Ok(());
-    }
     if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
         return Err((
             "electro-thermal coupling requires finite positive reference_temperature_k".to_string(),
@@ -11479,33 +11130,6 @@ fn validate_electro_coupling_options(
             ));
         }
         last_t = point.normalized_coordinate;
-    }
-    let model_region_ids = model
-        .material_assignments
-        .iter()
-        .map(|assignment| assignment.region_id.as_str())
-        .collect::<HashSet<_>>();
-    for scale in &options.region_conductivity_scales {
-        if !scale.conductivity_scale.is_finite() || scale.conductivity_scale <= 0.0 {
-            return Err((
-                "electro region_conductivity_scales must use finite positive conductivity_scale"
-                    .to_string(),
-                BTreeMap::from([
-                    ("region_id".to_string(), scale.region_id.clone()),
-                    (
-                        "conductivity_scale".to_string(),
-                        scale.conductivity_scale.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        if !model_region_ids.is_empty() && !model_region_ids.contains(scale.region_id.as_str()) {
-            return Err((
-                "electro region_conductivity_scales region_id must exist in model material assignments"
-                    .to_string(),
-                BTreeMap::from([("region_id".to_string(), scale.region_id.clone())]),
-            ));
-        }
     }
     Ok(())
 }
@@ -11670,374 +11294,6 @@ fn validate_coupled_flow_interfaces(
         }
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ThermoFieldArtifact {
-    schema_version: String,
-    source_geometry_id: String,
-    source_geometry_revision: u32,
-    #[serde(default)]
-    artifact_status: Option<String>,
-    #[serde(default)]
-    approved_by: Option<String>,
-    #[serde(default)]
-    payload_hash: Option<String>,
-    #[serde(default)]
-    signature: Option<String>,
-    #[serde(default)]
-    field_source: Option<ThermoFieldSource>,
-    #[serde(default)]
-    region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
-    #[serde(default)]
-    sampled_time_profile: Vec<runmat_analysis_fea::SolverSampledScalePoint>,
-}
-
-fn thermo_field_payload_hash(artifact: &ThermoFieldArtifact) -> String {
-    let source = artifact.field_source.as_ref();
-    let source_id = source.map(|s| s.source_id.as_str()).unwrap_or("");
-    let source_revision = source.map(|s| s.revision).unwrap_or(0);
-    let interpolation = source
-        .and_then(|s| s.interpolation_mode)
-        .map(|mode| match mode {
-            ThermoFieldInterpolationMode::Linear => "linear",
-            ThermoFieldInterpolationMode::Step => "step",
-        })
-        .unwrap_or("");
-    let expected_regions = source
-        .map(|s| s.expected_region_ids.join(","))
-        .unwrap_or_default();
-    let region_terms = artifact
-        .region_temperature_deltas
-        .iter()
-        .map(|delta| {
-            format!(
-                "{}:{:016x}",
-                delta.region_id,
-                delta.temperature_delta_k.to_bits()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let time_terms = artifact
-        .sampled_time_profile
-        .iter()
-        .map(|point| {
-            format!(
-                "{:016x}:{:016x}",
-                point.normalized_coordinate.to_bits(),
-                point.scale.to_bits()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let canonical = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        artifact.schema_version,
-        artifact.source_geometry_id,
-        artifact.source_geometry_revision,
-        source_id,
-        source_revision,
-        interpolation,
-        expected_regions,
-        region_terms,
-        time_terms
-    );
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
-}
-
-fn thermo_field_signature(payload_hash: &str, approved_by: &str, signing_key: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{payload_hash}:{approved_by}:{signing_key}").as_bytes());
-    format!("sigv1:sha256:{:x}", hasher.finalize())
-}
-
-fn resolve_thermo_coupling_options(
-    model: &AnalysisModel,
-    options: Option<ThermoMechanicalCouplingOptions>,
-    operation: &'static str,
-    op_version: &'static str,
-    context: &OperationContext,
-) -> Result<Option<ThermoMechanicalCouplingOptions>, OperationErrorEnvelope> {
-    let Some(mut options) = options else {
-        return Ok(None);
-    };
-    let Some(field_artifact_id) = options.field_artifact_id.as_deref() else {
-        return Ok(Some(options));
-    };
-
-    let root = thermo_field_artifact_root();
-    let path = root.join(format!("{field_artifact_id}.json"));
-    if !fs_exists(&path).map_err(|err| {
-        operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to inspect thermo field artifact: {err}"),
-            BTreeMap::from([
-                (
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                ),
-                (
-                    "thermo_field_artifact_path".to_string(),
-                    path.display().to_string(),
-                ),
-            ]),
-        )
-    })? {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!(
-                "thermo field artifact '{}' was not found",
-                field_artifact_id
-            ),
-            BTreeMap::from([
-                (
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                ),
-                (
-                    "thermo_field_artifact_path".to_string(),
-                    path.display().to_string(),
-                ),
-            ]),
-        ));
-    }
-
-    let raw = fs_read_to_string(&path).map_err(|err| {
-        operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to read thermo field artifact: {err}"),
-            BTreeMap::from([(
-                "thermo_field_artifact_path".to_string(),
-                path.display().to_string(),
-            )]),
-        )
-    })?;
-    let artifact: ThermoFieldArtifact = serde_json::from_str(&raw).map_err(|err| {
-        operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.INVALID",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("invalid thermo field artifact payload: {err}"),
-            BTreeMap::from([(
-                "thermo_field_artifact_path".to_string(),
-                path.display().to_string(),
-            )]),
-        )
-    })?;
-
-    if artifact.schema_version != "fea_thermo_field_artifact/v1"
-        && artifact.schema_version != "analysis_thermo_field_artifact/v1"
-    {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.SCHEMA_UNSUPPORTED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!(
-                "thermo field artifact schema '{}' is not supported",
-                artifact.schema_version
-            ),
-            BTreeMap::from([
-                (
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                ),
-                (
-                    "thermo_field_artifact_schema".to_string(),
-                    artifact.schema_version.clone(),
-                ),
-            ]),
-        ));
-    }
-
-    if artifact.source_geometry_id != model.geometry_id
-        || artifact.source_geometry_revision != model.geometry_revision
-    {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "thermo field artifact geometry lineage does not match FEA model",
-            BTreeMap::from([
-                (
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                ),
-                ("model_geometry_id".to_string(), model.geometry_id.clone()),
-                (
-                    "model_geometry_revision".to_string(),
-                    model.geometry_revision.to_string(),
-                ),
-                (
-                    "artifact_geometry_id".to_string(),
-                    artifact.source_geometry_id.clone(),
-                ),
-                (
-                    "artifact_geometry_revision".to_string(),
-                    artifact.source_geometry_revision.to_string(),
-                ),
-            ]),
-        ));
-    }
-
-    let expected_hash = thermo_field_payload_hash(&artifact);
-    if artifact.payload_hash.as_deref() != Some(expected_hash.as_str()) {
-        return Err(operation_error(
-            operation,
-            op_version,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMO_FIELD.DIGEST_MISMATCH",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "thermo field artifact payload hash does not match payload contents",
-            BTreeMap::from([
-                (
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                ),
-                ("expected_payload_hash".to_string(), expected_hash),
-                (
-                    "artifact_payload_hash".to_string(),
-                    artifact.payload_hash.clone().unwrap_or_default(),
-                ),
-            ]),
-        ));
-    }
-
-    if matches!(artifact.artifact_status.as_deref(), Some("approved")) {
-        let Some(approved_by) = artifact.approved_by.as_deref() else {
-            return Err(operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_THERMO_FIELD.APPROVER_MISSING",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "approved thermo field artifact is missing approved_by",
-                BTreeMap::from([(
-                    "thermo_field_artifact_id".to_string(),
-                    field_artifact_id.to_string(),
-                )]),
-            ));
-        };
-
-        let allowed = std::env::var("RUNMAT_THERMO_FIELD_ALLOWED_APPROVERS")
-            .ok()
-            .map(|value| {
-                value
-                    .split(',')
-                    .map(|entry| entry.trim().to_string())
-                    .filter(|entry| !entry.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        if !allowed.is_empty() && !allowed.iter().any(|entry| entry == approved_by) {
-            return Err(operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_THERMO_FIELD.APPROVER_UNAUTHORIZED",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "thermo field artifact approver is not authorized",
-                BTreeMap::from([
-                    (
-                        "thermo_field_artifact_id".to_string(),
-                        field_artifact_id.to_string(),
-                    ),
-                    ("approved_by".to_string(), approved_by.to_string()),
-                ]),
-            ));
-        }
-
-        let signing_key = std::env::var("RUNMAT_THERMO_FIELD_SIGNING_KEY")
-            .unwrap_or_else(|_| "runmat-dev-thermo-signing-key".to_string());
-        let expected_signature = thermo_field_signature(&expected_hash, approved_by, &signing_key);
-        if artifact.signature.as_deref() != Some(expected_signature.as_str()) {
-            return Err(operation_error(
-                operation,
-                op_version,
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_THERMO_FIELD.SIGNATURE_INVALID",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "thermo field artifact signature validation failed",
-                BTreeMap::from([
-                    (
-                        "thermo_field_artifact_id".to_string(),
-                        field_artifact_id.to_string(),
-                    ),
-                    ("expected_signature".to_string(), expected_signature),
-                    (
-                        "artifact_signature".to_string(),
-                        artifact.signature.clone().unwrap_or_default(),
-                    ),
-                ]),
-            ));
-        }
-    }
-
-    options.field_source = artifact.field_source;
-    options.region_temperature_deltas = artifact.region_temperature_deltas;
-    options.sampled_time_profile = artifact.sampled_time_profile;
-
-    Ok(Some(options))
 }
 
 fn diagnostic_metric(
@@ -12467,6 +11723,25 @@ fn map_validate_error(
             "RM.FEA.VALIDATE.INVALID_FRAME",
             "coordinate frame must be finite and non-degenerate".to_string(),
             BTreeMap::new(),
+        ),
+        AnalysisValidationError::InvalidMaterial {
+            material_id,
+            detail,
+        } => (
+            "RM.FEA.VALIDATE.INVALID_MATERIAL",
+            format!("material `{material_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("material_id".to_string(), material_id),
+                ("detail".to_string(), detail),
+            ]),
+        ),
+        AnalysisValidationError::InvalidMaterialAssignment { region_id, detail } => (
+            "RM.FEA.VALIDATE.INVALID_MATERIAL_ASSIGNMENT",
+            format!("material assignment for region `{region_id}` is invalid: {detail}"),
+            BTreeMap::from([
+                ("region_id".to_string(), region_id),
+                ("detail".to_string(), detail),
+            ]),
         ),
         AnalysisValidationError::InvalidConstraint {
             constraint_id,

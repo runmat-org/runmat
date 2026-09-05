@@ -155,6 +155,8 @@ fn replace_with_electric_current(
 
 fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [(f64, f64); 2]) {
     let signal_id = SignalId(id.to_string());
+    let excitation_id = ExcitationId(format!("{id}.excitation"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
     model.signals.push(PhysicalSignal::Velocity(Signal {
         signal_id: signal_id.clone(),
         shape: SignalShape::Scalar,
@@ -173,10 +175,19 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
         provenance: SignalProvenance::Authored,
     }));
     model
-        .cfd
-        .as_mut()
-        .expect("CFD domain must exist before adding its inlet signal")
-        .inlet_velocity_signal_id = Some(signal_id);
+        .excitations
+        .push(ExcitationAction::InletVelocity(excitation(
+            &excitation_id.0,
+            case_id.clone(),
+            ExcitationTarget::Region(RegionTarget::boundary("fluid_inlet")),
+            signal_id,
+            ExcitationDistribution::TopologyField,
+        )));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![excitation_id],
+        activation: ExcitationCaseActivation::Always,
+    });
 }
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -368,6 +379,11 @@ fn contract_linear_static_model() -> AnalysisModel {
 
 fn material_conflict_contract_model() -> AnalysisModel {
     let mut model = contract_linear_static_model();
+    let mut polymer = model.materials[0].clone();
+    polymer.material_id = "mat_polymer".to_string();
+    polymer.name = "Polymer".to_string();
+    polymer.mechanical.youngs_modulus_pa = 3.0e9;
+    model.materials.push(polymer);
     model.material_assignments = vec![MaterialAssignment {
         region_id: "beam_span".to_string(),
         expected_material_id: "mat_steel".to_string(),
@@ -607,9 +623,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         .electromagnetic
         .as_ref()
         .expect("electromagnetic template should seed electromagnetic domain");
-    assert!(electromagnetic_domain.enabled);
-    assert_eq!(electromagnetic_domain.reference_frequency_hz, 60.0);
-    assert_eq!(electromagnetic_domain.applied_current_a, 100.0);
+    assert_eq!(electromagnetic_domain.reference_frequency.hertz, 60.0);
 }
 
 #[test]
@@ -1434,13 +1448,9 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
         "cfd_steady".to_string(),
     )];
     model.cfd = Some(runmat_analysis_core::CfdDomain {
-        enabled: true,
-        solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 4.25,
-        turbulence_intensity: 0.06,
-        inlet_velocity_signal_id: None,
+        density: runmat_analysis_core::MassDensity::new(1.225),
+        dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+        turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
     });
     model.boundaries.clear();
     model.constraints = vec![
@@ -1735,13 +1745,9 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
         )],
     );
     model.cfd = Some(runmat_analysis_core::CfdDomain {
-        enabled: true,
-        solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 4.0,
-        turbulence_intensity: 0.06,
-        inlet_velocity_signal_id: None,
+        density: runmat_analysis_core::MassDensity::new(1.225),
+        dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
+        turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
     });
     append_inlet_velocity_history(&mut model, "fsi_inlet_velocity", [(0.0, 2.4), (1.0, 4.0)]);
 
@@ -1833,38 +1839,6 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "fea.run_fsi");
     assert_eq!(invalid.op_version, "fea.run_fsi/v1");
     assert_eq!(invalid.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_transient_thermo_field_reference_errors_are_typed() {
-    let mut model = contract_linear_static_model();
-    model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::structural_transient(
-        "transient_1".to_string(),
-    )];
-    model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-        enabled: true,
-        reference_temperature_k: 293.15,
-        applied_temperature_delta_k: 70.0,
-        field_artifact_id: Some("missing_thermo_field".to_string()),
-        field_source: None,
-        region_temperature_deltas: Vec::new(),
-        temperature_signal_id: None,
-    });
-
-    let invalid = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(
-            Some("trace-contract-transient-thermo-field-1".to_string()),
-            None,
-        ),
-    )
-    .expect_err("missing thermo field artifact should fail");
-    assert_eq!(invalid.operation, "fea.run_transient");
-    assert_eq!(invalid.op_version, "fea.run_transient/v1");
-    assert_eq!(invalid.error_code, "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND");
 }
 
 #[test]
@@ -1997,9 +1971,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     model.boundaries.clear();
     replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
     model.materials[0].electrical = Some(MaterialElectricalModel::default());
     model.constraints = vec![magnetic_ground("em_contract_ground", "em_contract_region")];
@@ -2164,9 +2136,7 @@ fn electromagnetic_contract_snapshot_matches_expected_shape() {
     model.boundaries.clear();
     replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
 
     let envelope = analysis_run_electromagnetic_with_options_op(

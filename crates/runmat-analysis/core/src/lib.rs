@@ -27,6 +27,7 @@ mod validate_accuracy;
 mod validate_authored;
 mod validate_domains;
 mod validate_excitations;
+mod validate_materials;
 mod validate_outputs;
 mod validate_sequence;
 mod validate_signals;
@@ -47,9 +48,7 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, CfdSolveFamily, ElectroRegionConductivityScale, ElectroThermalDomain,
-    ElectromagneticDomain, ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
-    ThermoRegionTemperatureDelta,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain,
 };
 pub use problem::excitation::{
     AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
@@ -74,11 +73,12 @@ pub use problem::model::{AnalysisModel, AnalysisModelId};
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ComplexPhase, Damping,
-    Displacement, ElectricCharge, ElectricChargeDensity, ElectricCurrent, ElectricCurrentDensity,
-    ElectricPotential, Force, FrictionCoefficient, HeatFlux, HeatGenerationDensity,
-    HeatTransferCoefficient, Length, MagneticVectorPotential, MassFlowRate, Moment, Position,
-    Pressure, Rotation, SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference,
-    ThermalContactResistance, Traction, Translation, Velocity,
+    Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity, ElectricCurrent,
+    ElectricCurrentDensity, ElectricPotential, Force, Frequency, FrictionCoefficient, HeatFlux,
+    HeatGenerationDensity, HeatTransferCoefficient, Length, MagneticVectorPotential, MassDensity,
+    MassFlowRate, Moment, Position, Pressure, Rotation, SpecificAcousticImpedance, Stiffness,
+    Temperature, TemperatureDifference, ThermalContactResistance, Traction, Translation,
+    TurbulenceIntensity, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::response_spectrum::{

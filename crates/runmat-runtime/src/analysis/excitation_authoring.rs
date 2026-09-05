@@ -1,11 +1,11 @@
 use runmat_analysis_core::{
-    AnalysisExcitation, AnalysisModel, CoordinateFrame, ElectricCurrent, ElectricPotential,
-    ExcitationAction, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
-    ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget, Force,
-    HeatGenerationDensity, PhysicalSignal, Pressure, ProjectionRequirement, RegionTarget, Signal,
+    AnalysisExcitation, AnalysisModel, CoordinateFrame, ElectricCurrent, ExcitationAction,
+    ExcitationCase, ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution,
+    ExcitationId, ExcitationKinematics, ExcitationTarget, Force, HeatGenerationDensity,
+    PhysicalSignal, Pressure, ProjectionRequirement, RegionTarget, Signal,
     SignalApproximationEvidence, SignalAxis, SignalBreakpoint, SignalExtrapolation, SignalId,
     SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalShape, SignalValue, TabulatedSignal, Temperature, Velocity,
+    SignalShape, SignalValue, TabulatedSignal,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,86 +84,6 @@ pub(crate) fn append_constant_excitation(
         action_ids,
         activation: ExcitationCaseActivation::Always,
     });
-}
-
-pub(crate) fn append_temperature_history(
-    model: &mut AnalysisModel,
-    id: impl Into<String>,
-    time_seconds: Vec<f64>,
-    kelvin: Vec<f64>,
-) -> SignalId {
-    append_scalar_history(
-        model,
-        id,
-        time_seconds,
-        kelvin.into_iter().map(Temperature::new).collect(),
-        PhysicalSignal::Temperature,
-    )
-}
-
-pub(crate) fn append_electric_potential_history(
-    model: &mut AnalysisModel,
-    id: impl Into<String>,
-    time_seconds: Vec<f64>,
-    volts: Vec<f64>,
-) -> SignalId {
-    append_scalar_history(
-        model,
-        id,
-        time_seconds,
-        volts.into_iter().map(ElectricPotential::new).collect(),
-        PhysicalSignal::ElectricPotential,
-    )
-}
-
-pub(crate) fn append_velocity_history(
-    model: &mut AnalysisModel,
-    id: impl Into<String>,
-    time_seconds: Vec<f64>,
-    meters_per_second: Vec<f64>,
-) -> SignalId {
-    append_scalar_history(
-        model,
-        id,
-        time_seconds,
-        meters_per_second.into_iter().map(Velocity::new).collect(),
-        PhysicalSignal::Velocity,
-    )
-}
-
-fn append_scalar_history<Q>(
-    model: &mut AnalysisModel,
-    id: impl Into<String>,
-    time_seconds: Vec<f64>,
-    values: Vec<Q>,
-    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
-) -> SignalId {
-    let signal_id = SignalId(id.into());
-    let sample_count = values.len();
-    model.signals.push(signal(Signal {
-        signal_id: signal_id.clone(),
-        shape: SignalShape::Scalar,
-        frame: None,
-        representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::TimeSeconds(time_seconds),
-            values: values
-                .into_iter()
-                .map(|value| SignalOrdinate::Real(SignalValue::Scalar(value)))
-                .collect(),
-            interpolation: SignalInterpolation::Linear,
-            extrapolation: SignalExtrapolation::HoldEndpoint,
-            breakpoints: Vec::new(),
-        }),
-        precision: SignalPrecision::Real64,
-        evidence: SignalApproximationEvidence {
-            max_absolute_error: None,
-            max_relative_error: None,
-            derivative_max_absolute_error: None,
-            sample_count,
-        },
-        provenance: SignalProvenance::Authored,
-    }));
-    signal_id
 }
 
 fn append_scalar<Q>(

@@ -4,9 +4,6 @@ pub fn severity(context: Option<&FeaElectroThermalContext>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };
-    if !context.enabled {
-        return 0.0;
-    }
     (context.applied_voltage_v.powi(2)
         * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
         * context.resistive_heating_coefficient.max(0.0)
@@ -70,12 +67,10 @@ mod tests {
     #[test]
     fn electro_time_scale_interpolates_in_range() {
         let context = FeaElectroThermalContext {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_voltage_v: 24.0,
             base_electrical_conductivity_s_per_m: 3.0e7,
             resistive_heating_coefficient: 5.0e-4,
-            region_conductivity_scales: Vec::new(),
             sampled_time_profile: vec![
                 crate::SolverSampledScalePoint {
                     normalized_coordinate: 0.0,

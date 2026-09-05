@@ -29,7 +29,10 @@ pub(super) const FEA_THERMOMECHANICAL_STEP_CLASS: &str = "fea.ThermoMechanicalSt
 pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str = "fea.ElectroThermalStep";
 pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str = "fea.ConjugateHeatTransferStep";
 pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str = "fea.FluidStructureStep";
-pub(super) const FEA_DOMAIN_CLASS: &str = "fea.Domain";
+pub(super) const FEA_THERMOMECHANICAL_DOMAIN_CLASS: &str = "fea.ThermoMechanicalDomain";
+pub(super) const FEA_ELECTROTHERMAL_DOMAIN_CLASS: &str = "fea.ElectroThermalDomain";
+pub(super) const FEA_ELECTROMAGNETIC_DOMAIN_CLASS: &str = "fea.ElectromagneticDomain";
+pub(super) const FEA_FLUID_DOMAIN_CLASS: &str = "fea.FluidDomain";
 pub(super) const FEA_CONTACT_INTERFACE_CLASS: &str = "fea.ContactInterface";
 pub(super) const FEA_FLUID_STRUCTURE_INTERFACE_CLASS: &str = "fea.FluidStructureInterface";
 pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS: &str =
@@ -172,7 +175,10 @@ pub(super) const STEP_FIELDS: &[&str] = &[
     "accuracy",
     "restart",
 ];
-pub(super) const DOMAIN_FIELDS: &[&str] = &["kind", "data"];
+pub(super) const REFERENCE_TEMPERATURE_DOMAIN_FIELDS: &[&str] = &["reference_temperature"];
+pub(super) const ELECTROMAGNETIC_DOMAIN_FIELDS: &[&str] = &["reference_frequency"];
+pub(super) const FLUID_DOMAIN_FIELDS: &[&str] =
+    &["density", "dynamic_viscosity", "turbulence_intensity"];
 pub(super) const INTERFACE_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "interface"];
 pub(super) const RESULTS_FIELDS: &[&str] = &[
     "identity",
@@ -279,6 +285,10 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_ELECTROTHERMAL_STEP_CLASS => electrothermal_step_methods(),
                 FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS => conjugate_heat_transfer_step_methods(),
                 FEA_FLUID_STRUCTURE_STEP_CLASS => fluid_structure_step_methods(),
+                FEA_THERMOMECHANICAL_DOMAIN_CLASS => thermomechanical_domain_methods(),
+                FEA_ELECTROTHERMAL_DOMAIN_CLASS => electrothermal_domain_methods(),
+                FEA_ELECTROMAGNETIC_DOMAIN_CLASS => electromagnetic_domain_methods(),
+                FEA_FLUID_DOMAIN_CLASS => fluid_domain_methods(),
                 FEA_CONTACT_INTERFACE_CLASS => contact_interface_methods(),
                 FEA_FLUID_STRUCTURE_INTERFACE_CLASS => fluid_structure_interface_methods(),
                 FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS => {
@@ -625,6 +635,28 @@ fn fluid_structure_step_methods() -> HashMap<String, crate::class_registry::Runt
     static_methods(&[("transient", "fea.FluidStructureStep.transient")])
 }
 
+fn thermomechanical_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[(
+        "atReferenceTemperature",
+        "fea.ThermoMechanicalDomain.atReferenceTemperature",
+    )])
+}
+
+fn electrothermal_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[(
+        "atReferenceTemperature",
+        "fea.ElectroThermalDomain.atReferenceTemperature",
+    )])
+}
+
+fn electromagnetic_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("atFrequency", "fea.ElectromagneticDomain.atFrequency")])
+}
+
+fn fluid_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[("newtonian", "fea.FluidDomain.newtonian")])
+}
+
 fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
     names
         .iter()
@@ -645,7 +677,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 39] {
+fn fea_class_schemas() -> [FeaClassSchema; 42] {
     [
         (
             FEA_STUDY_CLASS,
@@ -904,10 +936,31 @@ fn fea_class_schemas() -> [FeaClassSchema; 39] {
             validate_fea_object,
         ),
         (
-            FEA_DOMAIN_CLASS,
-            "runmat.fea.domain",
-            DOMAIN_FIELDS,
-            DOMAIN_FIELDS,
+            FEA_THERMOMECHANICAL_DOMAIN_CLASS,
+            "runmat.fea.thermomechanical-domain",
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_ELECTROTHERMAL_DOMAIN_CLASS,
+            "runmat.fea.electrothermal-domain",
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_ELECTROMAGNETIC_DOMAIN_CLASS,
+            "runmat.fea.electromagnetic-domain",
+            ELECTROMAGNETIC_DOMAIN_FIELDS,
+            ELECTROMAGNETIC_DOMAIN_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_FLUID_DOMAIN_CLASS,
+            "runmat.fea.fluid-domain",
+            FLUID_DOMAIN_FIELDS,
+            FLUID_DOMAIN_FIELDS,
             validate_fea_object,
         ),
         (

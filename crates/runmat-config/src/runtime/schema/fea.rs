@@ -14,8 +14,6 @@ pub struct FeaConfig {
     pub artifact_max_runs_per_kind: Option<usize>,
     #[serde(default)]
     pub study_artifact_root: Option<PathBuf>,
-    #[serde(default)]
-    pub thermo_field_artifact_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

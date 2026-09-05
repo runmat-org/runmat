@@ -1162,7 +1162,6 @@ impl RunMatWasm {
                 runmat_runtime::analysis::FeaRuntimeConfig {
                     artifact_root: Some(root.clone()),
                     study_artifact_root: None,
-                    thermo_field_artifact_root: None,
                 },
             );
         }

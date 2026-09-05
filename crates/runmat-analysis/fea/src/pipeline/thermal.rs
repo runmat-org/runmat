@@ -73,12 +73,6 @@ pub fn run_thermal_with_options(
             "thermal solve requires thermo_mechanical_context".to_string(),
         ));
     };
-    if !thermo_context.enabled {
-        return Err(FeaRunError::InvalidModel(
-            "thermal solve requires enabled thermo_mechanical_context".to_string(),
-        ));
-    }
-
     let step_count = options.step_count.max(2);
     emit_phase(
         "fea.run_thermal",
@@ -1126,8 +1120,7 @@ fn thermal_source_boundary_summary(
         prescribed_temperature_count,
         heat_flux_boundary_count,
         convection_boundary_count,
-        source_coverage_ratio: thermal_source_count as f64
-            / excitations.as_ref().map_or(1, |values| values.len().max(1)) as f64,
+        source_coverage_ratio: if thermal_source_count == 0 { 0.0 } else { 1.0 },
         boundary_coverage_ratio: thermal_boundary_count as f64
             / (model.constraints.len() + model.boundaries.len()).max(1) as f64,
         volumetric_heat_source_w_per_m3,

@@ -37,7 +37,7 @@ In a `.fea` file, `model.defaults: profile_scaffold` lets RunMat create the scaf
 
 ## Define Model Data
 
-Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint and boundary classes, `fea.loadCase(...)`, `fea.domain(...)`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
+Model data can be written in a `.fea` file or assembled in RunMat code with typed constructors such as `fea.material(...)`, the family-specific constraint and boundary classes, `fea.loadCase(...)`, concrete domain classes such as `fea.ElectromagneticDomain` and `fea.FluidDomain`, and `fea.model(...)`. Use a `.fea` file when the model definition is a portable study artifact. Use `.m` code when the model is generated from parameters, calculations, or loops.
 
 ```yaml
 model:

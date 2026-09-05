@@ -84,6 +84,7 @@ pub enum ExcitationAction {
     BaseAcceleration(AnalysisExcitation),
     HeatGeneration(AnalysisExcitation),
     HeatFlux(AnalysisExcitation),
+    TemperatureField(AnalysisExcitation),
     AmbientTemperature(AnalysisExcitation),
     TerminalVoltage(AnalysisExcitation),
     ElectricCurrent(AnalysisExcitation),
@@ -110,6 +111,7 @@ impl ExcitationAction {
             | Self::BaseAcceleration(value)
             | Self::HeatGeneration(value)
             | Self::HeatFlux(value)
+            | Self::TemperatureField(value)
             | Self::AmbientTemperature(value)
             | Self::TerminalVoltage(value)
             | Self::ElectricCurrent(value)
@@ -139,7 +141,9 @@ impl ExcitationAction {
             Self::BaseAcceleration(_) => PhysicalQuantityKind::Acceleration,
             Self::HeatGeneration(_) => PhysicalQuantityKind::HeatGenerationDensity,
             Self::HeatFlux(_) => PhysicalQuantityKind::HeatFlux,
-            Self::AmbientTemperature(_) => PhysicalQuantityKind::Temperature,
+            Self::TemperatureField(_) | Self::AmbientTemperature(_) => {
+                PhysicalQuantityKind::Temperature
+            }
             Self::TerminalVoltage(_) => PhysicalQuantityKind::ElectricPotential,
             Self::ElectricCurrent(_) => PhysicalQuantityKind::ElectricCurrent,
             Self::ElectricCharge(_) => PhysicalQuantityKind::ElectricCharge,
@@ -161,6 +165,7 @@ impl ExcitationAction {
             | Self::BaseAcceleration(value)
             | Self::HeatGeneration(value)
             | Self::HeatFlux(value)
+            | Self::TemperatureField(value)
             | Self::AmbientTemperature(value)
             | Self::TerminalVoltage(value)
             | Self::ElectricCurrent(value)

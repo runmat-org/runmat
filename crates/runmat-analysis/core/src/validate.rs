@@ -21,6 +21,12 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_INVALID_FRAME: coordinate frame is not finite and non-degenerate"
     )]
     InvalidFrame,
+    #[error("ANALYSIS_VALIDATION_INVALID_MATERIAL: material `{material_id}` is invalid: {detail}")]
+    InvalidMaterial { material_id: String, detail: String },
+    #[error(
+        "ANALYSIS_VALIDATION_INVALID_MATERIAL_ASSIGNMENT: material assignment for region `{region_id}` is invalid: {detail}"
+    )]
+    InvalidMaterialAssignment { region_id: String, detail: String },
     #[error(
         "ANALYSIS_VALIDATION_INVALID_CONSTRAINT: constraint `{constraint_id}` is invalid: {detail}"
     )]

@@ -59,6 +59,10 @@ scalar_quantity!(Stiffness, newtons_per_meter);
 scalar_quantity!(Damping, newton_seconds_per_meter);
 scalar_quantity!(ThermalContactResistance, square_meter_kelvin_per_watt);
 scalar_quantity!(FrictionCoefficient, ratio);
+scalar_quantity!(Frequency, hertz);
+scalar_quantity!(MassDensity, kilograms_per_cubic_meter);
+scalar_quantity!(DynamicViscosity, pascal_seconds);
+scalar_quantity!(TurbulenceIntensity, ratio);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

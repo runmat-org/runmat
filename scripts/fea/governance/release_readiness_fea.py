@@ -40,9 +40,7 @@ KEY_PERFORMANCE_FIXTURES = {
     "electromagnetic_reference_overlap_interference_gpu_provider",
     "electromagnetic_reference_boundary_kernel_gpu_provider",
     "thermo_ramp_smooth_gpu_provider",
-    "thermo_ramp_smooth_field_artifact_gpu_provider",
     "thermo_shock_oscillatory_gpu_provider",
-    "thermo_shock_oscillatory_field_artifact_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
     "thermo_gradient_pathological_gpu_provider",
     "nonlinear_plastic_hardening_reference_complex_gpu_provider",
@@ -129,8 +127,6 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.1",
-            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
-            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "14",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "6.8",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "292.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "375.0",
@@ -438,8 +434,6 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.25",
-            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
-            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "21",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "7.2",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "288.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "390.0",
@@ -747,8 +741,6 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.5",
-            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "false",
-            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "30",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "8.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "285.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "420.0",
@@ -1117,7 +1109,6 @@ def evaluate_release_readiness(
     latest: dict,
     rolling: List[dict],
     protected: bool,
-    thermo_promotion_report: dict | None = None,
     promotion_calibration: dict | None = None,
 ) -> dict:
     reasons: List[Reason] = []
@@ -1565,21 +1556,12 @@ def evaluate_release_readiness(
                         )
 
     replay_ok = is_true(os.getenv("RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK", "false"))
-    compat_ok = is_true(os.getenv("RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK", "false"))
     if not replay_ok:
         reasons.append(
             Reason(
                 code="ARTIFACT_REPLAY_UNVERIFIED",
                 severity="fail" if protected else "warn",
                 detail="artifact replay verification did not run or failed",
-            )
-        )
-    if not compat_ok:
-        reasons.append(
-            Reason(
-                code="ARTIFACT_COMPAT_UNVERIFIED",
-                severity="fail" if protected else "warn",
-                detail="artifact compatibility verification did not run or failed",
             )
         )
 
@@ -1689,18 +1671,6 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE", "0.25"
             ),
-        )
-    )
-    thermo_require_artifact_backed = is_true(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
-            profile_default("RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED", "false"),
-        )
-    )
-    thermo_field_artifact_max_age_days = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
-            profile_default("RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS", "30"),
         )
     )
     thermo_max_spread_trend_ratio = float(
@@ -5445,85 +5415,6 @@ def evaluate_release_readiness(
                 )
             )
 
-        if thermo_require_artifact_backed:
-            missing_artifact_ids = sorted(
-                rec.get("fixture_id", "<unknown>")
-                for rec in thermo_records
-                if rec.get("thermo_coupling_enabled") is True
-                and not isinstance(rec.get("thermo_field_artifact_id"), str)
-            )
-            if missing_artifact_ids:
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_ARTIFACT_REQUIRED",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            "thermo-enabled fixtures missing artifact-backed field references: "
-                            + ", ".join(missing_artifact_ids)
-                        ),
-                    )
-                )
-
-            unapproved_artifacts = sorted(
-                rec.get("fixture_id", "<unknown>")
-                for rec in thermo_records
-                if rec.get("thermo_coupling_enabled") is True
-                and isinstance(rec.get("thermo_field_artifact_id"), str)
-                and rec.get("thermo_field_artifact_approved") is not True
-            )
-            if unapproved_artifacts:
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_ARTIFACT_UNAPPROVED",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            "thermo field artifacts are not approved for fixtures: "
-                            + ", ".join(unapproved_artifacts)
-                        ),
-                    )
-                )
-
-            stale_artifacts = []
-            for rec in thermo_records:
-                if rec.get("thermo_coupling_enabled") is not True:
-                    continue
-                age_days = rec.get("thermo_field_artifact_age_days")
-                if isinstance(age_days, (int, float)) and float(age_days) > thermo_field_artifact_max_age_days:
-                    stale_artifacts.append(
-                        f"{rec.get('fixture_id', '<unknown>')}({float(age_days):.1f}d)"
-                    )
-            if stale_artifacts:
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_ARTIFACT_STALE",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            "thermo field artifacts exceed max age days "
-                            f"{thermo_field_artifact_max_age_days:.1f}: "
-                            + ", ".join(sorted(stale_artifacts))
-                        ),
-                    )
-                )
-
-            invalid_provenance = sorted(
-                rec.get("fixture_id", "<unknown>")
-                for rec in thermo_records
-                if rec.get("thermo_coupling_enabled") is True
-                and isinstance(rec.get("thermo_field_artifact_id"), str)
-                and rec.get("thermo_field_artifact_provenance_valid") is not True
-            )
-            if invalid_provenance:
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_ARTIFACT_PROVENANCE_INVALID",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            "thermo field artifact provenance is invalid for fixtures: "
-                            + ", ".join(invalid_provenance)
-                        ),
-                    )
-                )
-
         transient_values = []
         for rec in thermo_records:
             raw_value = rec.get("thermo_transient_severity")
@@ -5748,16 +5639,6 @@ def evaluate_release_readiness(
             None,
         ),
         (
-            "thermo_ramp_smooth_field_artifact_gpu_provider",
-            "thermo_ramp_smooth_field_clamp_ratio",
-            "thermo_field_clamp_ratio",
-        ),
-        (
-            "thermo_ramp_smooth_field_artifact_gpu_provider",
-            "thermo_ramp_smooth_constitutive_temperature_factor",
-            None,
-        ),
-        (
             "thermo_shock_oscillatory_gpu_provider",
             "thermo_shock_oscillatory_temporal_variation",
             None,
@@ -5769,21 +5650,6 @@ def evaluate_release_readiness(
         ),
         (
             "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_constitutive_temperature_factor",
-            None,
-        ),
-        (
-            "thermo_shock_oscillatory_field_artifact_gpu_provider",
-            "thermo_shock_oscillatory_temporal_variation",
-            None,
-        ),
-        (
-            "thermo_shock_oscillatory_field_artifact_gpu_provider",
-            "thermo_shock_oscillatory_field_clamp_ratio",
-            "thermo_field_clamp_ratio",
-        ),
-        (
-            "thermo_shock_oscillatory_field_artifact_gpu_provider",
             "thermo_shock_constitutive_temperature_factor",
             None,
         ),
@@ -13748,33 +13614,6 @@ def evaluate_release_readiness(
             )
         )
 
-    if isinstance(thermo_promotion_report, dict) and thermo_promotion_report.get("blocked"):
-        blocked_reasons = thermo_promotion_report.get("reasons")
-        if isinstance(blocked_reasons, list) and blocked_reasons:
-            detail = "; ".join(str(reason) for reason in blocked_reasons)
-        else:
-            detail = "thermo field promotion report indicates blocked status"
-        reasons.append(
-            Reason(
-                code="THERMO_FIELD_PROMOTION_BLOCKED",
-                severity="fail" if protected else "warn",
-                detail=detail,
-            )
-        )
-
-    signing_key = os.getenv("RUNMAT_THERMO_FIELD_SIGNING_KEY", "")
-    if governance_profile_name() == "release":
-        if not signing_key or signing_key == "runmat-dev-thermo-signing-key":
-            reasons.append(
-                Reason(
-                    code="THERMO_FIELD_SIGNING_KEY_UNSAFE",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        "release governance requires non-default thermo field signing key"
-                    ),
-                )
-            )
-
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -13807,11 +13646,6 @@ def evaluate_release_readiness(
         "thermo_max_field_coverage_drop_trend_ratio": thermo_max_field_coverage_drop_trend_ratio,
         "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
         "thermo_max_field_clamp_trend_ratio": thermo_max_field_clamp_trend_ratio,
-        "thermo_require_artifact_backed": thermo_require_artifact_backed,
-        "thermo_field_artifact_max_age_days": thermo_field_artifact_max_age_days,
-        "thermo_signing_key_safe": bool(
-            signing_key and signing_key != "runmat-dev-thermo-signing-key"
-        ),
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_field_clamp_breach_rate": thermo_field_clamp_breach_rate,
@@ -14656,18 +14490,6 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo field clamp trend threshold: "
         f"`{result.get('thermo_max_field_clamp_trend_ratio') if result.get('thermo_max_field_clamp_trend_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo artifact-backed required: "
-        f"`{result.get('thermo_require_artifact_backed') if result.get('thermo_require_artifact_backed') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field artifact max age days: "
-        f"`{result.get('thermo_field_artifact_max_age_days') if result.get('thermo_field_artifact_max_age_days') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo signing key safe: "
-        f"`{result.get('thermo_signing_key_safe') if result.get('thermo_signing_key_safe') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread breach rate: "
@@ -15524,12 +15346,6 @@ def main() -> int:
     rolling_dir = Path(
         os.getenv("RUNMAT_ANALYSIS_BASELINE_DIR", "target/runmat-analysis-artifacts/rolling")
     )
-    thermo_promotion_report_path = Path(
-        os.getenv(
-            "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
-            "target/runmat-analysis-artifacts/thermo_field_promotion_report.json",
-        )
-    )
     promotion_calibration_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION",
@@ -15552,7 +15368,6 @@ def main() -> int:
         latest,
         rolling_reports(rolling_dir),
         is_protected_branch(),
-        thermo_promotion_report=load_json(thermo_promotion_report_path),
         promotion_calibration=load_json(promotion_calibration_path),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

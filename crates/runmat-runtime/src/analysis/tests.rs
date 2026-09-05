@@ -11,13 +11,18 @@ use runmat_accelerate_api::{
     HostTensorView,
 };
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisProcedure,
-    AnalysisSequence, BeamElementModel, BeamSectionModel, CfdSolveFamily,
-    ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, ElectromagneticDomain,
-    EvidenceConfidence, ExcitationAction, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicalSignal, PhysicsFamily,
-    ProcedureStep, SignalRepresentation, SignalValue, StructuralElement, StructuralElementKind,
-    StructuralModel, StructuralNode,
+    AnalysisExcitation, AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId,
+    AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel,
+    ConductivityFrequencyPoint, CoordinateFrame, CoupledPhysicsFamily, Direction, DynamicViscosity,
+    ElectricPotential, ElectromagneticDomain, EvidenceConfidence, ExcitationAction, ExcitationCase,
+    ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+    ExcitationKinematics, ExcitationTarget, Frequency, MassDensity, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    PhysicalSignal, PhysicsFamily, ProcedureStep, ProjectionRequirement, RegionTarget, Signal,
+    SignalApproximationEvidence, SignalAxis, SignalExtrapolation, SignalId, SignalInterpolation,
+    SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
+    SignalValue, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
+    TabulatedSignal, Temperature, TurbulenceIntensity, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -308,19 +313,73 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model
 }
 
-fn sample_cfd_domain(
-    solve_family: CfdSolveFamily,
-    enabled: bool,
-) -> runmat_analysis_core::CfdDomain {
+fn sample_cfd_domain() -> runmat_analysis_core::CfdDomain {
     runmat_analysis_core::CfdDomain {
-        enabled,
-        solve_family,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 5.0,
-        turbulence_intensity: 0.06,
-        inlet_velocity_signal_id: None,
+        density: MassDensity::new(1.225),
+        dynamic_viscosity: DynamicViscosity::new(1.81e-5),
+        turbulence_intensity: TurbulenceIntensity::new(0.06),
     }
+}
+
+fn append_scalar_history_excitation<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    axis: Vec<f64>,
+    values: Vec<Q>,
+    target: ExcitationTarget,
+    direction: Option<Direction>,
+    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    let sample_count = values.len();
+    model.signals.push(signal(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Tabulated(TabulatedSignal {
+            axis: SignalAxis::TimeSeconds(axis),
+            values: values
+                .into_iter()
+                .map(|value| SignalOrdinate::Real(SignalValue::Scalar(value)))
+                .collect(),
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::HoldEndpoint,
+            breakpoints: Vec::new(),
+        }),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count,
+        },
+        provenance: SignalProvenance::Authored,
+    }));
+    let excitation_id = ExcitationId(id.to_string());
+    model.excitations.push(action(AnalysisExcitation {
+        excitation_id: excitation_id.clone(),
+        case_id: case_id.clone(),
+        target,
+        frame: CoordinateFrame::Global,
+        direction,
+        distribution: ExcitationDistribution::TopologyField,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: false,
+            preserve_moment: false,
+            relative_tolerance: 1.0e-10,
+        },
+    }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![excitation_id],
+        activation: ExcitationCaseActivation::Always,
+    });
 }
 
 fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str) {
@@ -432,18 +491,15 @@ fn sample_cht_model() -> AnalysisModel {
             AnalysisProcedure::TransientResponse,
         )],
     );
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    model.cfd = Some(sample_cfd_domain());
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 60.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
+                region_id: "beam_span".to_string(),
                 temperature_delta_k: 70.0,
             }],
             sampled_time_profile: vec![
@@ -471,77 +527,79 @@ fn sample_fsi_model() -> AnalysisModel {
             AnalysisProcedure::TransientResponse,
         )],
     );
-    let inlet_velocity_signal_id = append_velocity_history(
+    append_scalar_history_excitation(
         &mut model,
         "fsi_inlet_velocity",
         vec![0.0, 1.0],
-        vec![2.4, 4.0],
+        vec![Velocity::new(2.4), Velocity::new(4.0)],
+        ExcitationTarget::Region(RegionTarget::boundary("inlet")),
+        Some(Direction {
+            vector: [1.0, 0.0, 0.0],
+        }),
+        PhysicalSignal::Velocity,
+        ExcitationAction::InletVelocity,
     );
-    model.cfd = Some(runmat_analysis_core::CfdDomain {
-        enabled: true,
-        solve_family: CfdSolveFamily::Transient,
-        reference_density_kg_per_m3: 1.225,
-        dynamic_viscosity_pa_s: 1.81e-5,
-        inlet_velocity_m_per_s: 4.0,
-        turbulence_intensity: 0.06,
-        inlet_velocity_signal_id: Some(inlet_velocity_signal_id),
-    });
+    model.cfd = Some(sample_cfd_domain());
     model
 }
 
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
-    let temperature_signal_id = if coupling.sampled_time_profile.is_empty() {
-        None
+    for material in &mut model.materials {
+        material.thermal.reference_temperature_k = coupling.reference_temperature_k;
+        material.thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
+    }
+    let (time_seconds, kelvin) = if coupling.sampled_time_profile.is_empty() {
+        (
+            vec![0.0],
+            vec![Temperature::new(
+                coupling.reference_temperature_k + coupling.applied_temperature_delta_k,
+            )],
+        )
     } else {
-        let time_seconds = coupling
-            .sampled_time_profile
-            .iter()
-            .map(|point| point.normalized_coordinate)
-            .collect();
-        let kelvin = coupling
-            .sampled_time_profile
-            .iter()
-            .map(|point| {
-                coupling.reference_temperature_k
-                    + coupling.applied_temperature_delta_k * point.scale
-            })
-            .collect();
-        Some(append_temperature_history(
-            model,
-            "thermo_temperature_history",
-            time_seconds,
-            kelvin,
-        ))
+        (
+            coupling
+                .sampled_time_profile
+                .iter()
+                .map(|point| point.normalized_coordinate)
+                .collect(),
+            coupling
+                .sampled_time_profile
+                .iter()
+                .map(|point| {
+                    Temperature::new(
+                        coupling.reference_temperature_k
+                            + coupling.applied_temperature_delta_k * point.scale,
+                    )
+                })
+                .collect(),
+        )
     };
+    append_scalar_history_excitation(
+        model,
+        "thermo_temperature_history",
+        time_seconds,
+        kelvin,
+        ExcitationTarget::WholeModel,
+        None,
+        PhysicalSignal::Temperature,
+        ExcitationAction::TemperatureField,
+    );
+    for (index, delta) in coupling.region_temperature_deltas.iter().enumerate() {
+        append_scalar_history_excitation(
+            model,
+            &format!("thermo_region_temperature_{index}"),
+            vec![0.0],
+            vec![Temperature::new(
+                coupling.reference_temperature_k + delta.temperature_delta_k,
+            )],
+            ExcitationTarget::Region(RegionTarget::volume(&delta.region_id)),
+            None,
+            PhysicalSignal::Temperature,
+            ExcitationAction::TemperatureField,
+        );
+    }
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
-        enabled: coupling.enabled,
-        reference_temperature_k: coupling.reference_temperature_k,
-        applied_temperature_delta_k: coupling.applied_temperature_delta_k,
-        field_artifact_id: coupling.field_artifact_id,
-        field_source: coupling
-            .field_source
-            .map(|source| runmat_analysis_core::ThermoFieldSource {
-                source_id: source.source_id,
-                revision: source.revision,
-                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                    ThermoFieldInterpolationMode::Linear => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Linear
-                    }
-                    ThermoFieldInterpolationMode::Step => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Step
-                    }
-                }),
-                expected_region_ids: source.expected_region_ids,
-            }),
-        region_temperature_deltas: coupling
-            .region_temperature_deltas
-            .into_iter()
-            .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
-                region_id: delta.region_id,
-                temperature_delta_k: delta.temperature_delta_k,
-            })
-            .collect(),
-        temperature_signal_id,
+        reference_temperature: Temperature::new(coupling.reference_temperature_k),
     });
 }
 
@@ -556,41 +614,37 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             conductivity_frequency_response: Vec::new(),
         });
     }
-    let electric_potential_signal_id = if coupling.sampled_time_profile.is_empty() {
-        None
+    let (time_seconds, volts) = if coupling.sampled_time_profile.is_empty() {
+        (
+            vec![0.0],
+            vec![ElectricPotential::new(coupling.applied_voltage_v)],
+        )
     } else {
-        let time_seconds = coupling
-            .sampled_time_profile
-            .iter()
-            .map(|point| point.normalized_coordinate)
-            .collect();
-        let volts = coupling
-            .sampled_time_profile
-            .iter()
-            .map(|point| coupling.applied_voltage_v * point.scale)
-            .collect();
-        Some(append_electric_potential_history(
-            model,
-            "electro_thermal_potential_history",
-            time_seconds,
-            volts,
-        ))
+        (
+            coupling
+                .sampled_time_profile
+                .iter()
+                .map(|point| point.normalized_coordinate)
+                .collect(),
+            coupling
+                .sampled_time_profile
+                .iter()
+                .map(|point| ElectricPotential::new(coupling.applied_voltage_v * point.scale))
+                .collect(),
+        )
     };
+    append_scalar_history_excitation(
+        model,
+        "electro_thermal_potential_history",
+        time_seconds,
+        volts,
+        ExcitationTarget::Region(RegionTarget::boundary("tip")),
+        None,
+        PhysicalSignal::ElectricPotential,
+        ExcitationAction::TerminalVoltage,
+    );
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
-        enabled: coupling.enabled,
-        reference_temperature_k: coupling.reference_temperature_k,
-        applied_voltage_v: coupling.applied_voltage_v,
-        region_conductivity_scales: coupling
-            .region_conductivity_scales
-            .into_iter()
-            .map(
-                |scale| runmat_analysis_core::ElectroRegionConductivityScale {
-                    region_id: scale.region_id,
-                    conductivity_scale: scale.conductivity_scale,
-                },
-            )
-            .collect(),
-        electric_potential_signal_id,
+        reference_temperature: Temperature::new(coupling.reference_temperature_k),
     });
 }
 
@@ -960,8 +1014,8 @@ fn fea_document_rejects_solver_sequence_mismatch() {
     let err = pollster::block_on(parse_and_resolve_fea_document(&input, tmp.path()))
         .expect_err("mismatched solver and sequence should fail");
 
-    assert!(err.contains("solver options"));
-    assert!(err.contains("sequence"));
+    assert!(err.contains("solver options"), "unexpected error: {err}");
+    assert!(err.contains("thermal_step"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1639,9 +1693,8 @@ fn analysis_create_model_supports_electromagnetic_template() {
         .electromagnetic
         .as_ref()
         .expect("electromagnetic domain should be populated");
-    assert!(domain.enabled);
-    assert_eq!(domain.reference_frequency_hz, 60.0);
-    assert_eq!(domain.applied_current_a, 100.0);
+    assert_eq!(domain.reference_frequency.hertz, 60.0);
+    assert!(has_nonzero_electromagnetic_source(&envelope.data));
 }
 
 #[test]
@@ -1664,8 +1717,11 @@ fn analysis_create_model_supports_cfd_steady_template() {
         .cfd
         .as_ref()
         .expect("cfd domain should be populated");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::SteadyState);
-    assert!(cfd.inlet_velocity_signal_id.is_none());
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::Static
+    );
+    assert_eq!(cfd.density.kilograms_per_cubic_meter, 1.225);
 }
 
 #[test]
@@ -1688,8 +1744,11 @@ fn analysis_create_model_supports_cfd_transient_template() {
         .cfd
         .as_ref()
         .expect("cfd domain should be populated");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
+    assert_eq!(
+        envelope.data.sequence.steps[0].procedure,
+        AnalysisProcedure::TransientResponse
+    );
+    assert_eq!(cfd.turbulence_intensity.ratio, 0.08);
 }
 
 #[test]
@@ -1720,15 +1779,16 @@ fn analysis_create_model_supports_cht_coupled_template() {
         .cfd
         .as_ref()
         .expect("cfd domain should be populated for cht template");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
-    assert!(
+    assert_eq!(cfd.turbulence_intensity.ratio, 0.07);
+    assert_eq!(
         envelope
             .data
             .thermo_mechanical
             .as_ref()
             .expect("thermo-mechanical domain should be populated")
-            .enabled
+            .reference_temperature
+            .kelvin,
+        293.15
     );
 }
 
@@ -1764,8 +1824,7 @@ fn analysis_create_model_supports_fsi_coupled_template() {
         .cfd
         .as_ref()
         .expect("cfd domain should be populated for fsi template");
-    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
-    assert_eq!(cfd_velocity_scales(&envelope.data, cfd), vec![0.5, 1.0]);
+    assert_eq!(cfd.turbulence_intensity.ratio, 0.06);
     assert!(envelope.data.thermo_mechanical.is_none());
 }
 
@@ -1976,7 +2035,7 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
         .iter()
         .any(
             |entry| entry.procedure_step.family == PhysicsFamily::Structural
-                && entry.procedure_step.procedure == AnalysisProcedure::HarmonicResponse
+                && entry.procedure_step.procedure == AnalysisProcedure::Static
         ));
     assert!(envelope
         .data
@@ -2167,6 +2226,7 @@ fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
         assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
     }];
+    spec.execution.steps[0].step_id = model.sequence.steps[0].step_id.clone();
     spec.model = Some(model);
     let (solver_mesh_root, solver_mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("requested-canonical-solver-mesh");
@@ -2722,7 +2782,7 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
         .iter()
         .any(
             |entry| entry.procedure_step.family == PhysicsFamily::Electromagnetic
-                && entry.procedure_step.procedure == AnalysisProcedure::Static
+                && entry.procedure_step.procedure == AnalysisProcedure::HarmonicResponse
         ));
     assert!(envelope
         .data
@@ -3035,12 +3095,9 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -3143,12 +3200,9 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -4218,7 +4272,7 @@ fn analysis_trends_classifies_cfd_runs_separately() {
 
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.cfd = Some(sample_cfd_domain());
     for _ in 0..3 {
         let _ = analysis_run_cfd_with_options_op(
             &model,
@@ -4358,12 +4412,9 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -4492,12 +4543,10 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     set_model_electro_coupling(
         &mut model,
         ElectroThermalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
     );
@@ -4511,14 +4560,8 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     )
     .expect_err("transient run should reject invalid electro-thermal voltage");
 
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
-    );
-    assert_eq!(
-        err.context.get("applied_voltage_v").map(String::as_str),
-        Some("NaN")
-    );
+    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID");
+    assert!(err.message.contains("signal"));
 }
 
 #[test]
@@ -4531,12 +4574,10 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
     set_model_electro_coupling(
         &mut model,
         ElectroThermalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
     );
@@ -4564,90 +4605,6 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
 }
 
 #[test]
-fn analysis_run_transient_rejects_invalid_electro_thermal_conductivity_scale() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_invalid_electro_conductivity".to_string(),
-    )];
-    set_model_electro_coupling(
-        &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "tip".to_string(),
-                conductivity_scale: 0.0,
-            }],
-            sampled_time_profile: Vec::new(),
-        },
-    );
-
-    let err = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("transient run should reject invalid electro-thermal conductivity scale");
-
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
-    );
-    assert_eq!(
-        err.context.get("conductivity_scale").map(String::as_str),
-        Some("0")
-    );
-}
-
-#[test]
-fn analysis_run_transient_rejects_unmapped_electro_thermal_region() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_unmapped_electro_region".to_string(),
-    )];
-    set_model_electro_coupling(
-        &mut model,
-        ElectroThermalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_voltage_v: 36.0,
-            base_electrical_conductivity_s_per_m: 3.5e7,
-            resistive_heating_coefficient: 4.0e-4,
-            region_conductivity_scales: vec![ElectroRegionConductivityScale {
-                region_id: "not_a_model_region".to_string(),
-                conductivity_scale: 1.0,
-            }],
-            sampled_time_profile: Vec::new(),
-        },
-    );
-
-    let err = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("transient run should reject unmapped electro-thermal regions");
-
-    assert_eq!(
-        err.error_code,
-        "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS"
-    );
-    assert_eq!(
-        err.context.get("region_id").map(String::as_str),
-        Some("not_a_model_region")
-    );
-}
-
-#[test]
 fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_solid_model();
@@ -4659,12 +4616,9 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -4768,12 +4722,9 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -4874,13 +4825,6 @@ impl Drop for EnvVarRestoreGuard {
             std::env::remove_var(self.key);
         }
     }
-}
-
-fn scoped_thermo_field_artifact_root(root: &Path) -> EnvVarRestoreGuard {
-    const KEY: &str = "RUNMAT_THERMO_FIELD_ARTIFACT_ROOT";
-    let previous = std::env::var(KEY).ok();
-    std::env::set_var(KEY, root.display().to_string());
-    EnvVarRestoreGuard { key: KEY, previous }
 }
 
 struct FeaRuntimeConfigRestoreGuard {
@@ -5111,7 +5055,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
 
     let mut cfd_model = sample_model();
     cfd_model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
-    cfd_model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    cfd_model.cfd = Some(sample_cfd_domain());
     let cfd = analysis_run_cfd_with_options_op(
         &cfd_model,
         ComputeBackend::Cpu,
@@ -5162,12 +5106,9 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     set_model_thermo_coupling(
         &mut thermal_model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 20.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: vec![
                 runmat_analysis_fea::SolverSampledScalePoint {
@@ -5846,31 +5787,11 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
 }
 
 #[test]
-fn analysis_run_cfd_rejects_disabled_cfd_domain() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, false));
-    let err = analysis_run_cfd_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cfd run should fail for disabled cfd domain");
-
-    assert_eq!(err.operation, "fea.run_cfd");
-    assert_eq!(err.op_version, "fea.run_cfd/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_OPTIONS");
-}
-
-#[test]
 fn analysis_run_cfd_rejects_moment_excitations() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.cfd = Some(sample_cfd_domain());
     replace_with_moment_excitation(&mut model, "cfd_moment");
 
     let err = analysis_run_cfd_with_options_op(
@@ -6021,12 +5942,9 @@ fn analysis_run_cht_rejects_uncoupled_thermal_step() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 50.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -6050,7 +5968,7 @@ fn analysis_run_cht_rejects_uncoupled_fluid_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    model.cfd = Some(sample_cfd_domain());
     let err = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6073,7 +5991,8 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
         .cfd
         .as_mut()
         .expect("cht model should include cfd")
-        .dynamic_viscosity_pa_s = 0.0;
+        .dynamic_viscosity
+        .pascal_seconds = 0.0;
     let err = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6181,7 +6100,7 @@ fn analysis_run_fsi_rejects_uncoupled_fluid_step() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    model.cfd = Some(sample_cfd_domain());
     let err = analysis_run_fsi_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6204,7 +6123,8 @@ fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
         .cfd
         .as_mut()
         .expect("fsi model should include cfd")
-        .dynamic_viscosity_pa_s = 0.0;
+        .dynamic_viscosity
+        .pascal_seconds = 0.0;
     let err = analysis_run_fsi_with_options_op(
         &model,
         ComputeBackend::Cpu,
@@ -6294,9 +6214,7 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
 
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_FSI_INTERFACE_CLOSURE"
-            && diag
-                .message
-                .contains("interface_stiffness_pa_per_m=800000000")
+            && diag.message.contains("interface_stiffness_pa_per_m=")
     }));
     assert!(envelope
         .data
@@ -6330,9 +6248,7 @@ fn configure_valid_em_authoring(model: &mut AnalysisModel) {
         }
     }
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: Frequency::new(60.0),
     });
     model.constraints = vec![magnetic_ground("em_ground", "em_region")];
     model.boundaries = vec![magnetic_insulation("em_insulation", "em_region")];
@@ -6481,9 +6397,7 @@ fn analysis_run_electromagnetic_harmonic_contract_emits_typed_payload() {
         ],
     });
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: Frequency::new(60.0),
     });
     configure_valid_em_authoring(&mut model);
     let envelope = analysis_run_electromagnetic_with_options_op(
@@ -6752,9 +6666,7 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
         ],
     });
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: Frequency::new(60.0),
     });
     configure_valid_em_authoring(&mut model);
     let envelope = analysis_run_electromagnetic_with_options_op(
@@ -6806,9 +6718,7 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: Frequency::new(60.0),
     });
     let err = analysis_run_electromagnetic_with_options_op(
         &model,
@@ -6837,14 +6747,11 @@ fn analysis_run_thermal_returns_temperature_payload() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 60.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
+                region_id: "beam_span".to_string(),
                 temperature_delta_k: 70.0,
             }],
             sampled_time_profile: vec![
@@ -7030,22 +6937,10 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
-                    region_id: "tip".to_string(),
-                    temperature_delta_k: 95.0,
-                },
-                ThermoRegionTemperatureDelta {
-                    region_id: "root".to_string(),
-                    temperature_delta_k: 60.0,
-                },
-            ],
+            region_temperature_deltas: Vec::new(),
             sampled_time_profile: vec![
                 runmat_analysis_fea::SolverSampledScalePoint {
                     normalized_coordinate: 0.0,
@@ -7376,12 +7271,9 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -7459,12 +7351,9 @@ fn nonlinear_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -7824,7 +7713,7 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             target: runmat_analysis_core::RegionTarget::boundary("fluid_wall_upper"),
         };
     }
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.cfd = Some(sample_cfd_domain());
 
     let envelope = analysis_run_cfd_with_options_op(
         &model,
@@ -7989,7 +7878,7 @@ fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.boundaries.clear();
     model.constraints = sample_cfd_constraints(4.25);
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.cfd = Some(sample_cfd_domain());
 
     let envelope = analysis_run_cfd_with_options_op(
         &model,
@@ -8049,7 +7938,7 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
-    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    model.cfd = Some(sample_cfd_domain());
     model.boundaries.clear();
     model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Fluid(
         runmat_analysis_core::FluidConstraint {
@@ -8515,19 +8404,11 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 70.0,
             thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: None,
-            field_source: Some(ThermoFieldSource {
-                source_id: "field/transient-a".to_string(),
-                revision: 1,
-                interpolation_mode: Some(ThermoFieldInterpolationMode::Linear),
-                expected_region_ids: vec!["tip".to_string()],
-            }),
             region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "tip".to_string(),
+                region_id: "beam_span".to_string(),
                 temperature_delta_k: 70.0,
             }],
             sampled_time_profile: vec![
@@ -8552,11 +8433,12 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
     )
     .expect_err("non-monotonic thermo time template should be rejected");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID");
+    assert!(err.message.contains("signal"));
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
+fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
@@ -8565,18 +8447,13 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: Some(ThermoFieldSource {
-                source_id: "field/nonlinear-a".to_string(),
-                revision: 2,
-                interpolation_mode: Some(ThermoFieldInterpolationMode::Step),
-                expected_region_ids: vec!["missing_region".to_string()],
-            }),
-            region_temperature_deltas: Vec::new(),
+            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                region_id: "missing_region".to_string(),
+                temperature_delta_k: 80.0,
+            }],
             sampled_time_profile: Vec::new(),
         },
     );
@@ -8635,261 +8512,6 @@ fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
 }
 
 #[test]
-fn analysis_run_transient_can_resolve_thermo_field_artifact() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
-    )];
-
-    let root = temp_artifact_root("transient-thermo-resolve").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create thermo field artifact root");
-    let mut field_artifact = serde_json::json!({
-        "schema_version": "fea_thermo_field_artifact/v1",
-        "source_geometry_id": model.geometry_id,
-        "source_geometry_revision": model.geometry_revision,
-        "artifact_status": "approved",
-        "approved_by": "release-bot",
-        "field_source": {
-            "source_id": "artifact/transient-field",
-            "revision": 1,
-            "interpolation_mode": "linear",
-            "expected_region_ids": [],
-        },
-        "region_temperature_deltas": [
-            {"region_id": "beam_span", "temperature_delta_k": 72.0}
-        ],
-        "sampled_time_profile": [
-            {"normalized_coordinate": 0.0, "scale": 0.5},
-            {"normalized_coordinate": 1.0, "scale": 1.0}
-        ]
-    });
-    let artifact_hash = thermo_field_payload_hash(
-        &serde_json::from_value(field_artifact.clone()).expect("decode artifact struct"),
-    );
-    field_artifact["payload_hash"] = serde_json::Value::String(artifact_hash.clone());
-    field_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
-        &artifact_hash,
-        "release-bot",
-        "runmat-dev-thermo-signing-key",
-    ));
-    fs::write(
-        root.join("field_ok.json"),
-        serde_json::to_vec_pretty(&field_artifact).expect("encode thermo field artifact"),
-    )
-    .expect("write thermo field artifact");
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: Some("field_ok".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
-        },
-    );
-    let run = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("transient run should resolve thermo field artifact");
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("results should succeed");
-
-    let _ = fs::remove_dir_all(&root);
-
-    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_none());
-    assert_eq!(results.data.summary.thermo_region_delta_count, None);
-}
-
-#[test]
-fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
-    )];
-
-    let root = temp_artifact_root("transient-thermo-missing").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create empty thermo field artifact root");
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: Some("missing".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
-        },
-    );
-
-    let err = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("missing thermo field artifact should be rejected");
-    let _ = fs::remove_dir_all(&root);
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_THERMO_FIELD.NOT_FOUND");
-}
-
-#[test]
-fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
-    )];
-
-    let root = temp_artifact_root("transient-thermo-inline-parity").join("thermo-fields");
-    let _root_guard = scoped_thermo_field_artifact_root(&root);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create thermo field artifact root");
-    let mut inline_equivalent_artifact = serde_json::json!({
-        "schema_version": "fea_thermo_field_artifact/v1",
-        "source_geometry_id": model.geometry_id,
-        "source_geometry_revision": model.geometry_revision,
-        "artifact_status": "approved",
-        "approved_by": "release-bot",
-        "field_source": {
-            "source_id": "artifact/inline-equivalent",
-            "revision": 1,
-            "interpolation_mode": "linear",
-            "expected_region_ids": []
-        },
-        "region_temperature_deltas": [
-            {"region_id": "beam_span", "temperature_delta_k": 90.0}
-        ],
-        "sampled_time_profile": [
-            {"normalized_coordinate": 0.0, "scale": 0.4},
-            {"normalized_coordinate": 1.0, "scale": 1.0}
-        ]
-    });
-    let inline_hash = thermo_field_payload_hash(
-        &serde_json::from_value(inline_equivalent_artifact.clone())
-            .expect("decode inline artifact struct"),
-    );
-    inline_equivalent_artifact["payload_hash"] = serde_json::Value::String(inline_hash.clone());
-    inline_equivalent_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
-        &inline_hash,
-        "release-bot",
-        "runmat-dev-thermo-signing-key",
-    ));
-    fs::write(
-        root.join("inline_equivalent.json"),
-        serde_json::to_vec_pretty(&inline_equivalent_artifact).expect("encode artifact"),
-    )
-    .expect("write artifact");
-
-    let mut inline_model = model.clone();
-    set_model_thermo_coupling(
-        &mut inline_model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "beam_span".to_string(),
-                temperature_delta_k: 90.0,
-            }],
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.4,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
-    let inline = analysis_run_transient_with_options_op(
-        &inline_model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("inline thermo run should succeed");
-
-    let mut artifact_model = model;
-    set_model_thermo_coupling(
-        &mut artifact_model,
-        ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 90.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: Some("inline_equivalent".to_string()),
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
-        },
-    );
-    let artifact_backed = analysis_run_transient_with_options_op(
-        &artifact_model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("artifact-backed thermo run should succeed");
-    let _ = fs::remove_dir_all(&root);
-
-    let inline_transient = inline
-        .data
-        .transient_results
-        .as_ref()
-        .expect("inline transient payload");
-    let artifact_transient = artifact_backed
-        .data
-        .transient_results
-        .as_ref()
-        .expect("artifact transient payload");
-    let inline_final = inline_transient
-        .displacement_snapshots
-        .last()
-        .and_then(|field| field.as_host_f64())
-        .expect("inline host displacement");
-    let artifact_final = artifact_transient
-        .displacement_snapshots
-        .last()
-        .and_then(|field| field.as_host_f64())
-        .expect("artifact host displacement");
-    assert_eq!(inline_final.len(), artifact_final.len());
-    let mut max_abs = 0.0_f64;
-    for (lhs, rhs) in inline_final.iter().zip(artifact_final.iter()) {
-        max_abs = max_abs.max((lhs - rhs).abs());
-    }
-    assert!(max_abs <= 1.0e-12);
-}
-
-#[test]
 fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -8902,12 +8524,9 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },
@@ -8987,12 +8606,9 @@ fn transient_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
     set_model_thermo_coupling(
         &mut model,
         ThermoMechanicalCouplingOptions {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: Vec::new(),
         },

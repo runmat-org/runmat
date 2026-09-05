@@ -169,10 +169,6 @@ struct FixtureRunRecord {
     thermo_spatial_coverage_ratio: Option<f64>,
     thermo_field_extrapolation_ratio: Option<f64>,
     thermo_field_clamp_ratio: Option<f64>,
-    thermo_field_artifact_id: Option<String>,
-    thermo_field_artifact_approved: Option<bool>,
-    thermo_field_artifact_age_days: Option<f64>,
-    thermo_field_artifact_provenance_valid: Option<bool>,
     thermo_transient_severity: Option<f64>,
     thermo_nonlinear_severity: Option<f64>,
     electro_thermal_coupling_enabled: Option<bool>,
@@ -278,9 +274,7 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "thermo_gradient_benign_gpu_provider",
     "thermo_gradient_pathological_gpu_provider",
     "thermo_ramp_smooth_gpu_provider",
-    "thermo_ramp_smooth_field_artifact_gpu_provider",
     "thermo_shock_oscillatory_gpu_provider",
-    "thermo_shock_oscillatory_field_artifact_gpu_provider",
     "thermal_standalone_ramp_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
@@ -318,13 +312,6 @@ fn env_path(primary: &str, legacy: &str) -> Option<PathBuf> {
 fn harness_artifact_root() -> PathBuf {
     env_path("RUNMAT_FEA_ARTIFACT_ROOT", "RUNMAT_ANALYSIS_ARTIFACT_ROOT")
         .unwrap_or_else(default_harness_artifact_root)
-}
-
-fn harness_thermo_field_artifact_root(artifact_root: &Path) -> PathBuf {
-    std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| artifact_root.join("thermo-fields"))
 }
 
 fn synthesized_nonlinear_model() -> AnalysisModel {
@@ -388,7 +375,6 @@ fn fea_conformance_manifest_uses_physical_fixture_language() {
 #[test]
 fn fea_benchmark_conformance_manifest_gates() {
     let artifact_root = harness_artifact_root();
-    let thermo_field_artifact_root = harness_thermo_field_artifact_root(&artifact_root);
     let store_root = artifact_root
         .join("store")
         .join(format!("harness-{}", std::process::id()));
@@ -402,7 +388,6 @@ fn fea_benchmark_conformance_manifest_gates() {
     runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
         artifact_root: Some(artifact_root.clone()),
         study_artifact_root: Some(artifact_root.join("studies")),
-        thermo_field_artifact_root: Some(thermo_field_artifact_root),
     })
     .expect("configure FEA runtime artifact roots for harness");
 

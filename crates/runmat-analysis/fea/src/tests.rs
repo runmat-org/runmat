@@ -49,7 +49,9 @@ fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisCon
         },
     )
 }
-use runmat_analysis_core::{ElectromagneticDomain, MaterialElectricalModel, ProcedureStep};
+use runmat_analysis_core::{
+    ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
+};
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
@@ -288,11 +290,9 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
             step_count: 2,
             solver_mesh: Some(mesh.clone()),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 45.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -331,10 +331,9 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     assert_eq!(nonlinear.displacement_snapshots[0].shape, vec![4, 3]);
 
     let mut electromagnetic_model = model.clone();
+    replace_fixture_with_electric_current(&mut electromagnetic_model, "coil_current", "tip", 120.0);
     electromagnetic_model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 120.0,
+        reference_frequency: Frequency::new(60.0),
     });
     for material in &mut electromagnetic_model.materials {
         material.electrical = Some(MaterialElectricalModel::default());
@@ -815,11 +814,9 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -915,11 +912,9 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -966,11 +961,9 @@ fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling(
         ComputeBackend::Cpu,
         NonlinearSolveOptions {
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -1274,9 +1267,7 @@ fn electromagnetic_pipeline_consumes_electric_current_without_structural_admissi
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
     model.electromagnetic = Some(ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 4.0,
+        reference_frequency: Frequency::new(60.0),
     });
     for material in &mut model.materials {
         material.electrical = Some(MaterialElectricalModel::default());
@@ -1520,11 +1511,9 @@ fn thermal_solver_emits_heat_transfer_fields() {
         ThermalSolveOptions {
             step_count: 4,
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 45.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -1693,11 +1682,9 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         TransientSolveOptions {
             step_count: 24,
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
@@ -1796,12 +1783,10 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
         TransientSolveOptions {
             step_count: 12,
             electro_thermal_context: Some(FeaElectroThermalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_voltage_v: 36.0,
                 base_electrical_conductivity_s_per_m: 3.5e7,
                 resistive_heating_coefficient: 4.0e-4,
-                region_conductivity_scales: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),
             ..experimental_transient_options()
@@ -2047,11 +2032,9 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
         ComputeBackend::Cpu,
         NonlinearSolveOptions {
             thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                enabled: true,
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.4e-5,
-                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 sampled_time_profile: Vec::new(),
             }),

@@ -3,20 +3,21 @@ use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisInterface, AnalysisInterfaceKind, AnalysisModel,
     AnalysisModelId, AnalysisProcedure, AnalysisSequence, BoundaryOperator, CfdDomain,
     ComplexPhase, ConjugateHeatTransferInterfaceModel, ContactFriction, ContactInterfaceModel,
-    CoordinateFrame, Displacement, ElectricCurrent, ElectricPotential, ElectricalConstraint,
-    ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain, EvidenceConfidence,
-    ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint, FluidConstraintKind,
-    FluidStructureInterfaceModel, FluidStructureKinematics, FormulationRequirement,
-    FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
-    MagneticConstraintKind, MagneticVectorPotential, MaterialAcousticModel, MaterialAssignment,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel, PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
-    PhaseShiftedPeriodicConstraint, PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs,
-    PrescribedValue, Pressure, ProcedureStep, RegionTarget, Rotation, RotationDofValue,
-    SolutionSpace, SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
-    StructuralRotationDof, StructuralTranslationDof, Temperature, TemperatureDifference,
-    ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
-    ThermoMechanicalDomain, Translation, TranslationDofValue, Velocity,
+    CoordinateFrame, Displacement, DynamicViscosity, ElectricCurrent, ElectricPotential,
+    ElectricalConstraint, ElectricalConstraintKind, ElectroThermalDomain, ElectromagneticDomain,
+    EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationTarget, FluidConstraint,
+    FluidConstraintKind, FluidStructureInterfaceModel, FluidStructureKinematics,
+    FormulationRequirement, Frequency, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
+    MagneticConstraint, MagneticConstraintKind, MagneticVectorPotential, MassDensity,
+    MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
+    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
+    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
+    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
+    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
+    ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
+    ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_builtins::{
@@ -60,6 +61,7 @@ mod author_study;
 pub(crate) mod boundaries;
 pub(crate) mod classes;
 pub(crate) mod constraints;
+pub(crate) mod domains;
 pub(crate) mod interfaces;
 mod modeling;
 pub(crate) mod steps;
@@ -83,7 +85,6 @@ const SWEEP_NAME: &str = "fea.sweep";
 const MODEL_NAME: &str = "fea.model";
 const MATERIAL_NAME: &str = "fea.material";
 const MATERIAL_ASSIGNMENT_NAME: &str = "fea.materialAssignment";
-const DOMAIN_NAME: &str = "fea.domain";
 const VALIDATE_NAME: &str = "fea.validate";
 const PLAN_NAME: &str = "fea.plan";
 const RUN_NAME: &str = "fea.run";
@@ -246,22 +247,6 @@ const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
         arity: BuiltinParamArity::Variadic,
         default: None,
         description: "Expected-material and confidence options.",
-    },
-];
-const DOMAIN_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Physics-domain kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Typed fields for the selected domain kind.",
     },
 ];
 const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
@@ -433,11 +418,6 @@ const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         inputs: &MATERIAL_ASSIGNMENT_INPUTS,
         outputs: &OUT_ANY,
     }];
-const DOMAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "domain = fea.domain(kind, Name, Value, ...)",
-    inputs: &DOMAIN_INPUTS,
-    outputs: &OUT_ANY,
-}];
 const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "component = fea.component(args, ...)",
     inputs: &IN_VARIADIC_ARGS,
@@ -561,12 +541,6 @@ pub const FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescrip
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-pub const FEA_DOMAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOMAIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPONENT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -660,25 +634,6 @@ pub const FEA_MATERIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         &MATERIAL_PLASTIC_INTEGER_INPUTS,
         BuiltinIntegerOverloadKind::ScalarOnly,
     ),
-];
-
-const DOMAIN_FLOATING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "domain numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-const DOMAIN_REVISION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "field_source.revision",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-    notes: "The structural revision is decoded exactly as u32 and rejects negative or out-of-range integer values.",
-}];
-pub const FEA_DOMAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = [
-    fea_floating_capability("thermo-mechanical physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
-    BuiltinIntegerCapabilityDescriptor { form: "thermo field-source revision", inputs: &DOMAIN_REVISION_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The RunMat-native constructor preserves the exact u32 revision in both typed model storage and its public object representation." },
-    fea_floating_capability("electro-thermal physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
-    fea_floating_capability("electromagnetic physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
-    fea_floating_capability("CFD physics fields", &DOMAIN_FLOATING_INTEGER_INPUTS, BuiltinIntegerOverloadKind::Multiple),
 ];
 
 pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
@@ -847,19 +802,6 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     create_material_assignment_object_from_args(args)
-}
-
-#[runtime_builtin(
-    name = "fea.domain",
-    category = "fea",
-    summary = "Create a typed FEA physics domain object.",
-    keywords = "fea,domain,thermal,electromagnetic,cfd",
-    descriptor(crate::builtins::fea::FEA_DOMAIN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_DOMAIN_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea"
-)]
-pub async fn fea_domain_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    create_domain_object_from_args(args)
 }
 
 #[runtime_builtin(
@@ -1882,32 +1824,6 @@ fn json_number(builtin: &'static str, value: f64) -> BuiltinResult<serde_json::V
         })
 }
 
-fn json_with_overrides(
-    builtin: &'static str,
-    mut base: serde_json::Value,
-    fields: serde_json::Map<String, serde_json::Value>,
-    label: &str,
-) -> BuiltinResult<serde_json::Value> {
-    let Some(object) = base.as_object_mut() else {
-        return Err(builtin_error(
-            builtin,
-            &ERROR_INTERNAL,
-            format!("{label} default payload is not an object"),
-        ));
-    };
-    for (key, value) in fields {
-        if !object.contains_key(&key) {
-            return Err(builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                format!("unsupported {label} option `{key}`"),
-            ));
-        }
-        object.insert(key, value);
-    }
-    Ok(base)
-}
-
 fn json_deserialize<T: DeserializeOwned>(
     builtin: &'static str,
     value: serde_json::Value,
@@ -1915,16 +1831,6 @@ fn json_deserialize<T: DeserializeOwned>(
 ) -> BuiltinResult<T> {
     serde_json::from_value(value)
         .map_err(|err| builtin_error(builtin, &ERROR_INPUT, format!("invalid {label}: {err}")))
-}
-
-fn typed_domain_data<T: DeserializeOwned + Serialize>(
-    builtin: &'static str,
-    label: &str,
-    value: serde_json::Value,
-) -> BuiltinResult<serde_json::Value> {
-    let typed: T = json_deserialize(builtin, value, label)?;
-    serde_json::to_value(typed)
-        .map_err(|err| builtin_error_with_source(builtin, &ERROR_INTERNAL, err.to_string(), err))
 }
 
 fn json_to_string(value: serde_json::Value) -> BuiltinResult<String> {
@@ -2904,9 +2810,13 @@ fn sanitize_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::fea::values::{
+        dynamic_viscosity_builtin, frequency_builtin, mass_density_builtin,
+        temperature_kelvin_builtin, turbulence_intensity_builtin,
+    };
     use futures::executor::block_on;
     use runmat_meshing_core::CanonicalMeshingContract;
-    use runmat_value::{CellArray, StructValue};
+    use runmat_value::CellArray;
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -3372,17 +3282,12 @@ mod tests {
             IntValue::U64(u64::MAX),
         ] {
             let expected = integer.to_f64();
-            let domain = block_on(fea_domain_builtin(vec![
-                Value::String("electromagnetic".into()),
-                Value::String("AppliedCurrentA".into()),
-                Value::Int(integer.clone()),
-            ]))
-            .expect("domain integer field");
-            let domain: DomainPayload = object_payload(&domain);
-            let domain: runmat_analysis_core::ElectromagneticDomain =
-                json_deserialize(DOMAIN_NAME, domain.data, "electromagnetic domain")
-                    .expect("typed domain storage boundary");
-            assert_eq!(domain.applied_current_a, expected);
+            let frequency = block_on(frequency_builtin(Value::Int(integer.clone())))
+                .expect("frequency integer field");
+            let domain = block_on(domains::electromagnetic_domain_builtin(frequency))
+                .expect("typed electromagnetic domain");
+            let domain: runmat_analysis_core::ElectromagneticDomain = object_payload(&domain);
+            assert_eq!(domain.reference_frequency.hertz, expected);
 
             let material = block_on(fea_material_builtin(vec![
                 Value::String("material".into()),
@@ -3398,48 +3303,82 @@ mod tests {
     }
 
     #[test]
-    fn fea_domain_revision_and_field_metadata_remain_exact_in_public_objects() {
-        let mut field_source = StructValue::new();
-        field_source.insert("source_id", Value::String("temperature".into()));
-        field_source.insert("revision", Value::Int(IntValue::U32(u32::MAX)));
-        let domain = block_on(fea_domain_builtin(vec![
-            Value::String("thermoMechanical".into()),
-            Value::String("FieldSource".into()),
-            Value::Struct(field_source),
-        ]))
-        .expect("domain source revision");
-        let Value::Object(domain) = domain else {
-            panic!("expected domain object");
-        };
-        let Value::Struct(data) = domain.properties.get("data").expect("domain data") else {
-            panic!("expected domain data struct");
-        };
-        let Value::Struct(source) = data.fields.get("field_source").expect("field source") else {
-            panic!("expected field source struct");
-        };
-        assert_eq!(
-            source.fields.get("revision"),
-            Some(&Value::Int(IntValue::U64(u64::from(u32::MAX))))
-        );
+    fn fea_domain_constructors_preserve_typed_physics_boundaries() {
+        let temperature =
+            block_on(temperature_kelvin_builtin(Value::Num(293.15))).expect("typed temperature");
+        let frequency = block_on(frequency_builtin(Value::Num(60.0))).expect("typed frequency");
+        let density = block_on(mass_density_builtin(Value::Num(1.225))).expect("typed density");
+        let viscosity =
+            block_on(dynamic_viscosity_builtin(Value::Num(1.81e-5))).expect("typed viscosity");
+        let turbulence = block_on(turbulence_intensity_builtin(Value::Num(0.05)))
+            .expect("typed turbulence intensity");
 
-        for revision in [
-            Value::Int(IntValue::I8(-1)),
-            Value::Int(IntValue::U64(u64::MAX)),
-            Value::Num(1.0),
+        let thermo = block_on(domains::thermomechanical_domain_builtin(
+            temperature.clone(),
+        ))
+        .expect("thermo-mechanical domain");
+        let electro = block_on(domains::electrothermal_domain_builtin(temperature))
+            .expect("electro-thermal domain");
+        let electromagnetic = block_on(domains::electromagnetic_domain_builtin(frequency.clone()))
+            .expect("electromagnetic domain");
+        let fluid = block_on(domains::fluid_domain_builtin(
+            density, viscosity, turbulence,
+        ))
+        .expect("fluid domain");
+
+        for (value, class_name) in [
+            (thermo, FEA_THERMOMECHANICAL_DOMAIN_CLASS),
+            (electro, FEA_ELECTROTHERMAL_DOMAIN_CLASS),
+            (electromagnetic, FEA_ELECTROMAGNETIC_DOMAIN_CLASS),
+            (fluid, FEA_FLUID_DOMAIN_CLASS),
         ] {
-            let mut field_source = StructValue::new();
-            field_source.insert("source_id", Value::String("temperature".into()));
-            field_source.insert("revision", revision);
-            let error = block_on(fea_domain_builtin(vec![
-                Value::String("thermoMechanical".into()),
-                Value::String("FieldSource".into()),
-                Value::Struct(field_source),
-            ]))
-            .expect_err("invalid structural revision must reject");
-            assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
-            assert_eq!(error.context.builtin.as_deref(), Some(DOMAIN_NAME));
+            assert_object_class(&value, class_name);
         }
 
+        let error = block_on(domains::thermomechanical_domain_builtin(frequency))
+            .expect_err("frequency must not cross the temperature boundary");
+        assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
+    }
+
+    #[test]
+    fn fea_domain_classes_expose_only_their_own_constructors() {
+        ensure_fea_classes_registered();
+        assert!(crate::class_registry::lookup_method(
+            FEA_THERMOMECHANICAL_DOMAIN_CLASS,
+            "atReferenceTemperature"
+        )
+        .is_some());
+        assert!(crate::class_registry::lookup_method(
+            FEA_THERMOMECHANICAL_DOMAIN_CLASS,
+            "atFrequency"
+        )
+        .is_none());
+        assert!(
+            crate::class_registry::lookup_method(FEA_FLUID_DOMAIN_CLASS, "newtonian").is_some()
+        );
+        assert!(runmat_builtins::builtin_function_by_name("fea.domain").is_none());
+    }
+
+    #[test]
+    fn fea_model_rejects_duplicate_domain_families() {
+        let temperature =
+            block_on(temperature_kelvin_builtin(Value::Num(293.15))).expect("typed temperature");
+        let first = block_on(domains::thermomechanical_domain_builtin(
+            temperature.clone(),
+        ))
+        .expect("first domain");
+        let second =
+            block_on(domains::thermomechanical_domain_builtin(temperature)).expect("second domain");
+        let error = modeling::domain_vec_from_value("fea.model", &cell(vec![first, second]))
+            .expect_err("duplicate family must reject");
+        assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
+        assert!(error
+            .message()
+            .contains("duplicate thermo-mechanical FEA domain"));
+    }
+
+    #[test]
+    fn fea_field_metadata_remains_exact_in_public_objects() {
         let field = AnalysisField {
             field_id: "stress".into(),
             shape: vec![u32::MAX as usize, 0],
@@ -3490,11 +3429,7 @@ mod tests {
             })
         };
         let cases = [
-            block_on(fea_domain_builtin(vec![
-                Value::String("electromagnetic".into()),
-                Value::String("AppliedCurrentA".into()),
-                resident(),
-            ])),
+            block_on(frequency_builtin(resident())),
             block_on(fea_material_builtin(vec![
                 Value::String("material".into()),
                 Value::String("YoungsModulusPa".into()),
@@ -3506,7 +3441,10 @@ mod tests {
         for result in cases {
             let error = result.expect_err("resident FEA constructor field must reject");
             assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
-            assert!(error.message().contains("cannot convert value"));
+            assert!(
+                error.message().contains("real numeric scalar")
+                    || error.message().contains("cannot convert value")
+            );
         }
     }
 
@@ -3843,21 +3781,11 @@ execution:
         .expect("analysis step should build");
         assert_object_class(&step, FEA_STRUCTURAL_STEP_CLASS);
 
-        let selector = format!("id:{region_id}");
-        let mut regional_delta = StructValue::new();
-        regional_delta.insert("region_id", Value::String(selector.clone()));
-        regional_delta.insert("temperature_delta_k", Value::Int(IntValue::I8(5)));
-        let mut field_source = StructValue::new();
-        field_source.insert("source_id", Value::String("temperature-map".into()));
-        field_source.insert("revision", Value::Int(IntValue::U32(7)));
-        field_source.insert("expected_region_ids", cell(vec![Value::String(selector)]));
-        let domain = block_on(fea_domain_builtin(vec![
-            Value::String("thermoMechanical".into()),
-            Value::String("RegionTemperatureDeltas".into()),
-            cell(vec![Value::Struct(regional_delta)]),
-            Value::String("FieldSource".into()),
-            Value::Struct(field_source),
-        ]))
+        let reference_temperature = block_on(temperature_kelvin_builtin(Value::Num(293.15)))
+            .expect("reference temperature");
+        let domain = block_on(domains::thermomechanical_domain_builtin(
+            reference_temperature,
+        ))
         .expect("thermo-mechanical domain should build");
 
         let model = block_on(fea_model_builtin(vec![
@@ -3884,14 +3812,7 @@ execution:
         let thermo = decoded_model
             .thermo_mechanical
             .expect("thermo-mechanical domain");
-        assert_eq!(thermo.region_temperature_deltas[0].region_id, region_id);
-        assert_eq!(
-            thermo
-                .field_source
-                .expect("field source")
-                .expected_region_ids,
-            vec![region_id.clone()]
-        );
+        assert_eq!(thermo.reference_temperature.kelvin, 293.15);
 
         let study = block_on(fea_study_builtin(vec![
             Value::String("bracket_static".to_string()),

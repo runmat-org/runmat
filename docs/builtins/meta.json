@@ -53739,6 +53739,89 @@
       ]
     },
     {
+      "name": "fea.DynamicViscosity.pascalSeconds",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.DynamicViscosity.pascalSeconds(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.ElectricCurrent.amperes",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54330,6 +54413,64 @@
       }
     },
     {
+      "name": "fea.ElectroThermalDomain.atReferenceTemperature",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "domain = fea.ElectroThermalDomain.atReferenceTemperature(referenceTemperature)",
+          "inputs": [
+            {
+              "name": "reference_temperature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.Temperature used as the constitutive reference state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA domain constructors accept dimensioned quantity objects; integer handling belongs to those quantity constructors."
+      }
+    },
+    {
       "name": "fea.ElectroThermalStep.nonlinear",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -54443,6 +54584,64 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
+      }
+    },
+    {
+      "name": "fea.ElectromagneticDomain.atFrequency",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "domain = fea.ElectromagneticDomain.atFrequency(frequency)",
+          "inputs": [
+            {
+              "name": "frequency",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed positive fea.Frequency for the frequency-domain formulation."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA domain constructors accept dimensioned quantity objects; integer handling belongs to those quantity constructors."
       }
     },
     {
@@ -55073,6 +55272,78 @@
       }
     },
     {
+      "name": "fea.FluidDomain.newtonian",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "domain = fea.FluidDomain.newtonian(density, dynamicViscosity, turbulenceIntensity)",
+          "inputs": [
+            {
+              "name": "density",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed positive fea.MassDensity."
+            },
+            {
+              "name": "dynamic_viscosity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed positive fea.DynamicViscosity."
+            },
+            {
+              "name": "turbulence_intensity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.TurbulenceIntensity in [0, 1]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA domain constructors accept dimensioned quantity objects; integer handling belongs to those quantity constructors."
+      }
+    },
+    {
       "name": "fea.FluidStep.steadyState",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -55317,6 +55588,89 @@
         "kind": "NotApplicable",
         "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
+    },
+    {
+      "name": "fea.Frequency.hertz",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.Frequency.hertz(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
     },
     {
       "name": "fea.FrictionCoefficient.ratio",
@@ -56269,6 +56623,89 @@
       "signatures": [
         {
           "label": "value = fea.MagneticVectorPotential.webersPerMeter(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.MassDensity.kilogramsPerCubicMeter",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.MassDensity.kilogramsPerCubicMeter(value)",
           "inputs": [
             {
               "name": "value",
@@ -59540,6 +59977,64 @@
       }
     },
     {
+      "name": "fea.ThermoMechanicalDomain.atReferenceTemperature",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "domain = fea.ThermoMechanicalDomain.atReferenceTemperature(referenceTemperature)",
+          "inputs": [
+            {
+              "name": "reference_temperature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.Temperature used as the constitutive reference state."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA domain constructors accept dimensioned quantity objects; integer handling belongs to those quantity constructors."
+      }
+    },
+    {
       "name": "fea.ThermoMechanicalStep.transient",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -59760,6 +60255,89 @@
           "backend": "HostOnly",
           "overload": "FunctionSpecific",
           "notes": "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.TurbulenceIntensity.ratio",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.TurbulenceIntensity.ratio(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
         }
       ]
     },
@@ -59985,204 +60563,6 @@
         "kind": "NotApplicable",
         "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
       }
-    },
-    {
-      "name": "fea.domain",
-      "output_mode": "Fixed",
-      "completion_policy": "Public",
-      "signatures": [
-        {
-          "label": "domain = fea.domain(kind, Name, Value, ...)",
-          "inputs": [
-            {
-              "name": "kind",
-              "ty": "StringScalar",
-              "arity": "Required",
-              "default": null,
-              "description": "Physics-domain kind."
-            },
-            {
-              "name": "Name, Value",
-              "ty": "Any",
-              "arity": "Variadic",
-              "default": null,
-              "description": "Typed fields for the selected domain kind."
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "ty": "Any",
-              "arity": "Required",
-              "default": null,
-              "description": "FEA object or operation result."
-            }
-          ]
-        }
-      ],
-      "errors": [
-        {
-          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
-          "identifier": "RunMat:fea:LoadFailed",
-          "when": "A .fea document cannot be read, parsed, or resolved.",
-          "message": "fea: failed to load FEA document"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
-          "identifier": "RunMat:fea:InvalidInput",
-          "when": "A builtin receives an unsupported argument pattern or object type.",
-          "message": "fea: invalid input"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
-          "identifier": "RunMat:fea:OperationFailed",
-          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
-          "message": "fea: operation failed"
-        },
-        {
-          "code": "RM.FEA.BUILTIN.INTERNAL",
-          "identifier": "RunMat:fea:Internal",
-          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
-          "message": "fea: internal error"
-        }
-      ],
-      "integer_capabilities": [
-        {
-          "form": "thermo-mechanical physics fields",
-          "inputs": [
-            {
-              "name": "domain numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        },
-        {
-          "form": "thermo field-source revision",
-          "inputs": [
-            {
-              "name": "field_source.revision",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Rejected",
-              "notes": "The structural revision is decoded exactly as u32 and rejects negative or out-of-range integer values."
-            }
-          ],
-          "computation_domain": "Structural",
-          "output_class": "NotApplicable",
-          "overflow": "Error",
-          "backend": "HostOnly",
-          "overload": "StructuralParameter",
-          "notes": "The RunMat-native constructor preserves the exact u32 revision in both typed model storage and its public object representation."
-        },
-        {
-          "form": "electro-thermal physics fields",
-          "inputs": [
-            {
-              "name": "domain numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        },
-        {
-          "form": "electromagnetic physics fields",
-          "inputs": [
-            {
-              "name": "domain numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        },
-        {
-          "form": "CFD physics fields",
-          "inputs": [
-            {
-              "name": "domain numeric fields",
-              "classes": [
-                "Int8",
-                "Int16",
-                "Int32",
-                "Int64",
-                "Uint8",
-                "Uint16",
-                "Uint32",
-                "Uint64"
-              ],
-              "availability": "Documented",
-              "scalar_double": "Allowed",
-              "notes": "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected."
-            }
-          ],
-          "computation_domain": "FloatingPoint",
-          "output_class": "NotApplicable",
-          "overflow": "NotApplicable",
-          "backend": "HostOnly",
-          "overload": "Multiple",
-          "notes": "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round."
-        }
-      ]
     },
     {
       "name": "fea.field",

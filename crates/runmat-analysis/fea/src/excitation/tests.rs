@@ -19,6 +19,49 @@ fn realizes_typed_force_signal() {
 }
 
 #[test]
+fn projects_scalar_force_along_its_typed_direction() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        panic!("cantilever fixture should carry a force signal");
+    };
+    signal.shape = runmat_analysis_core::SignalShape::Scalar;
+    signal.representation = runmat_analysis_core::SignalRepresentation::Constant(
+        runmat_analysis_core::SignalValue::Scalar(runmat_analysis_core::Force::new(250.0)),
+    );
+    model.excitations[0].excitation_mut().direction = Some(runmat_analysis_core::Direction {
+        vector: [0.0, -1.0, 0.0],
+    });
+
+    let realized = realize_model_excitations(&model).expect("directional scalar should realize");
+
+    assert!(matches!(
+        realized.iter().next().expect("one force").kind,
+        RealizedExcitationKind::Force(value)
+            if value.real == [0.0, -250.0, 0.0] && value.imaginary == [0.0; 3]
+    ));
+}
+
+#[test]
+fn rejects_scalar_force_without_a_direction() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        panic!("cantilever fixture should carry a force signal");
+    };
+    signal.shape = runmat_analysis_core::SignalShape::Scalar;
+    signal.representation = runmat_analysis_core::SignalRepresentation::Constant(
+        runmat_analysis_core::SignalValue::Scalar(runmat_analysis_core::Force::new(250.0)),
+    );
+    model.excitations[0].excitation_mut().direction = None;
+
+    let error = realize_model_excitations(&model).expect_err("direction should be required");
+
+    assert_eq!(
+        error.to_string(),
+        "scalar directional excitation requires a direction"
+    );
+}
+
+#[test]
 fn coalesces_reference_point_force_and_moment_into_wrench() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(
@@ -49,9 +92,7 @@ fn coalesces_reference_point_force_and_moment_into_wrench() {
 fn preserves_complex_frequency_domain_current_density() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
-        enabled: true,
-        reference_frequency_hz: 60.0,
-        applied_current_a: 1.0,
+        reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
     let signal_id = runmat_analysis_core::SignalId("coil.current_density".into());
     model.signals = vec![

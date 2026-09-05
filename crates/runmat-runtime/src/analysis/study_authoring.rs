@@ -340,6 +340,7 @@ fn excitation_kind_label(action: &ExcitationAction) -> &'static str {
         ExcitationAction::HeatGeneration(_) => "heat_generation",
         ExcitationAction::HeatFlux(_) => "heat_flux",
         ExcitationAction::AmbientTemperature(_) => "ambient_temperature",
+        ExcitationAction::TemperatureField(_) => "temperature_field",
         ExcitationAction::TerminalVoltage(_) => "terminal_voltage",
         ExcitationAction::ElectricCurrent(_) => "electric_current",
         ExcitationAction::ElectricCharge(_) => "electric_charge",

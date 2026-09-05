@@ -1,4 +1,4 @@
-use crate::{FeaThermoFieldInterpolationMode, FeaThermoMechanicalContext};
+use crate::FeaThermoMechanicalContext;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeProfileSample {
@@ -24,9 +24,6 @@ pub fn severity(context: Option<&FeaThermoMechanicalContext>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };
-    if !context.enabled {
-        return 0.0;
-    }
     let thermal_strain = (context.thermal_expansion_coefficient
         * context.applied_temperature_delta_k.abs())
     .clamp(0.0, 0.05);
@@ -55,12 +52,6 @@ pub fn sample_time_profile(
     points.sort_by(|a, b| a.normalized_coordinate.total_cmp(&b.normalized_coordinate));
     let t = normalized_coordinate.clamp(0.0, 1.0);
 
-    let interpolation = context
-        .field_source
-        .as_ref()
-        .and_then(|source| source.interpolation_mode)
-        .unwrap_or(FeaThermoFieldInterpolationMode::Linear);
-
     if t <= points[0].normalized_coordinate {
         let raw = points[0].scale;
         let scale = raw.clamp(0.2, 2.0);
@@ -75,16 +66,11 @@ pub fn sample_time_profile(
         let a = &pair[0];
         let b = &pair[1];
         if t >= a.normalized_coordinate && t <= b.normalized_coordinate {
-            let raw = match interpolation {
-                FeaThermoFieldInterpolationMode::Linear => {
-                    let span = (b.normalized_coordinate - a.normalized_coordinate)
-                        .abs()
-                        .max(1.0e-9);
-                    let alpha = (t - a.normalized_coordinate) / span;
-                    a.scale + (b.scale - a.scale) * alpha
-                }
-                FeaThermoFieldInterpolationMode::Step => a.scale,
-            };
+            let span = (b.normalized_coordinate - a.normalized_coordinate)
+                .abs()
+                .max(1.0e-9);
+            let alpha = (t - a.normalized_coordinate) / span;
+            let raw = a.scale + (b.scale - a.scale) * alpha;
             let scale = raw.clamp(0.2, 2.0);
             return TimeProfileSample {
                 scale,
@@ -157,11 +143,9 @@ mod tests {
     #[test]
     fn realized_solver_profile_interpolates_and_reports_extrapolation() {
         let context = FeaThermoMechanicalContext {
-            enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 40.0,
             thermal_expansion_coefficient: 1.2e-5,
-            field_source: None,
             region_temperature_deltas: Vec::new(),
             sampled_time_profile: vec![
                 crate::SolverSampledScalePoint {

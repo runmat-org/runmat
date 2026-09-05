@@ -71,6 +71,7 @@ pub(crate) enum RealizedExcitationKind {
     BaseAcceleration(ComplexVector3),
     HeatGeneration(ComplexScalar),
     HeatFlux(ComplexScalar),
+    TemperatureField(ComplexScalar),
     AmbientTemperature(ComplexScalar),
     TerminalVoltage(ComplexScalar),
     ElectricCurrent(ComplexScalar),

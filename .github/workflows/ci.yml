@@ -365,7 +365,6 @@ jobs:
       RUNMAT_FEA_ARTIFACT_PATH: ${{ github.workspace }}/target/runmat-analysis-artifacts/analysis_benchmark_report.json
       RUNMAT_ANALYSIS_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
       RUNMAT_FEA_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
-      RUNMAT_THERMO_FIELD_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts/thermo-fields
     steps:
       - uses: actions/checkout@v5
 
@@ -416,73 +415,6 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"
         run: python3 scripts/fea/governance/validate_fea_conformance_report.py
-
-      - name: Enforce non-default thermo signing key on release branches
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
-        env:
-          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
-        run: |
-          if [ -z "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" ]; then
-            echo "RUNMAT_THERMO_FIELD_SIGNING_KEY secret is required on release branches"
-            exit 1
-          fi
-          if [ "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" = "runmat-dev-thermo-signing-key" ]; then
-            echo "default dev signing key is not allowed on release branches"
-            exit 1
-          fi
-
-      - name: Verify thermo field artifact trust chain
-        id: thermo_field_trust
-        if: always() && steps.fea_benchmark_conformance.outcome == 'success'
-        run: |
-          python3 - <<'PY'
-          import json
-          import subprocess
-          from pathlib import Path
-
-          artifacts = sorted(Path("target/runmat-analysis-artifacts/thermo-fields").glob("*.json"))
-          report = {
-              "schema_version": "thermo-field-trust-report/v1",
-              "artifact_count": len(artifacts),
-              "artifacts": [],
-              "passed": bool(artifacts),
-          }
-          lines = ["## Thermo Field Trust Report", "", f"Artifacts: `{len(artifacts)}`"]
-          if not artifacts:
-              lines.append("")
-              lines.append("No thermo field artifacts were found; compatibility verification is unverified.")
-          for artifact in artifacts:
-              proc = subprocess.run(
-                  ["python3", "scripts/fea/thermo_artifacts/validate_thermo_field_artifact.py", str(artifact)],
-                  capture_output=True,
-                  text=True,
-              )
-              ok = proc.returncode == 0
-              report["artifacts"].append(
-                  {
-                      "path": str(artifact),
-                      "valid": ok,
-                      "stdout": proc.stdout.strip(),
-                      "stderr": proc.stderr.strip(),
-                  }
-              )
-              lines.append(f"- `{artifact}`: {'ok' if ok else 'invalid'}")
-              if not ok:
-                  report["passed"] = False
-          out_json = Path("target/runmat-analysis-artifacts/thermo_field_trust_report.json")
-          out_md = Path("thermo-field-trust-report.md")
-          out_json.parent.mkdir(parents=True, exist_ok=True)
-          out_json.write_text(json.dumps(report, indent=2) + "\n")
-          out_md.write_text("\n".join(lines) + "\n")
-          print(out_md.read_text())
-          if not report["passed"]:
-              raise SystemExit(1)
-          PY
-          cat thermo-field-trust-report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Mark artifact compatibility verification passed
-        if: always() && steps.thermo_field_trust.outcome == 'success'
-        run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"
 
       - name: Test FEA script logic
         run: scripts/test-fea-scripts.sh
@@ -538,7 +470,6 @@ jobs:
           RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
-          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
           python3 scripts/fea/governance/release_readiness_fea.py | tee fea-release-readiness.md
           cat fea-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
@@ -585,8 +516,6 @@ jobs:
               thermo_field_coverage_drop_trend_threshold = ready.get('thermo_max_field_coverage_drop_trend_ratio')
               thermo_field_extrapolation_trend_ratio = ready.get('thermo_field_extrapolation_trend_ratio')
               thermo_field_extrapolation_trend_threshold = ready.get('thermo_max_field_extrapolation_trend_ratio')
-              thermo_require_artifact_backed = ready.get('thermo_require_artifact_backed')
-              thermo_field_artifact_max_age_days = ready.get('thermo_field_artifact_max_age_days')
               thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
               thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
               electro_enabled_rate = ready.get('electro_coupling_enabled_rate')
@@ -696,14 +625,6 @@ jobs:
               lines.append(
                   "- Thermo field extrapolation trend threshold: "
                   f"{thermo_field_extrapolation_trend_threshold if thermo_field_extrapolation_trend_threshold is not None else '-'}"
-              )
-              lines.append(
-                  "- Thermo artifact-backed required: "
-                  f"{thermo_require_artifact_backed if thermo_require_artifact_backed is not None else '-'}"
-              )
-              lines.append(
-                  "- Thermo field artifact max age days: "
-                  f"{thermo_field_artifact_max_age_days if thermo_field_artifact_max_age_days is not None else '-'}"
               )
               lines.append(
                   "- Thermo spread breach rate: "
@@ -913,9 +834,7 @@ jobs:
             fea-conformance-summary.md
             fea-release-readiness.md
             nonlinear-trends.md
-            thermo-field-trust-report.md
             tier75-governance-summary.md
-            target/runmat-analysis-artifacts/thermo_field_trust_report.json
           if-no-files-found: warn
 
   cross-build:

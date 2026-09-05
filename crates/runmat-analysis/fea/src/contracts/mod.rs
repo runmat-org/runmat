@@ -423,47 +423,22 @@ pub struct SolverSampledScalePoint {
     pub scale: f64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FeaThermoFieldInterpolationMode {
-    Linear,
-    Step,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaThermoFieldSource {
-    pub source_id: String,
-    pub revision: u32,
-    pub interpolation_mode: Option<FeaThermoFieldInterpolationMode>,
-    pub expected_region_ids: Vec<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
-    pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
-    pub field_source: Option<FeaThermoFieldSource>,
     pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
     /// Solver-owned realization of the authored temperature signal on normalized step time.
     pub sampled_time_profile: Vec<SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaElectroRegionConductivityScale {
-    pub region_id: String,
-    pub conductivity_scale: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaElectroThermalContext {
-    pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_voltage_v: f64,
     pub base_electrical_conductivity_s_per_m: f64,
     pub resistive_heating_coefficient: f64,
-    pub region_conductivity_scales: Vec<FeaElectroRegionConductivityScale>,
     /// Solver-owned realization of the authored electric-potential signal on normalized step time.
     pub sampled_time_profile: Vec<SolverSampledScalePoint>,
 }

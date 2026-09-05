@@ -20,15 +20,25 @@ const INTEGER_CLASSES: [BuiltinIntegerClass; 8] = [
     BuiltinIntegerClass::Uint64,
 ];
 
-const FEA_INTEGER_CONSTRUCTORS: [&str; 2] = ["fea.domain", "fea.material"];
+const FEA_INTEGER_CONSTRUCTORS: [&str; 5] = [
+    "fea.Frequency.hertz",
+    "fea.MassDensity.kilogramsPerCubicMeter",
+    "fea.DynamicViscosity.pascalSeconds",
+    "fea.TurbulenceIntensity.ratio",
+    "fea.material",
+];
 
-const FEA_INTEGER_INAPPLICABLE: [&str; 11] = [
+const FEA_INTEGER_INAPPLICABLE: [&str; 15] = [
     "fea.ConjugateHeatTransferInterface.conductance",
     "fea.ConjugateHeatTransferInterface.perfect",
     "fea.ConjugateHeatTransferInterface.resistance",
     "fea.ContactInterface.coulomb",
     "fea.ContactInterface.frictionless",
     "fea.FluidStructureInterface.noSlip",
+    "fea.ThermoMechanicalDomain.atReferenceTemperature",
+    "fea.ElectroThermalDomain.atReferenceTemperature",
+    "fea.ElectromagneticDomain.atFrequency",
+    "fea.FluidDomain.newtonian",
     "fea.compare",
     "fea.field",
     "fea.materialAssignment",
@@ -41,8 +51,8 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
     for constructor in INTEGER_CONSTRUCTORS {
         let source = format!(
             r#"
-            domain = fea.domain("electromagnetic", ...
-                "AppliedCurrentA", {constructor}(2));
+            frequency = fea.Frequency.hertz({constructor}(2));
+            domain = fea.ElectromagneticDomain.atFrequency(frequency);
             material = fea.material("steel", ...
                 "YoungsModulusPa", {constructor}(200), ...
                 "PoissonRatio", {constructor}(0));
@@ -50,7 +60,7 @@ fn fea_numeric_constructors_accept_every_host_integer_class() {
         );
         let values = execute_source(&source)
             .unwrap_or_else(|error| panic!("{constructor} compiled FEA constructors: {error}"));
-        for class_name in ["fea.Domain", "fea.Material"] {
+        for class_name in ["fea.ElectromagneticDomain", "fea.Material"] {
             assert!(
                 values.iter().any(|value| {
                     matches!(value, Value::Object(object) if object.class_name == class_name)

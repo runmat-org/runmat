@@ -17,6 +17,14 @@ The purpose of validation is to determine whether the implementation, numerical 
 
 No single test makes a FEA family production-grade. Readiness is earned per family and per intended use.
 
+Model validation runs before formulation admission or solver progress. It rejects non-finite or
+inadmissible constitutive properties, duplicate materials, dangling or duplicate region-to-material
+assignments, invalid typed domain reference states, and mismatched signal, excitation, constraint,
+boundary, and interface quantities. A deliberate expected-versus-assigned material mismatch is
+valid when both materials exist; its confidence is retained as quality evidence. Invalid material
+data and invalid assignments use distinct typed diagnostics, so a solver failure is not used as an
+input-validation mechanism.
+
 ## Maturity Levels
 
 Use these labels in [Current Status](/docs/fea/status):
@@ -39,7 +47,6 @@ Use these labels in [Current Status](/docs/fea/status):
 | `crates/runmat-runtime/tests/operation_contracts.rs` | Public operation contracts, error codes, result queries, quality propagation, provenance, and study artifacts. |
 | `crates/runmat-runtime/tests/analysis` | Conformance manifest and benchmark report harness across the supported families. |
 | `scripts/fea/governance` | Benchmark report validation, external references, readiness, thresholds, and promotion calibration. |
-| `scripts/fea/thermo_artifacts` | Thermo-field artifact drift, promotion, and validation workflows. |
 
 These checks provide strong L0-L2 evidence across many paths. Families marked L2 in the summary below have reached the L2 bar for their currently exposed public contract: solver behavior, fields, diagnostics, invalid-case classes, and backend parity or documented fallback are covered by automated evidence. L3-L5 require deeper family-specific known-answer, convergence, external-reference, and governance evidence.
 

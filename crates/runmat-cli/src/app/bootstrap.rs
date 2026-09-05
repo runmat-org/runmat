@@ -325,11 +325,6 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        thermo_field_artifact_root: config
-            .fea
-            .thermo_field_artifact_root
-            .clone()
-            .or_else(|| Some(artifact_root.join("thermo-fields"))),
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     Ok(())

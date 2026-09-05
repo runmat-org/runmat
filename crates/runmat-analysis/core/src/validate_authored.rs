@@ -12,6 +12,7 @@ pub(crate) fn validate_authored_model(
     model: &AnalysisModel,
 ) -> Result<(), AnalysisValidationError> {
     validate_coordinate_frame(&model.frame)?;
+    crate::validate_materials::validate_materials(&model.materials, &model.material_assignments)?;
     crate::validate_signals::validate_signals(&model.signals)?;
     crate::validate_domains::validate_domains(model)?;
     validate_constraints(&model.constraints, &model.signals)?;

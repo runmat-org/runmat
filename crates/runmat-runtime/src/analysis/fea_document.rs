@@ -885,16 +885,6 @@ fn resolve_typed_region_targets(
             resolve_region_target(target, geometry, aliases, &mut failure);
         }
     }
-    if let Some(domain) = &mut model.thermo_mechanical {
-        for region in &mut domain.region_temperature_deltas {
-            resolve_region_id(&mut region.region_id, geometry, aliases, &mut failure);
-        }
-    }
-    if let Some(domain) = &mut model.electro_thermal {
-        for region in &mut domain.region_conductivity_scales {
-            resolve_region_id(&mut region.region_id, geometry, aliases, &mut failure);
-        }
-    }
     failure.map_or(Ok(()), Err)
 }
 

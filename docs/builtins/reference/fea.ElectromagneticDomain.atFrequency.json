@@ -1,0 +1,17 @@
+{
+  "title": "fea.ElectromagneticDomain.atFrequency",
+  "category": "fea",
+  "keywords": ["fea", "domain", "electromagnetic", "frequency"],
+  "summary": "Create an electromagnetic frequency-domain definition.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": "tests/analysis" },
+  "description": "`domain = fea.ElectromagneticDomain.atFrequency(frequency)` creates an electromagnetic domain at a positive typed frequency.",
+  "behaviors": [
+    "`frequency` must be an `fea.Frequency`; bare numeric values are rejected.",
+    "Currents and current densities are authored as signals and excitations.",
+    "A model accepts at most one electromagnetic domain."
+  ],
+  "examples": [{ "description": "Create a 60 Hz domain", "input": "domain = fea.ElectromagneticDomain.atFrequency(fea.Frequency.hertz(60));" }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/domains.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/domains.rs" }
+}

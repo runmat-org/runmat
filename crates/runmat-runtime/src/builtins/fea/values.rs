@@ -21,6 +21,10 @@ pub(super) const TRANSLATION_CLASS: &str = "fea.Translation";
 pub(super) const COMPLEX_PHASE_CLASS: &str = "fea.ComplexPhase";
 pub(super) const THERMAL_CONTACT_RESISTANCE_CLASS: &str = "fea.ThermalContactResistance";
 pub(super) const FRICTION_COEFFICIENT_CLASS: &str = "fea.FrictionCoefficient";
+pub(super) const FREQUENCY_CLASS: &str = "fea.Frequency";
+pub(super) const MASS_DENSITY_CLASS: &str = "fea.MassDensity";
+pub(super) const DYNAMIC_VISCOSITY_CLASS: &str = "fea.DynamicViscosity";
+pub(super) const TURBULENCE_INTENSITY_CLASS: &str = "fea.TurbulenceIntensity";
 
 const METERS: &[&str] = &["meters"];
 const RADIANS: &[&str] = &["radians"];
@@ -35,6 +39,9 @@ const AMPERES: &[&str] = &["amperes"];
 const WEBERS_PER_METER: &[&str] = &["webers_per_meter"];
 const SQUARE_METER_KELVIN_PER_WATT: &[&str] = &["square_meter_kelvin_per_watt"];
 const RATIO: &[&str] = &["ratio"];
+const HERTZ: &[&str] = &["hertz"];
+const KILOGRAMS_PER_CUBIC_METER: &[&str] = &["kilograms_per_cubic_meter"];
+const PASCAL_SECONDS: &[&str] = &["pascal_seconds"];
 
 const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -169,6 +176,54 @@ scalar_quantity_builtin!(
     "value = fea.FrictionCoefficient.ratio(value)",
     "Create a non-negative friction coefficient.",
     FRICTION_COEFFICIENT_CLASS,
+    "ratio",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    frequency_builtin,
+    FREQUENCY_DESCRIPTOR,
+    FREQUENCY_SIGNATURES,
+    "fea.Frequency.hertz",
+    "value = fea.Frequency.hertz(value)",
+    "Create a positive frequency from hertz.",
+    FREQUENCY_CLASS,
+    "hertz",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    mass_density_builtin,
+    MASS_DENSITY_DESCRIPTOR,
+    MASS_DENSITY_SIGNATURES,
+    "fea.MassDensity.kilogramsPerCubicMeter",
+    "value = fea.MassDensity.kilogramsPerCubicMeter(value)",
+    "Create a positive mass density from kilograms per cubic meter.",
+    MASS_DENSITY_CLASS,
+    "kilograms_per_cubic_meter",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    dynamic_viscosity_builtin,
+    DYNAMIC_VISCOSITY_DESCRIPTOR,
+    DYNAMIC_VISCOSITY_SIGNATURES,
+    "fea.DynamicViscosity.pascalSeconds",
+    "value = fea.DynamicViscosity.pascalSeconds(value)",
+    "Create a positive dynamic viscosity from pascal-seconds.",
+    DYNAMIC_VISCOSITY_CLASS,
+    "pascal_seconds",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    turbulence_intensity_builtin,
+    TURBULENCE_INTENSITY_DESCRIPTOR,
+    TURBULENCE_INTENSITY_SIGNATURES,
+    "fea.TurbulenceIntensity.ratio",
+    "value = fea.TurbulenceIntensity.ratio(value)",
+    "Create a turbulence intensity ratio in the closed interval [0, 1].",
+    TURBULENCE_INTENSITY_CLASS,
     "ratio",
     1.0,
     0.0
@@ -533,7 +588,7 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
 }
 
-fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 18] {
+fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 22] {
     [
         (DISPLACEMENT_CLASS, "runmat.fea.displacement", METERS),
         (ROTATION_CLASS, "runmat.fea.rotation", RADIANS),
@@ -587,6 +642,22 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
         (
             FRICTION_COEFFICIENT_CLASS,
             "runmat.fea.friction-coefficient",
+            RATIO,
+        ),
+        (FREQUENCY_CLASS, "runmat.fea.frequency", HERTZ),
+        (
+            MASS_DENSITY_CLASS,
+            "runmat.fea.mass-density",
+            KILOGRAMS_PER_CUBIC_METER,
+        ),
+        (
+            DYNAMIC_VISCOSITY_CLASS,
+            "runmat.fea.dynamic-viscosity",
+            PASCAL_SECONDS,
+        ),
+        (
+            TURBULENCE_INTENSITY_CLASS,
+            "runmat.fea.turbulence-intensity",
             RATIO,
         ),
     ]
@@ -672,6 +743,13 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
             "fea.ThermalContactResistance.squareMeterKelvinPerWatt",
         )],
         FRICTION_COEFFICIENT_CLASS => &[("ratio", "fea.FrictionCoefficient.ratio")],
+        FREQUENCY_CLASS => &[("hertz", "fea.Frequency.hertz")],
+        MASS_DENSITY_CLASS => &[(
+            "kilogramsPerCubicMeter",
+            "fea.MassDensity.kilogramsPerCubicMeter",
+        )],
+        DYNAMIC_VISCOSITY_CLASS => &[("pascalSeconds", "fea.DynamicViscosity.pascalSeconds")],
+        TURBULENCE_INTENSITY_CLASS => &[("ratio", "fea.TurbulenceIntensity.ratio")],
         _ => unreachable!("quantity schemas contain only known classes"),
     };
     names
@@ -728,6 +806,12 @@ fn validate_quantity_range(class_name: &str, value: f64) -> Result<(), String> {
         }
         ACOUSTIC_IMPEDANCE_CLASS if value <= 0.0 => {
             Err("fea.SpecificAcousticImpedance must be positive".into())
+        }
+        FREQUENCY_CLASS | MASS_DENSITY_CLASS | DYNAMIC_VISCOSITY_CLASS if value <= 0.0 => {
+            Err(format!("{class_name} must be positive"))
+        }
+        TURBULENCE_INTENSITY_CLASS if !(0.0..=1.0).contains(&value) => {
+            Err("fea.TurbulenceIntensity must be in [0, 1]".into())
         }
         _ => Ok(()),
     }

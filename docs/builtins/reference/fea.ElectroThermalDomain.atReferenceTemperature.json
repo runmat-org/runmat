@@ -1,0 +1,17 @@
+{
+  "title": "fea.ElectroThermalDomain.atReferenceTemperature",
+  "category": "fea",
+  "keywords": ["fea", "domain", "electro-thermal", "temperature"],
+  "summary": "Create an electro-thermal domain with a typed constitutive reference temperature.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_domain_constructors_preserve_typed_physics_boundaries", "integration": null },
+  "description": "`domain = fea.ElectroThermalDomain.atReferenceTemperature(temperature)` creates the constitutive domain for electro-thermal procedures.",
+  "behaviors": [
+    "`temperature` must be an `fea.Temperature`; bare numeric values are rejected.",
+    "Electrical and thermal excitations are authored independently from the domain.",
+    "A model accepts at most one electro-thermal domain."
+  ],
+  "examples": [{ "description": "Create the domain", "input": "domain = fea.ElectroThermalDomain.atReferenceTemperature(fea.Temperature.kelvin(293.15));" }],
+  "links": [{ "label": "Using FEA", "url": "../../fea/using-fea" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/domains.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/domains.rs" }
+}

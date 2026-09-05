@@ -1,0 +1,12 @@
+{
+  "title": "fea.Frequency.hertz",
+  "category": "fea",
+  "keywords": ["fea", "quantity", "frequency", "hertz"],
+  "summary": "Create a positive typed frequency in hertz.",
+  "requires_feature": "fea",
+  "tested": { "unit": "builtins::fea::tests::fea_numeric_constructors_cross_all_integer_classes_once_into_binary64", "integration": null },
+  "description": "`frequency = fea.Frequency.hertz(value)` creates an `fea.Frequency` for frequency-domain procedures and signals.",
+  "behaviors": ["The input must be a finite positive real scalar.", "Host integer inputs cross one checked binary64 storage boundary; resident values are rejected."],
+  "examples": [{ "description": "Create 60 Hz", "input": "frequency = fea.Frequency.hertz(60);" }],
+  "source": { "label": "`crates/runmat-runtime/src/builtins/fea/values.rs`", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/values.rs" }
+}

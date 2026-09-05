@@ -258,7 +258,7 @@ See [MATLAB Language Compatibility](/docs/runtime/matlab-compatibility) for the 
 
 ### `[runtime.fea]`
 
-FEA settings configure study execution, run artifact storage, and coupled-field artifact roots.
+FEA settings configure study execution and run artifact storage.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -267,7 +267,6 @@ FEA settings configure study execution, run artifact storage, and coupled-field 
 | `artifact_max_runs` | integer | unset | Optional global retained run limit. |
 | `artifact_max_runs_per_kind` | integer | unset | Optional retained run limit per physics family. |
 | `study_artifact_root` | string | `"artifacts/studies"` | Study validate, plan, run, and sweep evidence root. |
-| `thermo_field_artifact_root` | string | `"artifacts/thermo-fields"` | Thermo-field artifact root for coupled thermal paths. |
 
 Example:
 
@@ -278,7 +277,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-thermo_field_artifact_root = "artifacts/thermo-fields"
 ```
 
 
@@ -334,7 +332,6 @@ FEA runtime config is preferred. These environment variables are supported as fa
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS`
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND`
 - `RUNMAT_FEA_STUDY_ARTIFACT_ROOT`
-- `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT`
 
 ## Full Reference Example
 
@@ -413,7 +410,6 @@ artifact_root = "artifacts"
 artifact_max_runs = 1000
 artifact_max_runs_per_kind = 100
 study_artifact_root = "artifacts/studies"
-thermo_field_artifact_root = "artifacts/thermo-fields"
 
 [runtime.telemetry]
 enabled = true

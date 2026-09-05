@@ -134,6 +134,7 @@ pub enum StructuralLoadKind {
     BaseAcceleration,
     HeatGeneration,
     HeatFlux,
+    TemperatureField,
     AmbientTemperature,
     TerminalVoltage,
     ElectricCurrent,
@@ -161,6 +162,7 @@ impl StructuralLoadKind {
             Self::BaseAcceleration => "base_acceleration",
             Self::HeatGeneration => "heat_generation",
             Self::HeatFlux => "heat_flux",
+            Self::TemperatureField => "temperature_field",
             Self::AmbientTemperature => "ambient_temperature",
             Self::TerminalVoltage => "terminal_voltage",
             Self::ElectricCurrent => "electric_current",
@@ -700,173 +702,163 @@ fn assemble_linear_system_impl(
     }
 
     if let Some(context) = thermo_mechanical_context {
-        if context.enabled {
-            let thermal_strain_scale = (context.thermal_expansion_coefficient
-                * context.applied_temperature_delta_k.abs())
-            .clamp(0.0, 0.05);
-            let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
-            let constitutive_temperature_factor = if model.materials.is_empty() {
-                (-(2.5e-4) * context.applied_temperature_delta_k).clamp(-0.25, 0.25)
-            } else {
-                let response = model
-                    .materials
-                    .iter()
-                    .map(|material| {
-                        let adjusted_delta = context.applied_temperature_delta_k
-                            + (context.reference_temperature_k
-                                - material.thermal.reference_temperature_k)
-                            + (avg_reference_temperature_k
-                                - material.thermal.reference_temperature_k)
-                                * 0.1;
-                        material.thermal.modulus_temp_coeff_per_k * adjusted_delta
-                    })
-                    .sum::<f64>()
-                    / model.materials.len() as f64;
-                response.clamp(-0.25, 0.25)
-            };
-            let constitutive_poisson_coupling =
-                (0.6 + avg_poisson_ratio.clamp(0.0, 0.49)).clamp(0.6, 1.2);
-            let modulus_temperature_scale = (1.0
-                + constitutive_temperature_factor * constitutive_poisson_coupling)
-                .clamp(0.72, 1.15);
-            let thermal_stiffening_scale = (1.0 + 0.35 * thermal_strain_scale).clamp(1.0, 1.06);
-            let effective_modulus_scale =
-                (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
-            let mut dof_adjustments = vec![0.0_f64; dof_count];
-            let assignment_heterogeneity_index = apply_thermo_material_heterogeneity(
-                model,
-                dof_count,
-                constitutive_temperature_factor,
-                context.reference_temperature_k,
-                context.applied_temperature_delta_k,
-                &mut dof_adjustments,
-            );
-            let spatial_field =
-                apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
-            let temporal_profile_variation =
-                thermo_mechanical::temporal_profile_variation(Some(&context));
-            let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
-            for i in 0..dof_count {
-                let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
-                let local_scale =
-                    (effective_modulus_scale * (1.0 + dof_adjustments[i])).clamp(0.75, 1.2);
-                local_modulus_scales[i] = local_scale;
-                stiffness_diag[i] *= thermal_bias * local_scale;
-                if !constrained[i] {
-                    rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
-                }
-            }
-            for i in 0..stiffness_upper.len() {
-                let edge_scale = 0.5 * (local_modulus_scales[i] + local_modulus_scales[i + 1]);
-                stiffness_upper[i] *= edge_scale;
-            }
-            let min_modulus_scale = local_modulus_scales
+        let thermal_strain_scale = (context.thermal_expansion_coefficient
+            * context.applied_temperature_delta_k.abs())
+        .clamp(0.0, 0.05);
+        let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
+        let constitutive_temperature_factor = if model.materials.is_empty() {
+            (-(2.5e-4) * context.applied_temperature_delta_k).clamp(-0.25, 0.25)
+        } else {
+            let response = model
+                .materials
                 .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min);
-            let max_modulus_scale = local_modulus_scales.iter().copied().fold(0.0_f64, f64::max);
-            let constitutive_material_spread_ratio =
-                if min_modulus_scale.is_finite() && min_modulus_scale > 0.0 {
-                    max_modulus_scale / min_modulus_scale
-                } else {
-                    1.0
-                };
-            thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
-                enabled: true,
-                reference_temperature_k: context.reference_temperature_k,
-                applied_temperature_delta_k: context.applied_temperature_delta_k,
-                thermal_expansion_coefficient: context.thermal_expansion_coefficient,
-                thermal_strain_scale,
-                thermal_load_scale,
-                constitutive_temperature_factor,
-                constitutive_poisson_coupling,
-                effective_modulus_scale,
-                constitutive_material_spread_ratio,
-                assignment_heterogeneity_index,
-                spatial_gradient_index: spatial_field.gradient_index,
-                spatial_coverage_ratio: spatial_field.coverage_ratio,
-                temporal_profile_variation,
-                region_delta_count: context.region_temperature_deltas.len(),
-                coupling_fingerprint: thermo_mechanical_fingerprint(
-                    &context,
-                    ThermoMechanicalFingerprintInputs {
-                        dof_count,
-                        constitutive_temperature_factor,
-                        constitutive_poisson_coupling,
-                        effective_modulus_scale,
-                        constitutive_material_spread_ratio,
-                        assignment_heterogeneity_index,
-                        spatial_gradient_index: spatial_field.gradient_index,
-                        temporal_profile_variation,
-                    },
-                ),
-                profile_sources: thermomechanical_profile_sources(&context),
-            });
+                .map(|material| {
+                    let adjusted_delta = context.applied_temperature_delta_k
+                        + (context.reference_temperature_k
+                            - material.thermal.reference_temperature_k)
+                        + (avg_reference_temperature_k - material.thermal.reference_temperature_k)
+                            * 0.1;
+                    material.thermal.modulus_temp_coeff_per_k * adjusted_delta
+                })
+                .sum::<f64>()
+                / model.materials.len() as f64;
+            response.clamp(-0.25, 0.25)
+        };
+        let constitutive_poisson_coupling =
+            (0.6 + avg_poisson_ratio.clamp(0.0, 0.49)).clamp(0.6, 1.2);
+        let modulus_temperature_scale = (1.0
+            + constitutive_temperature_factor * constitutive_poisson_coupling)
+            .clamp(0.72, 1.15);
+        let thermal_stiffening_scale = (1.0 + 0.35 * thermal_strain_scale).clamp(1.0, 1.06);
+        let effective_modulus_scale =
+            (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
+        let mut dof_adjustments = vec![0.0_f64; dof_count];
+        let assignment_heterogeneity_index = apply_thermo_material_heterogeneity(
+            model,
+            dof_count,
+            constitutive_temperature_factor,
+            context.reference_temperature_k,
+            context.applied_temperature_delta_k,
+            &mut dof_adjustments,
+        );
+        let spatial_field = apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
+        let temporal_profile_variation =
+            thermo_mechanical::temporal_profile_variation(Some(&context));
+        let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
+        for i in 0..dof_count {
+            let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
+            let local_scale =
+                (effective_modulus_scale * (1.0 + dof_adjustments[i])).clamp(0.75, 1.2);
+            local_modulus_scales[i] = local_scale;
+            stiffness_diag[i] *= thermal_bias * local_scale;
+            if !constrained[i] {
+                rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
+            }
         }
+        for i in 0..stiffness_upper.len() {
+            let edge_scale = 0.5 * (local_modulus_scales[i] + local_modulus_scales[i + 1]);
+            stiffness_upper[i] *= edge_scale;
+        }
+        let min_modulus_scale = local_modulus_scales
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let max_modulus_scale = local_modulus_scales.iter().copied().fold(0.0_f64, f64::max);
+        let constitutive_material_spread_ratio =
+            if min_modulus_scale.is_finite() && min_modulus_scale > 0.0 {
+                max_modulus_scale / min_modulus_scale
+            } else {
+                1.0
+            };
+        thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
+            enabled: true,
+            reference_temperature_k: context.reference_temperature_k,
+            applied_temperature_delta_k: context.applied_temperature_delta_k,
+            thermal_expansion_coefficient: context.thermal_expansion_coefficient,
+            thermal_strain_scale,
+            thermal_load_scale,
+            constitutive_temperature_factor,
+            constitutive_poisson_coupling,
+            effective_modulus_scale,
+            constitutive_material_spread_ratio,
+            assignment_heterogeneity_index,
+            spatial_gradient_index: spatial_field.gradient_index,
+            spatial_coverage_ratio: spatial_field.coverage_ratio,
+            temporal_profile_variation,
+            region_delta_count: context.region_temperature_deltas.len(),
+            coupling_fingerprint: thermo_mechanical_fingerprint(
+                &context,
+                ThermoMechanicalFingerprintInputs {
+                    dof_count,
+                    constitutive_temperature_factor,
+                    constitutive_poisson_coupling,
+                    effective_modulus_scale,
+                    constitutive_material_spread_ratio,
+                    assignment_heterogeneity_index,
+                    spatial_gradient_index: spatial_field.gradient_index,
+                    temporal_profile_variation,
+                },
+            ),
+            profile_sources: thermomechanical_profile_sources(&context),
+        });
     }
 
     if let Some(context) = electro_thermal_context {
-        if context.enabled {
-            let temporal_variation = if context.sampled_time_profile.len() < 2 {
-                0.0
-            } else {
-                let min_scale = context
-                    .sampled_time_profile
-                    .iter()
-                    .map(|point| point.scale)
-                    .fold(f64::INFINITY, f64::min);
-                let max_scale = context
-                    .sampled_time_profile
-                    .iter()
-                    .map(|point| point.scale)
-                    .fold(-f64::INFINITY, f64::max);
-                ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
-            };
-            let mut conductivity_scales = vec![1.0_f64; dof_count];
-            for (idx, scale) in context.region_conductivity_scales.iter().enumerate() {
-                let cursor = (idx * 5 + scale.region_id.len()) % dof_count.max(1);
-                conductivity_scales[cursor] = scale.conductivity_scale.clamp(0.2, 2.5);
-            }
-            let min_scale = conductivity_scales
+        let temporal_variation = if context.sampled_time_profile.len() < 2 {
+            0.0
+        } else {
+            let min_scale = context
+                .sampled_time_profile
                 .iter()
-                .copied()
-                .fold(f64::INFINITY, f64::min)
-                .max(1.0e-6);
-            let max_scale = conductivity_scales.iter().copied().fold(0.0_f64, f64::max);
-            let conductivity_spread_ratio = (max_scale / min_scale).clamp(1.0, 8.0);
-            let joule_heating_scale = (context.applied_voltage_v.powi(2)
-                * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
-                * context.resistive_heating_coefficient.max(0.0)
-                / 1.0e6)
-                .clamp(0.0, 10.0);
+                .map(|point| point.scale)
+                .fold(f64::INFINITY, f64::min);
+            let max_scale = context
+                .sampled_time_profile
+                .iter()
+                .map(|point| point.scale)
+                .fold(-f64::INFINITY, f64::max);
+            ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
+        };
+        let conductivity_scales = vec![1.0_f64; dof_count];
+        let min_scale = conductivity_scales
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min)
+            .max(1.0e-6);
+        let max_scale = conductivity_scales.iter().copied().fold(0.0_f64, f64::max);
+        let conductivity_spread_ratio = (max_scale / min_scale).clamp(1.0, 8.0);
+        let joule_heating_scale = (context.applied_voltage_v.powi(2)
+            * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
+            * context.resistive_heating_coefficient.max(0.0)
+            / 1.0e6)
+            .clamp(0.0, 10.0);
 
-            for i in 0..dof_count {
-                let local = conductivity_scales[i];
-                damping_diag[i] *= (1.0 + 0.02 * local).clamp(1.0, 1.1);
-                if !constrained[i] {
-                    rhs[i] += joule_heating_scale * local * (1.0 + (i % 7) as f64 * 0.01);
-                }
+        for i in 0..dof_count {
+            let local = conductivity_scales[i];
+            damping_diag[i] *= (1.0 + 0.02 * local).clamp(1.0, 1.1);
+            if !constrained[i] {
+                rhs[i] += joule_heating_scale * local * (1.0 + (i % 7) as f64 * 0.01);
             }
+        }
 
-            electro_thermal = Some(ElectroThermalAssemblySummary {
-                enabled: true,
-                reference_temperature_k: context.reference_temperature_k,
-                applied_voltage_v: context.applied_voltage_v,
-                base_electrical_conductivity_s_per_m: context.base_electrical_conductivity_s_per_m,
-                resistive_heating_coefficient: context.resistive_heating_coefficient,
+        electro_thermal = Some(ElectroThermalAssemblySummary {
+            enabled: true,
+            reference_temperature_k: context.reference_temperature_k,
+            applied_voltage_v: context.applied_voltage_v,
+            base_electrical_conductivity_s_per_m: context.base_electrical_conductivity_s_per_m,
+            resistive_heating_coefficient: context.resistive_heating_coefficient,
+            joule_heating_scale,
+            conductivity_spread_ratio,
+            temporal_profile_variation: temporal_variation,
+            region_scale_count: 0,
+            coupling_fingerprint: electro_thermal_fingerprint(
+                &context,
+                dof_count,
                 joule_heating_scale,
                 conductivity_spread_ratio,
-                temporal_profile_variation: temporal_variation,
-                region_scale_count: context.region_conductivity_scales.len(),
-                coupling_fingerprint: electro_thermal_fingerprint(
-                    &context,
-                    dof_count,
-                    joule_heating_scale,
-                    conductivity_spread_ratio,
-                    temporal_variation,
-                ),
-            });
-        }
+                temporal_variation,
+            ),
+        });
     }
 
     let stiffness_csr = match solver_mesh.as_ref() {
@@ -1041,7 +1033,6 @@ fn electro_thermal_fingerprint(
         conductivity_spread_ratio.to_bits(),
         temporal_profile_variation.to_bits(),
         dof_count as u64,
-        context.region_conductivity_scales.len() as u64,
         context.sampled_time_profile.len() as u64,
     ] {
         hash ^= value;
@@ -1268,6 +1259,13 @@ fn assemble_explicit_structural_system(
     let mut direct_rotational_moment_load_count = 0usize;
     let mut structural_wrench_lowering = Vec::new();
     for load in excitations.iter() {
+        if matches!(
+            load.kind,
+            RealizedExcitationKind::TemperatureField(_)
+                | RealizedExcitationKind::TerminalVoltage(_)
+        ) {
+            continue;
+        }
         let region_id = load.target.solver_region_id().ok_or_else(|| {
             StructuralAssemblyError::UnmappedStructuralLoad {
                 load_id: load.excitation_id.0.clone(),
