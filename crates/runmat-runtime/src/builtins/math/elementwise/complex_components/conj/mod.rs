@@ -15,7 +15,6 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
 const BUILTIN_NAME: &str = "conj";
 
 fn builtin_error_with_detail(

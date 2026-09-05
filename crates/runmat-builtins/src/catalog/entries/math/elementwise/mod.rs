@@ -1,4 +1,5 @@
 mod complex_components;
+mod complex_construction;
 mod error_functions;
 mod exponentials;
 mod floating_conversions;
@@ -13,6 +14,7 @@ mod roots;
 mod support;
 
 pub use complex_components::*;
+pub use complex_construction::*;
 pub use error_functions::*;
 pub use exponentials::*;
 pub use floating_conversions::*;
@@ -27,6 +29,7 @@ pub use roots::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     complex_components::ENTRIES,
+    complex_construction::ENTRIES,
     error_functions::ENTRIES,
     exponentials::ENTRIES,
     floating_conversions::ENTRIES,

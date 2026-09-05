@@ -1152,6 +1152,30 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 256,
 });
 
+enforceMigratedBuiltinFamily({
+  name: "complex-construction family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_construction",
+    "crates/runmat-builtins/src/catalog/inference/math/complex_construction",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_construction",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/complex_construction/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/complex_construction/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_construction/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_construction/complex/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_construction/complex/tests/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex_construction/complex/tests/host/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/complex.rs",
+    "docs/builtins/reference/complex.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/complex.json",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 320,
+});
+
 const gammaFunctionBoundaries = new Map([
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/mod.rs", 40],
   ["crates/runmat-builtins/src/catalog/inference/math/gamma_functions/common.rs", 64],
