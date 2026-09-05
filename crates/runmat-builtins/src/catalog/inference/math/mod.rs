@@ -7,6 +7,7 @@ pub(super) mod discrete;
 pub(super) mod error_functions;
 pub(super) mod exponentials;
 pub(super) mod gamma_functions;
+pub(super) mod heaviside;
 pub(super) mod hypotenuse;
 pub(super) mod integer_division;
 pub(super) mod logarithms;

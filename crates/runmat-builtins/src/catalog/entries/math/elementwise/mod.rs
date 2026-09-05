@@ -4,6 +4,7 @@ mod error_functions;
 mod exponentials;
 mod floating_conversions;
 mod gamma_functions;
+mod heaviside;
 mod hypot;
 mod logarithms;
 mod magnitude_phase_sign;
@@ -19,6 +20,7 @@ pub use error_functions::*;
 pub use exponentials::*;
 pub use floating_conversions::*;
 pub use gamma_functions::*;
+pub use heaviside::*;
 pub use hypot::*;
 pub use logarithms::*;
 pub use magnitude_phase_sign::*;
@@ -34,6 +36,7 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     exponentials::ENTRIES,
     floating_conversions::ENTRIES,
     gamma_functions::ENTRIES,
+    heaviside::ENTRIES,
     hypot::ENTRIES,
     logarithms::ENTRIES,
     magnitude_phase_sign::ENTRIES,

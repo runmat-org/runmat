@@ -230,6 +230,7 @@ pub enum MathInferenceRule {
     Discrete(DiscreteInferenceRule),
     ErrorFunction(ErrorFunctionInferenceRule),
     GammaFunction(GammaFunctionInferenceRule),
+    Heaviside,
     IntegerDivide,
     Hypot,
     MagnitudePhaseSign(MagnitudePhaseSignKind),
