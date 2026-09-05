@@ -18,7 +18,6 @@ mod math_trigonometric;
 mod metadata_predicate;
 mod numeric_classification;
 mod numeric_component;
-mod numeric_conversion;
 mod numeric_limit;
 mod parallel_semantics;
 mod routing;

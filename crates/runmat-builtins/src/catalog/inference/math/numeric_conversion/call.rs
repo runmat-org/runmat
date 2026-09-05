@@ -1,11 +1,11 @@
-use super::{argument_error, finish_fixed, literal_text};
+use super::super::super::{argument_error, finish_fixed, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_numeric_conversion, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
     NumericClass, NumericDomain, NumericFact, ResidencyFact, ValueFact, ValueKindFact,
 };
 
-pub(super) fn infer_numeric_conversion_call(
+pub(in crate::catalog::inference) fn infer_numeric_conversion_call(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
     target: NumericClass,
@@ -36,7 +36,7 @@ pub(super) fn infer_numeric_conversion_call(
     finish_fixed(entry, request, inference.fact, diagnostics)
 }
 
-pub(super) fn infer_numeric_conversion_with_like_call(
+pub(in crate::catalog::inference) fn infer_numeric_conversion_with_like_call(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
     target: NumericClass,

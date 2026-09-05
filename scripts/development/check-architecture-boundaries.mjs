@@ -249,7 +249,6 @@ const legacyRootInferenceLeaves = new Set([
   "metadata_predicate",
   "numeric_classification",
   "numeric_component",
-  "numeric_conversion",
   "numeric_limit",
   "parallel_semantics",
   "scalar_logical_reduction",
@@ -1050,6 +1049,40 @@ enforceMigratedBuiltinFamily({
   ],
   leafLineCeiling: 192,
   testLineCeiling: 224,
+});
+
+enforceMigratedBuiltinFamily({
+  name: "floating-conversion family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_conversion",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions/double/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions/single/mod.rs",
+    "crates/runmat-builtins/src/catalog/inference/math/numeric_conversion/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions/double/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions/double/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions/single/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/floating_conversions/single/tests.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions/definition.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/floating_conversions/documentation.rs",
+    "crates/runmat-builtins/src/catalog/inference/numeric_conversion.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/double.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/single.rs",
+    "docs/builtins/reference/double.json",
+    "docs/builtins/reference/single.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/double.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/single.json",
+  ],
+  leafLineCeiling: 224,
+  testLineCeiling: 272,
 });
 
 const gammaFunctionBoundaries = new Map([
