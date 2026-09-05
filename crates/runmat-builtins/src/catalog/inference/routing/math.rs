@@ -10,7 +10,7 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::AngleConversion(rule) => {
             super::super::math::angle_conversion::infer(rule, request, entry)
         }
-        MathInferenceRule::Atan2 => super::super::math_binary::infer_atan2(request, entry),
+        MathInferenceRule::Atan2 => super::super::math::two_argument_angle::infer(request, entry),
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }
@@ -29,7 +29,7 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::IntegerDivide => {
             super::super::math::integer_division::infer(request, entry)
         }
-        MathInferenceRule::Hypot => super::super::math_binary::infer_hypot(request, entry),
+        MathInferenceRule::Hypot => super::super::math::hypotenuse::infer(request, entry),
         MathInferenceRule::MagnitudePhaseSign(kind) => {
             super::super::math::magnitude_phase_sign::infer(kind, request, entry)
         }
@@ -64,7 +64,7 @@ pub(in crate::catalog::inference) fn infer(
         }
         MathInferenceRule::Round => super::super::math_rounding::infer_round(request, entry),
         MathInferenceRule::Remainder(function) => {
-            super::super::math_binary::infer_remainder(request, entry, function)
+            super::super::math::remainder::infer(function, request, entry)
         }
         MathInferenceRule::Trigonometric(function) => {
             super::super::math_trigonometric::infer_trigonometric(request, entry, function)

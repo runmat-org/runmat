@@ -8,7 +8,6 @@ mod distributed;
 mod introspection_semantics;
 mod logical;
 mod math;
-mod math_binary;
 mod math_degree_trigonometric;
 mod math_hyperbolic;
 mod math_inverse;
