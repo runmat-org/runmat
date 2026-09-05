@@ -1,5 +1,7 @@
 //! Native process composition for the portable RunMat execution driver.
 
+mod analysis_host;
+mod analysis_kernel;
 mod config;
 mod driver;
 mod durable;
@@ -20,6 +22,8 @@ pub mod supervisor;
 mod test_workload;
 mod worker;
 
+pub use analysis_host::{execute_analysis_program_request, NativeAnalysisHostLimits};
+pub use analysis_kernel::NativeAnalysisKernel;
 pub use config::NativeExecutionConfig;
 pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
 pub use error::{NativeExecutionError, NativeExecutionResult};

@@ -123,6 +123,25 @@ fn numerical_objects_are_deterministically_chunked_and_self_validating() {
     assert!(tampered.validate().is_err());
 }
 
+#[test]
+fn structural_linear_workload_round_trips_without_a_mesh_path() {
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        model: crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic),
+        backend: crate::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: None,
+        electro_thermal_context: None,
+    };
+    let bytes = workload.canonical_bytes().unwrap();
+    let decoded = StructuralLinearWorkload::from_canonical_bytes(&bytes).unwrap();
+    assert_eq!(decoded, workload);
+    assert!(!String::from_utf8_lossy(&bytes).contains("artifact_path"));
+}
+
 fn workload_task(workload: AnalysisWorkloadIdentity) -> AnalysisTaskIdentity {
     AnalysisTaskIdentity::new(workload, Vec::new()).unwrap()
 }

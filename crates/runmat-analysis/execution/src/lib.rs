@@ -3,6 +3,8 @@
 mod error;
 mod host;
 mod object;
+mod response;
+mod serial;
 mod task;
 mod workload;
 
@@ -11,7 +13,12 @@ pub use host::{
     AnalysisHostWorkload, ANALYSIS_HOST_ABI, ANALYSIS_HOST_EXECUTION_MODE,
     ANALYSIS_HOST_TARGET_PROFILE,
 };
-pub use object::{prepare_analysis_objects, PreparedAnalysisObjects};
+pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};
+pub use response::AnalysisHostResponse;
+pub use serial::{
+    execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
+    CompletedAnalysisWorkload,
+};
 pub use task::{build_analysis_task_submission, AnalysisExecutionContext};
 pub use workload::{
     analysis_worker_capabilities, AnalysisCapabilityRequirement, AnalysisWorkloadInput,

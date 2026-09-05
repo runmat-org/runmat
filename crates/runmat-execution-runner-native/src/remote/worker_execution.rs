@@ -48,6 +48,19 @@ pub(super) async fn execute(
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
+    if program.artifact.form == ExecutableForm::AnalysisWorkload {
+        drop(progress_sender);
+        return tokio::task::spawn_blocking(move || {
+            crate::execute_analysis_program_request(
+                &program,
+                &mut objects,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| failure(&error.to_string()));
+    }
     if program.artifact.form == ExecutableForm::MeshingWorkload {
         let Some(host) = meshing_host else {
             return failure("remote worker has no meshing host capability");

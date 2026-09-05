@@ -254,6 +254,10 @@ pub(super) async fn run_worker_loop(
                         state.objects.clone(),
                     )
                 };
+                let externalized = matches!(
+                    attempt.program.artifact.form,
+                    ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
+                );
                 let cooperative = attempt.program.artifact.form == ExecutableForm::MeshingWorkload;
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
@@ -266,7 +270,7 @@ pub(super) async fn run_worker_loop(
                         return;
                     }
                     let mut program = attempt.program;
-                    let materialized = if cooperative {
+                    let materialized = if externalized {
                         Ok(program.arguments.clone())
                     } else {
                         let state = state_for_task.lock().await;

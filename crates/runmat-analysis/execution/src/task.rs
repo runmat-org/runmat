@@ -44,6 +44,9 @@ pub fn build_analysis_task_submission(
     }
     let identity = AnalysisTaskIdentity::new(workload.identity, dependency_identities)?;
     let task_id = TaskId::derive(&[identity.digest().bytes()]);
+    let requested_outputs = u16::try_from(workload.outputs.len()).map_err(|_| {
+        crate::AnalysisBridgeError::Invalid("analysis output count is not representable".into())
+    })?;
     let request = TaskRequest {
         id: task_id,
         scope_id: context.scope_id,
@@ -58,9 +61,7 @@ pub fn build_analysis_task_submission(
             .into_iter()
             .map(|root| runmat_execution::value::ValuePayload::Object(Box::new(root)))
             .collect(),
-        outputs: OutputContract {
-            requested_outputs: 1,
-        },
+        outputs: OutputContract { requested_outputs },
         resources: context.resources,
         retry: context.retry,
         deadline_unix_millis: context.deadline_unix_millis,

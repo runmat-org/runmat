@@ -1,6 +1,8 @@
 use crate::assembly::AssemblySummary;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SpdPreconditionerKind {
     Jacobi,
     Ilu0,

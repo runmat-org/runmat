@@ -6,6 +6,7 @@
 mod error;
 mod identity;
 mod object;
+mod solve;
 
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use identity::{
@@ -22,6 +23,7 @@ pub use object::{
     ANALYSIS_CHUNK_VALUE_SCHEMA, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
+pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
 
 #[cfg(test)]
 mod tests;

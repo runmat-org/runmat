@@ -71,14 +71,15 @@ impl AnalysisHostWorkload {
         input_roots: &[ValueRef],
     ) -> AnalysisBridgeResult<ProgramExecutionRequest> {
         self.validate_inputs(input_roots)?;
+        let requested_outputs = u16::try_from(self.workload.outputs.len()).map_err(|_| {
+            AnalysisBridgeError::Invalid("analysis output count is not representable".into())
+        })?;
         let executable_bytes = self.canonical_bytes()?;
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision,
             entrypoint: "analysis_workload".into(),
-            outputs: OutputContract {
-                requested_outputs: 1,
-            },
+            outputs: OutputContract { requested_outputs },
             execution_mode: ANALYSIS_HOST_EXECUTION_MODE.into(),
             target: ProgramTarget::portable(ANALYSIS_HOST_TARGET_PROFILE),
             features: Default::default(),
@@ -104,7 +105,7 @@ impl AnalysisHostWorkload {
                 .cloned()
                 .map(|root| ValuePayload::Object(Box::new(root)))
                 .collect(),
-            requested_outputs: 1,
+            requested_outputs,
         };
         request.validate()?;
         Ok(request)

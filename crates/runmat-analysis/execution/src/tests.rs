@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
@@ -207,4 +208,143 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     .unwrap();
     assert_ne!(first.request.pool_id, second.request.pool_id);
     assert_eq!(first.request.id, second.request.id);
+}
+
+#[derive(Default)]
+struct MemoryObjects(BTreeMap<Digest, Vec<u8>>);
+
+impl runmat_execution_artifact::cache::CacheImport for MemoryObjects {
+    fn read_verified(
+        &self,
+        digest: Digest,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        Ok(self.0.get(&digest).cloned())
+    }
+}
+
+impl runmat_execution_artifact::cache::CacheExport for MemoryObjects {
+    fn write_verified(
+        &mut self,
+        object: &runmat_execution_artifact::LogicalObject,
+    ) -> runmat_execution_artifact::ArtifactResult<()> {
+        object.validate()?;
+        if self
+            .0
+            .insert(object.descriptor.digest, object.bytes.clone())
+            .is_some_and(|prior| prior != object.bytes)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Identity(
+                "memory object collision".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+struct FieldKernel;
+
+impl AnalysisKernel for FieldKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::Solve);
+        assert_eq!(invocation.inputs[0].payload(), b"canonical mesh bytes");
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::Field,
+            logical_identity: digest("field-identity"),
+            payload: b"canonical field bytes".to_vec(),
+        }])
+    }
+}
+
+#[test]
+fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
+    let access = access();
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        digest("mesh-identity"),
+        b"canonical mesh bytes",
+        5,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = input
+        .root_reference(&access, ValueRefKind::DriverObject)
+        .unwrap();
+    let mut store = MemoryObjects::default();
+    for object in &input.objects {
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object).unwrap();
+    }
+    let (study, execution_plan) = execution_identities();
+    let workload = AnalysisWorkloadRequest::new(
+        study,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        vec![AnalysisWorkloadInput {
+            kind: input.manifest.kind,
+            logical_identity: input.manifest.logical_identity,
+            payload_digest: input.manifest.payload_digest,
+            manifest_digest: input.root.digest,
+            manifest_encoded_length: input.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
+        vec![AnalysisNumericalObjectKind::Field],
+        BTreeSet::from([AnalysisCapabilityRequirement::Host {
+            abi: ANALYSIS_HOST_ABI.into(),
+        }]),
+    )
+    .unwrap();
+    let host = AnalysisHostWorkload::new(workload, access).unwrap();
+    let request = host.program_request(revision(), &[root]).unwrap();
+    let completed = execute_serial_analysis(
+        &request,
+        &mut store,
+        &FieldKernel,
+        6,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(completed.outputs[0].payload(), b"canonical field bytes");
+    let response = AnalysisHostResponse::completed(&host, &completed).unwrap();
+    response.validate_against(&host).unwrap();
+    assert!(matches!(
+        response.program_response(),
+        runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess { outputs, result_objects }
+            if outputs.len() == 1 && result_objects.len() == 5
+    ));
+}
+
+#[test]
+fn serial_execution_rejects_missing_and_tampered_chunks() {
+    let access = access();
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        digest("mesh-identity"),
+        b"canonical mesh bytes",
+        5,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = input
+        .root_reference(&access, ValueRefKind::DriverObject)
+        .unwrap();
+    let mut store = MemoryObjects::default();
+    for object in &input.objects {
+        runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object).unwrap();
+    }
+    let missing = input.objects[2].descriptor.digest;
+    store.0.remove(&missing);
+    assert!(import_analysis_objects(
+        &store,
+        &root,
+        input.manifest.kind,
+        input.manifest.logical_identity,
+        input.manifest.payload_digest,
+        &access,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
 }
