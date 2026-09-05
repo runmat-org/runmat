@@ -1,7 +1,7 @@
 pub(crate) mod attach;
 mod crypto;
 mod recovery;
-mod secret;
+pub(crate) mod secret;
 pub(crate) mod submit;
 
 use anyhow::{Context, Result};

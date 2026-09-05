@@ -48,6 +48,7 @@ pub(crate) struct RemoteSubmissionOptions {
     pub idempotency_key: Option<String>,
     pub workers: u32,
     pub on_run_created: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    pub output_intent: super::secret::SavedOutputIntent,
 }
 
 pub(crate) struct JobSubmission {
@@ -182,6 +183,7 @@ pub async fn submit(
             idempotency_key,
             workers,
             on_run_created: None,
+            output_intent: secret::SavedOutputIntent::Generic,
         },
     )
     .await?;
@@ -461,6 +463,7 @@ where
         project_id,
         endpoint_fingerprint,
         &run_key,
+        options.output_intent,
     ))?;
     Ok(committed)
 }

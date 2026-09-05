@@ -138,6 +138,15 @@ pub(crate) async fn await_downloaded_outputs(
 ) -> Result<(ProgramExecutionOutputs, Vec<ProgramExecutionObject>)> {
     let outputs = await_outputs(run_id).await?;
     let (client, saved) = saved_client(run_id).await?;
+    let objects = download_output_objects(&client, &saved, &outputs).await?;
+    Ok((outputs, objects))
+}
+
+async fn download_output_objects(
+    client: &ExecutionClient,
+    saved: &secret::SavedRemoteRun,
+    outputs: &ProgramExecutionOutputs,
+) -> Result<Vec<ProgramExecutionObject>> {
     let key = saved.key()?;
     let mut objects = Vec::with_capacity(outputs.objects.len());
     for location in &outputs.objects {
@@ -148,8 +157,12 @@ pub(crate) async fn await_downloaded_outputs(
                 &saved.endpoint_fingerprint,
             )
             .await?;
-        let bytes =
-            super::crypto::open_run_object(&key, run_id, EncryptionPurpose::Result, &ciphertext)?;
+        let bytes = super::crypto::open_run_object(
+            &key,
+            &saved.run_id,
+            EncryptionPurpose::Result,
+            &ciphertext,
+        )?;
         let object = ProgramExecutionObject {
             reference: location.reference.clone(),
             bytes,
@@ -159,7 +172,7 @@ pub(crate) async fn await_downloaded_outputs(
             .context("remote result object failed integrity validation")?;
         objects.push(object);
     }
-    Ok((outputs, objects))
+    Ok(objects)
 }
 
 pub async fn attach(run_id: &str, no_follow: bool, json: bool) -> Result<()> {
@@ -212,6 +225,26 @@ async fn print_terminal(
         outputs
             .validate()
             .context("remote result payload failed integrity validation")?;
+        if let secret::SavedOutputIntent::Mesh {
+            solver_mesh_path,
+            evidence_path,
+            force,
+            materialization,
+        } = &saved.output_intent
+        {
+            let objects = download_output_objects(client, saved, &outputs).await?;
+            let result = crate::commands::mesh::materialize_remote_outputs(
+                outputs.response,
+                objects,
+                solver_mesh_path,
+                evidence_path,
+                *force,
+            )?;
+            if *materialization == secret::OutputMaterialization::Pending {
+                secret::mark_output_materialized(&run.id)?;
+            }
+            return print_materialized_mesh(&run, solver_mesh_path, evidence_path, &result, json);
+        }
         let result_object_count = outputs.objects.len();
         let response = outputs.response;
         if json {
@@ -274,6 +307,38 @@ async fn print_terminal(
         println!("{}", serde_json::to_string(&run)?);
     } else {
         print_run(&run);
+    }
+    Ok(())
+}
+
+fn print_materialized_mesh(
+    run: &runmat_server_client::execution::RunResponse,
+    solver_mesh_path: &std::path::Path,
+    evidence_path: &std::path::Path,
+    result: &runmat_meshing_execution::ExactMeshingDagRunResult,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "run": run,
+                "solverMeshArtifactPath": solver_mesh_path,
+                "meshingEvidenceArtifactPath": evidence_path,
+                "canonicalDigest": crate::commands::mesh::hex_digest(
+                    result.artifact.canonical_digest.bytes()
+                ),
+                "nodeCount": result.artifact.topology.nodes.len(),
+                "elementCount": result.artifact.topology.volume_elements.len(),
+                "boundaryFaceCount": result.artifact.topology.boundary_faces.len(),
+                "materialized": true,
+            }))?
+        );
+    } else {
+        print_run(run);
+        println!("Verified solver mesh available");
+        println!("  mesh: {}", solver_mesh_path.display());
+        println!("  evidence: {}", evidence_path.display());
     }
     Ok(())
 }

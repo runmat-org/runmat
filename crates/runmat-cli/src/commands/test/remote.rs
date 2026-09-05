@@ -201,6 +201,7 @@ impl WorkerBackend for RemoteTestBackend {
                     on_run_created: Some(Arc::new(move |run_id| {
                         *active_run.lock().expect("remote test session poisoned") = Some(run_id);
                     })),
+                    output_intent: crate::commands::job::secret::SavedOutputIntent::Generic,
                 },
             )
             .await

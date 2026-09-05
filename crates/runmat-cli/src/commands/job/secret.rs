@@ -4,14 +4,42 @@ use anyhow::{Context, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
+pub const SAVED_REMOTE_RUN_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputMaterialization {
+    Pending,
+    Materialized,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SavedOutputIntent {
+    Generic,
+    Mesh {
+        solver_mesh_path: PathBuf,
+        evidence_path: PathBuf,
+        force: bool,
+        materialization: OutputMaterialization,
+    },
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SavedRemoteRun {
+    pub schema_version: u16,
     pub run_id: String,
     pub server_url: String,
     pub project_id: String,
     pub endpoint_fingerprint: String,
     pub run_key: String,
+    pub output_intent: SavedOutputIntent,
 }
 
 impl SavedRemoteRun {
@@ -21,18 +49,45 @@ impl SavedRemoteRun {
         project_id: String,
         endpoint_fingerprint: String,
         run_key: &runmat_execution_artifact::encryption::RunKeyMaterial,
+        output_intent: SavedOutputIntent,
     ) -> Self {
         Self {
+            schema_version: SAVED_REMOTE_RUN_SCHEMA_VERSION,
             run_id,
             server_url,
             project_id,
             endpoint_fingerprint,
             run_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .encode(run_key.expose_for_recipient_envelope()),
+            output_intent,
         }
     }
 
+    fn validate(&self, expected_run_id: &str) -> Result<()> {
+        if self.schema_version != SAVED_REMOTE_RUN_SCHEMA_VERSION {
+            anyhow::bail!("saved remote run uses an unsupported schema");
+        }
+        if self.run_id != expected_run_id {
+            anyhow::bail!("saved remote run identity does not match its storage key");
+        }
+        if let SavedOutputIntent::Mesh {
+            solver_mesh_path,
+            evidence_path,
+            ..
+        } = &self.output_intent
+        {
+            if !solver_mesh_path.is_absolute() || !evidence_path.is_absolute() {
+                anyhow::bail!("saved mesh output destinations must be absolute paths");
+            }
+            if solver_mesh_path == evidence_path {
+                anyhow::bail!("saved mesh output destinations must be distinct");
+            }
+        }
+        Ok(())
+    }
+
     pub fn key(&self) -> Result<runmat_execution_artifact::encryption::RunKeyMaterial> {
+        self.validate(&self.run_id)?;
         let bytes: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(&self.run_key)
             .context("saved run secret is malformed")?
@@ -43,24 +98,52 @@ impl SavedRemoteRun {
     }
 }
 
+pub fn mark_output_materialized(run_id: &str) -> Result<()> {
+    let mut saved = load(run_id)?;
+    match &mut saved.output_intent {
+        SavedOutputIntent::Mesh {
+            materialization, ..
+        } => *materialization = OutputMaterialization::Materialized,
+        SavedOutputIntent::Generic => {
+            anyhow::bail!("remote run has no deferred mesh output intent")
+        }
+    }
+    save(&saved)
+}
+
 pub fn save(value: &SavedRemoteRun) -> Result<()> {
+    value.validate(&value.run_id)?;
     let path = path(&value.run_id)?;
     let parent = path.parent().context("saved run path has no parent")?;
     std::fs::create_dir_all(parent).context("create saved run directory")?;
     set_private_directory(parent)?;
-    std::fs::write(&path, serde_json::to_vec_pretty(value)?)
-        .context("write saved remote run secret")?;
-    set_private_file(&path)?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).context("create staged saved remote run secret")?;
+    set_private_file(temporary.path())?;
+    use std::io::Write as _;
+    temporary
+        .write_all(&serde_json::to_vec_pretty(value)?)
+        .context("write staged saved remote run secret")?;
+    temporary
+        .as_file()
+        .sync_all()
+        .context("sync staged saved remote run secret")?;
+    temporary
+        .persist(&path)
+        .map_err(|error| error.error)
+        .context("publish saved remote run secret")?;
     Ok(())
 }
 
 pub fn load(run_id: &str) -> Result<SavedRemoteRun> {
     let path = path(run_id)?;
-    serde_json::from_slice(
+    let saved: SavedRemoteRun = serde_json::from_slice(
         &std::fs::read(&path)
             .with_context(|| format!("no local attach secret is available for run {run_id}"))?,
     )
-    .context("read saved remote run secret")
+    .context("read saved remote run secret")?;
+    saved.validate(run_id)?;
+    Ok(saved)
 }
 
 fn path(run_id: &str) -> Result<PathBuf> {
@@ -122,6 +205,12 @@ mod tests {
             "project_1".into(),
             "fingerprint".into(),
             &key,
+            SavedOutputIntent::Mesh {
+                solver_mesh_path: temp.path().join("mesh.cbor"),
+                evidence_path: temp.path().join("evidence.cbor"),
+                force: false,
+                materialization: OutputMaterialization::Pending,
+            },
         );
         save(&saved).unwrap();
         let loaded = load("run_123").unwrap();
@@ -129,6 +218,53 @@ mod tests {
             loaded.key().unwrap().expose_for_recipient_envelope(),
             key.expose_for_recipient_envelope()
         );
+        assert_eq!(loaded.output_intent, saved.output_intent);
+        mark_output_materialized("run_123").unwrap();
+        assert!(matches!(
+            load("run_123").unwrap().output_intent,
+            SavedOutputIntent::Mesh {
+                materialization: OutputMaterialization::Materialized,
+                ..
+            }
+        ));
         std::env::remove_var("RUNMAT_CLI_CONFIG_DIR");
+    }
+
+    #[test]
+    fn saved_mesh_intent_rejects_ambiguous_or_relocated_destinations() {
+        let key =
+            runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([9; 32]).unwrap();
+        let relative = SavedRemoteRun::new(
+            "run_relative".into(),
+            "https://example.invalid".into(),
+            "project_1".into(),
+            "fingerprint".into(),
+            &key,
+            SavedOutputIntent::Mesh {
+                solver_mesh_path: "mesh.cbor".into(),
+                evidence_path: "evidence.cbor".into(),
+                force: false,
+                materialization: OutputMaterialization::Pending,
+            },
+        );
+        assert!(relative.validate("run_relative").is_err());
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("result.cbor");
+        let ambiguous = SavedRemoteRun::new(
+            "run_ambiguous".into(),
+            "https://example.invalid".into(),
+            "project_1".into(),
+            "fingerprint".into(),
+            &key,
+            SavedOutputIntent::Mesh {
+                solver_mesh_path: path.clone(),
+                evidence_path: path,
+                force: false,
+                materialization: OutputMaterialization::Pending,
+            },
+        );
+        assert!(ambiguous.validate("run_ambiguous").is_err());
+        assert!(ambiguous.validate("different_run").is_err());
     }
 }

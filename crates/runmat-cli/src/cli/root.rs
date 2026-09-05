@@ -484,6 +484,8 @@ pub enum ConfigCommand {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{Cli, Commands};
     use crate::cli::{
         AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, MeshSourceUnitsArg,
@@ -559,12 +561,30 @@ mod tests {
             "16",
             "--trust-identity",
             "sha256:trusted-node",
+            "--output",
+            "artifacts/part.mesh.cbor",
+            "--evidence",
+            "artifacts/part.evidence.cbor",
+            "--force",
             "--detach",
         ])
         .unwrap();
-        let Some(Commands::Mesh { execution, .. }) = cli.command else {
+        let Some(Commands::Mesh {
+            output,
+            evidence,
+            force,
+            execution,
+            ..
+        }) = cli.command
+        else {
             panic!("expected mesh command")
         };
+        assert_eq!(output.unwrap(), PathBuf::from("artifacts/part.mesh.cbor"));
+        assert_eq!(
+            evidence.unwrap(),
+            PathBuf::from("artifacts/part.evidence.cbor")
+        );
+        assert!(force);
         assert_eq!(
             execution.resolve().unwrap(),
             crate::cli::ExecutionTarget::Remote(crate::cli::RemoteExecutionTarget {

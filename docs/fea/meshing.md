@@ -259,7 +259,7 @@ does not substitute a bounding box or display tessellation for the exact CAD mod
 | `--workers <count>` | Remote worker capacity; zero selects the meshing minimum | `0` |
 | `--trust-identity <fingerprint>` | Pinned identity required for a remote endpoint | None |
 | `--idempotency-key <key>` | Stable identity for safe submission retries | Generated |
-| `--detach` | Return after remote submission without creating local outputs | Off |
+| `--detach` | Return after remote submission; materialize verified outputs on `job attach` | Off |
 
 Smaller target sizes usually create more elements. Deviation is independent: curved geometry may
 need boundary edges much shorter than the global target to stay within the geometric error bound.
@@ -481,9 +481,17 @@ ABI, platform, memory/scratch class, and requested element-order capabilities.
 
 Without `--detach`, the CLI downloads every terminal result object, checks its digest and run
 authority, reconstructs and jointly validates the solver mesh and evidence, and only then writes the
-two requested local files. `--detach` returns the durable run ID and deliberately creates no local
-files; `--output`, `--evidence`, and `--force` therefore reject in detached mode. Use `runmat job
-show`, `runmat job attach`, or `runmat job cancel` with that run ID for lifecycle control.
+two requested local files. `--detach` returns the durable run ID before creating local files. The
+CLI records the absolute `--output` and `--evidence` destinations, together with the explicit
+`--force` decision, in the run's permission-restricted private local attach state. A later
+`runmat job attach RUN_ID` downloads and verifies the same terminal closure before atomically
+materializing that pair. Retrying attach is idempotent when those files already contain the exact
+verified result; a different or incomplete existing pair is preserved unless the original
+submission explicitly authorized replacement with `--force`.
+
+Use `runmat job show`, `runmat job attach`, or `runmat job cancel` with the run ID for lifecycle
+control. Because deferred destinations are client-local intent rather than execution identity, the
+Server and workers never receive filesystem paths and the logical mesh identity is unchanged.
 
 Operators prepare capacity with the `runmat cluster` workflow:
 
