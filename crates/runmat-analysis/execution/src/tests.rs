@@ -405,28 +405,17 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
             let invocation = host
                 .prepare_program_request(revision(), std::slice::from_ref(&root))
                 .unwrap();
+            let program = invocation.into_parts().0;
+            let program_artifact_id =
+                runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
             PreparedAnalysisStepTask {
                 step_id: authored_step.step_id.clone(),
                 host,
-                program_roots: invocation
-                    .request()
-                    .arguments
-                    .iter()
-                    .map(|argument| match argument {
-                        runmat_execution::value::ValuePayload::Object(reference) => {
-                            reference.as_ref().clone()
-                        }
-                        runmat_execution::value::ValuePayload::Inline(_) => {
-                            panic!("analysis graph inputs must remain externalized")
-                        }
-                    })
-                    .collect(),
+                program,
                 context: AnalysisExecutionContext {
                     scope_id: ExecutionScopeId::derive(&[b"parallel-study"]),
                     pool_id: PoolId::derive(&[step_id.as_bytes()]),
-                    program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
-                        b"analysis-program",
-                    ]),
+                    program_artifact_id,
                     resources: runmat_execution::resource::ResourceRequest {
                         cpu_millicores: 1000,
                         memory_bytes: 1024 * 1024,

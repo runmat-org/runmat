@@ -30,8 +30,9 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
     execute_analysis_program_request, run_remote_worker_quic, NativeAnalysisHostLimits,
-    NativeAnalysisKernel, NativeExecutionConfig, NativeProgramSession, QuicRemoteWorkerChannel,
-    RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    NativeAnalysisKernel, NativeExecutionConfig, NativeProgramSession, NativeProgramTask,
+    QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig,
+    RemoteWorkerQuicRequest,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -71,61 +72,47 @@ async fn parent() {
     let directory = tempfile::tempdir().unwrap();
     let (host, program, _input_objects) = fixture(revision(), "analysis-process-conformance");
     let request = program.request.clone();
+    let (second_host, second_program, _second_inputs) = fixture_for_study(
+        revision(),
+        "analysis-process-conformance",
+        digest("authored-study-second"),
+    );
+    let second_request = second_program.request.clone();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.executable = std::env::current_exe().unwrap();
     config.worker_arguments = vec!["--child".into()];
-    config.max_workers = 1;
+    config.max_workers = 2;
     config.store_root = directory.path().join("native-analysis-session");
     config.worker_capabilities = capabilities();
     let session = NativeProgramSession::new(config).unwrap();
     let mut store = session.object_store();
     program.write_to(&mut store).unwrap();
-    let roots = request
-        .arguments
-        .iter()
-        .map(|value| match value {
-            ValuePayload::Object(root) => (**root).clone(),
-            ValuePayload::Inline(_) => panic!("analysis inputs must remain externalized"),
-        })
-        .collect::<Vec<_>>();
-    let submission = build_analysis_task_submission(
-        &host,
-        roots,
-        Vec::new(),
-        BTreeSet::new(),
-        AnalysisExecutionContext {
-            scope_id: session.scope_id(),
-            pool_id: session.pool_id(),
-            program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
-            resources: ResourceRequest {
-                cpu_millicores: 1_000,
-                memory_bytes: 256 * 1024 * 1024,
-                scratch_bytes: 256 * 1024 * 1024,
-                max_wall_millis: 60_000,
-                max_artifact_bytes: 64 * 1024 * 1024,
-                max_egress_bytes: 0,
-                max_relay_bytes: 0,
-                accelerators: Vec::new(),
-                required_capabilities: capabilities(),
-            },
-            retry: RetryPolicy::IdempotentInfrastructure,
-            deadline_unix_millis: None,
-            priority: 0,
-        },
-    )
-    .unwrap();
-    let task = session.submit(request.clone(), submission).unwrap();
-    let process_result = tokio::time::timeout(Duration::from_secs(15), async {
-        loop {
-            if let Some(result) = task.try_result() {
-                break result.unwrap();
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
+    second_program.write_to(&mut store).unwrap();
+    let submissions = vec![
+        (
+            request.clone(),
+            analysis_submission(session.scope_id(), session.pool_id(), &host, &request),
+        ),
+        (
+            second_request.clone(),
+            analysis_submission(
+                session.scope_id(),
+                session.pool_id(),
+                &second_host,
+                &second_request,
+            ),
+        ),
+    ];
+    let mut tasks = session.submit_graph(submissions).unwrap();
+    let second_task = tasks.pop().unwrap();
+    let task = tasks.pop().unwrap();
+    let process_result = wait_for_native_task(task).await;
+    let second_result = wait_for_native_task(second_task).await;
     let process_payload = import_result(&store, &process_result.outputs, &host);
+    assert_eq!(
+        import_result(&store, &second_result.outputs, &second_host),
+        process_payload
+    );
 
     let mut inline_store = store.clone();
     let inline = execute_analysis_program_request(
@@ -154,6 +141,19 @@ async fn parent() {
 
     remote_conformance(process_payload).await;
     durable_conformance(inline_payload).await;
+}
+
+async fn wait_for_native_task(task: NativeProgramTask) -> runmat_execution_runner::AttemptSuccess {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(result) = task.try_result() {
+                break result.unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap()
 }
 
 async fn run_durable_driver() {
@@ -258,6 +258,12 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
     .unwrap();
     let (host, program, _input_objects) = fixture(revision.clone(), "remote-analysis");
     let request = program.request.clone();
+    let (second_host, second_program, _second_inputs) = fixture_for_study(
+        revision.clone(),
+        "remote-analysis",
+        digest("remote-authored-study-second"),
+    );
+    let second_request = second_program.request.clone();
     let bundle = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure()
@@ -338,14 +344,39 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
             pool.register_execution_object(object.reference.clone(), object.bytes.clone())
                 .unwrap();
         }
-        let submission = analysis_submission(scope_id, pool_id, &host, &request);
-        let completion = pool.submit(submission, request).unwrap();
+        for object in &second_program.objects {
+            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+                .unwrap();
+        }
+        let mut completions = pool
+            .submit_graph(vec![
+                (
+                    request.clone(),
+                    analysis_submission(scope_id, pool_id, &host, &request),
+                ),
+                (
+                    second_request.clone(),
+                    analysis_submission(scope_id, pool_id, &second_host, &second_request),
+                ),
+            ])
+            .unwrap();
+        let second_completion = completions.pop().unwrap();
+        let completion = completions.pop().unwrap();
         let success = tokio::time::timeout(Duration::from_secs(15), completion.wait())
             .await
             .expect("remote analysis completion timeout")
             .unwrap();
+        let second_success =
+            tokio::time::timeout(Duration::from_secs(15), second_completion.wait())
+                .await
+                .expect("second remote analysis completion timeout")
+                .unwrap();
         let mut result_store = MemoryStore::default();
-        for reference in &success.result_objects {
+        for reference in success
+            .result_objects
+            .iter()
+            .chain(&second_success.result_objects)
+        {
             result_store.0.insert(
                 reference.logical_digest,
                 pool.execution_object(reference)
@@ -356,6 +387,10 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
         }
         let payload = import_result(&result_store, &success.outputs, &host);
         assert_eq!(payload, expected_payload);
+        assert_eq!(
+            import_result(&result_store, &second_success.outputs, &second_host),
+            expected_payload
+        );
         channel.drain().await.unwrap();
     };
     let (server, ()) = tokio::join!(server, client);
@@ -396,6 +431,18 @@ fn fixture(
     PreparedAnalysisProgram,
     Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
 ) {
+    fixture_for_study(revision, authorization_scope, digest("authored-study"))
+}
+
+fn fixture_for_study(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+    authored_study_digest: Digest,
+) -> (
+    AnalysisHostWorkload,
+    PreparedAnalysisProgram,
+    Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
+) {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let solve = StructuralLinearWorkload {
         schema_version: 1,
@@ -414,7 +461,7 @@ fn fixture(
         encryption_context: digest("encryption"),
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
-        authored_study_digest: digest("authored-study"),
+        authored_study_digest,
         frozen_project_digest: None,
         program_revision: revision,
         artifact_access: access,

@@ -143,6 +143,58 @@ fn sweep_identity_preserves_authored_order_and_rejects_duplicate_studies() {
 }
 
 #[test]
+fn sweep_results_compose_in_authored_order_not_completion_order() {
+    let first = StudyIdentity::new(digest("sweep-study-a"), None).unwrap();
+    let second = StudyIdentity::new(digest("sweep-study-b"), None).unwrap();
+    let (_, execution, _) = identity_graph();
+    let result = |study, label| {
+        let workload = AnalysisWorkloadIdentity::new(
+            study,
+            step_identity(study),
+            execution,
+            AnalysisWorkKind::Solve,
+            digest(label),
+            vec![digest("input")],
+        )
+        .unwrap();
+        AnalysisResultIdentity::new(workload, vec![digest(label)]).unwrap()
+    };
+    let expected_studies = [first, second];
+    let sweep = SweepIdentity::new(
+        digest("ordered-sweep"),
+        expected_studies.to_vec(),
+        digest("composition"),
+    )
+    .unwrap();
+    let first_entry = SweepEntryOutcome {
+        ordinal: 0,
+        study: first,
+        disposition: SweepEntryDisposition::Succeeded {
+            result: result(first, "result-a"),
+        },
+    };
+    let second_entry = SweepEntryOutcome {
+        ordinal: 1,
+        study: second,
+        disposition: SweepEntryDisposition::Succeeded {
+            result: result(second, "result-b"),
+        },
+    };
+
+    let ordered =
+        ComposedSweepResult::new(sweep, &expected_studies, vec![first_entry, second_entry])
+            .unwrap();
+    let reversed =
+        ComposedSweepResult::new(sweep, &expected_studies, vec![second_entry, first_entry])
+            .unwrap();
+    assert_eq!(ordered, reversed);
+
+    let mut wrong = reversed.entries;
+    wrong[1].study = first;
+    assert!(ComposedSweepResult::new(sweep, &expected_studies, wrong).is_err());
+}
+
+#[test]
 fn numerical_objects_are_deterministically_chunked_and_self_validating() {
     let payload = (0_u8..=31).collect::<Vec<_>>();
     let prepared = chunk_numerical_payload(

@@ -47,20 +47,45 @@ impl NativeProgramSession {
         program: ProgramExecutionRequest,
         submission: TaskSubmission,
     ) -> NativeExecutionResult<NativeProgramTask> {
-        program
-            .validate_for_portable_host()
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        if submission.request.inputs != program.arguments
-            || submission.request.outputs.requested_outputs != program.requested_outputs
-        {
+        self.submit_graph(vec![(program, submission)])?
+            .pop()
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("native task admission returned no handle".into())
+            })
+    }
+
+    /// Atomically admits a topologically ordered graph before dispatching any task.
+    pub fn submit_graph(
+        &self,
+        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+    ) -> NativeExecutionResult<Vec<NativeProgramTask>> {
+        if tasks.is_empty() {
             return Err(NativeExecutionError::Protocol(
-                "native task inputs or outputs differ from its exact program request".into(),
+                "native task graph must not be empty".into(),
             ));
         }
-        let completion = self
-            .driver
-            .submit_task(submission, program.recipe, program.artifact)?;
-        Ok(NativeProgramTask { completion })
+        for (program, submission) in &tasks {
+            program
+                .validate_for_portable_host()
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            if submission.request.inputs != program.arguments
+                || submission.request.outputs.requested_outputs != program.requested_outputs
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "native task inputs or outputs differ from its exact program request".into(),
+                ));
+            }
+        }
+        let completions = self.driver.submit_tasks(
+            tasks
+                .into_iter()
+                .map(|(program, submission)| (submission, program.recipe, program.artifact))
+                .collect(),
+        )?;
+        Ok(completions
+            .into_iter()
+            .map(|completion| NativeProgramTask { completion })
+            .collect())
     }
 
     pub fn cancel(&self, reason: CancellationReason) {

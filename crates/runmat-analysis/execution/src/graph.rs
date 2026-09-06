@@ -4,8 +4,10 @@ use runmat_analysis_core::{ProcedureStepId, ValidatedAnalysisSequence};
 use runmat_analysis_fea::execution::{
     AnalysisTaskIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
 };
-use runmat_execution::value::ValueRef;
+use runmat_execution::identity::ArtifactId;
+use runmat_execution::value::ValuePayload;
 use runmat_execution::TaskId;
+use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::TaskSubmission;
 
 use crate::{
@@ -17,7 +19,7 @@ use crate::{
 pub struct PreparedAnalysisStepTask {
     pub step_id: ProcedureStepId,
     pub host: AnalysisHostWorkload,
-    pub program_roots: Vec<ValueRef>,
+    pub program: ProgramExecutionRequest,
     pub context: AnalysisExecutionContext,
 }
 
@@ -25,6 +27,7 @@ pub struct PreparedAnalysisStepTask {
 pub struct AnalysisSequenceTask {
     pub step_id: ProcedureStepId,
     pub identity: AnalysisTaskIdentity,
+    pub program: ProgramExecutionRequest,
     pub submission: TaskSubmission,
 }
 
@@ -32,6 +35,15 @@ pub struct AnalysisSequenceTask {
 pub struct AnalysisSequenceExecutionGraph {
     pub study: StudyIdentity,
     pub tasks: Vec<AnalysisSequenceTask>,
+}
+
+impl AnalysisSequenceExecutionGraph {
+    pub fn into_program_tasks(self) -> Vec<(ProgramExecutionRequest, TaskSubmission)> {
+        self.tasks
+            .into_iter()
+            .map(|task| (task.program, task.submission))
+            .collect()
+    }
 }
 
 /// Projects a validated semantic sequence into generic scheduler tasks.
@@ -131,9 +143,29 @@ pub fn compile_analysis_sequence_graph(
             .collect::<AnalysisBridgeResult<BTreeSet<_>>>()?;
         let identity =
             AnalysisTaskIdentity::new(task.host.workload.identity, dependency_identities.clone())?;
+        task.program.validate().map_err(|error| {
+            AnalysisBridgeError::Invalid(format!("analysis program request is invalid: {error}"))
+        })?;
+        let program_artifact_id = ArtifactId::derive(&[task.program.artifact.id.0.bytes()]);
+        if task.context.program_artifact_id != program_artifact_id {
+            return Err(AnalysisBridgeError::Identity(
+                "analysis execution context names a different program artifact",
+            ));
+        }
+        let program_roots = task
+            .program
+            .arguments
+            .iter()
+            .map(|argument| match argument {
+                ValuePayload::Object(reference) => Ok(reference.as_ref().clone()),
+                ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
+                    "analysis sequence program inputs must remain externalized".into(),
+                )),
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()?;
         let submission = build_analysis_task_submission(
             &task.host,
-            task.program_roots,
+            program_roots,
             dependency_identities,
             dependency_tasks,
             task.context,
@@ -147,6 +179,7 @@ pub fn compile_analysis_sequence_graph(
         tasks.push(AnalysisSequenceTask {
             step_id: step_id.clone(),
             identity,
+            program: task.program,
             submission,
         });
     }

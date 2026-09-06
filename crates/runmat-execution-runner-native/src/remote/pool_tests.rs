@@ -322,6 +322,50 @@ async fn rejected_submission_does_not_poison_remote_task_registries() {
 }
 
 #[tokio::test]
+async fn remote_task_graph_admission_is_atomic() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-graph-rollback-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-graph-rollback-pool"]);
+    let bundle = executable_bundle().await.2;
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 0,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        8,
+        bundle,
+    )
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let first_id = TaskId::derive(&[b"remote-graph-first"]);
+    let second_id = TaskId::derive(&[b"remote-graph-second"]);
+    let first = submission(scope_id, pool_id, first_id, artifact_id);
+    let mut rejected = submission(scope_id, pool_id, second_id, artifact_id);
+    rejected.dependencies = BTreeSet::from([TaskId::derive(&[b"remote-graph-missing"])]);
+
+    assert!(pool
+        .submit_graph(vec![
+            (program.clone(), first.clone()),
+            (program.clone(), rejected),
+        ])
+        .is_err());
+    assert!(pool.snapshot().tasks.is_empty());
+
+    let mut dependent = submission(scope_id, pool_id, second_id, artifact_id);
+    dependent.dependencies = BTreeSet::from([first_id]);
+    let handles = pool
+        .submit_graph(vec![(program.clone(), first), (program, dependent)])
+        .expect("a rejected graph must not reserve scheduler or remote registry state");
+    assert_eq!(handles.len(), 2);
+    let snapshot = pool.snapshot();
+    assert!(snapshot.tasks.contains_key(&first_id));
+    assert!(snapshot.tasks.contains_key(&second_id));
+}
+
+#[tokio::test]
 async fn late_dependent_on_failed_remote_task_resolves_without_dispatch() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-late-terminal-scope"]);
     let pool_id = PoolId::derive(&[b"remote-late-terminal-pool"]);

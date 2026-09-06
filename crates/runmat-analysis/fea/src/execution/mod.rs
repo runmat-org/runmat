@@ -7,6 +7,7 @@ mod error;
 mod identity;
 mod object;
 mod solve;
+mod sweep;
 
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use identity::{
@@ -15,7 +16,7 @@ pub use identity::{
     ExecutionPlanIdentity, GeneratorIdentity, NumericalPlanIdentity, ObservationIdentity,
     OperatorIdentity, ProblemIdentity, PublicationIdentity, SequenceIdentity,
     SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
-    StateTransitionIdentity, StepIdentity, StudyIdentity, SweepIdentity,
+    StateTransitionIdentity, StepIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, AnalysisChunkDescriptor, AnalysisNumericalObjectKind,
@@ -24,6 +25,7 @@ pub use object::{
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
+pub use sweep::{ComposedSweepResult, SweepEntryDisposition, SweepEntryOutcome};
 
 #[cfg(test)]
 mod tests;

@@ -115,6 +115,20 @@ impl Driver {
                 self.worker_lost(worker_id, &mut actions)?;
             }
             DriverCommand::Submit(submission) => self.submit(*submission)?,
+            DriverCommand::SubmitBatch(submissions) => {
+                if submissions.is_empty() {
+                    return Err(RunnerError::Invalid(
+                        "task submission batch must not be empty".into(),
+                    ));
+                }
+                let prior = self.snapshot.clone();
+                for submission in submissions {
+                    if let Err(error) = self.submit(submission) {
+                        self.snapshot = prior;
+                        return Err(error);
+                    }
+                }
+            }
             DriverCommand::BackendReport(report) => {
                 self.apply_backend_report(report, &mut actions)?;
             }

@@ -168,6 +168,52 @@ fn dependency_submitted_after_failure_inherits_terminal_state() {
 }
 
 #[test]
+fn task_batch_admission_is_atomic() {
+    let mut fixture = common::fixture(1, 1);
+    let first = common::task(
+        "batch-first",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let first_id = first.request.id;
+    let mut rejected = common::task(
+        "batch-rejected",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let rejected_id = rejected.request.id;
+    rejected.dependencies = BTreeSet::from([TaskId::derive(&[b"batch-missing"])]);
+    let before = fixture.driver.snapshot();
+
+    assert!(fixture
+        .driver
+        .handle(DriverCommand::SubmitBatch(vec![first.clone(), rejected]))
+        .is_err());
+    assert_eq!(fixture.driver.snapshot(), before);
+
+    let mut dependent = common::task(
+        "batch-rejected",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    dependent.dependencies = BTreeSet::from([first_id]);
+    let actions = fixture
+        .driver
+        .handle(DriverCommand::SubmitBatch(vec![first, dependent]))
+        .unwrap();
+    assert!(actions.iter().any(
+        |action| matches!(action, DriverAction::Launch(request) if request.task_id == first_id)
+    ));
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&rejected_id].state,
+        TaskState::Deferred
+    );
+}
+
+#[test]
 fn task_graph_rejects_unknown_dependencies() {
     let mut fixture = common::fixture(1, 1);
     let mut task = common::task(

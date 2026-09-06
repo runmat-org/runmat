@@ -42,6 +42,14 @@ enum FailedRoute {
     Missing,
 }
 
+struct PendingTaskRegistration {
+    task_id: TaskId,
+    program: ProgramExecutionRequest,
+    submission: TaskSubmission,
+    completion_receiver: oneshot::Receiver<CompletionResult>,
+    progress: Arc<super::pool_progress::RemoteProgressBuffer>,
+}
+
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
@@ -292,19 +300,59 @@ impl RemotePoolDriver {
         submission: TaskSubmission,
         program: ProgramExecutionRequest,
     ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        if submission.request.scope_id != self.scope_id
-            || submission.request.pool_id != self.pool_id
-        {
-            return Err(NativeExecutionError::Configuration(
-                "remote task is outside this driver authority".into(),
+        self.submit_graph(vec![(program, submission)])?
+            .pop()
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("remote task admission returned no handle".into())
+            })
+    }
+
+    /// Atomically admits a topologically ordered graph before dispatching any task.
+    pub fn submit_graph(
+        self: &Arc<Self>,
+        tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
+    ) -> NativeExecutionResult<Vec<RemoteTaskCompletion>> {
+        if tasks.is_empty() {
+            return Err(NativeExecutionError::Protocol(
+                "remote task graph must not be empty".into(),
             ));
         }
-        program.validate().map_err(|error| {
-            NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
-        })?;
-        let task_id = submission.request.id;
-        let (sender, receiver) = oneshot::channel();
-        let progress = Arc::new(super::pool_progress::RemoteProgressBuffer::default());
+        let mut registrations = Vec::with_capacity(tasks.len());
+        let mut completion_senders = Vec::with_capacity(tasks.len());
+        for (program, submission) in tasks {
+            if submission.request.scope_id != self.scope_id
+                || submission.request.pool_id != self.pool_id
+            {
+                return Err(NativeExecutionError::Configuration(
+                    "remote task is outside this driver authority".into(),
+                ));
+            }
+            program.validate().map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "remote program request is invalid: {error}"
+                ))
+            })?;
+            let artifact_id =
+                runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
+            if submission.request.program_artifact_id != artifact_id
+                || submission.request.inputs != program.arguments
+                || submission.request.outputs.requested_outputs != program.requested_outputs
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "remote task differs from its exact program request".into(),
+                ));
+            }
+            let (sender, receiver) = oneshot::channel();
+            let task_id = submission.request.id;
+            registrations.push(PendingTaskRegistration {
+                task_id,
+                program,
+                submission,
+                completion_receiver: receiver,
+                progress: Arc::new(super::pool_progress::RemoteProgressBuffer::default()),
+            });
+            completion_senders.push((task_id, sender));
+        }
         let mut programs = self
             .programs
             .lock()
@@ -317,28 +365,43 @@ impl RemotePoolDriver {
             .progress
             .lock()
             .expect("remote progress registry poisoned");
-        if programs.contains_key(&task_id)
-            || completions.contains_key(&task_id)
-            || progress_registry.contains_key(&task_id)
-        {
+        let mut unique = BTreeSet::new();
+        if let Some(registration) = registrations.iter().find(|registration| {
+            let task_id = registration.task_id;
+            !unique.insert(task_id)
+                || programs.contains_key(&task_id)
+                || completions.contains_key(&task_id)
+                || progress_registry.contains_key(&task_id)
+        }) {
             return Err(NativeExecutionError::Protocol(format!(
-                "remote task {task_id} already has registered execution state"
+                "remote task {} already has registered execution state",
+                registration.task_id
             )));
         }
-        programs.insert(task_id, program);
-        completions.insert(task_id, sender);
-        progress_registry.insert(task_id, Arc::clone(&progress));
+        for registration in &registrations {
+            programs.insert(registration.task_id, registration.program.clone());
+            progress_registry.insert(registration.task_id, Arc::clone(&registration.progress));
+        }
+        for (task_id, sender) in completion_senders {
+            completions.insert(task_id, sender);
+        }
+        let submissions = registrations
+            .iter()
+            .map(|registration| registration.submission.clone())
+            .collect();
         let actions = match self
             .driver
             .lock()
             .expect("remote driver poisoned")
-            .handle(DriverCommand::Submit(Box::new(submission)))
+            .handle(DriverCommand::SubmitBatch(submissions))
         {
             Ok(actions) => actions,
             Err(error) => {
-                programs.remove(&task_id);
-                completions.remove(&task_id);
-                progress_registry.remove(&task_id);
+                for registration in &registrations {
+                    programs.remove(&registration.task_id);
+                    completions.remove(&registration.task_id);
+                    progress_registry.remove(&registration.task_id);
+                }
                 return Err(error.into());
             }
         };
@@ -347,7 +410,12 @@ impl RemotePoolDriver {
         drop(programs);
         self.dispatch(actions);
         self.resolve_non_success_terminals();
-        Ok(RemoteTaskCompletion::new(receiver, progress))
+        Ok(registrations
+            .into_iter()
+            .map(|registration| {
+                RemoteTaskCompletion::new(registration.completion_receiver, registration.progress)
+            })
+            .collect())
     }
 
     pub fn resize(self: &Arc<Self>, desired_workers: u32) -> NativeExecutionResult<()> {

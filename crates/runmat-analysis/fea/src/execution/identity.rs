@@ -21,7 +21,7 @@ macro_rules! identity_type {
                 self.0
             }
 
-            fn derive<T: Serialize>(
+            pub(super) fn derive<T: Serialize>(
                 domain: &'static str,
                 input: &T,
             ) -> AnalysisExecutionResult<Self> {
@@ -52,6 +52,7 @@ identity_type!(AnalysisAttemptIdentity);
 identity_type!(ObservationIdentity);
 identity_type!(AccuracyIdentity);
 identity_type!(AnalysisResultIdentity);
+identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

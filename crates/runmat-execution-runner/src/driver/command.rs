@@ -46,6 +46,7 @@ pub enum DriverCommand {
     DrainWorker(WorkerId),
     WorkerLost(WorkerId),
     Submit(Box<TaskSubmission>),
+    SubmitBatch(Vec<TaskSubmission>),
     BackendReport(BackendReport),
     CancelScope {
         scope_id: ExecutionScopeId,

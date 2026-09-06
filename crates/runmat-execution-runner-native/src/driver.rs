@@ -224,74 +224,113 @@ impl LocalDriver {
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        artifact.validate_against(&recipe).map_err(|error| {
-            NativeExecutionError::Protocol(format!(
-                "local program artifact failed validation: {error}"
-            ))
-        })?;
-        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        if submission.request.scope_id != self.scope_id
-            || submission.request.pool_id != self.pool_id
-            || submission.request.program_artifact_id != artifact_id
-        {
+        self.submit_tasks(vec![(submission, recipe, artifact)])?
+            .pop()
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("local task admission returned no completion".into())
+            })
+    }
+
+    pub(crate) fn submit_tasks(
+        self: &Arc<Self>,
+        tasks: Vec<(TaskSubmission, ProgramBuildRecipe, ProgramArtifact)>,
+    ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
+        if tasks.is_empty() {
             return Err(NativeExecutionError::Protocol(
-                "local task submission differs from its session or program artifact".into(),
+                "local task submission batch must not be empty".into(),
             ));
         }
-        let task_id = submission.request.id;
-        let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        self.artifacts.put(artifact_id, &stored)?;
-        let completion = Arc::new(TaskCompletion::new());
-        {
-            let mut completions = self
-                .completions
-                .lock()
-                .expect("completion registry poisoned");
-            if completions.contains_key(&task_id) {
-                return Err(NativeExecutionError::Protocol(format!(
-                    "local task {task_id} already has registered completion state"
-                )));
+        let mut registrations = Vec::with_capacity(tasks.len());
+        for (submission, recipe, artifact) in tasks {
+            artifact.validate_against(&recipe).map_err(|error| {
+                NativeExecutionError::Protocol(format!(
+                    "local program artifact failed validation: {error}"
+                ))
+            })?;
+            let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
+            if submission.request.scope_id != self.scope_id
+                || submission.request.pool_id != self.pool_id
+                || submission.request.program_artifact_id != artifact_id
+            {
+                return Err(NativeExecutionError::Protocol(
+                    "local task submission differs from its session or program artifact".into(),
+                ));
             }
-            completions.insert(task_id, Arc::clone(&completion));
+            let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
+                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            self.artifacts.put(artifact_id, &stored)?;
+            registrations.push((
+                submission.request.id,
+                Arc::new(TaskCompletion::new()),
+                submission,
+            ));
         }
-        let (actions, inherited_terminal) = {
+
+        let mut completions = self
+            .completions
+            .lock()
+            .expect("completion registry poisoned");
+        let mut unique = BTreeSet::new();
+        if registrations
+            .iter()
+            .any(|(task_id, _, _)| !unique.insert(*task_id) || completions.contains_key(task_id))
+        {
+            return Err(NativeExecutionError::Protocol(
+                "local task batch contains a duplicate or registered task".into(),
+            ));
+        }
+        for (task_id, completion, _) in &registrations {
+            completions.insert(*task_id, Arc::clone(completion));
+        }
+        let (actions, inherited_terminals) = {
             let mut driver = self.driver.lock().expect("local driver poisoned");
             let prior = driver.snapshot();
-            let actions = match driver.handle(DriverCommand::Submit(Box::new(submission))) {
+            let submissions = registrations
+                .iter()
+                .map(|(_, _, submission)| submission.clone())
+                .collect();
+            let actions = match driver.handle(DriverCommand::SubmitBatch(submissions)) {
                 Ok(actions) => actions,
                 Err(error) => {
-                    self.completions
-                        .lock()
-                        .expect("completion registry poisoned")
-                        .remove(&task_id);
+                    for (task_id, _, _) in &registrations {
+                        completions.remove(task_id);
+                    }
                     return Err(error.into());
                 }
             };
             if let Err(error) = self.checkpoints.write(&driver.snapshot()) {
                 driver.restore_snapshot(prior)?;
-                self.completions
-                    .lock()
-                    .expect("completion registry poisoned")
-                    .remove(&task_id);
+                for (task_id, _, _) in &registrations {
+                    completions.remove(task_id);
+                }
                 return Err(error);
             }
-            let terminal = driver.snapshot().tasks.get(&task_id).and_then(|task| {
-                matches!(
-                    task.state,
-                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
-                )
-                .then_some(task.state)
-            });
+            let snapshot = driver.snapshot();
+            let terminal = registrations
+                .iter()
+                .filter_map(|(task_id, completion, _)| {
+                    snapshot.tasks.get(task_id).and_then(|task| {
+                        matches!(
+                            task.state,
+                            TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
+                        )
+                        .then(|| (Arc::clone(completion), task.state))
+                    })
+                })
+                .collect::<Vec<_>>();
             (actions, terminal)
         };
-        if let Some(state) = inherited_terminal {
+        drop(completions);
+        for (completion, state) in inherited_terminals {
             completion.complete(Err(format!(
                 "local task inherited terminal dependency state {state:?}"
             )));
         }
         Self::dispatch(Arc::clone(self), actions);
-        Ok(completion)
+        Ok(registrations
+            .into_iter()
+            .map(|(_, completion, _)| completion)
+            .collect())
     }
 
     pub(crate) fn cancel_all(self: &Arc<Self>, reason: CancellationReason) {
