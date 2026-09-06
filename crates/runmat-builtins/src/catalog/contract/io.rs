@@ -15,10 +15,17 @@ pub enum IoConsoleInferenceRule {
 pub enum IoReplFsInferenceRule {
     ChangeDirectory,
     CurrentDirectory,
+    DirectoryLifecycle(DirectoryLifecycleInferenceRule),
     Environment(EnvironmentInferenceRule),
     PathSyntax(PathSyntaxInferenceRule),
     SearchPath(SearchPathInferenceRule),
     TemporaryPath(TemporaryPathInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DirectoryLifecycleInferenceRule {
+    Create,
+    Remove,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

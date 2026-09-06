@@ -6,6 +6,7 @@ pub(in crate::catalog::entries::io) fn extend_entries(
         &[
             super::addpath::ENTRIES,
             super::cd::ENTRIES,
+            super::directory_lifecycle::ENTRIES,
             super::environment::ENTRIES,
             super::genpath::ENTRIES,
             super::path::ENTRIES,

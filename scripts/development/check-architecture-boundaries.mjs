@@ -1576,6 +1576,69 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "directory-lifecycle family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_lifecycle",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/mkdir/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/rmdir/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_lifecycle/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_lifecycle/mkdir/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_lifecycle/rmdir/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/mkdir.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/rmdir.rs",
+    "docs/builtins/reference/mkdir.json",
+    "docs/builtins/reference/rmdir.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/mkdir.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/rmdir.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/inference.rs",
+]) {
+  if (/"(?:mkdir|rmdir)"/.test(read(sourcePath))) {
+    fail(`${sourcePath} must route directory lifecycle inference by typed rules, not builtin names`);
+  }
+}
+if (/\bpub fn (?:mkdir|rmdir)_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy runtime type resolvers must not reclaim directory-lifecycle inference authority");
+}
+if (/"(?:mkdir|rmdir)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim directory-lifecycle authority");
+}
+for (const [sourcePath, ceiling] of [
+  ["crates/runmat-runtime/src/warnings/mod.rs", 32],
+  ["crates/runmat-runtime/src/warnings/emission.rs", 128],
+  ["crates/runmat-runtime/src/warnings/policy.rs", 256],
+  ["crates/runmat-runtime/src/warnings/tests.rs", 128],
+]) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(`${sourcePath} exceeds its warning-service role boundary (found ${lines} lines; maximum ${ceiling})`);
+  }
+}
+const warningBuiltin = read("crates/runmat-runtime/src/builtins/diagnostics/warning.rs");
+if (/\b(?:struct WarningPolicy|struct WarningManager|static WARNING_MANAGER)\b/.test(warningBuiltin)) {
+  fail("the warning builtin must not own cross-cutting warning policy state");
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",

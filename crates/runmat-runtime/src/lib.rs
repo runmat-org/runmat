@@ -62,6 +62,7 @@ pub mod replay;
 pub mod runtime_error;
 pub mod user_functions;
 pub mod warning_store;
+pub(crate) mod warnings;
 pub mod workspace;
 
 /// Standard result type for runtime builtins.

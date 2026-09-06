@@ -1,5 +1,6 @@
 mod addpath;
 mod cd;
+mod directory_lifecycle;
 mod environment;
 mod genpath;
 mod inference;
@@ -14,6 +15,7 @@ mod temporary_path;
 
 pub use addpath::*;
 pub use cd::*;
+pub use directory_lifecycle::*;
 pub use environment::*;
 pub use genpath::*;
 pub use path::*;
