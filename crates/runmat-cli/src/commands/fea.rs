@@ -2,8 +2,10 @@ use anyhow::{Context, Result};
 use log::info;
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_runtime::analysis::{
-    analysis_run_study_sweep_op, load_fea_document_from_path_async, AnalysisStudyRunData,
-    AnalysisStudySweepData, FeaResolvedDocument,
+    analysis_complete_structural_study_op, analysis_complete_study_sweep_op,
+    analysis_prepare_structural_study_op, analysis_study_sweep_identity,
+    load_fea_document_from_path_async, AnalysisStudyRunData, AnalysisStudySweepData,
+    AnalysisStudySweepRunOutcome, AnalysisStudySweepSpec, FeaResolvedDocument,
 };
 use runmat_runtime::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use serde::Serialize;
@@ -85,9 +87,6 @@ pub async fn execute_fea_path(
             }
         }
         FeaResolvedDocument::Sweep(spec) => {
-            if !matches!(execution, ExecutionTarget::Local) {
-                anyhow::bail!("remote FEA sweep execution is not yet available");
-            }
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
@@ -102,8 +101,12 @@ pub async fn execute_fea_path(
                     styles.info("validating, planning, and solving studies")
                 );
             }
-            let envelope =
-                analysis_run_study_sweep_op(&spec, context).map_err(report_operation_error)?;
+            let envelope = match execution {
+                ExecutionTarget::Local => execute_local_sweep(&spec, context, config)?,
+                ExecutionTarget::Remote(_) => {
+                    anyhow::bail!("remote FEA sweep execution is not yet available")
+                }
+            };
             if json {
                 print_envelope(&envelope, config.runtime.verbose)?;
             } else {
@@ -114,6 +117,102 @@ pub async fn execute_fea_path(
 
     dump_provider_telemetry_if_requested();
     Ok(())
+}
+
+fn execute_local_sweep(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+    config: &RunMatRuntimeConfig,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>> {
+    analysis_study_sweep_identity(spec, &context).map_err(report_operation_error)?;
+    let mut prepared = spec
+        .studies
+        .iter()
+        .map(|study| analysis_prepare_structural_study_op(study, context.clone()))
+        .map(|result| match result {
+            Ok(prepared) => (Some(prepared), None),
+            Err(error) => (None, Some(AnalysisStudySweepRunOutcome::Failed(error))),
+        })
+        .collect::<Vec<_>>();
+
+    if spec.fail_fast && prepared.iter().any(|(_, outcome)| outcome.is_some()) {
+        let outcomes = prepared
+            .into_iter()
+            .map(|(_, outcome)| outcome.unwrap_or(AnalysisStudySweepRunOutcome::NotRun))
+            .collect();
+        return analysis_complete_study_sweep_op(spec, context, outcomes)
+            .map_err(report_operation_error);
+    }
+
+    let placement_indices = prepared
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (entry, _))| entry.as_ref().map(|_| index))
+        .collect::<Vec<_>>();
+    if !placement_indices.is_empty() {
+        let numerical_results = {
+            let placement_entries = placement_indices
+                .iter()
+                .map(|index| {
+                    prepared[*index]
+                        .0
+                        .as_ref()
+                        .map(|structural| portable::LocalSweepEntry {
+                            study: &spec.studies[*index],
+                            prepared: structural,
+                        })
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("prepared structural sweep entry {index} disappeared")
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            portable::execute_structural_sweep(&placement_entries, config, spec.fail_fast)
+                .unwrap_or_else(|error| {
+                    placement_entries
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| {
+                            if spec.fail_fast && index > 0 {
+                                portable::LocalSweepOutcome::NotRun
+                            } else {
+                                portable::LocalSweepOutcome::Completed(Err(error.clone()))
+                            }
+                        })
+                        .collect()
+                })
+        };
+        if numerical_results.len() != placement_indices.len() {
+            anyhow::bail!(
+                "local structural sweep returned {} results for {} prepared studies",
+                numerical_results.len(),
+                placement_indices.len()
+            );
+        }
+        for (index, numerical_result) in placement_indices.into_iter().zip(numerical_results) {
+            let portable::LocalSweepOutcome::Completed(numerical_result) = numerical_result else {
+                prepared[index].1 = Some(AnalysisStudySweepRunOutcome::NotRun);
+                continue;
+            };
+            let structural = prepared[index].0.take().ok_or_else(|| {
+                anyhow::anyhow!("prepared structural sweep entry {index} disappeared")
+            })?;
+            prepared[index].1 = Some(
+                match analysis_complete_structural_study_op(structural, numerical_result) {
+                    Ok(run) => AnalysisStudySweepRunOutcome::Succeeded(Box::new(run)),
+                    Err(error) => AnalysisStudySweepRunOutcome::Failed(error),
+                },
+            );
+        }
+    }
+
+    let outcomes = prepared
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, outcome))| {
+            outcome.ok_or_else(|| anyhow::anyhow!("sweep entry {index} has no terminal outcome"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    analysis_complete_study_sweep_op(spec, context, outcomes).map_err(report_operation_error)
 }
 
 pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {

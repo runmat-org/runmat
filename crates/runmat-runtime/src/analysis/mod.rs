@@ -86,6 +86,7 @@ mod solver_mesh_flow_topology;
 pub mod storage;
 mod structural_study;
 mod study_execution;
+mod study_sweep;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use excitation_query::{
@@ -109,6 +110,9 @@ use structural_study::{
     study_evidence_root, PreparedStudyRun,
 };
 use study_execution::execute_study_step;
+pub use study_sweep::{
+    analysis_complete_study_sweep_op, analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
@@ -1048,8 +1052,26 @@ pub fn analysis_prepare_structural_study_op(
 
 pub fn analysis_complete_structural_study_op(
     prepared: PreparedStructuralStudy,
-    result: FeaRunResult,
+    result: Result<FeaRunResult, String>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let result = result.map_err(|message| {
+        operation_error(
+            AnalysisOperation::LinearStatic.name(),
+            AnalysisOperation::LinearStatic.version(),
+            &prepared.linear.context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_EXECUTION_FAILED",
+                error_type: OperationErrorType::Backend,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::from([(
+                "analysis_model_id".to_string(),
+                prepared.linear.workload.model.model_id.0.clone(),
+            )]),
+        )
+    })?;
     let resolved_solver_options =
         AnalysisSolverOptions::StructuralLinear(prepared.linear.options.clone());
     let run = analysis_complete_linear_static_run_op(prepared.linear, result)?;
@@ -1487,160 +1509,22 @@ pub fn analysis_run_study_sweep_op(
     spec: &AnalysisStudySweepSpec,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
-    let mut issue_codes = Vec::new();
-    if spec.sweep_id.trim().is_empty() {
-        issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY".to_string());
-    }
-    if spec.studies.is_empty() {
-        issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY".to_string());
-    }
-    if !issue_codes.is_empty() {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "study sweep spec is invalid",
-            BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
-        ));
-    }
-
-    let mut run_entries = Vec::with_capacity(spec.studies.len());
-    let mut failure_entries = Vec::new();
-    for (index, study) in spec.studies.iter().enumerate() {
-        let run = match analysis_run_study_op(study, context.clone()) {
-            Ok(run) => run,
-            Err(err) => {
+    analysis_study_sweep_identity(spec, &context)?;
+    let mut outcomes = Vec::with_capacity(spec.studies.len());
+    for study in &spec.studies {
+        match analysis_run_study_op(study, context.clone()) {
+            Ok(run) => outcomes.push(AnalysisStudySweepRunOutcome::Succeeded(Box::new(run))),
+            Err(error) => {
+                outcomes.push(AnalysisStudySweepRunOutcome::Failed(error));
                 if spec.fail_fast {
-                    return Err(operation_error(
-                        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-                        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-                        &context,
-                        OperationErrorSpec {
-                            error_code: "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED",
-                            error_type: OperationErrorType::Validation,
-                            retryable: false,
-                            severity: OperationErrorSeverity::Error,
-                        },
-                        format!(
-                            "study sweep failed at index {} for study_id {}: {}",
-                            index, study.study_id, err.error_code
-                        ),
-                        BTreeMap::from([
-                            ("sweep_id".to_string(), spec.sweep_id.clone()),
-                            ("study_id".to_string(), study.study_id.clone()),
-                            ("study_index".to_string(), index.to_string()),
-                            ("cause_error_code".to_string(), err.error_code),
-                        ]),
-                    ));
+                    outcomes
+                        .resize_with(spec.studies.len(), || AnalysisStudySweepRunOutcome::NotRun);
+                    break;
                 }
-                failure_entries.push(AnalysisStudySweepFailureEntry {
-                    study_id: study.study_id.clone(),
-                    study_index: index,
-                    error_code: err.error_code,
-                    message: err.message,
-                });
-                continue;
             }
-        };
-        run_entries.push(AnalysisStudySweepRunEntry {
-            study_id: run.data.study_id,
-            procedure_step: run.data.procedure_step,
-            execution: run.data.execution,
-            identity: run.data.identity,
-            run_id: run.data.run_id,
-            run_status: run.data.run_status,
-            numerically_acceptable: run.data.numerically_acceptable,
-            production_publishable: run.data.production_publishable,
-            production_publication_reasons: run.data.production_publication_reasons,
-            run_operation: run.data.run_operation,
-            run_op_version: run.data.run_op_version,
-        });
+        }
     }
-
-    let sanitized_sweep_id = sanitize_study_sweep_id(&spec.sweep_id);
-    let evidence_root = study_evidence_root()
-        .join("sweeps")
-        .join(sanitized_sweep_id)
-        .join("run.json");
-    if let Some(parent) = evidence_root.parent() {
-        fs_create_dir_all(parent).map_err(|err| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-                ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("failed to create study sweep evidence directory: {err}"),
-                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
-            )
-        })?;
-    }
-    let payload = serde_json::json!({
-        "schema_version": "fea_study_sweep_run_artifact/v1",
-        "sweep_id": spec.sweep_id.clone(),
-        "fail_fast": spec.fail_fast,
-        "study_count": spec.studies.len(),
-        "success_count": run_entries.len(),
-        "failed_count": failure_entries.len(),
-        "failure_entries": failure_entries.clone(),
-        "run_entries": run_entries.clone(),
-    });
-    let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to encode study sweep evidence payload: {err}"),
-            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
-        )
-    })?;
-    atomic_write_bytes(&evidence_root, &payload_bytes).map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            err,
-            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
-        )
-    })?;
-
-    let evidence_artifact_path = evidence_root.display().to_string();
-    Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-        &context,
-        AnalysisStudySweepData {
-            sweep_id: spec.sweep_id.clone(),
-            study_count: spec.studies.len(),
-            success_count: run_entries.len(),
-            failed_count: failure_entries.len(),
-            failure_entries,
-            run_entries,
-            evidence_artifact_path,
-        },
-    ))
+    analysis_complete_study_sweep_op(spec, context, outcomes)
 }
 
 pub fn analysis_validate(

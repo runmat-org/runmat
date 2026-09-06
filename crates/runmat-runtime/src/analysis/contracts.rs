@@ -2482,6 +2482,7 @@ pub struct AnalysisStudySweepRunEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySweepData {
     pub sweep_id: String,
+    pub identity: runmat_analysis_fea::execution::SweepIdentity,
     pub study_count: usize,
     pub success_count: usize,
     pub failed_count: usize,

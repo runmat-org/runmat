@@ -2332,7 +2332,7 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
     let numerical_result = executor
         .execute(prepared.workload(), prepared.solver_mesh())
         .expect("prepared numerical solve should succeed");
-    let envelope = analysis_complete_structural_study_op(prepared, numerical_result)
+    let envelope = analysis_complete_structural_study_op(prepared, Ok(numerical_result))
         .expect("prepared structural study completion should succeed");
 
     assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
@@ -2571,6 +2571,92 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
     assert_eq!(err.operation, "fea.run_study_sweep");
     assert_eq!(err.op_version, "fea.run_study_sweep/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC");
+}
+
+#[test]
+fn analysis_complete_study_sweep_rejects_missing_and_substituted_outcomes() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let context = OperationContext::new(None, None);
+    let actual = sample_electromagnetic_study_spec();
+    let run = analysis_run_study_op(&actual, context.clone())
+        .expect("electromagnetic study should produce a composable result");
+    let mut expected = actual;
+    expected.study_id = "different_authored_study".into();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "substituted_sweep".into(),
+        studies: vec![expected],
+        fail_fast: false,
+    };
+
+    let missing = analysis_complete_study_sweep_op(&spec, context.clone(), Vec::new())
+        .expect_err("missing sweep outcomes must fail closed");
+    assert_eq!(
+        missing.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.OUTCOME_CARDINALITY"
+    );
+
+    let substituted = analysis_complete_study_sweep_op(
+        &spec,
+        context,
+        vec![AnalysisStudySweepRunOutcome::Succeeded(Box::new(run))],
+    )
+    .expect_err("a result from a different authored study must fail closed");
+    assert_eq!(
+        substituted.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.RESULT_SUBSTITUTED"
+    );
+}
+
+#[test]
+fn analysis_complete_study_sweep_rejects_duplicate_logical_studies() {
+    let _guard = analysis_test_guard();
+    let study = sample_electromagnetic_study_spec();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "duplicate_study_sweep".into(),
+        studies: vec![study.clone(), study],
+        fail_fast: false,
+    };
+
+    let error = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("duplicate logical studies must not receive a sweep identity");
+
+    assert_eq!(error.error_code, "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC");
+    assert_eq!(
+        error.context.get("issue_codes").map(String::as_str),
+        Some("RM.FEA.STUDY_SWEEP.IDENTITY_INVALID")
+    );
+}
+
+#[test]
+fn analysis_complete_study_sweep_finds_the_authored_fail_fast_error_before_not_run_entries() {
+    let _guard = analysis_test_guard();
+    let context = OperationContext::new(None, None);
+    let first = sample_linear_static_study_spec();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".into();
+    let error = analysis_run_study_op(&invalid, context.clone())
+        .expect_err("invalid authored study must fail preparation");
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "prepared_fail_fast_sweep".into(),
+        studies: vec![first, invalid],
+        fail_fast: true,
+    };
+
+    let composed = analysis_complete_study_sweep_op(
+        &spec,
+        context,
+        vec![
+            AnalysisStudySweepRunOutcome::NotRun,
+            AnalysisStudySweepRunOutcome::Failed(error),
+        ],
+    )
+    .expect_err("the authored preparation failure must determine fail-fast completion");
+    assert_eq!(composed.error_code, "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED");
+    assert_eq!(
+        composed.context.get("study_index").map(String::as_str),
+        Some("1")
+    );
 }
 
 #[test]

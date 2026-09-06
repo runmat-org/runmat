@@ -3137,6 +3137,16 @@ mod tests {
             FEA_SWEEP_RUN_RESULT_CLASS,
             &AnalysisStudySweepData {
                 sweep_id: "sweep".into(),
+                identity: runmat_analysis_fea::execution::SweepIdentity::new(
+                    runmat_execution::Digest::sha256(b"sweep"),
+                    vec![runmat_analysis_fea::execution::StudyIdentity::new(
+                        runmat_execution::Digest::sha256(b"study"),
+                        None,
+                    )
+                    .expect("study identity")],
+                    runmat_execution::Digest::sha256(b"composition"),
+                )
+                .expect("sweep identity"),
                 study_count: 0,
                 success_count: 0,
                 failed_count: 0,

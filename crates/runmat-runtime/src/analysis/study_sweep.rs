@@ -1,0 +1,336 @@
+use std::collections::BTreeMap;
+
+use runmat_analysis_fea::execution::{StudyIdentity, SweepIdentity};
+use runmat_execution::Digest;
+
+use crate::operations::{
+    operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
+    OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
+};
+
+use super::{
+    atomic_write_bytes, fs_create_dir_all, sanitize_study_sweep_id, study_evidence_root,
+    AnalysisStudyRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+};
+
+/// One authored sweep entry after semantic preparation and numerical placement.
+///
+/// Placement adapters return this boundary to the runtime; only the runtime may apply sweep
+/// failure policy or publish the aggregate evidence artifact.
+#[derive(Debug)]
+pub enum AnalysisStudySweepRunOutcome {
+    Succeeded(Box<OperationEnvelope<AnalysisStudyRunData>>),
+    Failed(OperationErrorEnvelope),
+    NotRun,
+}
+
+/// Composes and publishes a complete sweep in authored order.
+///
+/// The caller may complete entries in any order, but it must restore authored order before
+/// crossing this boundary. The runtime revalidates cardinality and successful study identity so a
+/// placement adapter cannot substitute or omit a result.
+pub fn analysis_complete_study_sweep_op(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+    outcomes: Vec<AnalysisStudySweepRunOutcome>,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
+    let identity = analysis_study_sweep_identity(spec, &context)?;
+    validate_outcome_cardinality(spec, outcomes.len(), &context)?;
+
+    if spec.fail_fast {
+        if let Some((index, error)) = outcomes.iter().enumerate().find_map(|(index, outcome)| {
+            if let AnalysisStudySweepRunOutcome::Failed(error) = outcome {
+                Some((index, error))
+            } else {
+                None
+            }
+        }) {
+            return Err(study_failure(
+                spec,
+                &spec.studies[index].study_id,
+                index,
+                error,
+                &context,
+            ));
+        }
+    }
+
+    let mut run_entries = Vec::with_capacity(spec.studies.len());
+    let mut failure_entries = Vec::new();
+    for (index, (study, outcome)) in spec.studies.iter().zip(outcomes).enumerate() {
+        match outcome {
+            AnalysisStudySweepRunOutcome::Succeeded(run) => {
+                if run.data.study_id != study.study_id {
+                    return Err(operation_error(
+                        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                        &context,
+                        OperationErrorSpec {
+                            error_code: "RM.FEA.RUN_STUDY_SWEEP.RESULT_SUBSTITUTED",
+                            error_type: OperationErrorType::Validation,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Error,
+                        },
+                        "study sweep result differs from its authored entry",
+                        BTreeMap::from([
+                            ("sweep_id".to_string(), spec.sweep_id.clone()),
+                            ("study_id".to_string(), study.study_id.clone()),
+                            ("study_index".to_string(), index.to_string()),
+                            ("result_study_id".to_string(), run.data.study_id),
+                        ]),
+                    ));
+                }
+                run_entries.push(run_entry(run.data));
+            }
+            AnalysisStudySweepRunOutcome::Failed(error) => {
+                if spec.fail_fast {
+                    return Err(study_failure(
+                        spec,
+                        study.study_id.as_str(),
+                        index,
+                        &error,
+                        &context,
+                    ));
+                }
+                failure_entries.push(AnalysisStudySweepFailureEntry {
+                    study_id: study.study_id.clone(),
+                    study_index: index,
+                    error_code: error.error_code,
+                    message: error.message,
+                });
+            }
+            AnalysisStudySweepRunOutcome::NotRun => {
+                return Err(operation_error(
+                    ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_STUDY_SWEEP.OUTCOME_MISSING",
+                        error_type: OperationErrorType::Contract,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Fatal,
+                    },
+                    "study sweep contains an entry that was not executed",
+                    BTreeMap::from([
+                        ("sweep_id".to_string(), spec.sweep_id.clone()),
+                        ("study_id".to_string(), study.study_id.clone()),
+                        ("study_index".to_string(), index.to_string()),
+                    ]),
+                ));
+            }
+        }
+    }
+
+    publish_sweep(spec, identity, context, run_entries, failure_entries)
+}
+
+/// Validates an authored sweep and derives its stable logical identity before any work starts.
+pub fn analysis_study_sweep_identity(
+    spec: &AnalysisStudySweepSpec,
+    context: &OperationContext,
+) -> Result<SweepIdentity, OperationErrorEnvelope> {
+    let mut issue_codes = Vec::new();
+    if spec.sweep_id.trim().is_empty() {
+        issue_codes.push("RM.FEA.STUDY_SWEEP.ID_EMPTY");
+    }
+    if spec.studies.is_empty() {
+        issue_codes.push("RM.FEA.STUDY_SWEEP.STUDIES_EMPTY");
+    }
+    if issue_codes.is_empty() {
+        match sweep_identity(spec) {
+            Ok(identity) => return Ok(identity),
+            Err(_) => issue_codes.push("RM.FEA.STUDY_SWEEP.IDENTITY_INVALID"),
+        }
+    }
+    Err(operation_error(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY_SWEEP.INVALID_SPEC",
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        "study sweep spec or outcome set is invalid",
+        BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
+    ))
+}
+
+fn validate_outcome_cardinality(
+    spec: &AnalysisStudySweepSpec,
+    outcome_count: usize,
+    context: &OperationContext,
+) -> Result<(), OperationErrorEnvelope> {
+    if outcome_count == spec.studies.len() {
+        return Ok(());
+    }
+    Err(operation_error(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY_SWEEP.OUTCOME_CARDINALITY",
+            error_type: OperationErrorType::Contract,
+            retryable: false,
+            severity: OperationErrorSeverity::Fatal,
+        },
+        "study sweep outcome count differs from its authored study count",
+        BTreeMap::from([
+            ("sweep_id".to_string(), spec.sweep_id.clone()),
+            ("study_count".to_string(), spec.studies.len().to_string()),
+            ("outcome_count".to_string(), outcome_count.to_string()),
+        ]),
+    ))
+}
+
+fn sweep_identity(spec: &AnalysisStudySweepSpec) -> Result<SweepIdentity, String> {
+    let studies = spec
+        .studies
+        .iter()
+        .map(|study| StudyIdentity::new(super::analysis_study_content_digest(study), None))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let sweep_contract_digest = Digest::sha256(
+        [
+            b"runmat-authored-analysis-sweep/v1\0".as_slice(),
+            spec.sweep_id.as_bytes(),
+        ]
+        .concat(),
+    );
+    let composition_policy_digest = Digest::sha256(
+        [
+            b"runmat-analysis-sweep-composition/v1\0".as_slice(),
+            &[u8::from(spec.fail_fast)],
+        ]
+        .concat(),
+    );
+    SweepIdentity::new(sweep_contract_digest, studies, composition_policy_digest)
+        .map_err(|error| error.to_string())
+}
+
+fn study_failure(
+    spec: &AnalysisStudySweepSpec,
+    study_id: &str,
+    index: usize,
+    error: &OperationErrorEnvelope,
+    context: &OperationContext,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED",
+            error_type: OperationErrorType::Validation,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        format!(
+            "study sweep failed at index {index} for study_id {study_id}: {}",
+            error.error_code
+        ),
+        BTreeMap::from([
+            ("sweep_id".to_string(), spec.sweep_id.clone()),
+            ("study_id".to_string(), study_id.to_string()),
+            ("study_index".to_string(), index.to_string()),
+            ("cause_error_code".to_string(), error.error_code.clone()),
+        ]),
+    )
+}
+
+fn run_entry(run: AnalysisStudyRunData) -> AnalysisStudySweepRunEntry {
+    AnalysisStudySweepRunEntry {
+        study_id: run.study_id,
+        procedure_step: run.procedure_step,
+        execution: run.execution,
+        identity: run.identity,
+        run_id: run.run_id,
+        run_status: run.run_status,
+        numerically_acceptable: run.numerically_acceptable,
+        production_publishable: run.production_publishable,
+        production_publication_reasons: run.production_publication_reasons,
+        run_operation: run.run_operation,
+        run_op_version: run.run_op_version,
+    }
+}
+
+fn publish_sweep(
+    spec: &AnalysisStudySweepSpec,
+    identity: SweepIdentity,
+    context: OperationContext,
+    run_entries: Vec<AnalysisStudySweepRunEntry>,
+    failure_entries: Vec<AnalysisStudySweepFailureEntry>,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
+    let evidence_root = study_evidence_root()
+        .join("sweeps")
+        .join(sanitize_study_sweep_id(&spec.sweep_id))
+        .join("run.json");
+    if let Some(parent) = evidence_root.parent() {
+        fs_create_dir_all(parent).map_err(|error| {
+            artifact_error(
+                spec,
+                &context,
+                format!("failed to create study sweep evidence directory: {error}"),
+            )
+        })?;
+    }
+    let payload = serde_json::json!({
+        "schema_version": "fea_study_sweep_run_artifact/v1",
+        "sweep_id": spec.sweep_id.clone(),
+        "identity": identity,
+        "fail_fast": spec.fail_fast,
+        "study_count": spec.studies.len(),
+        "success_count": run_entries.len(),
+        "failed_count": failure_entries.len(),
+        "failure_entries": failure_entries,
+        "run_entries": run_entries,
+    });
+    let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|error| {
+        artifact_error(
+            spec,
+            &context,
+            format!("failed to encode study sweep evidence payload: {error}"),
+        )
+    })?;
+    atomic_write_bytes(&evidence_root, &payload_bytes)
+        .map_err(|error| artifact_error(spec, &context, error))?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        &context,
+        AnalysisStudySweepData {
+            sweep_id: spec.sweep_id.clone(),
+            identity,
+            study_count: spec.studies.len(),
+            success_count: run_entries.len(),
+            failed_count: failure_entries.len(),
+            failure_entries,
+            run_entries,
+            evidence_artifact_path: evidence_root.display().to_string(),
+        },
+    ))
+}
+
+fn artifact_error(
+    spec: &AnalysisStudySweepSpec,
+    context: &OperationContext,
+    message: String,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
+            error_type: OperationErrorType::Internal,
+            retryable: true,
+            severity: OperationErrorSeverity::Error,
+        },
+        message,
+        BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+    )
+}
