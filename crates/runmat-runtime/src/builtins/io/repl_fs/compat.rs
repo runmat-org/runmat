@@ -18,8 +18,8 @@ use runmat_builtins::{
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntegerStorage, LogicalArray, NumericDType, NumericScalar,
-    ObjectInstance, StructValue, Tensor, Value,
+    CellArray, CharArray, IntegerStorage, NumericDType, NumericScalar, ObjectInstance, StructValue,
+    Tensor, Value,
 };
 
 use crate::builtins::common::env as runtime_env;
@@ -136,21 +136,6 @@ macro_rules! simple_descriptor {
     };
 }
 
-pub const ISFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isfile is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
-};
-
-simple_descriptor!(
-    ISFILE_SIGNATURES,
-    ISFILE_DESCRIPTOR,
-    "tf = isfile(path)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-
 const MEMMAPFILE_INTEGER_CONTROLS_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "memmapfile-integer-property-controls",
@@ -222,19 +207,6 @@ pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
     },
 ];
-pub const ISFOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isfolder is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
-};
-simple_descriptor!(
-    ISFOLDER_SIGNATURES,
-    ISFOLDER_DESCRIPTOR,
-    "tf = isfolder(path)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
 simple_descriptor!(
     MATLABROOT_SIGNATURES,
     MATLABROOT_DESCRIPTOR,
@@ -566,13 +538,6 @@ pub(super) fn char_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn logical_array(values: Vec<bool>, shape: Vec<usize>, name: &str) -> BuiltinResult<Value> {
-    Ok(Value::LogicalArray(
-        LogicalArray::new(values.into_iter().map(u8::from).collect(), shape)
-            .map_err(|err| compat_error(name, err))?,
-    ))
-}
-
 fn expand_path_for_builtin(text: &str, name: &str) -> BuiltinResult<PathBuf> {
     let expanded = expand_user_path(text.trim(), name).map_err(|err| compat_error(name, err))?;
     Ok(PathBuf::from(expanded))
@@ -591,90 +556,6 @@ fn output_list_for_count(default: Vec<Value>) -> Value {
         default.into_iter().next().unwrap()
     } else {
         Value::OutputList(default)
-    }
-}
-
-#[runtime_builtin(
-    name = "isfile",
-    category = "io/repl_fs",
-    summary = "Return true for paths that name existing files.",
-    keywords = "isfile,file,exists,predicate",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::bool_type),
-    descriptor(crate::builtins::io::repl_fs::compat::ISFILE_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::ISFILE_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn isfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    path_predicate_builtin("isfile", args, |meta| meta.is_file()).await
-}
-
-#[runtime_builtin(
-    name = "isfolder",
-    category = "io/repl_fs",
-    summary = "Return true for paths that name existing folders.",
-    keywords = "isfolder,folder,directory,exists,predicate",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::bool_type),
-    descriptor(crate::builtins::io::repl_fs::compat::ISFOLDER_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::ISFOLDER_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn isfolder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    path_predicate_builtin("isfolder", args, |meta| meta.is_dir()).await
-}
-
-async fn path_predicate_builtin(
-    name: &str,
-    args: Vec<Value>,
-    predicate: fn(&vfs::FsMetadata) -> bool,
-) -> BuiltinResult<Value> {
-    if args.iter().any(value_contains_resident) {
-        return Err(compat_error(
-            name,
-            format!("{name}: path must be text; provider-resident numeric values are invalid"),
-        ));
-    }
-    let args = gather_args(name, &args).await?;
-    if args.len() != 1 {
-        return Err(compat_error(
-            name,
-            format!("{name}: expected exactly one input argument"),
-        ));
-    }
-    match &args[0] {
-        Value::StringArray(array) => {
-            let mut values = Vec::with_capacity(array.data.len());
-            for text in &array.data {
-                let path = expand_path_for_builtin(text, name)?;
-                values.push(
-                    vfs::metadata_async(&path)
-                        .await
-                        .is_ok_and(|m| predicate(&m)),
-                );
-            }
-            logical_array(values, array.shape.clone(), name)
-        }
-        Value::Cell(array) => {
-            let mut values = Vec::with_capacity(array.data.len());
-            for value in &array.data {
-                let path = value_to_path(value, name, "path")?;
-                values.push(
-                    vfs::metadata_async(&path)
-                        .await
-                        .is_ok_and(|m| predicate(&m)),
-                );
-            }
-            logical_array(values, array.shape.clone(), name)
-        }
-        value => {
-            let path = value_to_path(value, name, "path")?;
-            Ok(Value::Bool(
-                vfs::metadata_async(&path)
-                    .await
-                    .is_ok_and(|m| predicate(&m)),
-            ))
-        }
     }
 }
 
@@ -1958,18 +1839,6 @@ mod tests {
             assert!(run(ispref_builtin(vec![Value::Int(integer)])).is_err());
         }
         assert!(run(ispref_builtin(vec![unowned_resident_value()])).is_err());
-    }
-
-    #[test]
-    fn path_and_environment_predicates_reject_resident_numeric_inputs_before_access() {
-        for result in [
-            run(isfile_builtin(vec![unowned_resident_value()])),
-            run(isfolder_builtin(vec![unowned_resident_value()])),
-        ] {
-            let error = result.expect_err("resident numeric input must be invalid text");
-            assert!(error.message().contains("provider-resident numeric"));
-            assert!(!error.message().contains("no acceleration provider"));
-        }
     }
 
     #[test]

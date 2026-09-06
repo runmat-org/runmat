@@ -176,9 +176,14 @@ function findRepoRoot(startDir) {
  * @returns {BuiltinMetadata[]}
  */
 function readBuiltinDocuments() {
+    const exporter = process.env.RUNMAT_EXAMPLE_DOCUMENTATION_BINARY;
+    const command = exporter ? resolve(repoRoot, exporter) : "cargo";
+    const args = exporter
+        ? ["--transition"]
+        : ["run", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"];
     const encoded = execFileSync(
-        "cargo",
-        ["run", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"],
+        command,
+        args,
         { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
     );
     const payload = JSON.parse(encoded);
