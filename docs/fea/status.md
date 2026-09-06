@@ -17,7 +17,7 @@ V&V levels are defined in [Verification & Validation](/docs/fea/validation). The
 
 | Question | Status | Boundary |
 | --- | --- | --- |
-| Can I run `.m` and `.fea` with the same command? | Yes. `runmat run` accepts `.m` scripts and `.fea` study/sweep files. | `.fea` files do not accept positional script arguments or bytecode emission. |
+| Can I run `.m` and `.fea` with the same command? | Yes. `runmat run` accepts `.m` scripts and `.fea` study/sweep files. | Scripts and `.fea` files do not accept positional inputs; remote typed function entrypoints do. `.fea` files do not support bytecode emission. |
 | Can I check before running? | Yes. `runmat check` supports `.m` scripts and `.fea` documents. | `.m` check compiles the source path; `.fea` check validates and plans but does not solve. |
 | Can I use named entrypoints? | Yes. Project entrypoints can target `.m` or `.fea` paths. | Entrypoint resolution must resolve to an actual file. |
 | Can I use RunMat code? | Yes. Typed geometry, meshing, FEA construction, workflow, and result-query builtins are registered. | `.m` code and `.fea` files can express the same study content; use `.m` when generation or parameterization is the better shape. |

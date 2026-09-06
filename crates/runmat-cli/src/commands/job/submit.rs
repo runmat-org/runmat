@@ -187,20 +187,27 @@ pub async fn submit(
         },
     )
     .await?;
-    if json {
-        println!("{}", serde_json::to_string(&committed)?);
-    } else {
-        println!(
-            "{} {} ({})",
-            crate::presentation::stdout().success("Job"),
-            committed.id,
-            committed.state
+    if detach {
+        if json {
+            println!("{}", serde_json::to_string(&committed)?);
+        } else {
+            println!(
+                "{} {} ({})",
+                crate::presentation::stdout().success("Job"),
+                committed.id,
+                committed.state
+            );
+        }
+        return Ok(());
+    }
+    if !json {
+        eprintln!(
+            "{} {}",
+            crate::presentation::stderr().muted("Attached to remote job"),
+            committed.id
         );
     }
-    if !detach {
-        super::attach::attach(&committed.id, false, json).await?;
-    }
-    Ok(())
+    super::attach::attach(&committed.id, false, json).await
 }
 
 pub(crate) async fn submit_prepared(

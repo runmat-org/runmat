@@ -25,6 +25,7 @@ pub async fn execute(command: BatchCommand) -> Result<()> {
             json,
             args,
         } => {
+            crate::commands::script::validate_local_script_arguments(&args)?;
             let file = std::fs::canonicalize(&file)
                 .with_context(|| format!("failed to resolve batch source {}", file.display()))?;
             let source_name = source_name(&file)?;

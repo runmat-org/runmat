@@ -18,7 +18,7 @@ pub enum BatchCommand {
         /// Emit structured JSON
         #[arg(long)]
         json: bool,
-        /// Arguments passed to the script
+        /// Positional inputs; scripts currently reject them rather than discarding them
         #[arg(last = true)]
         args: Vec<String>,
     },

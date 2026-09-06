@@ -51,6 +51,19 @@ runmat job show RUN_ID
 runmat job attach RUN_ID
 ```
 
+Omit `--detach` to wait for completion. With `--json`, a waited submission emits one terminal JSON
+document; a detached submission emits one run document for later lifecycle operations. RunMat does
+not mix submission and terminal objects on standard output. Script entrypoints accept no positional
+inputs. To invoke a source file's declared function with string inputs, select it explicitly:
+
+```bash
+runmat job submit functions/evaluate_case.m \
+  --function evaluate_case \
+  --cluster CLUSTER_ID \
+  --trust-identity SHA256_FINGERPRINT \
+  -- case-a input/data.mat
+```
+
 Request cancellation with `runmat job cancel RUN_ID`. Cancellation is fenced and durable, but arbitrary MATLAB effects outside the managed result boundary cannot be rolled back. A lost driver or node can therefore produce an `indeterminate` run rather than a misleading retry or success.
 
 Distributed tests preserve test-owned discovery, fixture grouping, retry, event, result, report, and coverage semantics while scheduling attempts through the same execution driver:

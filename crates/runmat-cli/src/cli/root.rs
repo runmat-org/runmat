@@ -236,7 +236,7 @@ pub enum Commands {
         /// Emit structured JSON for .fea studies and sweeps
         #[arg(long)]
         json: bool,
-        /// Arguments to pass to script
+        /// Positional inputs; scripts currently reject them rather than inventing argv semantics
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -597,6 +597,23 @@ mod tests {
                 detach: true,
             })
         );
+    }
+
+    #[test]
+    fn run_argument_delimiter_keeps_target_like_text_in_the_workload() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "run",
+            "model.m",
+            "--",
+            "--cluster",
+            "not-placement",
+        ])
+        .unwrap();
+        let Some(Commands::Run { args, .. }) = cli.command else {
+            panic!("expected run command")
+        };
+        assert_eq!(args, ["--cluster", "not-placement"]);
     }
 
     #[test]

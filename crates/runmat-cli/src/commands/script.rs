@@ -56,6 +56,8 @@ pub async fn execute_script_with_args(
         return execute_fea_path(script, cli, config, fea_json).await;
     }
 
+    validate_local_script_arguments(&args)?;
+
     if let Some(path) = &emit_bytecode_path {
         let content = fs::read_to_string(&script)
             .with_context(|| format!("Failed to read script file: {script:?}"))?;
@@ -70,6 +72,16 @@ pub async fn execute_script_with_args(
     }
 
     execute_script_path(script, cli, config).await
+}
+
+pub(crate) fn validate_local_script_arguments(args: &[String]) -> Result<()> {
+    if !args.is_empty() {
+        anyhow::bail!(
+            "local MATLAB script execution does not accept positional arguments; \
+             invoke a typed function entrypoint through `runmat job submit --function`"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
@@ -495,10 +507,19 @@ fn outcome_error_diagnostic(outcome: &ExecutionOutcome) -> Option<&RuntimeDiagno
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_script_input;
+    use super::{resolve_script_input, validate_local_script_arguments};
     use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn local_script_arguments_reject_instead_of_being_discarded() {
+        validate_local_script_arguments(&[]).unwrap();
+        let error = validate_local_script_arguments(&["input".into()]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not accept positional arguments"));
+    }
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {

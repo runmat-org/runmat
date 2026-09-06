@@ -23,7 +23,10 @@ runmat run studies/bracket_static.fea
 
 `runmat check` loads geometry, resolves the study, validates it, and plans it. It does not solve. `runmat run` executes the study or sweep and prints a run summary by default.
 
-`.fea` files use the same `runmat run` command as `.m` files. Positional script arguments and `--emit-bytecode` apply only to `.m` files.
+`.fea` files use the same `runmat run` command as `.m` files, but neither file form accepts
+positional script arguments. RunMat does not invent non-MATLAB `argv` semantics for scripts.
+Remote typed function entrypoints accept declared string inputs through
+`runmat job submit --function NAME -- ...`. `--emit-bytecode` applies only to `.m` files.
 
 By default, FEA run output is human-readable and includes the `run_id`, status, quality gates, evidence path, and a `fea.results("<run_id>")` hint for post-processing. Use `runmat run --json studies/bracket_static.fea` when a script or CI job needs structured JSON. Use `runmat check --json studies/bracket_static.fea` for structured validation and plan output.
 
