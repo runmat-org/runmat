@@ -11,6 +11,11 @@ pub(in crate::catalog::inference) fn infer(
             super::super::math::angle_conversion::infer(rule, request, entry)
         }
         MathInferenceRule::Atan2 => super::super::math::two_argument_angle::infer(request, entry),
+        MathInferenceRule::BinaryArithmetic(rule) => {
+            crate::catalog::entries::math::elementwise::binary_arithmetic::infer_binary_arithmetic(
+                rule, request, entry,
+            )
+        }
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }

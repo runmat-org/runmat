@@ -4,6 +4,7 @@ use serde::Serialize;
 pub enum MathInferenceRule {
     AngleConversion(AngleConversionInferenceRule),
     Atan2,
+    BinaryArithmetic(BinaryArithmeticInferenceRule),
     Bitwise(BitwiseInferenceRule),
     ComplexConstruction,
     Discrete(DiscreteInferenceRule),
@@ -31,6 +32,16 @@ pub enum MathInferenceRule {
     DegreeTrigonometric(DegreeTrigonometricFunction),
     InverseTrigonometric(InverseTrigonometricFunction),
     InverseHyperbolic(InverseHyperbolicFunction),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BinaryArithmeticInferenceRule {
+    Add,
+    Subtract,
+    Multiply,
+    RightDivide,
+    LeftDivide,
+    Power,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

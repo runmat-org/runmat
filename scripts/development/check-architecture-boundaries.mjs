@@ -2168,6 +2168,57 @@ for (const { path: sourcePath, text } of rustSources("crates/runmat-runtime/src/
   }
 }
 
+enforceMigratedBuiltinFamily({
+  name: "binary-arithmetic catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/inference/mod.rs",
+  ],
+  obsoletePaths: [],
+});
+const binaryArithmeticRuntimeRoot =
+  "crates/runmat-runtime/src/builtins/math/elementwise/binary_arithmetic";
+const binaryArithmeticRuntimeComposition = read(`${binaryArithmeticRuntimeRoot}/mod.rs`);
+if (binaryArithmeticRuntimeComposition.split("\n").length > 64) {
+  fail("binary-arithmetic runtime composition must remain a bounded module router");
+}
+for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot)) {
+  if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
+    fail(`${sourcePath} duplicates catalog-owned binary-arithmetic metadata`);
+  }
+  if (/match\s+[^\n{]*(?:builtin_)?name|(?:builtin_)?name\s*(?:==|!=)/.test(text)) {
+    fail(`${sourcePath} selects binary-arithmetic semantics from an identity string`);
+  }
+}
+for (const identity of ["plus"]) {
+  const obsoleteFlatPath = `crates/runmat-runtime/src/builtins/math/elementwise/${identity}.rs`;
+  if (fs.existsSync(path.join(repo, obsoleteFlatPath))) {
+    fail(`${obsoleteFlatPath} is obsolete flat binary-arithmetic layout debt`);
+  }
+}
+const plusRuntimeBoundaries = new Map([
+  [`${binaryArithmeticRuntimeRoot}/mod.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/plus/mod.rs`, 160],
+  [`${binaryArithmeticRuntimeRoot}/plus/host.rs`, 384],
+  [`${binaryArithmeticRuntimeRoot}/plus/provider.rs`, 256],
+  [`${binaryArithmeticRuntimeRoot}/plus/output_prototype.rs`, 320],
+  [`${binaryArithmeticRuntimeRoot}/plus/tests/mod.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/plus/tests/host.rs`, 448],
+  [`${binaryArithmeticRuntimeRoot}/plus/tests/provider.rs`, 256],
+  [`${binaryArithmeticRuntimeRoot}/plus/tests/wgpu.rs`, 256],
+]);
+for (const [sourcePath, ceiling] of plusRuntimeBoundaries) {
+  const text = read(sourcePath);
+  const lines = text.split("\n").length;
+  if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
+    fail(
+      `${sourcePath} exceeds its binary-arithmetic role boundary ` +
+      `(found ${lines} lines; maximum ${ceiling} and 24576 bytes)`
+    );
+  }
+}
+
 const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {

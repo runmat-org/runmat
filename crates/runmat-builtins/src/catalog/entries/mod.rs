@@ -27,7 +27,7 @@ mod array;
 mod introspection;
 pub(in crate::catalog) mod io;
 mod logical;
-mod math;
+pub(in crate::catalog) mod math;
 mod parallel;
 mod stats;
 
