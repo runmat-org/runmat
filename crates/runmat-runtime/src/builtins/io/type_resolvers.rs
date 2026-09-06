@@ -291,14 +291,6 @@ pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn tempdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
-pub fn tempname_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn unzip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::cell_of(Type::String)
@@ -547,9 +539,6 @@ mod tests {
     assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
     assert_resolver!(rmdir_type_resolver, rmdir_type, &[], Type::Num);
-    assert_resolver!(tempdir_type_resolver, tempdir_type, &[], Type::String);
-    assert_resolver!(tempname_type_resolver, tempname_type, &[], Type::String);
-
     assert_resolver!(
         audioinfo_type_resolver,
         struct_type,
