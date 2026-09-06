@@ -271,7 +271,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             ..pure(BuiltinSemanticKind::Workspace)
         },
 
-        "jsondecode" | "jsonencode" | "fullfile" => pure(BuiltinSemanticKind::General),
+        "jsondecode" | "jsonencode" => pure(BuiltinSemanticKind::General),
         "feval" | "call_method" | "subsref" | "subsasgn" | "notify" | "fzero" | "fsolve"
         | "ode45" | "ode23" | "ode15s" => host_callback(),
         "addlistener" | "new_handle_object" => BuiltinSemantics {
