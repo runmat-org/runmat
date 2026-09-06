@@ -252,40 +252,14 @@ fn component_count(
     shape: &SignalShape,
     topology_entity_count: Option<u64>,
 ) -> AnalysisExecutionResult<usize> {
-    match shape {
-        SignalShape::Scalar if topology_entity_count.is_none() => Ok(1),
-        SignalShape::Vector3 if topology_entity_count.is_none() => Ok(3),
-        SignalShape::Tensor(extents) if topology_entity_count.is_none() && !extents.is_empty() => {
-            extents.iter().try_fold(1_usize, |count, extent| {
-                if *extent == 0 {
-                    return Err(AnalysisExecutionError::Invalid(
-                        "signal tensor extents must be non-zero".into(),
-                    ));
-                }
-                count
-                    .checked_mul(*extent)
-                    .ok_or(AnalysisExecutionError::Limit("signal component count"))
-            })
-        }
-        SignalShape::TopologyField {
-            topology_id,
-            component_count,
-        } if !topology_id.trim().is_empty() && *component_count > 0 => {
-            let entities = topology_entity_count.ok_or_else(|| {
-                AnalysisExecutionError::Invalid(
-                    "topology-field realization requires an entity count".into(),
-                )
-            })?;
-            let entities = usize::try_from(entities)
-                .map_err(|_| AnalysisExecutionError::Limit("topology entity count"))?;
-            entities
-                .checked_mul(*component_count)
-                .ok_or(AnalysisExecutionError::Limit(
-                    "topology signal component count",
-                ))
-        }
-        _ => Err(AnalysisExecutionError::Invalid(
-            "signal realization shape and topology entity count are inconsistent".into(),
-        )),
-    }
+    let entities = topology_entity_count
+        .map(usize::try_from)
+        .transpose()
+        .map_err(|_| AnalysisExecutionError::Limit("topology entity count"))?;
+    shape.realized_component_count(entities).ok_or_else(|| {
+        AnalysisExecutionError::Invalid(
+            "signal realization shape and topology entity count are inconsistent or overflowed"
+                .into(),
+        )
+    })
 }

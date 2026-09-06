@@ -7,6 +7,7 @@ mod host;
 mod object;
 mod response;
 mod serial;
+mod signal_materialization;
 mod structural;
 mod task;
 mod transport;
@@ -29,6 +30,10 @@ pub use response::AnalysisHostResponse;
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
     CompletedAnalysisWorkload,
+};
+pub use signal_materialization::{
+    canonicalize_signal_generator_outputs, plan_signal_generator_chunks, SignalGeneratorChunk,
+    SignalGeneratorChunkOutput,
 };
 pub use structural::{
     import_structural_linear_result, prepare_structural_linear_program,

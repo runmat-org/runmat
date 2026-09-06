@@ -247,6 +247,33 @@ impl PhysicalSignal {
             Self::MassFlowRate(signal) => generator!(signal),
         }
     }
+
+    pub fn precision(&self) -> SignalPrecision {
+        match self {
+            Self::Displacement(signal) => signal.precision,
+            Self::Rotation(signal) => signal.precision,
+            Self::Velocity(signal) => signal.precision,
+            Self::Acceleration(signal) => signal.precision,
+            Self::AngularVelocity(signal) => signal.precision,
+            Self::AngularAcceleration(signal) => signal.precision,
+            Self::Force(signal) => signal.precision,
+            Self::Moment(signal) => signal.precision,
+            Self::Traction(signal) => signal.precision,
+            Self::Pressure(signal) => signal.precision,
+            Self::BodyForceDensity(signal) => signal.precision,
+            Self::Temperature(signal) => signal.precision,
+            Self::TemperatureDifference(signal) => signal.precision,
+            Self::HeatFlux(signal) => signal.precision,
+            Self::HeatGenerationDensity(signal) => signal.precision,
+            Self::ElectricPotential(signal) => signal.precision,
+            Self::ElectricCurrent(signal) => signal.precision,
+            Self::ElectricCharge(signal) => signal.precision,
+            Self::ElectricCurrentDensity(signal) => signal.precision,
+            Self::ElectricChargeDensity(signal) => signal.precision,
+            Self::MagneticVectorPotential(signal) => signal.precision,
+            Self::MassFlowRate(signal) => signal.precision,
+        }
+    }
 }
 
 fn signal_domain<Q>(signal: &Signal<Q>) -> SignalDomainKind {
@@ -298,6 +325,30 @@ impl SignalShape {
                 component_count,
             } if !topology_id.trim().is_empty() && *component_count > 0 => {
                 Some(vec![*component_count])
+            }
+            _ => None,
+        }
+    }
+
+    /// Number of canonical values carried by one sample after topology resolution.
+    pub fn realized_component_count(&self, topology_entity_count: Option<usize>) -> Option<usize> {
+        match self {
+            Self::Scalar if topology_entity_count.is_none() => Some(1),
+            Self::Vector3 if topology_entity_count.is_none() => Some(3),
+            Self::Tensor(extents)
+                if topology_entity_count.is_none()
+                    && !extents.is_empty()
+                    && extents.iter().all(|extent| *extent > 0) =>
+            {
+                extents
+                    .iter()
+                    .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
+            }
+            Self::TopologyField {
+                topology_id,
+                component_count,
+            } if !topology_id.trim().is_empty() && *component_count > 0 => {
+                topology_entity_count.and_then(|entities| entities.checked_mul(*component_count))
             }
             _ => None,
         }
