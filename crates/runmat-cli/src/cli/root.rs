@@ -233,6 +233,8 @@ pub enum Commands {
     Run {
         /// Script file to execute
         file: PathBuf,
+        #[command(flatten)]
+        execution: ExecutionTargetArgs,
         /// Emit structured JSON for .fea studies and sweeps
         #[arg(long)]
         json: bool,
@@ -594,6 +596,40 @@ mod tests {
                 trust_identity: "sha256:trusted-node".into(),
                 idempotency_key: None,
                 workers: 16,
+                detach: true,
+            })
+        );
+    }
+
+    #[test]
+    fn fea_run_uses_the_shared_remote_placement_surface() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "run",
+            "model.fea",
+            "--cluster",
+            "engineering",
+            "--queue",
+            "cpu",
+            "--workers",
+            "8",
+            "--trust-identity",
+            "sha256:trusted-node",
+            "--detach",
+        ])
+        .unwrap();
+        let Some(Commands::Run { execution, .. }) = cli.command else {
+            panic!("expected run command")
+        };
+        assert_eq!(
+            execution.resolve().unwrap(),
+            crate::cli::ExecutionTarget::Remote(crate::cli::RemoteExecutionTarget {
+                cluster: "engineering".into(),
+                project: None,
+                queue: "cpu".into(),
+                trust_identity: "sha256:trusted-node".into(),
+                idempotency_key: None,
+                workers: 8,
                 detach: true,
             })
         );

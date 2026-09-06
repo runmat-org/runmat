@@ -84,6 +84,7 @@ mod result_policy;
 mod solver_mesh_artifact;
 mod solver_mesh_flow_topology;
 pub mod storage;
+mod structural_study;
 mod study_execution;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
@@ -96,6 +97,8 @@ use execution_dispatch::{execution_operation, run_operation_for_identity, Analys
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
 use result_policy::{classify_run_status, evaluate_production_publication};
+pub use structural_study::PreparedStructuralStudy;
+use structural_study::PreparedStudyRun;
 use study_execution::execute_study_step;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -112,6 +115,28 @@ pub trait StructuralLinearExecutor: Send + Sync {
         workload: &StructuralLinearWorkload,
         mesh: &SolverMeshArtifact,
     ) -> Result<FeaRunResult, String>;
+}
+
+/// A fully resolved structural-linear solve at the placement boundary.
+///
+/// The workload and mesh are path-free worker inputs. The remaining fields are retained by the
+/// runtime so a returned numerical result can be admitted, classified, and persisted exactly once.
+#[derive(Debug, Clone)]
+pub struct PreparedStructuralLinearRun {
+    workload: StructuralLinearWorkload,
+    solver_mesh: Option<SolverMeshArtifact>,
+    options: AnalysisRunOptions,
+    context: OperationContext,
+}
+
+impl PreparedStructuralLinearRun {
+    pub fn workload(&self) -> &StructuralLinearWorkload {
+        &self.workload
+    }
+
+    pub fn solver_mesh(&self) -> Option<&SolverMeshArtifact> {
+        self.solver_mesh.as_ref()
+    }
 }
 
 fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
@@ -962,11 +987,86 @@ pub fn analysis_run_study_with_structural_executor_op(
     analysis_run_study_with_structural_executor(spec, context, Some(executor))
 }
 
+pub fn analysis_prepare_structural_study_op(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<PreparedStructuralStudy, OperationErrorEnvelope> {
+    let study = prepare_study_run(spec, context)?;
+    let AnalysisSolverOptions::StructuralLinear(mut options) =
+        study.authored_execution.solver_options.clone()
+    else {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &study.context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.PORTABLE_FAMILY_UNSUPPORTED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "portable study preparation currently requires a structural-linear procedure step",
+            BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
+        ));
+    };
+    if options.solver_mesh_artifact_path.is_none() {
+        options.solver_mesh_artifact_path = study.solver_mesh_artifact_path.clone();
+    }
+    let linear = analysis_prepare_linear_static_run_op(
+        &study.model,
+        study.authored_execution.backend,
+        study.authored_execution.requirement,
+        options,
+        study.context.clone(),
+    )?;
+    if linear.solver_mesh.is_none() {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &study.context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "portable structural study execution requires a canonical solver mesh",
+            BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
+        ));
+    }
+    Ok(PreparedStructuralStudy { study, linear })
+}
+
+pub fn analysis_complete_structural_study_op(
+    prepared: PreparedStructuralStudy,
+    result: FeaRunResult,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let resolved_solver_options =
+        AnalysisSolverOptions::StructuralLinear(prepared.linear.options.clone());
+    let run = analysis_complete_linear_static_run_op(prepared.linear, result)?;
+    complete_study_run(prepared.study, run, resolved_solver_options)
+}
+
 fn analysis_run_study_with_structural_executor(
     spec: &AnalysisStudySpec,
     context: OperationContext,
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let prepared = prepare_study_run(spec, context)?;
+    let (run_envelope, resolved_solver_options) = execute_study_step(
+        &prepared.model,
+        &prepared.authored_execution,
+        prepared.solver_mesh_artifact_path.as_deref(),
+        &prepared.context,
+        structural_executor,
+    )?;
+    complete_study_run(prepared, run_envelope, resolved_solver_options)
+}
+
+fn prepare_study_run(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<PreparedStudyRun, OperationErrorEnvelope> {
     let issue_codes = validate_study_issue_codes(spec);
     if !issue_codes.is_empty() {
         return Err(operation_error(
@@ -1049,13 +1149,35 @@ fn analysis_run_study_with_structural_executor(
         context.clone(),
     )?;
     meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
-    let (run_envelope, resolved_solver_options) = execute_study_step(
-        &model,
+    Ok(PreparedStudyRun {
+        spec: spec.clone(),
+        context,
+        study_fingerprint,
+        model,
+        authored_execution: authored_execution.clone(),
+        procedure_step,
+        operation_sequence,
+        solver_mesh_artifact_path,
+        meshing_evidence_artifact_path,
+    })
+}
+
+fn complete_study_run(
+    prepared: PreparedStudyRun,
+    run_envelope: OperationEnvelope<AnalysisRunResult>,
+    resolved_solver_options: AnalysisSolverOptions,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let PreparedStudyRun {
+        spec,
+        context,
+        study_fingerprint,
+        model,
         authored_execution,
-        solver_mesh_artifact_path.as_deref(),
-        &context,
-        structural_executor,
-    )?;
+        procedure_step,
+        operation_sequence,
+        solver_mesh_artifact_path,
+        meshing_evidence_artifact_path,
+    } = prepared;
     let actual_identity = &run_envelope.data.run.identity;
     if actual_identity.family() != procedure_step.family
         || actual_identity.procedure() != procedure_step.procedure
@@ -8828,14 +8950,13 @@ pub fn analysis_run_linear_static_with_options(
     )
 }
 
-fn analysis_run_linear_static_with_executor(
+pub fn analysis_prepare_linear_static_run_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
-    executor: Option<&dyn StructuralLinearExecutor>,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
     let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
@@ -8910,62 +9031,25 @@ fn analysis_run_linear_static_with_executor(
         thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         electro_thermal_context: to_fea_electro_thermal_context(electro_options),
     };
-    let run = if let Some(executor) = executor {
-        let mesh = solver_mesh.as_ref().ok_or_else(|| {
-            operation_error(
-                AnalysisOperation::LinearStatic.name(),
-                AnalysisOperation::LinearStatic.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_MESH_REQUIRED",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "portable structural execution requires a canonical solver mesh",
-                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-            )
-        })?;
-        executor.execute(&workload, mesh).map_err(|message| {
-            operation_error(
-                AnalysisOperation::LinearStatic.name(),
-                AnalysisOperation::LinearStatic.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_EXECUTION_FAILED",
-                    error_type: OperationErrorType::Backend,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                message,
-                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
-            )
-        })?
-    } else {
-        run_linear_static_with_options(
-            model,
-            backend,
-            LinearStaticSolveOptions {
-                formulation_requirement,
-                preconditioner_kind: requested_preconditioner,
-                algebra_backend_kind: requested_solver_backend,
-                solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
-                solver_mesh: solver_mesh.clone(),
-                require_solver_mesh_for_solid: true,
-                thermo_mechanical_context: workload.thermo_mechanical_context.clone(),
-                electro_thermal_context: workload.electro_thermal_context.clone(),
-            },
-        )
-        .map_err(|err| map_fea_run_error(AnalysisOperation::LinearStatic, model, &context, err))?
-    };
+    Ok(PreparedStructuralLinearRun {
+        workload,
+        solver_mesh,
+        options,
+        context,
+    })
+}
 
+pub fn analysis_complete_linear_static_run_op(
+    prepared: PreparedStructuralLinearRun,
+    run: FeaRunResult,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let result = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
-            model,
-            solver_mesh: solver_mesh.as_ref(),
-            requested_backend: backend,
-            formulation_requirement,
-            options: &options,
+            model: &prepared.workload.model,
+            solver_mesh: prepared.solver_mesh.as_ref(),
+            requested_backend: prepared.workload.backend,
+            formulation_requirement: prepared.workload.formulation_requirement,
+            options: &prepared.options,
         },
         run,
     )
@@ -8973,7 +9057,7 @@ fn analysis_run_linear_static_with_executor(
         operation_error(
             AnalysisOperation::LinearStatic.name(),
             AnalysisOperation::LinearStatic.version(),
-            &context,
+            &prepared.context,
             OperationErrorSpec {
                 error_code: "RM.FEA.RUN_LINEAR_STATIC.RESULT_ADMISSION_FAILED",
                 error_type: OperationErrorType::Contract,
@@ -8981,7 +9065,10 @@ fn analysis_run_linear_static_with_executor(
                 severity: OperationErrorSeverity::Fatal,
             },
             message,
-            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+            BTreeMap::from([(
+                "analysis_model_id".to_string(),
+                prepared.workload.model.model_id.0.clone(),
+            )]),
         )
     })?;
 
@@ -8989,16 +9076,97 @@ fn analysis_run_linear_static_with_executor(
         AnalysisOperation::LinearStatic.name(),
         AnalysisOperation::LinearStatic.version(),
         "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
-        &context,
+        &prepared.context,
         &result,
     )?;
 
     Ok(OperationEnvelope::new(
         AnalysisOperation::LinearStatic.name(),
         AnalysisOperation::LinearStatic.version(),
-        &context,
+        &prepared.context,
         result,
     ))
+}
+
+fn analysis_run_linear_static_with_executor(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
+    options: AnalysisRunOptions,
+    context: OperationContext,
+    executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let prepared = analysis_prepare_linear_static_run_op(
+        model,
+        backend,
+        formulation_requirement,
+        options,
+        context,
+    )?;
+    let run = if let Some(executor) = executor {
+        let mesh = prepared.solver_mesh.as_ref().ok_or_else(|| {
+            operation_error(
+                AnalysisOperation::LinearStatic.name(),
+                AnalysisOperation::LinearStatic.version(),
+                &prepared.context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_MESH_REQUIRED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "portable structural execution requires a canonical solver mesh",
+                BTreeMap::from([(
+                    "analysis_model_id".to_string(),
+                    prepared.workload.model.model_id.0.clone(),
+                )]),
+            )
+        })?;
+        executor
+            .execute(&prepared.workload, mesh)
+            .map_err(|message| {
+                operation_error(
+                    AnalysisOperation::LinearStatic.name(),
+                    AnalysisOperation::LinearStatic.version(),
+                    &prepared.context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_EXECUTION_FAILED",
+                        error_type: OperationErrorType::Backend,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    message,
+                    BTreeMap::from([(
+                        "analysis_model_id".to_string(),
+                        prepared.workload.model.model_id.0.clone(),
+                    )]),
+                )
+            })?
+    } else {
+        run_linear_static_with_options(
+            &prepared.workload.model,
+            prepared.workload.backend,
+            LinearStaticSolveOptions {
+                formulation_requirement: prepared.workload.formulation_requirement,
+                preconditioner_kind: prepared.workload.preconditioner,
+                algebra_backend_kind: prepared.workload.algebra_backend,
+                solver_mesh_artifact_path: prepared.options.solver_mesh_artifact_path.clone(),
+                solver_mesh: prepared.solver_mesh.clone(),
+                require_solver_mesh_for_solid: prepared.workload.require_solver_mesh_for_solid,
+                thermo_mechanical_context: prepared.workload.thermo_mechanical_context.clone(),
+                electro_thermal_context: prepared.workload.electro_thermal_context.clone(),
+            },
+        )
+        .map_err(|err| {
+            map_fea_run_error(
+                AnalysisOperation::LinearStatic,
+                &prepared.workload.model,
+                &prepared.context,
+                err,
+            )
+        })?
+    };
+    analysis_complete_linear_static_run_op(prepared, run)
 }
 
 pub fn analysis_run_electromagnetic_op(

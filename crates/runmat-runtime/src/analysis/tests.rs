@@ -2300,6 +2300,71 @@ fn portable_structural_study_reenters_shared_runtime_persistence() {
 }
 
 #[test]
+fn prepared_structural_study_completes_without_reinterpreting_the_study() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("prepared-run-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("prepared-run-study-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let prepared = analysis_prepare_structural_study_op(
+        &spec,
+        OperationContext::new(
+            Some("trace-prepared".into()),
+            Some("request-prepared".into()),
+        ),
+    )
+    .expect("structural study preparation should succeed");
+    let continuation = prepared
+        .continuation_bytes()
+        .expect("prepared study continuation should encode");
+    let prepared = PreparedStructuralStudy::from_continuation_bytes(&continuation)
+        .expect("prepared study continuation should restore");
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let numerical_result = executor
+        .execute(prepared.workload(), prepared.solver_mesh())
+        .expect("prepared numerical solve should succeed");
+    let envelope = analysis_complete_structural_study_op(prepared, numerical_result)
+        .expect("prepared structural study completion should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(envelope.trace_id.as_deref(), Some("trace-prepared"));
+    assert_eq!(envelope.request_id.as_deref(), Some("request-prepared"));
+    assert_eq!(envelope.data.study_id, spec.study_id);
+    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
+    assert!(storage::load_run_result(&envelope.data.run_id)
+        .expect("prepared run lookup should succeed")
+        .is_some());
+    assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn structural_study_continuation_rejects_a_changed_solver_mesh() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("changed-continuation-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let prepared = analysis_prepare_structural_study_op(&spec, OperationContext::new(None, None))
+        .expect("structural study preparation should succeed");
+    let continuation = prepared
+        .continuation_bytes()
+        .expect("prepared study continuation should encode");
+    fs::write(&solver_mesh_path, b"changed solver mesh").expect("replace test solver mesh");
+
+    assert!(PreparedStructuralStudy::from_continuation_bytes(&continuation).is_err());
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
 fn analysis_run_study_preserves_requested_canonical_solver_mesh_artifact() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();

@@ -13,7 +13,7 @@ pub enum OutputMaterialization {
     Materialized,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -27,6 +27,18 @@ pub enum SavedOutputIntent {
         evidence_path: PathBuf,
         force: bool,
         materialization: OutputMaterialization,
+    },
+    StructuralStudy {
+        continuation: String,
+        revision: runmat_execution::ProgramRevision,
+        materialization: OutputMaterialization,
+        result: Option<
+            Box<
+                runmat_runtime::operations::OperationEnvelope<
+                    runmat_runtime::analysis::AnalysisStudyRunData,
+                >,
+            >,
+        >,
     },
 }
 
@@ -83,6 +95,23 @@ impl SavedRemoteRun {
                 anyhow::bail!("saved mesh output destinations must be distinct");
             }
         }
+        if let SavedOutputIntent::StructuralStudy {
+            continuation,
+            materialization,
+            result,
+            ..
+        } = &self.output_intent
+        {
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(continuation)
+                .context("saved structural study continuation is malformed")?;
+            if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+                anyhow::bail!("saved structural study continuation exceeds its bound");
+            }
+            if (*materialization == OutputMaterialization::Materialized) != result.is_some() {
+                anyhow::bail!("saved structural study materialization state is inconsistent");
+            }
+        }
         Ok(())
     }
 
@@ -104,10 +133,30 @@ pub fn mark_output_materialized(run_id: &str) -> Result<()> {
         SavedOutputIntent::Mesh {
             materialization, ..
         } => *materialization = OutputMaterialization::Materialized,
-        SavedOutputIntent::Generic => {
-            anyhow::bail!("remote run has no deferred mesh output intent")
+        SavedOutputIntent::StructuralStudy { .. } | SavedOutputIntent::Generic => {
+            anyhow::bail!("remote run has no deferred output intent")
         }
     }
+    save(&saved)
+}
+
+pub fn mark_structural_study_materialized(
+    run_id: &str,
+    result: runmat_runtime::operations::OperationEnvelope<
+        runmat_runtime::analysis::AnalysisStudyRunData,
+    >,
+) -> Result<()> {
+    let mut saved = load(run_id)?;
+    let SavedOutputIntent::StructuralStudy {
+        materialization,
+        result: saved_result,
+        ..
+    } = &mut saved.output_intent
+    else {
+        anyhow::bail!("remote run has no deferred structural study output intent");
+    };
+    *materialization = OutputMaterialization::Materialized;
+    *saved_result = Some(Box::new(result));
     save(&saved)
 }
 
@@ -193,6 +242,22 @@ fn set_private_file(_path: &std::path::Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn revision() -> runmat_execution::ProgramRevision {
+        runmat_execution::ProgramRevision::new(
+            runmat_execution::Digest::sha256(b"saved-run-graph"),
+            runmat_execution::Digest::sha256(b"saved-run-source"),
+            runmat_execution::ProgramEnvironment::new(
+                1,
+                1,
+                runmat_execution::Digest::sha256(b"saved-run-runtime"),
+                runmat_execution::Digest::sha256(b"saved-run-catalog"),
+                "matlab",
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn attach_secret_round_trips_without_exposing_it_in_job_identity() {
         let temp = tempfile::tempdir().unwrap();
@@ -266,5 +331,33 @@ mod tests {
         );
         assert!(ambiguous.validate("run_ambiguous").is_err());
         assert!(ambiguous.validate("different_run").is_err());
+    }
+
+    #[test]
+    fn structural_study_continuation_round_trips() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("RUNMAT_CLI_CONFIG_DIR", temp.path());
+        let key =
+            runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([11; 32]).unwrap();
+        let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"continuation");
+        let saved = SavedRemoteRun::new(
+            "run_structural".into(),
+            "https://example.invalid".into(),
+            "project_1".into(),
+            "fingerprint".into(),
+            &key,
+            SavedOutputIntent::StructuralStudy {
+                continuation,
+                revision: revision(),
+                materialization: OutputMaterialization::Pending,
+                result: None,
+            },
+        );
+        save(&saved).unwrap();
+        assert_eq!(
+            load("run_structural").unwrap().output_intent,
+            saved.output_intent
+        );
+        std::env::remove_var("RUNMAT_CLI_CONFIG_DIR");
     }
 }

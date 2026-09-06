@@ -46,7 +46,12 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
             repl::execute_repl(&repl_config, cli).await
         }
-        Commands::Run { file, json, args } => {
+        Commands::Run {
+            file,
+            execution,
+            json,
+            args,
+        } => {
             script::execute_script_with_args(
                 file,
                 args,
@@ -54,6 +59,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
                 cli,
                 config,
                 json,
+                execution,
             )
             .await
         }

@@ -4,15 +4,12 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
-    build_analysis_task_submission, import_analysis_objects, prepare_analysis_objects,
-    AnalysisCapabilityRequirement, AnalysisExecutionContext, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest,
+    build_analysis_task_submission, import_analysis_objects, prepare_structural_linear_program,
+    AnalysisExecutionContext, AnalysisHostWorkload, StructuralLinearProgramPreparation,
 };
 use runmat_analysis_fea::execution::{
-    AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
-    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkload,
-    StructuralLinearWorkloadResult, StudyIdentity,
+    AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -27,8 +24,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
-    ArtifactAccess, ExecutableForm, ExecutionBundleBuilder, ObjectNamespace,
-    ProgramExecutionResponse,
+    ArtifactAccess, ExecutableForm, ExecutionBundleBuilder, ProgramExecutionResponse,
 };
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
@@ -38,9 +34,7 @@ use runmat_execution_runner_native::{
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
-use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
-};
+use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
 fn main() {
     let mode = std::env::args_os().nth(1);
@@ -423,67 +417,24 @@ fn fixture(
         thermo_mechanical_context: None,
         electro_thermal_context: None,
     };
-    let state = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::SemanticState,
-        digest("state"),
-        &solve.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
     let mesh = solver_mesh(&solve);
-    let mesh = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::Mesh,
-        digest("mesh"),
-        &mesh.canonical_encode().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let objects = vec![state, mesh];
     let access = ArtifactAccess {
         authorization_scope: authorization_scope.into(),
         encryption_context: digest("encryption"),
     };
-    let inputs = objects
-        .iter()
-        .map(|object| AnalysisWorkloadInput {
-            kind: object.manifest.kind,
-            logical_identity: object.manifest.logical_identity,
-            payload_digest: object.manifest.payload_digest,
-            manifest_digest: object.root.digest,
-            manifest_encoded_length: object.root.encoded_length,
-            reference_kind: ValueRefKind::DriverObject,
-        })
-        .collect();
-    let (study, execution_plan) = identities();
-    let workload = AnalysisWorkloadRequest::new(
-        study,
-        execution_plan,
-        AnalysisWorkKind::Solve,
-        inputs,
-        vec![AnalysisNumericalObjectKind::SemanticState],
-        BTreeSet::from([
-            AnalysisCapabilityRequirement::Host {
-                abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
-            },
-            AnalysisCapabilityRequirement::ProcessIsolation,
-        ]),
-    )
+    let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision,
+        artifact_access: access,
+        workload: solve,
+        mesh,
+        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
     .unwrap();
-    let host = AnalysisHostWorkload::new(workload, access).unwrap();
-    let roots = objects
-        .iter()
-        .map(|object| {
-            object
-                .root_reference(&host.artifact_access, ValueRefKind::DriverObject)
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
-    let request = host.program_request(revision, &roots).unwrap();
-    (host, request, objects)
+    (prepared.host, prepared.program.request, prepared.inputs)
 }
 
 fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverMeshArtifact {
@@ -508,25 +459,6 @@ fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverM
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     mesh
-}
-
-fn identities() -> (StudyIdentity, ExecutionPlanIdentity) {
-    let study = StudyIdentity::new(digest("study"), None).unwrap();
-    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
-    let step = StepIdentity::new(sequence, digest("step")).unwrap();
-    let constraints =
-        ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
-    let problem =
-        ProblemIdentity::new(step, digest("model"), None, constraints, Vec::new()).unwrap();
-    let discretization =
-        DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
-    let operator = OperatorIdentity::new(discretization, digest("operator")).unwrap();
-    let accuracy = AccuracyIdentity::new(step, digest("accuracy")).unwrap();
-    let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
-    (
-        study,
-        ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap(),
-    )
 }
 
 fn capabilities() -> BTreeSet<Capability> {

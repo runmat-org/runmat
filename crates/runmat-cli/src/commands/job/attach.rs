@@ -245,6 +245,40 @@ async fn print_terminal(
             }
             return print_materialized_mesh(&run, solver_mesh_path, evidence_path, &result, json);
         }
+        if let secret::SavedOutputIntent::StructuralStudy {
+            continuation,
+            revision,
+            materialization,
+            result,
+        } = &saved.output_intent
+        {
+            if *materialization == secret::OutputMaterialization::Materialized {
+                let result = result.as_ref().context(
+                    "saved structural study materialization omitted its completed result",
+                )?;
+                if json {
+                    crate::commands::fea::print_envelope(result, true)?;
+                } else {
+                    crate::commands::fea::print_study_run_summary(&result.data, false);
+                }
+                return Ok(());
+            }
+            let objects = download_output_objects(client, saved, &outputs).await?;
+            let envelope = crate::commands::fea::remote::materialize_remote_outputs(
+                &run.id,
+                outputs.response,
+                objects,
+                continuation,
+                revision.clone(),
+            )?;
+            secret::mark_structural_study_materialized(&run.id, envelope.clone())?;
+            if json {
+                crate::commands::fea::print_envelope(&envelope, true)?;
+            } else {
+                crate::commands::fea::print_study_run_summary(&envelope.data, false);
+            }
+            return Ok(());
+        }
         let result_object_count = outputs.objects.len();
         let response = outputs.response;
         if json {

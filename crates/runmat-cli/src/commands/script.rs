@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{CaptureFiguresMode, Cli, FigureSize};
+use crate::cli::{CaptureFiguresMode, Cli, ExecutionTarget, ExecutionTargetArgs, FigureSize};
 use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
@@ -32,7 +32,16 @@ pub async fn execute_script(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
-    execute_script_with_args(script, vec![], emit_bytecode_path, cli, config, false).await
+    execute_script_with_args(
+        script,
+        vec![],
+        emit_bytecode_path,
+        cli,
+        config,
+        false,
+        ExecutionTargetArgs::default(),
+    )
+    .await
 }
 
 pub async fn execute_script_with_args(
@@ -42,6 +51,7 @@ pub async fn execute_script_with_args(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
     fea_json: bool,
+    execution: ExecutionTargetArgs,
 ) -> Result<()> {
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
@@ -53,7 +63,11 @@ pub async fn execute_script_with_args(
         if !args.is_empty() {
             anyhow::bail!(".fea files do not accept positional script arguments");
         }
-        return execute_fea_path(script, cli, config, fea_json).await;
+        return execute_fea_path(script, cli, config, fea_json, execution.resolve()?).await;
+    }
+
+    if !matches!(execution.resolve()?, ExecutionTarget::Local) {
+        anyhow::bail!("remote `runmat run` execution currently requires a .fea study document");
     }
 
     validate_local_script_arguments(&args)?;

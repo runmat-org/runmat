@@ -9,18 +9,20 @@ use runmat_runtime::operations::{OperationContext, OperationEnvelope, OperationE
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::cli::Cli;
+use crate::cli::{Cli, ExecutionTarget};
 use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::presentation;
 use crate::AlreadyReportedCliError;
 
 mod portable;
+pub(crate) mod remote;
 
 pub async fn execute_fea_path(
     path: PathBuf,
-    _cli: &Cli,
+    cli: &Cli,
     config: &RunMatRuntimeConfig,
     json: bool,
+    execution: ExecutionTarget,
 ) -> Result<()> {
     info!("Executing FEA document: {path:?}");
     if !json {
@@ -60,19 +62,32 @@ pub async fn execute_fea_path(
                 );
                 eprintln!("  {}", styles.info("validating, planning, and solving"));
             }
-            let executor = portable::LocalProcessStructuralExecutor::new(&spec, config)?;
-            let envelope =
-                runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
-                    &spec, context, &executor,
-                )
-                .map_err(report_operation_error)?;
-            if json {
-                print_envelope(&envelope, config.runtime.verbose)?;
-            } else {
-                print_study_run_summary(&envelope.data, config.runtime.verbose);
+            let envelope = match execution {
+                ExecutionTarget::Local => {
+                    let executor = portable::LocalProcessStructuralExecutor::new(&spec, config)?;
+                    Some(
+                        runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
+                            &spec, context, &executor,
+                        )
+                        .map_err(report_operation_error)?,
+                    )
+                }
+                ExecutionTarget::Remote(target) => {
+                    remote::execute_study(&path, *spec, context, target, cli, config, json).await?
+                }
+            };
+            if let Some(envelope) = envelope {
+                if json {
+                    print_envelope(&envelope, config.runtime.verbose)?;
+                } else {
+                    print_study_run_summary(&envelope.data, config.runtime.verbose);
+                }
             }
         }
         FeaResolvedDocument::Sweep(spec) => {
+            if !matches!(execution, ExecutionTarget::Local) {
+                anyhow::bail!("remote FEA sweep execution is not yet available");
+            }
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
@@ -101,7 +116,7 @@ pub async fn execute_fea_path(
     Ok(())
 }
 
-fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
+pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool) {
     let styles = presentation::stdout();
     println!(
         "{}: {}",
@@ -216,7 +231,7 @@ fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
     }
 }
 
-fn print_envelope<T: Serialize>(
+pub(crate) fn print_envelope<T: Serialize>(
     envelope: &OperationEnvelope<T>,
     include_metadata: bool,
 ) -> Result<()> {
