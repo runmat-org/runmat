@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::analysis_worker_capabilities;
-use runmat_analysis_fea::execution::StructuralLinearWorkload;
+use runmat_analysis_fea::execution::{StructuralLinearWorkload, StudyIdentity, SweepIdentity};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -26,20 +26,21 @@ use runmat_geometry_io::{
 use runmat_meshing_core::{MeshingRequest, MetricTensor3};
 use runmat_meshing_execution::exact_meshing_worker_capabilities;
 
-use super::{
-    import_exact_structural_study_result, prepare_exact_structural_study_root,
-    ExactStructuralStudyRootPreparation,
-};
 use crate::{
-    native_meshing_kernel_dispatcher, prepare_exact_meshing_root, run_remote_meshing_worker_quic,
-    ExactMeshingRootPreparation, QuicRemoteWorkerChannel, RemoteMeshingWorkerQuicRequest,
-    RemotePoolDriver, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
+    import_exact_structural_sweep_result, native_meshing_kernel_dispatcher,
+    prepare_exact_meshing_root, prepare_exact_structural_study_root,
+    run_remote_meshing_worker_quic, ExactMeshingRootPreparation,
+    ExactStructuralStudyRootPreparation, ExactStructuralSweepTerminal, QuicRemoteWorkerChannel,
+    RemoteMeshingWorkerQuicRequest, RemotePoolDriver, RemoteWorkerChannelConfig,
+    RemoteWorkerQuicRequest,
 };
+
+use super::{prepare_exact_structural_sweep_root, ExactStructuralSweepRootPreparation};
 
 const BOX: &[u8] = include_bytes!("../../../runmat-geometry/io/tests/fixtures/box.brep");
 
 #[tokio::test(flavor = "current_thread")]
-async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic() {
+async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_quic() {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -79,15 +80,60 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
     .unwrap();
     let source_digest = Digest::sha256(BOX);
     let workload = box_structural_workload();
-    let authored_study_digest = Digest::sha256(b"box structural study");
-    let prepared = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+    let first_study_digest = Digest::sha256(b"box structural study A");
+    let second_study_digest = Digest::sha256(b"box structural study B");
+    let invalid_study_digest = Digest::sha256(b"box structural study invalid boundary");
+    let first = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
         program_revision: revision.clone(),
         artifact_access: access.clone(),
-        authored_study_digest,
+        authored_study_digest: first_study_digest,
+        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+        geometry_source_digest: source_digest,
+        workload_template: workload.clone(),
+        exact_meshing: exact_meshing.clone(),
+    })
+    .unwrap();
+    let second = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        authored_study_digest: second_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
         workload_template: workload,
+        exact_meshing: exact_meshing.clone(),
+    })
+    .unwrap();
+    let mut invalid_workload = box_structural_workload();
+    invalid_workload.model.constraints[0].visit_targets_mut(|target| {
+        *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
+    });
+    let invalid = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        authored_study_digest: invalid_study_digest,
+        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+        geometry_source_digest: source_digest,
+        workload_template: invalid_workload,
         exact_meshing,
+    })
+    .unwrap();
+    let frozen_project_digest = Some(Digest::from_bytes(*project_identity.graph_digest.bytes()));
+    let identity = SweepIdentity::new(
+        Digest::sha256(b"encrypted structural sweep"),
+        vec![
+            StudyIdentity::new(first_study_digest, frozen_project_digest).unwrap(),
+            StudyIdentity::new(second_study_digest, frozen_project_digest).unwrap(),
+            StudyIdentity::new(invalid_study_digest, frozen_project_digest).unwrap(),
+        ],
+        Digest::sha256(b"collect all outcomes"),
+    )
+    .unwrap();
+    let prepared = prepare_exact_structural_sweep_root(ExactStructuralSweepRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access.clone(),
+        identity,
+        fail_fast: false,
+        studies: vec![first, second, invalid],
     })
     .unwrap();
     let expectation = prepared.result_expectation();
@@ -95,7 +141,7 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
     let mut builder = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure();
-    for program in prepared.required_programs().unwrap() {
+    for program in prepared.required_programs() {
         builder = builder.with_materialized_program(
             program.recipe,
             program.artifact.form,
@@ -128,7 +174,7 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
         false,
     ));
     let resources = ResourceRequest {
-        cpu_millicores: 1_000,
+        cpu_millicores: 500,
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
         accelerator_count: 0,
@@ -137,7 +183,7 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
         maximum_wall_millis: 180_000,
     };
     let inventory = ResourceInventory {
-        cpu_millicores: u32::try_from(resources.cpu_millicores).unwrap(),
+        cpu_millicores: 1_000,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes,
         accelerators: Vec::new(),
@@ -202,7 +248,7 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
                 id: pool_id,
                 min_workers: 1,
                 max_workers: 1,
-                max_in_flight: 1,
+                max_in_flight: 2,
                 resource_limit: inventory,
             },
             59,
@@ -211,14 +257,14 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
         )
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
-        for object in prepared.transport_objects().unwrap() {
+        for object in prepared.transport_objects() {
             pool.register_execution_object(object.reference, object.bytes)
                 .unwrap();
         }
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(180),
-            crate::remote::exact_structural_study::execute(
+            crate::remote::exact_structural_sweep::execute(
                 Arc::clone(&pool),
                 prepared.into_request(),
                 access.authorization_scope.clone(),
@@ -226,16 +272,18 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
             ),
         )
         .await
-        .expect("remote exact structural study timed out")
+        .expect("remote exact structural sweep timed out")
         .unwrap();
         let crate::remote::pool_execution::RemotePoolExecutionOutcome::Completed(completed) =
             outcome
         else {
-            panic!("remote exact structural study did not complete")
+            panic!("remote exact structural sweep did not complete")
         };
         let mut wrong_request = expectation.clone();
-        wrong_request.expected_meshing_request.deterministic_seed ^= 1;
-        assert!(import_exact_structural_study_result(
+        wrong_request.studies[0]
+            .expected_meshing_request
+            .deterministic_seed ^= 1;
+        assert!(import_exact_structural_sweep_result(
             pool.as_ref(),
             completed.response.clone(),
             &wrong_request,
@@ -250,20 +298,44 @@ async fn exact_structural_study_reaches_an_admitted_result_over_encrypted_quic()
         {
             result_objects.pop();
         }
-        assert!(import_exact_structural_study_result(
+        assert!(import_exact_structural_sweep_result(
             pool.as_ref(),
             incomplete,
             &expectation,
             ObjectInventoryLimits::default(),
         )
         .is_err());
-        let result = import_exact_structural_study_result(
+        let sweep = import_exact_structural_sweep_result(
             pool.as_ref(),
             completed.response,
             &expectation,
             ObjectInventoryLimits::default(),
         )
         .unwrap();
+        assert_eq!(sweep.identity, identity);
+        assert_eq!(sweep.entries.len(), 3);
+        let mut entries = sweep.entries.into_iter();
+        let first = entries.next().unwrap();
+        let ExactStructuralSweepTerminal::Succeeded(result) = first.terminal else {
+            panic!("first remote structural sweep entry did not succeed")
+        };
+        let second = entries.next().unwrap();
+        let ExactStructuralSweepTerminal::Succeeded(second_result) = second.terminal else {
+            panic!(
+                "second remote structural sweep entry did not succeed: {:?}",
+                second.terminal
+            )
+        };
+        assert_eq!(
+            second_result.analysis.run.identity.family(),
+            runmat_analysis_core::PhysicsFamily::Structural
+        );
+        let invalid = entries.next().unwrap();
+        assert!(matches!(
+            invalid.terminal,
+            ExactStructuralSweepTerminal::Failed(message)
+                if message.contains("face_999999")
+        ));
         assert!(!result.mesh.artifact.topology.volume_elements.is_empty());
         result
             .mesh

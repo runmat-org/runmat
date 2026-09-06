@@ -274,6 +274,28 @@ pub fn analysis_complete_structural_study_intent_op(
     )
 }
 
+/// Maps a placement-owned terminal failure into the structural-study operation contract.
+pub fn structural_study_execution_failure(
+    intent: &PreparedStructuralStudyIntent,
+    failure: super::StructuralStudyExecutionFailure,
+) -> OperationErrorEnvelope {
+    let (error_code, error_type, severity, message) = match failure {
+        super::StructuralStudyExecutionFailure::Failed(message) => (
+            "RM.FEA.RUN_STUDY.REMOTE_EXECUTION_FAILED",
+            OperationErrorType::Backend,
+            OperationErrorSeverity::Error,
+            message,
+        ),
+        super::StructuralStudyExecutionFailure::Indeterminate(message) => (
+            "RM.FEA.RUN_STUDY.REMOTE_EXECUTION_INDETERMINATE",
+            OperationErrorType::Internal,
+            OperationErrorSeverity::Fatal,
+            message,
+        ),
+    };
+    intent_completion_error(intent, error_code, error_type, severity, message)
+}
+
 fn intent_completion_error(
     intent: &PreparedStructuralStudyIntent,
     error_code: &'static str,

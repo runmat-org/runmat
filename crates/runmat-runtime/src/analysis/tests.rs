@@ -2660,6 +2660,56 @@ fn analysis_complete_study_sweep_finds_the_authored_fail_fast_error_before_not_r
 }
 
 #[test]
+fn analysis_complete_study_sweep_preserves_indeterminate_terminal_kind() {
+    let _guard = analysis_test_guard();
+    let context = OperationContext::new(None, None);
+    let study = sample_linear_static_study_spec();
+    let mut invalid = study.clone();
+    invalid.study_id = "   ".into();
+    let error = analysis_run_study_op(&invalid, context.clone())
+        .expect_err("invalid authored study must provide a representative operation error");
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "indeterminate_sweep".into(),
+        studies: vec![study],
+        fail_fast: false,
+    };
+
+    let composed = analysis_complete_study_sweep_op(
+        &spec,
+        context.clone(),
+        vec![AnalysisStudySweepRunOutcome::Indeterminate(error.clone())],
+    )
+    .expect("non-fail-fast sweep must publish indeterminate evidence");
+
+    assert_eq!(composed.data.failure_entries.len(), 1);
+    assert_eq!(
+        composed.data.failure_entries[0].kind,
+        AnalysisStudySweepFailureKind::Indeterminate
+    );
+
+    let fail_fast = AnalysisStudySweepSpec {
+        sweep_id: "indeterminate_fail_fast_sweep".into(),
+        studies: spec.studies,
+        fail_fast: true,
+    };
+    let terminal = analysis_complete_study_sweep_op(
+        &fail_fast,
+        context,
+        vec![AnalysisStudySweepRunOutcome::Indeterminate(error)],
+    )
+    .expect_err("fail-fast sweep must preserve an indeterminate terminal");
+    assert_eq!(
+        terminal.error_code,
+        "RM.FEA.RUN_STUDY_SWEEP.STUDY_INDETERMINATE"
+    );
+    assert_eq!(terminal.error_type, OperationErrorType::Validation);
+    assert_eq!(
+        terminal.context.get("failure_kind").map(String::as_str),
+        Some("indeterminate")
+    );
+}
+
+#[test]
 fn analysis_run_study_sweep_fail_fast_returns_error_on_invalid_study() {
     let _guard = analysis_test_guard();
     let mut invalid = sample_linear_static_study_spec();

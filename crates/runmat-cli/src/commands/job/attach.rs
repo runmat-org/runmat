@@ -279,6 +279,42 @@ async fn print_terminal(
             }
             return Ok(());
         }
+        if let secret::SavedOutputIntent::StructuralSweep {
+            spec,
+            continuations,
+            revision,
+            materialization,
+            result,
+        } = &saved.output_intent
+        {
+            if *materialization == secret::OutputMaterialization::Materialized {
+                let result = result.as_ref().context(
+                    "saved structural sweep materialization omitted its completed result",
+                )?;
+                if json {
+                    crate::commands::fea::print_envelope(result, true)?;
+                } else {
+                    crate::commands::fea::print_sweep_run_summary(&result.data);
+                }
+                return Ok(());
+            }
+            let objects = download_output_objects(client, saved, &outputs).await?;
+            let envelope = crate::commands::fea::remote::materialize_remote_sweep_outputs(
+                &run.id,
+                outputs.response,
+                objects,
+                spec,
+                continuations,
+                revision.clone(),
+            )?;
+            secret::mark_structural_sweep_materialized(&run.id, envelope.clone())?;
+            if json {
+                crate::commands::fea::print_envelope(&envelope, true)?;
+            } else {
+                crate::commands::fea::print_sweep_run_summary(&envelope.data);
+            }
+            return Ok(());
+        }
         let result_object_count = outputs.objects.len();
         let response = outputs.response;
         if json {

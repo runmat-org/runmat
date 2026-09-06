@@ -102,15 +102,18 @@ pub async fn execute_fea_path(
                 );
             }
             let envelope = match execution {
-                ExecutionTarget::Local => execute_local_sweep(&spec, context, config)?,
-                ExecutionTarget::Remote(_) => {
-                    anyhow::bail!("remote FEA sweep execution is not yet available")
+                ExecutionTarget::Local => Some(execute_local_sweep(&spec, context, config)?),
+                ExecutionTarget::Remote(target) => {
+                    remote::execute_sweep(&path, spec.clone(), context, target, cli, config, json)
+                        .await?
                 }
             };
-            if json {
-                print_envelope(&envelope, config.runtime.verbose)?;
-            } else {
-                print_sweep_run_summary(&envelope.data);
+            if let Some(envelope) = envelope {
+                if json {
+                    print_envelope(&envelope, config.runtime.verbose)?;
+                } else {
+                    print_sweep_run_summary(&envelope.data);
+                }
             }
         }
     }
@@ -291,7 +294,7 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
     }
 }
 
-fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
+pub(crate) fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
     let styles = presentation::stdout();
     println!(
         "{}: {}",
@@ -323,8 +326,11 @@ fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         println!("  {}", styles.error("failures:"));
         for entry in &data.failure_entries {
             println!(
-                "    {}: {} ({})",
-                entry.study_id, entry.message, entry.error_code
+                "    {} [{}]: {} ({})",
+                entry.study_id,
+                entry.kind.as_str(),
+                entry.message,
+                entry.error_code
             );
         }
     }

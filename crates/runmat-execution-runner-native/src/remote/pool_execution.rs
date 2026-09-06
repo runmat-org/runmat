@@ -21,7 +21,7 @@ use super::pool_wait::{
 use super::RemotePoolDriver;
 use crate::{
     NativeExecutionError, NativeExecutionResult, EXACT_MESHING_ROOT_EXECUTION_MODE,
-    EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE,
+    EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE,
 };
 
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(90);
@@ -297,6 +297,8 @@ async fn execute_with_allocated_workers(
     let exact_meshing = request.recipe.execution_mode == EXACT_MESHING_ROOT_EXECUTION_MODE;
     let exact_structural_study =
         request.recipe.execution_mode == EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE;
+    let exact_structural_sweep =
+        request.recipe.execution_mode == EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE;
     let pool_for_execution = Arc::clone(&pool);
     let resources_for_execution = resources.clone();
     let mut execution = if exact_meshing {
@@ -308,6 +310,13 @@ async fn execute_with_allocated_workers(
         )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
     } else if exact_structural_study {
         Box::pin(super::exact_structural_study::execute(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+    } else if exact_structural_sweep {
+        Box::pin(super::exact_structural_sweep::execute(
             pool_for_execution,
             request,
             run_id,

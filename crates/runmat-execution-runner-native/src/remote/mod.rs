@@ -5,6 +5,7 @@ mod crypto;
 mod driver;
 pub(crate) mod exact_meshing;
 pub(crate) mod exact_structural_study;
+pub(crate) mod exact_structural_sweep;
 mod object_transfer;
 mod pool;
 mod pool_allocation;

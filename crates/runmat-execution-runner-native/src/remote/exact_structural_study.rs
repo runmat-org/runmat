@@ -21,31 +21,70 @@ use super::pool_tasks::{execution_failure_outcome, packaged, task_failure_outcom
 use super::RemotePoolDriver;
 use crate::{BoundaryRegionResolution, NativeExecutionError, NativeExecutionResult};
 
+#[derive(Clone, Debug)]
+pub(super) enum RemoteExactStructuralStudyComposition {
+    Completed(ProgramExecutionResponse),
+    Failed(String),
+    Cancelled,
+    Indeterminate(String),
+}
+
 pub(crate) async fn execute(
     pool: Arc<RemotePoolDriver>,
     request: ProgramExecutionRequest,
     run_id: String,
     resources: AllocationResources,
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    let decoded = crate::decode_exact_structural_study_root(&request, pool.as_ref())?;
+    match execute_for_composition(Arc::clone(&pool), &request, &run_id, &resources).await? {
+        RemoteExactStructuralStudyComposition::Completed(response) => {
+            packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+        }
+        RemoteExactStructuralStudyComposition::Failed(message) => {
+            execution_failure_outcome(pool, message)
+        }
+        RemoteExactStructuralStudyComposition::Cancelled => {
+            Ok(RemotePoolExecutionOutcome::Cancelled)
+        }
+        RemoteExactStructuralStudyComposition::Indeterminate(message) => {
+            Ok(RemotePoolExecutionOutcome::Indeterminate(message))
+        }
+    }
+}
+
+pub(super) async fn execute_for_composition(
+    pool: Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    run_id: &str,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
+    let decoded = crate::decode_exact_structural_study_root(request, pool.as_ref())?;
     let completed = match super::exact_meshing::execute_for_composition(
         Arc::clone(&pool),
         &decoded.exact_meshing,
-        &run_id,
-        &resources,
+        run_id,
+        resources,
     )
     .await?
     {
         RemoteExactMeshingComposition::Completed(completed) => completed,
-        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(outcome),
+        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
     };
+    execute_with_completed_meshing(pool, request, decoded, completed, resources).await
+}
+
+pub(super) async fn execute_with_completed_meshing(
+    pool: Arc<RemotePoolDriver>,
+    request: &ProgramExecutionRequest,
+    decoded: crate::DecodedExactStructuralStudyRoot,
+    completed: Box<super::exact_meshing::CompletedRemoteExactMeshing>,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     if completed.result.artifact.geometry.source_digest.bytes()
         != decoded.geometry_source_digest.bytes()
     {
-        return execution_failure_outcome(
-            pool,
+        return Ok(RemoteExactStructuralStudyComposition::Failed(
             "meshed geometry differs from the whole-study source identity".into(),
-        );
+        ));
     }
 
     let aliases = completed
@@ -74,7 +113,7 @@ pub(crate) async fn execute(
 
     let mut workload = decoded.workload_template.clone();
     if let Err(error) = resolve_workload_boundary_aliases(&mut workload, &resolution) {
-        return execution_failure_outcome(pool, error);
+        return Ok(RemoteExactStructuralStudyComposition::Failed(error));
     }
     let unresolved_workload_digest = Digest::sha256(
         &decoded
@@ -104,7 +143,7 @@ pub(crate) async fn execute(
             ValuePayload::Inline(_) => Err(protocol("analysis inputs must be externalized")),
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
-    let mut task_resources = super::pool_resources::task_resources(&resources)?;
+    let mut task_resources = super::pool_resources::task_resources(resources)?;
     task_resources.required_capabilities = prepared
         .host
         .workload
@@ -130,7 +169,7 @@ pub(crate) async fn execute(
                 max_attempts: runmat_analysis_execution::DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
             },
             deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(
-                &resources,
+                resources,
             )?),
             priority: 0,
         },
@@ -140,7 +179,7 @@ pub(crate) async fn execute(
     let completion = pool.submit(submission, prepared.program.request.clone())?;
     let success = match completion.wait().await {
         Ok(success) => success,
-        Err(message) => return task_failure_outcome(pool, task_id, message),
+        Err(message) => return task_failure_outcome(pool, task_id, message).map(composition),
     };
     let analysis_response = ProgramExecutionResponse::ExternalizedSuccess {
         outputs: success.outputs,
@@ -152,11 +191,13 @@ pub(crate) async fn execute(
         &prepared,
         ObjectInventoryLimits::default(),
     ) {
-        return execution_failure_outcome(pool, error.to_string());
+        return Ok(RemoteExactStructuralStudyComposition::Failed(
+            error.to_string(),
+        ));
     }
     let (response, objects) =
         crate::exact_structural_study_root::package_exact_structural_study_result(
-            &request,
+            request,
             &decoded,
             &completed.result,
             &boundary_objects,
@@ -166,7 +207,24 @@ pub(crate) async fn execute(
     for object in objects {
         pool.register_execution_object(object.reference, object.bytes)?;
     }
-    packaged(response, pool).map(RemotePoolExecutionOutcome::Completed)
+    Ok(RemoteExactStructuralStudyComposition::Completed(response))
+}
+
+pub(super) fn composition(
+    outcome: RemotePoolExecutionOutcome,
+) -> RemoteExactStructuralStudyComposition {
+    match outcome {
+        RemotePoolExecutionOutcome::Completed(result) => match result.response {
+            ProgramExecutionResponse::Failure { message } => {
+                RemoteExactStructuralStudyComposition::Failed(message)
+            }
+            response => RemoteExactStructuralStudyComposition::Completed(response),
+        },
+        RemotePoolExecutionOutcome::Cancelled => RemoteExactStructuralStudyComposition::Cancelled,
+        RemotePoolExecutionOutcome::Indeterminate(message) => {
+            RemoteExactStructuralStudyComposition::Indeterminate(message)
+        }
+    }
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

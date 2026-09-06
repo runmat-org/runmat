@@ -14,6 +14,7 @@ mod publication;
 
 pub use lifecycle::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
+    structural_study_execution_failure,
 };
 #[cfg(test)]
 pub(super) use publication::run_evidence_stage;
@@ -108,6 +109,12 @@ pub struct PreparedStructuralStudyIntent {
     pub(super) options: AnalysisRunOptions,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuralStudyExecutionFailure {
+    Failed(String),
+    Indeterminate(String),
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StructuralStudyIntentContinuation {
@@ -137,6 +144,10 @@ impl PreparedStructuralStudyIntent {
 
     pub fn study_id(&self) -> &str {
         &self.study_id
+    }
+
+    pub fn operation_context(&self) -> &OperationContext {
+        &self.context
     }
 
     pub fn model_template(&self) -> AnalysisModelTemplate {

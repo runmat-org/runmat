@@ -11,8 +11,8 @@ use crate::operations::{
 use super::{
     atomic_write_bytes, fs_create_dir_all, sanitize_study_sweep_id, study_evidence_root,
     AnalysisStudyRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-    ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+    AnalysisStudySweepFailureKind, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
+    ANALYSIS_RUN_STUDY_SWEEP_OPERATION, ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
 };
 
 /// One authored sweep entry after semantic preparation and numerical placement.
@@ -23,6 +23,7 @@ use super::{
 pub enum AnalysisStudySweepRunOutcome {
     Succeeded(Box<OperationEnvelope<AnalysisStudyRunData>>),
     Failed(OperationErrorEnvelope),
+    Indeterminate(OperationErrorEnvelope),
     NotRun,
 }
 
@@ -40,17 +41,26 @@ pub fn analysis_complete_study_sweep_op(
     validate_outcome_cardinality(spec, outcomes.len(), &context)?;
 
     if spec.fail_fast {
-        if let Some((index, error)) = outcomes.iter().enumerate().find_map(|(index, outcome)| {
-            if let AnalysisStudySweepRunOutcome::Failed(error) = outcome {
-                Some((index, error))
-            } else {
-                None
-            }
-        }) {
+        if let Some((index, kind, error)) =
+            outcomes
+                .iter()
+                .enumerate()
+                .find_map(|(index, outcome)| match outcome {
+                    AnalysisStudySweepRunOutcome::Failed(error) => {
+                        Some((index, AnalysisStudySweepFailureKind::Failed, error))
+                    }
+                    AnalysisStudySweepRunOutcome::Indeterminate(error) => {
+                        Some((index, AnalysisStudySweepFailureKind::Indeterminate, error))
+                    }
+                    AnalysisStudySweepRunOutcome::Succeeded(_)
+                    | AnalysisStudySweepRunOutcome::NotRun => None,
+                })
+        {
             return Err(study_failure(
                 spec,
                 &spec.studies[index].study_id,
                 index,
+                kind,
                 error,
                 &context,
             ));
@@ -90,6 +100,7 @@ pub fn analysis_complete_study_sweep_op(
                         spec,
                         study.study_id.as_str(),
                         index,
+                        AnalysisStudySweepFailureKind::Failed,
                         &error,
                         &context,
                     ));
@@ -97,6 +108,26 @@ pub fn analysis_complete_study_sweep_op(
                 failure_entries.push(AnalysisStudySweepFailureEntry {
                     study_id: study.study_id.clone(),
                     study_index: index,
+                    kind: AnalysisStudySweepFailureKind::Failed,
+                    error_code: error.error_code,
+                    message: error.message,
+                });
+            }
+            AnalysisStudySweepRunOutcome::Indeterminate(error) => {
+                if spec.fail_fast {
+                    return Err(study_failure(
+                        spec,
+                        study.study_id.as_str(),
+                        index,
+                        AnalysisStudySweepFailureKind::Indeterminate,
+                        &error,
+                        &context,
+                    ));
+                }
+                failure_entries.push(AnalysisStudySweepFailureEntry {
+                    study_id: study.study_id.clone(),
+                    study_index: index,
+                    kind: AnalysisStudySweepFailureKind::Indeterminate,
                     error_code: error.error_code,
                     message: error.message,
                 });
@@ -215,27 +246,45 @@ fn study_failure(
     spec: &AnalysisStudySweepSpec,
     study_id: &str,
     index: usize,
+    kind: AnalysisStudySweepFailureKind,
     error: &OperationErrorEnvelope,
     context: &OperationContext,
 ) -> OperationErrorEnvelope {
+    let (error_code, error_type, retryable, severity, terminal_label) = match kind {
+        AnalysisStudySweepFailureKind::Failed => (
+            "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED",
+            OperationErrorType::Validation,
+            false,
+            OperationErrorSeverity::Error,
+            "failed",
+        ),
+        AnalysisStudySweepFailureKind::Indeterminate => (
+            "RM.FEA.RUN_STUDY_SWEEP.STUDY_INDETERMINATE",
+            error.error_type,
+            error.retryable,
+            error.severity,
+            "became indeterminate",
+        ),
+    };
     operation_error(
         ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
         ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
         context,
         OperationErrorSpec {
-            error_code: "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED",
-            error_type: OperationErrorType::Validation,
-            retryable: false,
-            severity: OperationErrorSeverity::Error,
+            error_code,
+            error_type,
+            retryable,
+            severity,
         },
         format!(
-            "study sweep failed at index {index} for study_id {study_id}: {}",
+            "study sweep {terminal_label} at index {index} for study_id {study_id}: {}",
             error.error_code
         ),
         BTreeMap::from([
             ("sweep_id".to_string(), spec.sweep_id.clone()),
             ("study_id".to_string(), study_id.to_string()),
             ("study_index".to_string(), index.to_string()),
+            ("failure_kind".to_string(), kind.as_str().to_string()),
             ("cause_error_code".to_string(), error.error_code.clone()),
         ]),
     )

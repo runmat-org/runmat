@@ -2496,8 +2496,25 @@ pub struct AnalysisStudySweepData {
 pub struct AnalysisStudySweepFailureEntry {
     pub study_id: String,
     pub study_index: usize,
+    pub kind: AnalysisStudySweepFailureKind,
     pub error_code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisStudySweepFailureKind {
+    Failed,
+    Indeterminate,
+}
+
+impl AnalysisStudySweepFailureKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
 }
 
 fn default_study_sweep_fail_fast() -> bool {

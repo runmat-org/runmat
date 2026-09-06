@@ -102,7 +102,8 @@ use result_policy::{classify_run_status, evaluate_production_publication};
 use structural_study::run_evidence_stage;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
-    PreparedStructuralStudy, PreparedStructuralStudyIntent, StructuralStudyCompletionIdentity,
+    structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
+    StructuralStudyCompletionIdentity, StructuralStudyExecutionFailure,
     STRUCTURAL_STUDY_INTENT_MAX_BYTES,
 };
 use structural_study::{
@@ -240,14 +241,14 @@ pub use contracts::{
     AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
     AnalysisSolverOptions, AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyRunData,
     AnalysisStudySpec, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
-    AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry,
-    AnalysisStudySweepSpec, AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry,
-    AnalysisStudyValidateResult, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
-    AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult,
-    ContactEnforcementOptions, ElectroThermalCouplingOptions, ElectromagneticResultsData,
-    FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits,
-    ModalResultsData, NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions,
-    PrecisionMode, PreconditionerMode, ProductionPublicationReason,
+    AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
+    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ContactEnforcementOptions, ElectroThermalCouplingOptions,
+    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
+    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
+    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
     ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermalResultsData, ThermoMechanicalCouplingOptions,
     ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
@@ -1301,6 +1302,7 @@ pub fn analysis_plan_study_sweep_op(
                 failure_entries.push(AnalysisStudySweepFailureEntry {
                     study_id: study.study_id.clone(),
                     study_index: index,
+                    kind: AnalysisStudySweepFailureKind::Failed,
                     error_code: err.error_code,
                     message: err.message,
                 });

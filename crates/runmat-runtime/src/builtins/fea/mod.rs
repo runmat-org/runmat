@@ -3064,6 +3064,7 @@ mod tests {
         let mut entries = vec![AnalysisStudySweepFailureEntry {
             study_id: "bad-study".into(),
             study_index: 0,
+            kind: crate::analysis::AnalysisStudySweepFailureKind::Failed,
             error_code: "RM.TEST".into(),
             message: "failed".into(),
         }];

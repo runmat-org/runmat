@@ -25,6 +25,7 @@ use crate::{
 };
 
 /// Exact meshing output retained in driver-owned form for composition into a larger root.
+#[derive(Clone)]
 pub(super) struct CompletedRemoteExactMeshing {
     pub(super) source_face_ids: BTreeMap<u64, PersistentEntityId>,
     pub(super) result: ExactMeshingDagRunResult,

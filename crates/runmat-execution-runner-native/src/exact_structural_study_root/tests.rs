@@ -11,7 +11,7 @@ use runmat_meshing_core::{
     resolve_meshing_request, GeometryTolerancePolicy, MeshingRequestSettings,
 };
 
-fn revision() -> ProgramRevision {
+pub(crate) fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"graph"),
         Digest::sha256(b"source"),
@@ -27,7 +27,7 @@ fn revision() -> ProgramRevision {
     .unwrap()
 }
 
-fn access(authority: &str) -> ArtifactAccess {
+pub(crate) fn access(authority: &str) -> ArtifactAccess {
     ArtifactAccess {
         authorization_scope: authority.into(),
         encryption_context: Digest::sha256(authority.as_bytes()),
@@ -48,7 +48,11 @@ fn workload() -> StructuralLinearWorkload {
     }
 }
 
-fn prepared(authority: &str, expected_source: Digest) -> PreparedExactStructuralStudyRoot {
+pub(crate) fn prepared(
+    authority: &str,
+    expected_source: Digest,
+    authored_study_digest: Digest,
+) -> PreparedExactStructuralStudyRoot {
     let source = b"portable exact CAD source";
     let revision = revision();
     let access = access(authority);
@@ -80,7 +84,7 @@ fn prepared(authority: &str, expected_source: Digest) -> PreparedExactStructural
     prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
-        authored_study_digest: Digest::sha256(b"study"),
+        authored_study_digest,
         frozen_project_digest: Some(Digest::sha256(b"project")),
         geometry_source_digest: expected_source,
         workload_template: workload(),
@@ -92,8 +96,8 @@ fn prepared(authority: &str, expected_source: Digest) -> PreparedExactStructural
 #[test]
 fn whole_study_root_is_path_free_and_reuses_fixed_programs() {
     let source_digest = Digest::sha256(b"portable exact CAD source");
-    let first = prepared("run-a", source_digest);
-    let second = prepared("run-b", source_digest);
+    let first = prepared("run-a", source_digest, Digest::sha256(b"study"));
+    let second = prepared("run-b", source_digest, Digest::sha256(b"study"));
     assert_eq!(
         first.required_programs().unwrap(),
         second.required_programs().unwrap()
@@ -121,7 +125,11 @@ fn whole_study_root_is_path_free_and_reuses_fixed_programs() {
 
 #[test]
 fn whole_study_root_rejects_a_substituted_source_identity() {
-    let prepared = prepared("run", Digest::sha256(b"different source"));
+    let prepared = prepared(
+        "run",
+        Digest::sha256(b"different source"),
+        Digest::sha256(b"study"),
+    );
     let directory = tempfile::tempdir().unwrap();
     let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
         directory.path(),

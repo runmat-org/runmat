@@ -40,6 +40,19 @@ pub enum SavedOutputIntent {
             >,
         >,
     },
+    StructuralSweep {
+        spec: Box<runmat_runtime::analysis::AnalysisStudySweepSpec>,
+        continuations: Vec<String>,
+        revision: runmat_execution::ProgramRevision,
+        materialization: OutputMaterialization,
+        result: Option<
+            Box<
+                runmat_runtime::operations::OperationEnvelope<
+                    runmat_runtime::analysis::AnalysisStudySweepData,
+                >,
+            >,
+        >,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -114,6 +127,80 @@ impl SavedRemoteRun {
                 anyhow::bail!("saved structural study materialization state is inconsistent");
             }
         }
+        if let SavedOutputIntent::StructuralSweep {
+            spec,
+            continuations,
+            materialization,
+            result,
+            ..
+        } = &self.output_intent
+        {
+            let expected_identity = runmat_runtime::analysis::analysis_study_sweep_identity(
+                spec,
+                &runmat_runtime::operations::OperationContext::new(None, None),
+            )
+            .map_err(|error| anyhow::anyhow!(error.message))?;
+            if continuations.len() != spec.studies.len() {
+                anyhow::bail!("saved structural sweep continuation count is invalid");
+            }
+            for (continuation, authored) in continuations.iter().zip(&spec.studies) {
+                let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(continuation)
+                    .context("saved structural sweep continuation is malformed")?;
+                let intent = runmat_runtime::analysis::PreparedStructuralStudyIntent::from_continuation_bytes(&bytes)
+                    .map_err(anyhow::Error::msg)
+                    .context("saved structural sweep continuation is invalid")?;
+                if intent.study_id() != authored.study_id
+                    || intent.authored_study_digest()
+                        != runmat_runtime::analysis::analysis_study_content_digest(authored)
+                {
+                    anyhow::bail!(
+                        "saved structural sweep continuation differs from its authored study"
+                    );
+                }
+            }
+            if (*materialization == OutputMaterialization::Materialized) != result.is_some() {
+                anyhow::bail!("saved structural sweep materialization state is inconsistent");
+            }
+            if let Some(result) = result {
+                let data = &result.data;
+                if data.sweep_id != spec.sweep_id
+                    || data.identity != expected_identity
+                    || data.study_count != spec.studies.len()
+                    || data.success_count != data.run_entries.len()
+                    || data.failed_count != data.failure_entries.len()
+                    || data.success_count + data.failed_count != data.study_count
+                {
+                    anyhow::bail!("saved structural sweep result differs from its authored sweep");
+                }
+                let mut represented = std::collections::BTreeSet::new();
+                for entry in &data.run_entries {
+                    if !spec
+                        .studies
+                        .iter()
+                        .any(|study| study.study_id == entry.study_id)
+                        || !represented.insert(entry.study_id.as_str())
+                    {
+                        anyhow::bail!("saved structural sweep result contains a substituted run");
+                    }
+                }
+                for entry in &data.failure_entries {
+                    if spec
+                        .studies
+                        .get(entry.study_index)
+                        .is_none_or(|study| study.study_id != entry.study_id)
+                        || !represented.insert(entry.study_id.as_str())
+                    {
+                        anyhow::bail!(
+                            "saved structural sweep result contains a substituted failure"
+                        );
+                    }
+                }
+                if represented.len() != spec.studies.len() {
+                    anyhow::bail!("saved structural sweep result omits an authored study");
+                }
+            }
+        }
         Ok(())
     }
 
@@ -135,10 +222,32 @@ pub fn mark_output_materialized(run_id: &str) -> Result<()> {
         SavedOutputIntent::Mesh {
             materialization, ..
         } => *materialization = OutputMaterialization::Materialized,
-        SavedOutputIntent::StructuralStudy { .. } | SavedOutputIntent::Generic => {
+        SavedOutputIntent::StructuralStudy { .. }
+        | SavedOutputIntent::StructuralSweep { .. }
+        | SavedOutputIntent::Generic => {
             anyhow::bail!("remote run has no deferred output intent")
         }
     }
+    save(&saved)
+}
+
+pub fn mark_structural_sweep_materialized(
+    run_id: &str,
+    result: runmat_runtime::operations::OperationEnvelope<
+        runmat_runtime::analysis::AnalysisStudySweepData,
+    >,
+) -> Result<()> {
+    let mut saved = load(run_id)?;
+    let SavedOutputIntent::StructuralSweep {
+        materialization,
+        result: saved_result,
+        ..
+    } = &mut saved.output_intent
+    else {
+        anyhow::bail!("remote run has no deferred structural sweep output intent");
+    };
+    *materialization = OutputMaterialization::Materialized;
+    *saved_result = Some(Box::new(result));
     save(&saved)
 }
 
@@ -354,5 +463,65 @@ mod tests {
             },
         );
         assert!(saved.validate("run_structural").is_err());
+    }
+
+    #[tokio::test]
+    async fn structural_sweep_secret_binds_each_continuation_to_its_authored_study() {
+        let document_path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/box_static.fea");
+        let runmat_runtime::analysis::FeaResolvedDocument::Study(first) =
+            runmat_runtime::analysis::load_fea_document_from_path_async(&document_path)
+                .await
+                .unwrap()
+        else {
+            panic!("structural fixture must resolve to a study")
+        };
+        let mut second = (*first).clone();
+        second.study_id = "canonical_box_static_second".into();
+        let context = runmat_runtime::operations::OperationContext::new(None, None);
+        let studies = vec![*first, second];
+        let continuations = studies
+            .iter()
+            .map(|study| {
+                let intent = runmat_runtime::analysis::analysis_prepare_structural_study_intent_op(
+                    study,
+                    context.clone(),
+                )
+                .unwrap();
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(intent.continuation_bytes().unwrap())
+            })
+            .collect::<Vec<_>>();
+        let spec = runmat_runtime::analysis::AnalysisStudySweepSpec {
+            sweep_id: "saved_structural_sweep".into(),
+            studies,
+            fail_fast: false,
+        };
+        let key =
+            runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([13; 32]).unwrap();
+        let saved = SavedRemoteRun::new(
+            "run_structural_sweep".into(),
+            "https://example.invalid".into(),
+            "project_1".into(),
+            "fingerprint".into(),
+            &key,
+            SavedOutputIntent::StructuralSweep {
+                spec: Box::new(spec.clone()),
+                continuations: continuations.clone(),
+                revision: revision(),
+                materialization: OutputMaterialization::Pending,
+                result: None,
+            },
+        );
+        saved.validate("run_structural_sweep").unwrap();
+
+        let mut substituted = saved;
+        let SavedOutputIntent::StructuralSweep { continuations, .. } =
+            &mut substituted.output_intent
+        else {
+            unreachable!()
+        };
+        continuations.swap(0, 1);
+        assert!(substituted.validate("run_structural_sweep").is_err());
     }
 }

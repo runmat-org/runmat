@@ -11,6 +11,7 @@ mod exact_meshing_executor;
 mod exact_meshing_job;
 mod exact_meshing_root;
 mod exact_structural_study_root;
+mod exact_structural_sweep_root;
 mod local_store;
 mod materialized_project;
 mod meshing_evaluator;
@@ -51,6 +52,14 @@ pub use exact_structural_study_root::{
     ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
     ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
     EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
+};
+pub use exact_structural_sweep_root::{
+    decode_exact_structural_sweep_root, import_exact_structural_sweep_result,
+    prepare_exact_structural_sweep_root, DecodedExactStructuralSweepRoot,
+    ExactStructuralSweepEntryResult, ExactStructuralSweepResult,
+    ExactStructuralSweepResultExpectation, ExactStructuralSweepRootPreparation,
+    ExactStructuralSweepTerminal, PreparedExactStructuralSweepRoot,
+    EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_SWEEP_ROOT_TARGET_PROFILE,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
