@@ -47,6 +47,6 @@ pub const PLUS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     suppress_auto_output: false,
 };
 
-pub(super) const fn entry() -> &'static BuiltinCatalogEntry {
+pub(super) const fn plus_entry() -> &'static BuiltinCatalogEntry {
     &PLUS_CATALOG_ENTRY
 }

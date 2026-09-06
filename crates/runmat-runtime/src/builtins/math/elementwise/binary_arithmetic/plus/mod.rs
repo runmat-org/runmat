@@ -4,16 +4,14 @@ use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
 use runmat_builtins::PLUS_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PLUS_ERROR_INTERNAL, PLUS_ERROR_INVALID_ARGUMENT,
+    BuiltinErrorDescriptor, PLUS_CATALOG_ENTRY, PLUS_ERROR_INTERNAL, PLUS_ERROR_INVALID_ARGUMENT,
     PLUS_ERROR_INVALID_INPUT, PLUS_ERROR_SIZE_MISMATCH, PLUS_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CharArray, ComplexStorage, ComplexTensor, IntegerStorage, NumericStorage, Tensor, Value,
-};
+use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::broadcast::BroadcastPlan;
-use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
+use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -117,7 +115,7 @@ async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult
         return Err(builtin_error("complex integer arithmetic is not supported"));
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
-    let template = parse_output_template(&rest)?;
+    let template = parse_output_template(OUTPUT_PROTOTYPE_CONTEXT, &rest)?;
     if matches!(template, OutputTemplate::Like(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(&PLUS_LIKE_EXTENSION, BUILTIN_NAME)?;
     }
@@ -127,19 +125,26 @@ async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult
         (lhs, Value::GpuTensor(rb)) => plus_gpu_host_right(lhs, rb).await,
         (lhs, rhs) => plus_host(lhs, rhs),
     }?;
-    apply_output_template(base, &template).await
+    apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
 }
 
-mod output_prototype;
 #[cfg(test)]
-use output_prototype::real_to_complex;
-use output_prototype::{apply_output_template, parse_output_template, OutputTemplate};
+use super::output_prototype::real_to_complex;
+use super::output_prototype::{
+    apply_output_template, parse_output_template, OutputPrototypeContext, OutputTemplate,
+};
+
+const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext {
+    identity: PLUS_CATALOG_ENTRY.identity,
+    invalid_argument: &PLUS_ERROR_INVALID_ARGUMENT,
+    invalid_input: &PLUS_ERROR_INVALID_INPUT,
+};
 
 mod provider;
 use provider::{plus_gpu_host_left, plus_gpu_host_right, plus_gpu_pair};
 
 mod host;
-use host::{char_array_to_tensor, is_real_integer_operand, plus_host};
+use host::{is_real_integer_operand, plus_host};
 
 #[cfg(test)]
 mod tests;

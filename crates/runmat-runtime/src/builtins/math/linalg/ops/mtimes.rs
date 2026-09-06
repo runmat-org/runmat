@@ -356,7 +356,7 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     // tensors, so route every scalar case through the same class-preserving
     // host implementation used by `times` before attempting matrix products.
     if mtimes_scalar(&lhs) || mtimes_scalar(&rhs) {
-        return crate::builtins::math::elementwise::times::times_host(lhs, rhs);
+        return crate::builtins::math::elementwise::binary_arithmetic::times::times_host(lhs, rhs);
     }
 
     match (lhs, rhs) {

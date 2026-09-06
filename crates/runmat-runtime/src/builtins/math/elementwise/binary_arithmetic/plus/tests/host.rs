@@ -235,8 +235,11 @@ fn plus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
 #[test]
 fn plus_like_complex_conversion_preserves_single_storage() {
     let tensor = Tensor::from_f32(vec![2.0, 3.0], vec![2, 1]).unwrap();
-    let result =
-        block_on(super::real_to_complex(Value::Tensor(tensor))).expect("complex conversion");
+    let result = block_on(super::real_to_complex(
+        super::OUTPUT_PROTOTYPE_CONTEXT,
+        Value::Tensor(tensor),
+    ))
+    .expect("complex conversion");
     let Value::ComplexTensor(result) = result else {
         panic!("expected complex single tensor");
     };
