@@ -4,7 +4,7 @@ pub(super) fn parse(tokens: Vec<String>) -> crate::BuiltinResult<Vec<String>> {
         .map(String::as_str)
         .map(str::trim)
         .filter(|token| !token.is_empty())
-        .flat_map(super::super::path_mutation::segments::split)
+        .flat_map(super::super::path_list::split)
         .collect();
     if directories.is_empty() {
         return Err(super::errors::descriptor(

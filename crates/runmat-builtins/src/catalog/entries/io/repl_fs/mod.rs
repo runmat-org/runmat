@@ -1,5 +1,6 @@
 mod addpath;
 mod cd;
+mod genpath;
 mod path;
 mod pwd;
 mod rmpath;
@@ -10,6 +11,7 @@ use runmat_types::{CallInference, CallRequest};
 
 pub use addpath::*;
 pub use cd::*;
+pub use genpath::*;
 pub use path::*;
 pub use pwd::*;
 pub use rmpath::*;
@@ -29,6 +31,7 @@ pub(super) fn infer(
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     addpath::ENTRIES,
     cd::ENTRIES,
+    genpath::ENTRIES,
     path::ENTRIES,
     pwd::ENTRIES,
     rmpath::ENTRIES,

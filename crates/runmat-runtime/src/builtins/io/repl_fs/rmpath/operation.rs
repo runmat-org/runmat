@@ -9,12 +9,12 @@ pub(super) async fn plan(directories: Vec<String>) -> crate::BuiltinResult<Strin
     let mut segments = current_path_segments();
     let mut seen = HashSet::new();
     for raw in directories {
-        let key = super::super::path_mutation::segments::identity(&raw);
+        let key = super::super::path_list::identity(&raw);
         if seen.insert(key) {
             remove(&mut segments, &raw).await?;
         }
     }
-    Ok(super::super::path_mutation::segments::join(&segments))
+    Ok(super::super::path_list::join(&segments))
 }
 
 async fn remove(segments: &mut Vec<String>, raw: &str) -> crate::BuiltinResult<()> {
@@ -42,9 +42,9 @@ async fn remove(segments: &mut Vec<String>, raw: &str) -> crate::BuiltinResult<(
 }
 
 fn retain_other_entries(segments: &mut Vec<String>, requested: &str) -> bool {
-    let requested = super::super::path_mutation::segments::identity(requested);
+    let requested = super::super::path_list::identity(requested);
     let before = segments.len();
-    segments.retain(|entry| super::super::path_mutation::segments::identity(entry) != requested);
+    segments.retain(|entry| super::super::path_list::identity(entry) != requested);
     segments.len() != before
 }
 

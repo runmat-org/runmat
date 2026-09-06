@@ -50,6 +50,7 @@ pub enum SearchPathInferenceRule {
     QueryOrReplace,
     Add,
     Remove,
+    Generate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -225,10 +225,6 @@ pub fn exist_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn genpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn fullfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
@@ -548,7 +544,6 @@ mod tests {
         Type::cell_of(Type::Struct { known_fields: None })
     );
     assert_resolver!(exist_type_resolver, exist_type, &[], Type::Num);
-    assert_resolver!(genpath_type_resolver, genpath_type, &[], Type::String);
     assert_resolver!(fullfile_type_resolver, fullfile_type, &[], Type::String);
     assert_resolver!(
         uigetfile_type_resolver,
