@@ -5,6 +5,7 @@ pub use super::directory_listing::*;
 pub use super::environment::*;
 pub use super::file_transfer::*;
 pub use super::genpath::*;
+pub use super::installation_path::*;
 pub use super::path::*;
 pub use super::path_predicate::*;
 pub use super::path_syntax::*;

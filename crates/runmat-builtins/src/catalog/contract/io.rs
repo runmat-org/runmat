@@ -54,10 +54,16 @@ pub enum FileInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PathInferenceRule {
+    Installation(InstallationPathInferenceRule),
     Predicate(PathPredicateInferenceRule),
     Syntax(PathSyntaxInferenceRule),
     Search(SearchPathInferenceRule),
     Temporary(TemporaryPathInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum InstallationPathInferenceRule {
+    Root,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

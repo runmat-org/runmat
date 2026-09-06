@@ -11,6 +11,7 @@ pub mod exist;
 pub(crate) mod file_dialog;
 pub(crate) mod file_transfer;
 pub mod genpath;
+pub(crate) mod installation_path;
 pub mod open;
 pub mod opentoline;
 pub mod path;

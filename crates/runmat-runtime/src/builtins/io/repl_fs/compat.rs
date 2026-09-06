@@ -22,7 +22,6 @@ use runmat_value::{
     Tensor, Value,
 };
 
-use crate::builtins::common::env as runtime_env;
 use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
 use crate::builtins::common::path_state::set_path_string;
 use crate::output_count;
@@ -207,14 +206,6 @@ pub const MEMMAPFILE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         notes: "This compatibility-gated extension parses typed controls exactly. Automatic residency gathers through its owner; explicit residency is separately gated before provider access.",
     },
 ];
-simple_descriptor!(
-    MATLABROOT_SIGNATURES,
-    MATLABROOT_DESCRIPTOR,
-    "root = matlabroot()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
 const SYSTEM_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "command",
     ty: BuiltinParamType::StringScalar,
@@ -556,36 +547,6 @@ fn value_contains_resident(value: &Value) -> bool {
         Value::OutputList(values) => values.iter().any(value_contains_resident),
         _ => false,
     }
-}
-
-#[runtime_builtin(
-    name = "matlabroot",
-    category = "io/repl_fs",
-    summary = "Return the RunMat installation root as MATLAB-root compatibility text.",
-    keywords = "matlabroot,root,installation,path",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::MATLABROOT_DESCRIPTOR),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn matlabroot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !args.is_empty() {
-        return Err(compat_error(
-            "matlabroot",
-            "matlabroot: too many input arguments",
-        ));
-    }
-    let root = runtime_env::var("RUNMAT_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(Path::to_path_buf))
-        })
-        .or_else(|| vfs::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    Ok(char_value(&path_to_string(&root)))
 }
 
 #[runtime_builtin(
@@ -1114,10 +1075,7 @@ async fn restoredefaultpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "restoredefaultpath: too many input arguments",
         ));
     }
-    let root = match matlabroot_builtin(Vec::new()).await? {
-        Value::CharArray(ca) => char_row_to_string(&ca),
-        _ => String::new(),
-    };
+    let root = path_to_string(&super::installation_path::root());
     set_path_string(&root);
     Ok(char_value(&root))
 }
