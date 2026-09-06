@@ -51,6 +51,7 @@ pub enum SearchPathInferenceRule {
     Add,
     Remove,
     Generate,
+    Persist,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

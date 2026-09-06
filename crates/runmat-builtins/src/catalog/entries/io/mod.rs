@@ -20,5 +20,5 @@ pub(in crate::catalog) fn infer(
 
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     super::extend_groups(entries, &[console::ENTRIES]);
-    super::extend_groups(entries, repl_fs::ENTRY_GROUPS);
+    repl_fs::extend_entries(entries);
 }

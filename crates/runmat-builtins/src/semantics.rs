@@ -341,13 +341,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "savepath" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment().with_filesystem(),
-            environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
         "exist" => BuiltinSemantics {
             effects: BuiltinEffects::none()
                 .with_filesystem()

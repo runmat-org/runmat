@@ -14,5 +14,6 @@ pub(super) fn infer(
         SearchPathInferenceRule::Add => super::addpath::inference::infer(request, entry),
         SearchPathInferenceRule::Remove => super::rmpath::inference::infer(request, entry),
         SearchPathInferenceRule::Generate => super::genpath::inference::infer(request, entry),
+        SearchPathInferenceRule::Persist => super::savepath::inference::infer(request, entry),
     }
 }
