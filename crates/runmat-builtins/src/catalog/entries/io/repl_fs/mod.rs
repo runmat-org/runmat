@@ -1,13 +1,13 @@
 mod addpath;
 mod cd;
 mod genpath;
+mod inference;
 mod path;
 mod pwd;
+mod registry;
 mod rmpath;
+mod savepath;
 mod search_path;
-
-use crate::{BuiltinCatalogEntry, IoReplFsInferenceRule};
-use runmat_types::{CallInference, CallRequest};
 
 pub use addpath::*;
 pub use cd::*;
@@ -15,24 +15,7 @@ pub use genpath::*;
 pub use path::*;
 pub use pwd::*;
 pub use rmpath::*;
+pub use savepath::*;
 
-pub(super) fn infer(
-    rule: IoReplFsInferenceRule,
-    request: &CallRequest,
-    entry: &BuiltinCatalogEntry,
-) -> CallInference {
-    match rule {
-        IoReplFsInferenceRule::ChangeDirectory => cd::inference::infer(request, entry),
-        IoReplFsInferenceRule::CurrentDirectory => pwd::inference::infer(request, entry),
-        IoReplFsInferenceRule::SearchPath(rule) => search_path::infer(rule, request, entry),
-    }
-}
-
-pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
-    addpath::ENTRIES,
-    cd::ENTRIES,
-    genpath::ENTRIES,
-    path::ENTRIES,
-    pwd::ENTRIES,
-    rmpath::ENTRIES,
-];
+pub(super) use inference::infer;
+pub(super) use registry::extend_entries;

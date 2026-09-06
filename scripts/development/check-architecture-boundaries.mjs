@@ -1339,12 +1339,14 @@ for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/inference/routing/io/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/console/mod.rs", 32],
-  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs", 40],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path/mod.rs", 32],
 ])) {
   const lines = read(sourcePath).split("\n").length;
   if (lines > ceiling) {
-    fail(`${sourcePath} exceeds its typed IO inference routing boundary (found ${lines} lines; maximum ${ceiling})`);
+    fail(`${sourcePath} exceeds its typed IO catalog composition boundary (found ${lines} lines; maximum ${ceiling})`);
   }
 }
 if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/inference/routing/io.rs"))) {
@@ -1432,11 +1434,29 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "search-path persistence identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/savepath",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/savepath",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/savepath/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/savepath/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/savepath.rs",
+    "docs/builtins/reference/savepath.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/savepath.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
 const legacyIoResolvers = read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs");
-if (/\bpub fn (?:addpath|rmpath|genpath)_type\b/.test(legacyIoResolvers)) {
+if (/\bpub fn (?:addpath|rmpath|genpath|savepath)_type\b/.test(legacyIoResolvers)) {
   fail("legacy runtime type resolvers must not reclaim migrated search-path inference authority");
 }
-if (/"(?:addpath|rmpath|genpath)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+if (/"(?:addpath|rmpath|genpath|savepath)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
   fail("legacy name-selected semantics must not reclaim migrated search-path authority");
 }
 
