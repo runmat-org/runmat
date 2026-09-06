@@ -4,11 +4,14 @@ use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::ResourceRequest;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::value::ValueRef;
+use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::{ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::TaskSubmission;
 
-use crate::{AnalysisBridgeResult, AnalysisWorkloadRequest};
+use crate::{
+    AnalysisBridgeResult, AnalysisHostWorkload, ANALYSIS_HOST_INVOCATION_MEDIA_TYPE,
+    ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
+};
 
 pub const ANALYSIS_EXECUTION_CALLABLE_OWNER: &str = "runmat.analysis.host";
 
@@ -24,15 +27,30 @@ pub struct AnalysisExecutionContext {
 }
 
 pub fn build_analysis_task_submission(
-    workload: &AnalysisWorkloadRequest,
-    input_roots: Vec<ValueRef>,
+    host: &AnalysisHostWorkload,
+    program_roots: Vec<ValueRef>,
     dependency_identities: Vec<AnalysisTaskIdentity>,
     dependency_tasks: BTreeSet<TaskId>,
     context: AnalysisExecutionContext,
 ) -> AnalysisBridgeResult<TaskSubmission> {
+    let workload = &host.workload;
     workload.validate()?;
     context.resources.validate()?;
-    if input_roots.len() != workload.inputs.len()
+    let Some((invocation_root, input_roots)) = program_roots.split_first() else {
+        return Err(crate::AnalysisBridgeError::Invalid(
+            "analysis task is missing its invocation descriptor".into(),
+        ));
+    };
+    if host
+        .artifact_access
+        .validate_reference(
+            invocation_root,
+            ValueRefKind::DriverObject,
+            ANALYSIS_HOST_INVOCATION_MEDIA_TYPE,
+            ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
+        )
+        .is_err()
+        || host.validate_inputs(input_roots).is_err()
         || dependency_identities.len() != dependency_tasks.len()
         || !workload
             .generic_capabilities()?
@@ -57,7 +75,7 @@ pub fn build_analysis_task_submission(
             qualified_name: "analysis_workload".into(),
             entrypoint_digest: workload.identity.digest(),
         },
-        inputs: input_roots
+        inputs: program_roots
             .into_iter()
             .map(|root| runmat_execution::value::ValuePayload::Object(Box::new(root)))
             .collect(),

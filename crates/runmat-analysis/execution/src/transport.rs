@@ -4,7 +4,7 @@ use runmat_execution::identity::ValueId;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{
-    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    LogicalObject, ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
     ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 
@@ -18,9 +18,20 @@ use crate::{
 pub struct PreparedAnalysisProgram {
     pub request: ProgramExecutionRequest,
     pub objects: Vec<ProgramExecutionObject>,
+    logical_objects: Vec<LogicalObject>,
 }
 
 impl PreparedAnalysisProgram {
+    pub fn write_to(
+        &self,
+        store: &mut impl runmat_execution_artifact::cache::CacheExport,
+    ) -> AnalysisBridgeResult<()> {
+        for object in &self.logical_objects {
+            store.write_verified(object)?;
+        }
+        Ok(())
+    }
+
     pub fn inputs(
         &self,
         locations: Vec<ProgramExecutionObjectLocation>,
@@ -59,6 +70,7 @@ pub fn prepare_analysis_program(
 
     let mut roots = Vec::with_capacity(inputs.len());
     let mut inventory = BTreeMap::<ValueId, ProgramExecutionObject>::new();
+    let mut logical_inventory = BTreeMap::<runmat_execution::Digest, LogicalObject>::new();
     for (prepared, contract) in inputs.iter().zip(&host.workload.inputs) {
         if prepared.manifest.kind != contract.kind
             || prepared.manifest.logical_identity != contract.logical_identity
@@ -80,6 +92,9 @@ pub fn prepare_analysis_program(
             ))?;
         roots.push(root);
         for (reference, object) in references.into_iter().zip(&prepared.objects) {
+            logical_inventory
+                .entry(object.descriptor.digest)
+                .or_insert_with(|| object.clone());
             let transported = ProgramExecutionObject {
                 reference,
                 bytes: object.bytes.clone(),
@@ -99,9 +114,26 @@ pub fn prepare_analysis_program(
         }
     }
 
-    let request = host.program_request(program_revision, &roots)?;
+    let invocation = host.prepare_program_request(program_revision, &roots)?;
+    let (request, descriptor) = invocation.into_parts();
+    let descriptor_reference = match request.arguments.first() {
+        Some(runmat_execution::value::ValuePayload::Object(reference)) => reference.as_ref(),
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "analysis host invocation has no descriptor root",
+            ))
+        }
+    };
+    let transported = ProgramExecutionObject {
+        reference: descriptor_reference.clone(),
+        bytes: descriptor.bytes.clone(),
+    };
+    transported.validate()?;
+    inventory.insert(transported.reference.id, transported);
+    logical_inventory.insert(descriptor.descriptor.digest, descriptor);
     Ok(PreparedAnalysisProgram {
         request,
         objects: inventory.into_values().collect(),
+        logical_objects: logical_inventory.into_values().collect(),
     })
 }

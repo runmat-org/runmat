@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use base64::Engine as _;
 use runmat_analysis_execution::{
-    import_structural_linear_result, prepare_structural_linear_program,
-    PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
+    import_structural_linear_result, prepare_analysis_host_program,
+    prepare_structural_linear_program, PreparedStructuralLinearProgram,
+    StructuralLinearProgramPreparation,
 };
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
 use runmat_config::runtime::RunMatRuntimeConfig;
-use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::CacheImport;
@@ -52,23 +52,13 @@ pub(super) async fn execute_study(
         runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
     )?;
     let study_digest = analysis_study_content_digest(&spec);
-    let placeholder = prepare_program(
-        &study,
-        revision.clone(),
-        study_digest,
-        "bundle-sizing-authority",
-    )?;
+    let host_program = prepare_analysis_host_program(revision.clone(), 1)?;
     let bundle = ExecutionBundleBuilder::native(&resolved.resolved.frozen, revision.clone())?
         .with_compiled_package_closure()
         .with_materialized_program(
-            placeholder.program.request.recipe.clone(),
+            host_program.recipe,
             ExecutableForm::AnalysisWorkload,
-            placeholder
-                .program
-                .request
-                .artifact
-                .executable_bytes
-                .clone(),
+            host_program.artifact.executable_bytes,
         )
         .build()?;
     let mut bundle_archive = Vec::new();
@@ -198,31 +188,7 @@ fn prepare_remote_execution(
     bundle_archive: Vec<u8>,
 ) -> Result<PreparedRemoteExecution> {
     let request = prepared.program.request;
-    let mut references = BTreeMap::new();
-    for input in &prepared.inputs {
-        for reference in
-            input.references(&prepared.host.artifact_access, ValueRefKind::DriverObject)?
-        {
-            references.insert(reference.logical_digest, reference);
-        }
-    }
-    let mut objects = Vec::new();
-    for input in prepared.inputs {
-        for object in input.objects {
-            let reference = references
-                .remove(&object.descriptor.digest)
-                .context("structural program omitted an input object reference")?;
-            let object = ProgramExecutionObject {
-                reference,
-                bytes: object.bytes,
-            };
-            object.validate()?;
-            objects.push(object);
-        }
-    }
-    if !references.is_empty() {
-        bail!("structural program input inventory contains an unbound reference");
-    }
+    let objects = prepared.program.objects;
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: request.recipe,

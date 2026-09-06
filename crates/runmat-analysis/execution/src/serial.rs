@@ -77,7 +77,7 @@ where
             "analysis execution limits must be non-zero".into(),
         ));
     }
-    let host = AnalysisHostWorkload::from_program_request(request)?;
+    let host = AnalysisHostWorkload::from_program_request(request, store)?;
     let roots = input_roots(request)?;
     let inputs = host
         .workload
@@ -154,14 +154,5 @@ where
 }
 
 fn input_roots(request: &ProgramExecutionRequest) -> AnalysisBridgeResult<Vec<ValueRef>> {
-    request
-        .arguments
-        .iter()
-        .map(|input| match input {
-            ValuePayload::Object(root) => Ok((**root).clone()),
-            ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
-                "analysis numerical inputs must remain externalized".into(),
-            )),
-        })
-        .collect()
+    AnalysisHostWorkload::semantic_input_roots(request)
 }

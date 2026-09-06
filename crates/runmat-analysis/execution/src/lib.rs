@@ -12,7 +12,9 @@ mod workload;
 
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
 pub use host::{
-    AnalysisHostWorkload, ANALYSIS_HOST_ABI, ANALYSIS_HOST_EXECUTION_MODE,
+    prepare_analysis_host_program, AnalysisHostProgramArtifact, AnalysisHostWorkload,
+    PreparedAnalysisHostInvocation, ANALYSIS_HOST_ABI, ANALYSIS_HOST_EXECUTION_MODE,
+    ANALYSIS_HOST_INVOCATION_MEDIA_TYPE, ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
     ANALYSIS_HOST_TARGET_PROFILE,
 };
 pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};

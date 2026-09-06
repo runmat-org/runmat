@@ -47,11 +47,12 @@ pub fn execute_analysis_program_request<
     if let Err(error) = limits.validate() {
         return failure(error.to_string());
     }
-    let host = match runmat_analysis_execution::AnalysisHostWorkload::from_program_request(request)
-    {
-        Ok(host) => host,
-        Err(error) => return failure(error.to_string()),
-    };
+    let host =
+        match runmat_analysis_execution::AnalysisHostWorkload::from_program_request(request, store)
+        {
+            Ok(host) => host,
+            Err(error) => return failure(error.to_string()),
+        };
     match execute_serial_analysis(request, store, kernel, limits.chunk_bytes, limits.inventory)
         .and_then(|completed| AnalysisHostResponse::completed(&host, &completed))
     {

@@ -16,7 +16,6 @@ use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::ValuePayload;
 use runmat_execution::ProgramRevision;
-use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
 use runmat_execution_runner_native::{NativeExecutionConfig, NativeProgramSession};
@@ -96,13 +95,10 @@ impl StructuralLinearExecutor for LocalProcessStructuralExecutor {
         let session =
             NativeProgramSession::new(native_config).map_err(|error| error.to_string())?;
         let mut store = session.object_store();
-        for input in &prepared.inputs {
-            for object in &input.objects {
-                store
-                    .write_verified(object)
-                    .map_err(|error| error.to_string())?;
-            }
-        }
+        prepared
+            .program
+            .write_to(&mut store)
+            .map_err(|error| error.to_string())?;
         let roots = prepared
             .program
             .request
@@ -120,7 +116,7 @@ impl StructuralLinearExecutor for LocalProcessStructuralExecutor {
             .resources
             .maximum_wall_time_milliseconds;
         let submission = build_analysis_task_submission(
-            &prepared.host.workload,
+            &prepared.host,
             roots,
             Vec::new(),
             BTreeSet::new(),

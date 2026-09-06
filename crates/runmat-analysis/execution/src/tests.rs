@@ -88,12 +88,31 @@ fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
     )
     .unwrap();
     let host = AnalysisHostWorkload::new(workload, access()).unwrap();
-    let request = host.program_request(revision(), &[root]).unwrap();
-    assert!(request.artifact.executable_bytes.len() < payload.len() * 20);
+    let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
+    let request = invocation.request().clone();
+    let mut store = MemoryObjects::default();
+    invocation.write_to(&mut store).unwrap();
+    assert!(request.artifact.executable_bytes.len() < payload.len());
     assert_eq!(
-        AnalysisHostWorkload::from_program_request(&request).unwrap(),
+        AnalysisHostWorkload::from_program_request(&request, &store).unwrap(),
         host
     );
+
+    let missing = MemoryObjects::default();
+    assert!(AnalysisHostWorkload::from_program_request(&request, &missing).is_err());
+
+    let mut reordered = request.clone();
+    reordered.arguments.swap(0, 1);
+    assert!(AnalysisHostWorkload::from_program_request(&reordered, &store).is_err());
+
+    let mut mixed_authority = request;
+    let runmat_execution::value::ValuePayload::Object(descriptor) =
+        &mut mixed_authority.arguments[0]
+    else {
+        unreachable!()
+    };
+    descriptor.authorization_scope = "other-study".into();
+    assert!(AnalysisHostWorkload::from_program_request(&mixed_authority, &store).is_err());
 }
 
 #[test]
@@ -129,7 +148,7 @@ fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
     let host = AnalysisHostWorkload::new(workload, access()).unwrap();
     let prepared =
         prepare_analysis_program(&host, revision(), std::slice::from_ref(&input)).unwrap();
-    assert_eq!(prepared.objects.len(), input.objects.len());
+    assert_eq!(prepared.objects.len(), input.objects.len() + 1);
     assert!(prepared.objects.iter().all(|object| {
         object.reference.authorization_scope == host.artifact_access.authorization_scope
             && object.reference.kind == ValueRefKind::DriverObject
@@ -192,7 +211,9 @@ fn workload_rejects_identity_and_access_tampering() {
     let host = AnalysisHostWorkload::new(workload, access()).unwrap();
     let mut wrong_root = root;
     wrong_root.authorization_scope = "other-study".into();
-    assert!(host.program_request(revision(), &[wrong_root]).is_err());
+    assert!(host
+        .prepare_program_request(revision(), &[wrong_root])
+        .is_err());
 }
 
 #[test]
@@ -246,6 +267,19 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     )
     .unwrap();
     let capabilities = workload.generic_capabilities().unwrap();
+    let host = AnalysisHostWorkload::new(workload.clone(), access()).unwrap();
+    let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
+    let program_roots = invocation
+        .request()
+        .arguments
+        .iter()
+        .map(|argument| match argument {
+            runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
+            runmat_execution::value::ValuePayload::Inline(_) => {
+                panic!("analysis task inputs must remain externalized")
+            }
+        })
+        .collect::<Vec<_>>();
     let context = |pool: &[u8]| AnalysisExecutionContext {
         scope_id: ExecutionScopeId::derive(&[b"study-scope"]),
         pool_id: PoolId::derive(&[pool]),
@@ -266,16 +300,16 @@ fn logical_task_identity_is_independent_of_pool_placement() {
         priority: 0,
     };
     let first = build_analysis_task_submission(
-        &workload,
-        vec![root.clone()],
+        &host,
+        program_roots.clone(),
         Vec::new(),
         BTreeSet::new(),
         context(b"pool-a"),
     )
     .unwrap();
     let second = build_analysis_task_submission(
-        &workload,
-        vec![root],
+        &host,
+        program_roots,
         Vec::new(),
         BTreeSet::new(),
         context(b"pool-b"),
@@ -372,7 +406,9 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     )
     .unwrap();
     let host = AnalysisHostWorkload::new(workload, access).unwrap();
-    let request = host.program_request(revision(), &[root]).unwrap();
+    let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
+    invocation.write_to(&mut store).unwrap();
+    let request = invocation.into_parts().0;
     let completed = execute_serial_analysis(
         &request,
         &mut store,
@@ -503,7 +539,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 2);
-    assert_eq!(prepared.program.request.arguments.len(), 2);
+    assert_eq!(prepared.program.request.arguments.len(), 3);
     assert!(prepared
         .program
         .request
@@ -533,12 +569,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .canonical_bytes()
     .unwrap();
     let mut store = MemoryObjects::default();
-    for input in &prepared.inputs {
-        for object in &input.objects {
-            runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object)
-                .unwrap();
-        }
-    }
+    prepared.program.write_to(&mut store).unwrap();
     let completed = execute_serial_analysis(
         &prepared.program.request,
         &mut store,
@@ -624,6 +655,18 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     assert_ne!(
         prepared.host.workload.execution_plan,
         backend_variant.host.workload.execution_plan
+    );
+    assert_eq!(
+        prepared.program.request.recipe,
+        backend_variant.program.request.recipe
+    );
+    assert_eq!(
+        prepared.program.request.artifact,
+        backend_variant.program.request.artifact
+    );
+    assert_ne!(
+        prepared.program.request.arguments,
+        backend_variant.program.request.arguments
     );
 
     let mut wrong_backend = raw;

@@ -5,7 +5,8 @@ use std::time::Duration;
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
     build_analysis_task_submission, import_analysis_objects, prepare_structural_linear_program,
-    AnalysisExecutionContext, AnalysisHostWorkload, StructuralLinearProgramPreparation,
+    AnalysisExecutionContext, AnalysisHostWorkload, PreparedAnalysisProgram,
+    StructuralLinearProgramPreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -18,9 +19,9 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::{ValuePayload, ValueRefKind};
+use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::cache::{CacheExport, CacheImport};
+use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
@@ -68,7 +69,8 @@ fn main() {
 
 async fn parent() {
     let directory = tempfile::tempdir().unwrap();
-    let (host, request, input_objects) = fixture(revision(), "analysis-process-conformance");
+    let (host, program, _input_objects) = fixture(revision(), "analysis-process-conformance");
+    let request = program.request.clone();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.executable = std::env::current_exe().unwrap();
     config.worker_arguments = vec!["--child".into()];
@@ -77,11 +79,7 @@ async fn parent() {
     config.worker_capabilities = capabilities();
     let session = NativeProgramSession::new(config).unwrap();
     let mut store = session.object_store();
-    for objects in &input_objects {
-        for object in &objects.objects {
-            store.write_verified(object).unwrap();
-        }
-    }
+    program.write_to(&mut store).unwrap();
     let roots = request
         .arguments
         .iter()
@@ -91,7 +89,7 @@ async fn parent() {
         })
         .collect::<Vec<_>>();
     let submission = build_analysis_task_submission(
-        &host.workload,
+        &host,
         roots,
         Vec::new(),
         BTreeSet::new(),
@@ -200,13 +198,10 @@ async fn durable_conformance(expected_payload: Vec<u8>) {
         },
     )
     .unwrap();
-    let (host, request, input_objects) = fixture(revision(), "durable-analysis");
+    let (host, program, _input_objects) = fixture(revision(), "durable-analysis");
+    let request = program.request.clone();
     let mut store = supervisor.object_store().unwrap();
-    for prepared in input_objects {
-        for object in prepared.objects {
-            store.write_verified(&object).unwrap();
-        }
-    }
+    program.write_to(&mut store).unwrap();
     let (record, duplicate) = supervisor
         .submit_program(
             runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
@@ -261,7 +256,8 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
         runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap();
-    let (host, request, input_objects) = fixture(revision.clone(), "remote-analysis");
+    let (host, program, _input_objects) = fixture(revision.clone(), "remote-analysis");
+    let request = program.request.clone();
     let bundle = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_compiled_package_closure()
@@ -338,14 +334,9 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
         )
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
-        for prepared in &input_objects {
-            let references = prepared
-                .references(&host.artifact_access, ValueRefKind::DriverObject)
+        for object in &program.objects {
+            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
                 .unwrap();
-            for (object, reference) in prepared.objects.iter().zip(references) {
-                pool.register_execution_object(reference, object.bytes.clone())
-                    .unwrap();
-            }
         }
         let submission = analysis_submission(scope_id, pool_id, &host, &request);
         let completion = pool.submit(submission, request).unwrap();
@@ -402,7 +393,7 @@ fn fixture(
     authorization_scope: &str,
 ) -> (
     AnalysisHostWorkload,
-    runmat_execution_artifact::ProgramExecutionRequest,
+    PreparedAnalysisProgram,
     Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
 ) {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -434,7 +425,7 @@ fn fixture(
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    (prepared.host, prepared.program.request, prepared.inputs)
+    (prepared.host, prepared.program, prepared.inputs)
 }
 
 fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverMeshArtifact {
@@ -496,7 +487,7 @@ fn analysis_submission(
         })
         .collect();
     build_analysis_task_submission(
-        &host.workload,
+        host,
         roots,
         Vec::new(),
         BTreeSet::new(),
