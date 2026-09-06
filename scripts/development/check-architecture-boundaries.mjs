@@ -1538,6 +1538,67 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "lexical-path family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/fullfile/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/fileparts/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/filesep/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/pathsep/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/fullfile/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/fileparts/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/filesep/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/pathsep/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/lexical/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/fullfile.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/fileparts.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/filesep.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/pathsep.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_syntax/lexical.rs",
+    "docs/builtins/reference/fullfile.json",
+    "docs/builtins/reference/fileparts.json",
+    "docs/builtins/reference/filesep.json",
+    "docs/builtins/reference/pathsep.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/fullfile.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/fileparts.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/filesep.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/pathsep.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/inference.rs",
+]) {
+  const source = read(sourcePath);
+  if (/"(?:fullfile|fileparts|filesep|pathsep)"/.test(source)) {
+    fail(`${sourcePath} must dispatch lexical-path behavior through typed rules and entries`);
+  }
+}
+if (/\bpub fn (?:fullfile|fileparts|filesep|pathsep)_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy runtime type resolvers must not reclaim lexical-path inference authority");
+}
+if (/"(?:fullfile|fileparts|filesep|pathsep)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim lexical-path authority");
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",

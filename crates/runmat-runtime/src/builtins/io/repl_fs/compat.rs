@@ -24,7 +24,7 @@ use runmat_value::{
 
 use crate::builtins::common::env as runtime_env;
 use crate::builtins::common::fs::{expand_user_path, home_directory, path_to_string};
-use crate::builtins::common::path_state::{set_path_string, PATH_LIST_SEPARATOR};
+use crate::builtins::common::path_state::set_path_string;
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -87,29 +87,6 @@ const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const OUTPUT_THREE_TEXT: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "folder",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Folder component.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Base filename component.",
-    },
-    BuiltinParamDescriptor {
-        name: "extension",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Extension component including the leading dot.",
-    },
-];
 const OUTPUT_STATUS_MESSAGE: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "status",
@@ -159,26 +136,12 @@ macro_rules! simple_descriptor {
     };
 }
 
-simple_descriptor!(
-    FILEPARTS_SIGNATURES,
-    FILEPARTS_DESCRIPTOR,
-    "[folder, name, extension] = fileparts(filename)",
-    &INPUTS_ONE,
-    &OUTPUT_THREE_TEXT,
-    BuiltinOutputMode::ByRequestedOutputCount
-);
 pub const ISFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
     notes: "isfile is a host-text filesystem predicate; integer and resident numeric paths reject before provider or filesystem access.",
 };
 
-pub const FILEPARTS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "fileparts is a structural host-text parser with no numeric role; numeric and provider-resident values are rejected as invalid text before any gather or provider access.",
-    };
 simple_descriptor!(
     ISFILE_SIGNATURES,
     ISFILE_DESCRIPTOR,
@@ -276,14 +239,6 @@ simple_descriptor!(
     MATLABROOT_SIGNATURES,
     MATLABROOT_DESCRIPTOR,
     "root = matlabroot()",
-    &INPUTS_NONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    PATHSEP_SIGNATURES,
-    PATHSEP_DESCRIPTOR,
-    "sep = pathsep()",
     &INPUTS_NONE,
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
@@ -640,39 +595,6 @@ fn output_list_for_count(default: Vec<Value>) -> Value {
 }
 
 #[runtime_builtin(
-    name = "fileparts",
-    category = "io/repl_fs",
-    summary = "Split a file path into folder, base name, and extension.",
-    keywords = "fileparts,path,filename,extension",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::fileparts_type),
-    descriptor(crate::builtins::io::repl_fs::compat::FILEPARTS_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::FILEPARTS_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn fileparts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.len() != 1 {
-        return Err(compat_error(
-            "fileparts",
-            "fileparts: expected exactly one input argument",
-        ));
-    }
-    let input = scalar_text(&args[0], "fileparts", "filename")?;
-    let path = Path::new(&input);
-    let folder = path.parent().map(path_to_string).unwrap_or_default();
-    let filename = path.file_name().and_then(|v| v.to_str()).unwrap_or("");
-    let (name, ext) = match filename.rfind('.') {
-        Some(0) | None => (filename.to_string(), String::new()),
-        Some(idx) => (filename[..idx].to_string(), filename[idx..].to_string()),
-    };
-    Ok(output_list_for_count(vec![
-        char_value(&folder),
-        char_value(&name),
-        char_value(&ext),
-    ]))
-}
-
-#[runtime_builtin(
     name = "isfile",
     category = "io/repl_fs",
     summary = "Return true for paths that name existing files.",
@@ -796,23 +718,6 @@ async fn matlabroot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .or_else(|| vfs::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     Ok(char_value(&path_to_string(&root)))
-}
-
-#[runtime_builtin(
-    name = "pathsep",
-    category = "io/repl_fs",
-    summary = "Return the platform path-list separator.",
-    keywords = "pathsep,path,separator",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::string_type),
-    descriptor(crate::builtins::io::repl_fs::compat::PATHSEP_DESCRIPTOR),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn pathsep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if !args.is_empty() {
-        return Err(compat_error("pathsep", "pathsep: too many input arguments"));
-    }
-    Ok(char_value(&PATH_LIST_SEPARATOR.to_string()))
 }
 
 #[runtime_builtin(
@@ -2017,10 +1922,6 @@ mod tests {
     #[test]
     fn textual_filesystem_apis_are_integer_inapplicable() {
         assert_eq!(
-            FILEPARTS_INTEGER_AUDIT.kind,
-            BuiltinIntegerAuditKind::NotApplicable
-        );
-        assert_eq!(
             FILEATTRIB_INTEGER_AUDIT.kind,
             BuiltinIntegerAuditKind::NotApplicable
         );
@@ -2057,43 +1958,6 @@ mod tests {
             assert!(run(ispref_builtin(vec![Value::Int(integer)])).is_err());
         }
         assert!(run(ispref_builtin(vec![unowned_resident_value()])).is_err());
-    }
-
-    #[test]
-    fn fileparts_splits_folder_name_and_extension() {
-        let value = run(fileparts_builtin(vec![Value::String(
-            "/tmp/example.test.m".to_string(),
-        )]))
-        .unwrap();
-        match value {
-            Value::OutputList(values) => {
-                assert_eq!(values[1], char_value("example.test"));
-                assert_eq!(values[2], char_value(".m"));
-            }
-            other => panic!("unexpected value {other:?}"),
-        }
-    }
-
-    #[test]
-    fn fileparts_rejects_numeric_and_resident_inputs_before_provider_access() {
-        for invalid in [Value::Num(1.0), unowned_resident_value()] {
-            let error = run(fileparts_builtin(vec![invalid])).expect_err("invalid text input");
-            assert!(error.message().contains("filename must be"));
-            assert!(!error.message().to_ascii_lowercase().contains("provider"));
-        }
-    }
-
-    #[test]
-    fn fileparts_preserves_scalar_string_array_text_input() {
-        let input =
-            runmat_value::StringArray::new(vec!["folder/example.m".to_string()], vec![1, 1])
-                .expect("scalar string array");
-        let value = run(fileparts_builtin(vec![Value::StringArray(input)])).expect("fileparts");
-        let Value::OutputList(values) = value else {
-            panic!("expected output list");
-        };
-        assert_eq!(values[1], char_value("example"));
-        assert_eq!(values[2], char_value(".m"));
     }
 
     #[test]

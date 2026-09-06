@@ -225,14 +225,6 @@ pub fn exist_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn fullfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
-pub fn fileparts_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::OutputList(vec![Type::String, Type::String, Type::String])
-}
-
 pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![
         Type::Num,
@@ -516,7 +508,6 @@ mod tests {
         Type::cell_of(Type::Struct { known_fields: None })
     );
     assert_resolver!(exist_type_resolver, exist_type, &[], Type::Num);
-    assert_resolver!(fullfile_type_resolver, fullfile_type, &[], Type::String);
     assert_resolver!(
         uigetfile_type_resolver,
         uigetfile_type,

@@ -16,6 +16,7 @@ pub enum IoReplFsInferenceRule {
     ChangeDirectory,
     CurrentDirectory,
     Environment(EnvironmentInferenceRule),
+    PathSyntax(PathSyntaxInferenceRule),
     SearchPath(SearchPathInferenceRule),
     TemporaryPath(TemporaryPathInferenceRule),
 }
@@ -32,6 +33,14 @@ pub enum EnvironmentInferenceRule {
 pub enum TemporaryPathInferenceRule {
     Directory,
     UniqueName,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PathSyntaxInferenceRule {
+    Join,
+    Split,
+    FileSeparator,
+    PathListSeparator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
