@@ -1,3 +1,4 @@
+pub(in crate::catalog) mod binary_arithmetic;
 mod complex_components;
 mod complex_construction;
 mod error_functions;
@@ -14,6 +15,7 @@ mod powers_of_two;
 mod roots;
 mod support;
 
+pub use binary_arithmetic::*;
 pub use complex_components::*;
 pub use complex_construction::*;
 pub use error_functions::*;
@@ -30,6 +32,7 @@ pub use powers_of_two::*;
 pub use roots::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
+    binary_arithmetic::ENTRIES,
     complex_components::ENTRIES,
     complex_construction::ENTRIES,
     error_functions::ENTRIES,

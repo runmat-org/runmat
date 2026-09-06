@@ -3,7 +3,7 @@ use runmat_types::{
     ViewFact,
 };
 
-pub(in crate::catalog::inference) fn materialize(output: &mut ValueFact) {
+pub(crate) fn materialize(output: &mut ValueFact) {
     output.storage = if output.is_scalar() {
         StorageFact::Scalar
     } else {

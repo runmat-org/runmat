@@ -24,6 +24,7 @@ mod support;
 mod unary_logical_scalar;
 
 pub use distributed::infer_partition_local_call;
+pub(crate) use support::facts::materialize;
 pub(super) use support::{
     argument_error, default_double_scalar, finish_fixed, finish_fixed_outputs, literal_text,
     numeric_kind, preserved_binary_residency, unavailable_rule,
