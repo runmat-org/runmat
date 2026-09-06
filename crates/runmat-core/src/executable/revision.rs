@@ -41,3 +41,64 @@ fn frame(digest: &mut Sha256, bytes: &[u8]) {
     digest.update((bytes.len() as u64).to_be_bytes());
     digest.update(bytes);
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::executor::block_on;
+    use runmat_execution::{Digest, ProgramEnvironment};
+
+    use super::*;
+
+    fn environment() -> ProgramEnvironment {
+        ProgramEnvironment::new(
+            1,
+            1,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn frozen_physical_lookup_path_does_not_enter_portable_source_identity() {
+        let first = ExecutableSource::frozen(
+            "package@1",
+            "src/+loads/pulse.m",
+            "/host-a/project/src/+loads/pulse.m",
+            "function y = pulse(x); y = x; end",
+        );
+        let second = ExecutableSource::frozen(
+            "package@1",
+            "src/+loads/pulse.m",
+            "D:\\project\\src\\+loads\\pulse.m",
+            "function y = pulse(x); y = x; end",
+        );
+        assert_eq!(
+            ExecutableRevision::derive(&first, None, environment()),
+            ExecutableRevision::derive(&second, None, environment())
+        );
+        assert_ne!(first.lookup_path(), second.lookup_path());
+    }
+
+    #[test]
+    fn frozen_physical_lookup_path_does_not_enter_portable_executable() {
+        let lookup_path = "/private/machine-specific/project/src/+loads/pulse.m";
+        let source = ExecutableSource::frozen(
+            "package@1",
+            "src/+loads/pulse.m",
+            lookup_path,
+            "function y = pulse(x)\narguments\n    x double\nend\ny = x;\nend\n",
+        );
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let unit = block_on(session.compile_executable_unit(source, None)).unwrap();
+        let bytes = unit
+            .portable_envelope_for(Some("pulse"))
+            .unwrap()
+            .canonical_bytes()
+            .unwrap();
+        assert!(!bytes
+            .windows(lookup_path.len())
+            .any(|window| window == lookup_path.as_bytes()));
+    }
+}

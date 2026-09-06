@@ -61,6 +61,7 @@ fn admitted() -> AdmittedSignalGenerator {
             qualified_name: "loads.pulse".into(),
             source_digest: digest("loads.m"),
         },
+        executable_source_digest: digest("executable-source"),
         function: ProgramFunctionId(7),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),

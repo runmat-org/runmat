@@ -16,6 +16,7 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::presentation;
 use crate::AlreadyReportedCliError;
 
+pub(super) mod callables;
 mod portable;
 pub(crate) mod remote;
 

@@ -782,18 +782,17 @@ impl RunMatSession {
         let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         let previous_pending = self.pending_companion_source_discovery.take();
         self.active_source_name = source.relative_path.clone();
-        self.active_source_fullpath_name = Some(source.relative_path.clone());
+        self.active_source_fullpath_name = Some(source.lookup_path().to_string());
 
         let companion_result = if let Some(handoff) = self.project_handoff.as_ref() {
             companion_source_statements_from_handoff_async(
-                &source.relative_path,
+                source.lookup_path(),
                 self.compat_mode,
                 handoff,
             )
             .await
         } else {
-            discover_companion_source_statements_async(&source.relative_path, self.compat_mode)
-                .await
+            discover_companion_source_statements_async(source.lookup_path(), self.compat_mode).await
         };
         let result = match companion_result {
             Ok(companion) => {

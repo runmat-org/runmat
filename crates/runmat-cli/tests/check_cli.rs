@@ -75,6 +75,47 @@ fn canonical_fea_documentation_examples_check_cleanly() {
 }
 
 #[test]
+fn fea_check_resolves_and_statically_admits_a_named_project_signal_generator() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::create_dir_all(temp.path().join("src/+loads")).unwrap();
+    fs::write(
+        temp.path().join("runmat.toml"),
+        "[package]\nname = \"fea-callable-check\"\n\n[sources]\nroots = [\"src\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("src/+loads/pulse.m"),
+        "function y = pulse(t, magnitude)\narguments\n    t double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
+    )
+    .unwrap();
+    let fixture = repository.join("crates/runmat-cli/tests/fixtures/box_static.fea");
+    let geometry = repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep");
+    let document = fs::read_to_string(fixture)
+        .unwrap()
+        .replace(
+            "../../../runmat-geometry/io/tests/fixtures/box.brep",
+            &geometry.display().to_string(),
+        )
+        .replace(
+            "        constant:\n          scalar: { newtons: 1000.0 }",
+            "        generator:\n          qualified_function: loads.pulse\n          arguments:\n            - real: 1000.0\n          domain: time_seconds\n          sampling:\n            uniform: { start: 0.0, end: 1.0, sample_count: 5 }\n          interpolation: linear\n          extrapolation: reject\n          effects: pure",
+        )
+        .replace("        sample_count: 1", "        sample_count: 0");
+    fs::write(temp.path().join("study.fea"), document).unwrap();
+
+    let output = runmat(&temp, &["check", "study.fea", "--json"]);
+    assert!(
+        output.status.success(),
+        "callable-backed study failed check:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["validation"]["valid"], true);
+}
+
+#[test]
 fn production_example_rejects_an_unqualified_formulation() {
     let temp = TempDir::new().unwrap();
     let path = "docs/fea/examples/acoustic-production-rejected.fea";

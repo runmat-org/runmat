@@ -71,6 +71,17 @@ impl ExecutableUnit {
         &self.analysis
     }
 
+    /// Exact static facts for a function in this immutable executable revision.
+    pub fn function_analysis(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> Option<&runmat_mir::analysis::FunctionAnalysis> {
+        self.analysis
+            .functions
+            .iter()
+            .find(|analysis| analysis.function == function)
+    }
+
     /// Canonical analyzed MIR retained for native lowering and artifact production.
     pub fn mir(&self) -> &runmat_mir::MirAssembly {
         &self.mir

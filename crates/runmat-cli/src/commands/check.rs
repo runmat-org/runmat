@@ -30,7 +30,7 @@ pub async fn execute_check(
     let deny_warnings = parse_denied_levels(&deny)?;
     let file = resolve_script_input(file)?;
     if is_fea_file_path(&file) {
-        return check_fea_file(file, config, json).await;
+        return check_fea_file(file, cli, config, json).await;
     }
     if is_matlab_file(&file) {
         return check_m_file(
@@ -74,7 +74,12 @@ fn parse_denied_levels(levels: &[String]) -> Result<bool> {
     Ok(deny_warnings)
 }
 
-async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool) -> Result<()> {
+async fn check_fea_file(
+    path: PathBuf,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    json: bool,
+) -> Result<()> {
     if !json {
         let styles = presentation::stderr();
         eprintln!(
@@ -90,6 +95,15 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
     let context = OperationContext::new(None, None);
     match document {
         FeaResolvedDocument::Study(spec) => {
+            if let Some(model) = &spec.model {
+                crate::commands::fea::callables::validate_signal_generators(
+                    &path,
+                    &model.signals,
+                    cli,
+                    config,
+                )
+                .await?;
+            }
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
@@ -140,6 +154,17 @@ async fn check_fea_file(path: PathBuf, config: &RunMatRuntimeConfig, json: bool)
             }
         }
         FeaResolvedDocument::Sweep(spec) => {
+            for study in &spec.studies {
+                if let Some(model) = &study.model {
+                    crate::commands::fea::callables::validate_signal_generators(
+                        &path,
+                        &model.signals,
+                        cli,
+                        config,
+                    )
+                    .await?;
+                }
+            }
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(

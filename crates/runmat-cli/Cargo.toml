@@ -90,6 +90,7 @@ runmat-test = { workspace = true }
 runmat-test-runner = { workspace = true }
 runmat-test-runner-execution = { workspace = true }
 runmat-test-runner-native = { workspace = true }
+runmat-types = { workspace = true }
 sha2 = { workspace = true }
 
 [features]

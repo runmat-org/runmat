@@ -6246,6 +6246,7 @@ dependencies = [
  "runmat-test-runner-execution",
  "runmat-test-runner-native",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "runmat-vm",
  "rustyline",

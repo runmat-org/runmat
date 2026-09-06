@@ -20,6 +20,7 @@ const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 
 pub struct AdmittedSignalGenerator {
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
+    pub executable_source_digest: Digest,
     pub function: runmat_types::ProgramFunctionId,
     pub generator_identity: GeneratorIdentity,
     pub materialization_identity: SignalMaterializationIdentity,
@@ -36,6 +37,7 @@ pub fn admit_named_signal_generator(
     signal: &PhysicalSignal,
     program_revision: ProgramRevision,
     callable: BundleCallable,
+    executable_source_digest: Digest,
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
@@ -59,6 +61,7 @@ pub fn admit_named_signal_generator(
             &callable.owner_identity,
             &callable.qualified_name,
             callable.source_digest,
+            executable_source_digest,
             function.function,
         ),
     )?;
@@ -92,6 +95,7 @@ pub fn admit_named_signal_generator(
     Ok(AdmittedSignalGenerator {
         program_revision: program_revision.clone(),
         callable,
+        executable_source_digest,
         function: function.function,
         generator_identity,
         materialization_identity,
@@ -334,6 +338,7 @@ mod tests {
             &signal(),
             revision(),
             callable(),
+            digest("executable-source"),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -342,6 +347,7 @@ mod tests {
             &signal(),
             revision(),
             callable(),
+            digest("executable-source"),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -357,6 +363,7 @@ mod tests {
             &signal(),
             revision(),
             callable(),
+            digest("executable-source"),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -367,6 +374,7 @@ mod tests {
             &signal(),
             revision(),
             changed_callable,
+            digest("executable-source"),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -383,6 +391,7 @@ mod tests {
             &changed_signal,
             revision(),
             callable(),
+            digest("executable-source"),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -421,6 +430,7 @@ mod tests {
                 &signal(),
                 revision(),
                 callable(),
+                digest("executable-source"),
                 &facts,
                 &BTreeSet::new(),
             )
@@ -449,6 +459,7 @@ mod tests {
             &seeded_signal,
             revision(),
             callable(),
+            digest("executable-source"),
             &random,
             &BTreeSet::new(),
         )
@@ -470,6 +481,7 @@ mod tests {
             &seeded_signal,
             revision(),
             callable(),
+            digest("executable-source"),
             &random,
             &BTreeSet::new(),
         )

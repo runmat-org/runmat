@@ -8,6 +8,7 @@ mod object;
 mod response;
 mod serial;
 mod signal_materialization;
+mod signal_program;
 mod structural;
 mod task;
 mod transport;
@@ -34,6 +35,11 @@ pub use serial::{
 pub use signal_materialization::{
     canonicalize_signal_generator_outputs, plan_signal_generator_chunks, SignalGeneratorChunk,
     SignalGeneratorChunkOutput,
+};
+pub use signal_program::{
+    build_signal_generator_task_submission, prepare_signal_generator_program,
+    PreparedSignalGeneratorChunk, PreparedSignalGeneratorProgram, SignalGeneratorExecutionContext,
+    SIGNAL_GENERATOR_EXECUTION_MODE, SIGNAL_GENERATOR_TARGET_PROFILE,
 };
 pub use structural::{
     import_structural_linear_result, prepare_structural_linear_program,
