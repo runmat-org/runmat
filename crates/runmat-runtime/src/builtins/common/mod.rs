@@ -10,6 +10,7 @@ pub mod concatenation;
 pub mod deal;
 pub mod elementwise;
 pub mod env;
+pub(crate) mod exact_logical;
 pub mod format;
 pub mod fs;
 pub mod gpu_helpers;

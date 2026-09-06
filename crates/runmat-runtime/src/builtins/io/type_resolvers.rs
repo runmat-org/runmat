@@ -266,15 +266,7 @@ pub fn ls_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
 
-pub fn mkdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
 pub fn movefile_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
-pub fn rmdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
@@ -527,9 +519,7 @@ mod tests {
         Type::Union(vec![Type::String, Type::Num])
     );
     assert_resolver!(ls_type_resolver, ls_type, &[], Type::String);
-    assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
-    assert_resolver!(rmdir_type_resolver, rmdir_type, &[], Type::Num);
     assert_resolver!(
         audioinfo_type_resolver,
         struct_type,
