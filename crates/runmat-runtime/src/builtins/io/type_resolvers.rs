@@ -209,10 +209,6 @@ pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
 pub fn delete_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Void
 }
@@ -264,10 +260,6 @@ pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 
 pub fn ls_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
-}
-
-pub fn movefile_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
 }
 
 pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -491,7 +483,6 @@ mod tests {
     );
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
-    assert_resolver!(copyfile_type_resolver, copyfile_type, &[], Type::Num);
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
     assert_resolver!(
         dir_type_resolver,
@@ -519,7 +510,6 @@ mod tests {
         Type::Union(vec![Type::String, Type::Num])
     );
     assert_resolver!(ls_type_resolver, ls_type, &[], Type::String);
-    assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
     assert_resolver!(
         audioinfo_type_resolver,
         struct_type,

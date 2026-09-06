@@ -1602,6 +1602,56 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "file-transfer family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/copyfile/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/movefile/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/copyfile/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/movefile/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/copyfile.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/movefile.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/copyfile/legacy.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/movefile/legacy.rs",
+    "docs/builtins/reference/copyfile.json",
+    "docs/builtins/reference/movefile.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/copyfile.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/movefile.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/inference.rs",
+]) {
+  if (/"(?:copyfile|movefile)"/.test(read(sourcePath))) {
+    fail(`${sourcePath} must route file-transfer inference by typed rules, not builtin names`);
+  }
+}
+if (/\bpub fn (?:copyfile|movefile)_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy runtime type resolvers must not reclaim file-transfer inference authority");
+}
+if (/"(?:copyfile|movefile)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim file-transfer authority");
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",

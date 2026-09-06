@@ -288,16 +288,14 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
-        "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fileread" | "filewrite"
-        | "copyfile" | "movefile" | "delete" | "dir" | "readmatrix" | "csvwrite" | "csvread"
-        | "dlmread" | "dlmwrite" | "writematrix" | "writecell" | "xlsread" | "xlswrite" | "ls" => {
-            BuiltinSemantics {
-                effects: BuiltinEffects::none().with_filesystem(),
-                purity: BuiltinPurity::Impure,
-                semantic_kind: BuiltinSemanticKind::Filesystem,
-                ..BuiltinSemantics::unknown()
-            }
-        }
+        "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fileread" | "filewrite" | "delete"
+        | "dir" | "readmatrix" | "csvwrite" | "csvread" | "dlmread" | "dlmwrite"
+        | "writematrix" | "writecell" | "xlsread" | "xlswrite" | "ls" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_filesystem(),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Filesystem,
+            ..BuiltinSemantics::unknown()
+        },
         "fprintf" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_ui(),
             purity: BuiltinPurity::Impure,

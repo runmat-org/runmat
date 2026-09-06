@@ -3,16 +3,15 @@
 pub mod addpath;
 pub mod cd;
 pub mod compat;
-pub mod copyfile;
 pub mod delete;
 pub mod dir;
 pub(crate) mod directory_lifecycle;
 pub(crate) mod environment;
 pub mod exist;
 pub(crate) mod file_dialog;
+pub(crate) mod file_transfer;
 pub mod genpath;
 pub mod ls;
-pub mod movefile;
 pub mod open;
 pub mod opentoline;
 pub mod path;

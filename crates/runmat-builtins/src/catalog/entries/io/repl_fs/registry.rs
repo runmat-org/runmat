@@ -8,6 +8,7 @@ pub(in crate::catalog::entries::io) fn extend_entries(
             super::cd::ENTRIES,
             super::directory_lifecycle::ENTRIES,
             super::environment::ENTRIES,
+            super::file_transfer::ENTRIES,
             super::genpath::ENTRIES,
             super::path::ENTRIES,
             super::path_syntax::ENTRIES,
