@@ -1,6 +1,7 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
 mod error;
+mod graph;
 mod host;
 mod object;
 mod response;
@@ -11,6 +12,10 @@ mod transport;
 mod workload;
 
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
+pub use graph::{
+    compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
+    PreparedAnalysisStepTask,
+};
 pub use host::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, AnalysisHostWorkload,
     PreparedAnalysisHostInvocation, ANALYSIS_HOST_ABI, ANALYSIS_HOST_EXECUTION_MODE,

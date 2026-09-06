@@ -305,24 +305,48 @@ impl RemotePoolDriver {
         let task_id = submission.request.id;
         let (sender, receiver) = oneshot::channel();
         let progress = Arc::new(super::pool_progress::RemoteProgressBuffer::default());
-        self.programs
+        let mut programs = self
+            .programs
             .lock()
-            .expect("remote program catalog poisoned")
-            .insert(task_id, program);
-        self.completions
+            .expect("remote program catalog poisoned");
+        let mut completions = self
+            .completions
             .lock()
-            .expect("remote completion registry poisoned")
-            .insert(task_id, sender);
-        self.progress
+            .expect("remote completion registry poisoned");
+        let mut progress_registry = self
+            .progress
             .lock()
-            .expect("remote progress registry poisoned")
-            .insert(task_id, Arc::clone(&progress));
-        let actions = self
+            .expect("remote progress registry poisoned");
+        if programs.contains_key(&task_id)
+            || completions.contains_key(&task_id)
+            || progress_registry.contains_key(&task_id)
+        {
+            return Err(NativeExecutionError::Protocol(format!(
+                "remote task {task_id} already has registered execution state"
+            )));
+        }
+        programs.insert(task_id, program);
+        completions.insert(task_id, sender);
+        progress_registry.insert(task_id, Arc::clone(&progress));
+        let actions = match self
             .driver
             .lock()
             .expect("remote driver poisoned")
-            .handle(DriverCommand::Submit(Box::new(submission)))?;
+            .handle(DriverCommand::Submit(Box::new(submission)))
+        {
+            Ok(actions) => actions,
+            Err(error) => {
+                programs.remove(&task_id);
+                completions.remove(&task_id);
+                progress_registry.remove(&task_id);
+                return Err(error.into());
+            }
+        };
+        drop(progress_registry);
+        drop(completions);
+        drop(programs);
         self.dispatch(actions);
+        self.resolve_non_success_terminals();
         Ok(RemoteTaskCompletion::new(receiver, progress))
     }
 

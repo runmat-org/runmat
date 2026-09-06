@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::execution::{
     AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisWorkKind,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity,
-    OperatorIdentity, ProblemIdentity, SequenceIdentity, SignalRealizationIdentity,
-    SolverExcitationIdentity, StepIdentity, StructuralLinearWorkload,
+    OperatorIdentity, ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity,
+    SignalRealizationIdentity, SolverExcitationIdentity, StepIdentity, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
@@ -110,6 +110,7 @@ pub fn prepare_structural_linear_program(
     });
     let workload = AnalysisWorkloadRequest::new(
         identities.study,
+        identities.step,
         identities.execution_plan,
         AnalysisWorkKind::Solve,
         workload_inputs,
@@ -173,6 +174,7 @@ pub fn import_structural_linear_result(
 
 struct StructuralIdentities {
     study: StudyIdentity,
+    step: StepIdentity,
     problem: ProblemIdentity,
     execution_plan: ExecutionPlanIdentity,
 }
@@ -192,11 +194,8 @@ fn derive_identities(
         ));
     }
     let study = StudyIdentity::new(authored_study_digest, frozen_project_digest)?;
-    let sequence = SequenceIdentity::new(
-        study,
-        contract_digest("sequence", &workload.model.sequence)?,
-    )?;
-    let step = StepIdentity::new(sequence, contract_digest("step", step_contract)?)?;
+    let sequence = SequenceIdentity::from_authored(study, &workload.model.sequence)?;
+    let step = StepIdentity::from_authored(sequence, step_contract)?;
     let constraints = ConstraintPlanIdentity::new(
         step,
         mesh_digest,
@@ -208,12 +207,13 @@ fn derive_identities(
         .iter()
         .map(|excitation| {
             let authored = contract_digest("excitation", excitation)?;
-            let signal = SignalRealizationIdentity::new(
+            let materialization = SignalMaterializationIdentity::new(
                 authored,
                 None,
                 contract_digest("static-sampling", &step_contract.independent_domain)?,
-                authored,
+                Vec::new(),
             )?;
+            let signal = SignalRealizationIdentity::new(materialization, authored)?;
             SolverExcitationIdentity::new(
                 step,
                 signal,
@@ -276,6 +276,7 @@ fn derive_identities(
     )?;
     Ok(StructuralIdentities {
         study,
+        step,
         problem,
         execution_plan,
     })

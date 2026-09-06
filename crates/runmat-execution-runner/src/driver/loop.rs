@@ -53,6 +53,16 @@ impl Driver {
         Ok(Self { snapshot })
     }
 
+    /// Replaces the current in-memory state with a fully validated snapshot.
+    ///
+    /// Hosts use this to roll back a command whose surrounding durable admission could not be
+    /// committed. No actions from the rejected state may have been dispatched before restoration.
+    pub fn restore_snapshot(&mut self, snapshot: DriverSnapshot) -> RunnerResult<()> {
+        snapshot.validate()?;
+        self.snapshot = snapshot;
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> DriverSnapshot {
         self.snapshot.clone()
     }

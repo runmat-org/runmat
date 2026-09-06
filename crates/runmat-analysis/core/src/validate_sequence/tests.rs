@@ -229,3 +229,57 @@ fn rejects_checkpoint_restart_without_stable_identity() {
         Err(AnalysisValidationError::InvalidProcedureStep { .. })
     ));
 }
+
+#[test]
+fn exposes_deterministic_parallel_sequence_topology() {
+    let mut model = model_with_steps(vec![
+        ProcedureStep::structural_static("finish"),
+        ProcedureStep::structural_static("right"),
+        ProcedureStep::structural_static("root"),
+        ProcedureStep::structural_static("left"),
+    ]);
+    model.sequence.dependencies = vec![
+        SequenceDependency {
+            predecessor: ProcedureStepId("right".into()),
+            successor: ProcedureStepId("finish".into()),
+            reason: SequenceDependencyReason::AuthoredOrdering,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("root".into()),
+            successor: ProcedureStepId("right".into()),
+            reason: SequenceDependencyReason::AuthoredOrdering,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("left".into()),
+            successor: ProcedureStepId("finish".into()),
+            reason: SequenceDependencyReason::AuthoredOrdering,
+        },
+        SequenceDependency {
+            predecessor: ProcedureStepId("root".into()),
+            successor: ProcedureStepId("left".into()),
+            reason: SequenceDependencyReason::AuthoredOrdering,
+        },
+    ];
+
+    let validated = validate_sequence(&model).expect("diamond sequence should validate");
+    let ids = |values: &[ProcedureStepId]| {
+        values
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        ids(validated.topological_order()),
+        vec!["root", "left", "right", "finish"]
+    );
+    assert_eq!(validated.parallel_levels().len(), 3);
+    assert_eq!(ids(&validated.parallel_levels()[0]), vec!["root"]);
+    assert_eq!(ids(&validated.parallel_levels()[1]), vec!["left", "right"]);
+    assert_eq!(ids(&validated.parallel_levels()[2]), vec!["finish"]);
+    assert_eq!(
+        ids(&validated.direct_predecessors()[&ProcedureStepId("finish".into())]),
+        vec!["left", "right"]
+    );
+    assert_eq!(validated.sequence(), &model.sequence);
+}

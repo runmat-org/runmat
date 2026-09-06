@@ -290,6 +290,99 @@ impl RemoteWorkerChannel for FakeWorker {
 }
 
 #[tokio::test]
+async fn rejected_submission_does_not_poison_remote_task_registries() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-submit-rollback-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-submit-rollback-pool"]);
+    let bundle = executable_bundle().await.2;
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 0,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        6,
+        bundle,
+    )
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let task_id = TaskId::derive(&[b"remote-submit-rollback-task"]);
+    let mut rejected = submission(scope_id, pool_id, task_id, artifact_id);
+    rejected.dependencies = BTreeSet::from([TaskId::derive(&[b"missing-dependency"])]);
+
+    assert!(pool.submit(rejected, program.clone()).is_err());
+    assert!(!pool.snapshot().tasks.contains_key(&task_id));
+
+    let _completion = pool
+        .submit(submission(scope_id, pool_id, task_id, artifact_id), program)
+        .expect("a rejected submission must not reserve its task registries");
+    assert!(pool.snapshot().tasks.contains_key(&task_id));
+}
+
+#[tokio::test]
+async fn late_dependent_on_failed_remote_task_resolves_without_dispatch() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-late-terminal-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-late-terminal-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        7,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    pool.add_worker(Arc::new(FailingRouteWorker {
+        spec: WorkerSpec {
+            id: WorkerId::derive(&[b"remote-late-terminal-worker"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+        bundle,
+        fail_execute: true,
+        fail_drain: false,
+    }))
+    .await
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let predecessor_id = TaskId::derive(&[b"remote-late-terminal-predecessor"]);
+    let predecessor = pool
+        .submit(
+            submission(scope_id, pool_id, predecessor_id, artifact_id),
+            program.clone(),
+        )
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), predecessor.wait())
+            .await
+            .unwrap()
+            .is_err()
+    );
+
+    let dependent_id = TaskId::derive(&[b"remote-late-terminal-dependent"]);
+    let mut dependent = submission(scope_id, pool_id, dependent_id, artifact_id);
+    dependent.dependencies = BTreeSet::from([predecessor_id]);
+    let dependent = pool.submit(dependent, program).unwrap();
+    let outcome = tokio::time::timeout(Duration::from_secs(1), dependent.wait())
+        .await
+        .expect("late terminal dependency must resolve without worker dispatch");
+    assert!(outcome.is_err());
+    assert!(matches!(
+        pool.snapshot().tasks[&dependent_id].state,
+        runmat_execution::state::TaskState::Failed
+            | runmat_execution::state::TaskState::Indeterminate
+            | runmat_execution::state::TaskState::Cancelled
+    ));
+}
+
+#[tokio::test]
 async fn remote_pool_rejects_worker_inventory_that_differs_from_description() {
     let scope_id = ExecutionScopeId::derive(&[b"remote-description-scope"]);
     let pool_id = PoolId::derive(&[b"remote-description-pool"]);

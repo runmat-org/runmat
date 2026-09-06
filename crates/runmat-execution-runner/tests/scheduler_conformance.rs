@@ -7,6 +7,7 @@ use runmat_execution::state::{PoolState, TaskState};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::TaskId;
 use runmat_execution_runner::driver::{DriverAction, DriverActor, DriverCommand};
+use runmat_execution_runner::{AttemptFailureKind, AttemptReport};
 
 #[test]
 fn actor_mailbox_preserves_command_order() {
@@ -82,6 +83,88 @@ fn dependencies_release_only_after_logical_result_commit() {
     assert!(actions.iter().any(
         |action| matches!(action, DriverAction::Launch(request) if request.task_id == child_id)
     ));
+}
+
+#[test]
+fn dependency_submitted_after_success_is_ready_immediately() {
+    let mut fixture = common::fixture(1, 1);
+    let parent = common::task(
+        "late-parent",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let parent_id = parent.request.id;
+    let parent_request = common::submit(&mut fixture.driver, parent);
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(
+            runmat_execution_runner::port::BackendReport::for_request(
+                &parent_request,
+                common::success(),
+            ),
+        ))
+        .unwrap();
+
+    let mut child = common::task(
+        "late-child",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let child_id = child.request.id;
+    child.dependencies = BTreeSet::from([parent_id]);
+    let actions = fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(child)))
+        .unwrap();
+
+    assert!(actions.iter().any(
+        |action| matches!(action, DriverAction::Launch(request) if request.task_id == child_id)
+    ));
+}
+
+#[test]
+fn dependency_submitted_after_failure_inherits_terminal_state() {
+    let mut fixture = common::fixture(1, 1);
+    let parent = common::task(
+        "failed-parent",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let parent_id = parent.request.id;
+    let parent_request = common::submit(&mut fixture.driver, parent);
+    fixture
+        .driver
+        .handle(DriverCommand::BackendReport(
+            runmat_execution_runner::port::BackendReport::for_request(
+                &parent_request,
+                AttemptReport::Failed {
+                    kind: AttemptFailureKind::Execution,
+                    message: "fixture failure".into(),
+                },
+            ),
+        ))
+        .unwrap();
+
+    let mut child = common::task(
+        "failed-child",
+        fixture.scope,
+        fixture.pool,
+        RetryPolicy::Never,
+    );
+    let child_id = child.request.id;
+    child.dependencies = BTreeSet::from([parent_id]);
+    assert!(fixture
+        .driver
+        .handle(DriverCommand::Submit(Box::new(child)))
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        fixture.driver.snapshot().tasks[&child_id].state,
+        TaskState::Failed
+    );
 }
 
 #[test]

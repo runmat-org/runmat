@@ -128,7 +128,7 @@ pub use study::sequence::{
     SequenceBranchId, SequenceDependency, SequenceDependencyReason, StateCompleteness, StateId,
     StateInput, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
     StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef, TopologyTransitionPolicy,
-    TransitionId,
+    TransitionId, ValidatedAnalysisSequence,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
@@ -139,7 +139,10 @@ pub use study::{
     StructuralFormulationRealization, StructuralOperatorImplementation,
     StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
 };
-pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
+pub use validate::{
+    validate_model, validate_model_against_geometry, validate_model_sequence,
+    AnalysisValidationError,
+};
 
 #[cfg(test)]
 mod tests {

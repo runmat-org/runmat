@@ -136,20 +136,73 @@ impl Driver {
                 return Err(RunnerError::UnknownTask(*dependency));
             }
         }
+        let dependency_state = submission
+            .dependencies
+            .iter()
+            .filter_map(|dependency| self.snapshot.tasks.get(dependency).map(|task| task.state))
+            .fold(None, merge_dependency_terminal_state);
+        let dependencies_succeeded = !submission.dependencies.is_empty()
+            && submission
+                .dependencies
+                .iter()
+                .all(|dependency| self.snapshot.tasks[dependency].state == TaskState::Succeeded);
         let task_id = submission.request.id;
         self.snapshot
             .graph
             .insert(task_id, submission.dependencies.clone())?;
-        let record = TaskRecord::new(submission, self.snapshot.next_event_sequence);
+        let mut record = TaskRecord::new(submission, self.snapshot.next_event_sequence);
+        if let Some(state) = dependency_state {
+            record.state = state;
+            record.active_attempt = None;
+        } else if dependencies_succeeded {
+            record.state = TaskState::Ready;
+        }
         let state = record.state;
         if state == TaskState::Ready {
             self.enqueue(&record);
         }
-        self.snapshot
-            .deadlines
-            .insert(task_id, record.submission.request.deadline_unix_millis);
+        if !matches!(
+            state,
+            TaskState::Succeeded
+                | TaskState::Failed
+                | TaskState::Cancelled
+                | TaskState::Indeterminate
+        ) {
+            self.snapshot
+                .deadlines
+                .insert(task_id, record.submission.request.deadline_unix_millis);
+        }
         self.snapshot.tasks.insert(task_id, record);
         self.emit(DriverEventKind::TaskSubmitted { task_id, state });
         Ok(())
+    }
+}
+
+fn merge_dependency_terminal_state(
+    current: Option<TaskState>,
+    candidate: TaskState,
+) -> Option<TaskState> {
+    let candidate_rank = dependency_terminal_rank(candidate)?;
+    match current {
+        Some(current)
+            if dependency_terminal_rank(current).unwrap_or_default() >= candidate_rank =>
+        {
+            Some(current)
+        }
+        _ => Some(candidate),
+    }
+}
+
+const fn dependency_terminal_rank(state: TaskState) -> Option<u8> {
+    match state {
+        TaskState::Cancelled => Some(1),
+        TaskState::Failed => Some(2),
+        TaskState::Indeterminate => Some(3),
+        TaskState::Deferred
+        | TaskState::Ready
+        | TaskState::Assigned
+        | TaskState::Running
+        | TaskState::Committing
+        | TaskState::Succeeded => None,
     }
 }

@@ -14,8 +14,8 @@ pub use identity::{
     AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
     ExecutionPlanIdentity, GeneratorIdentity, NumericalPlanIdentity, ObservationIdentity,
     OperatorIdentity, ProblemIdentity, PublicationIdentity, SequenceIdentity,
-    SignalRealizationIdentity, SolverExcitationIdentity, StateTransitionIdentity, StepIdentity,
-    StudyIdentity,
+    SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
+    StateTransitionIdentity, StepIdentity, StudyIdentity, SweepIdentity,
 };
 pub use object::{
     chunk_numerical_payload, AnalysisChunkDescriptor, AnalysisNumericalObjectKind,

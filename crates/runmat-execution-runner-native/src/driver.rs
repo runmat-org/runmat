@@ -243,16 +243,53 @@ impl LocalDriver {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         self.artifacts.put(artifact_id, &stored)?;
         let completion = Arc::new(TaskCompletion::new());
-        self.completions
-            .lock()
-            .expect("completion registry poisoned")
-            .insert(task_id, Arc::clone(&completion));
-        let actions = self
-            .driver
-            .lock()
-            .expect("local driver poisoned")
-            .handle(DriverCommand::Submit(Box::new(submission)))?;
-        self.checkpoint()?;
+        {
+            let mut completions = self
+                .completions
+                .lock()
+                .expect("completion registry poisoned");
+            if completions.contains_key(&task_id) {
+                return Err(NativeExecutionError::Protocol(format!(
+                    "local task {task_id} already has registered completion state"
+                )));
+            }
+            completions.insert(task_id, Arc::clone(&completion));
+        }
+        let (actions, inherited_terminal) = {
+            let mut driver = self.driver.lock().expect("local driver poisoned");
+            let prior = driver.snapshot();
+            let actions = match driver.handle(DriverCommand::Submit(Box::new(submission))) {
+                Ok(actions) => actions,
+                Err(error) => {
+                    self.completions
+                        .lock()
+                        .expect("completion registry poisoned")
+                        .remove(&task_id);
+                    return Err(error.into());
+                }
+            };
+            if let Err(error) = self.checkpoints.write(&driver.snapshot()) {
+                driver.restore_snapshot(prior)?;
+                self.completions
+                    .lock()
+                    .expect("completion registry poisoned")
+                    .remove(&task_id);
+                return Err(error);
+            }
+            let terminal = driver.snapshot().tasks.get(&task_id).and_then(|task| {
+                matches!(
+                    task.state,
+                    TaskState::Failed | TaskState::Cancelled | TaskState::Indeterminate
+                )
+                .then_some(task.state)
+            });
+            (actions, terminal)
+        };
+        if let Some(state) = inherited_terminal {
+            completion.complete(Err(format!(
+                "local task inherited terminal dependency state {state:?}"
+            )));
+        }
         Self::dispatch(Arc::clone(self), actions);
         Ok(completion)
     }

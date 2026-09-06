@@ -1,7 +1,10 @@
 use runmat_geometry_core::UnitSystem;
 use thiserror::Error;
 
-use crate::problem::{coordinate_frame::CoordinateFrame, model::AnalysisModel};
+use crate::{
+    problem::{coordinate_frame::CoordinateFrame, model::AnalysisModel},
+    ValidatedAnalysisSequence,
+};
 
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum AnalysisValidationError {
@@ -116,14 +119,21 @@ pub enum AnalysisValidationError {
 }
 
 pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationError> {
+    validate_model_sequence(model).map(drop)
+}
+
+/// Validates the complete authored model and returns its immutable semantic
+/// sequence topology for execution planning.
+pub fn validate_model_sequence(
+    model: &AnalysisModel,
+) -> Result<ValidatedAnalysisSequence, AnalysisValidationError> {
     if model.materials.is_empty() {
         return Err(AnalysisValidationError::MissingMaterials);
     }
     if model.constraints.is_empty() && model.boundaries.is_empty() {
         return Err(AnalysisValidationError::MissingConstraintsOrBoundaries);
     }
-    crate::validate_authored::validate_authored_model(model)?;
-    Ok(())
+    crate::validate_authored::validate_authored_model(model)
 }
 
 pub fn validate_model_against_geometry(

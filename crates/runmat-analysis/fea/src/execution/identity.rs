@@ -1,3 +1,4 @@
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
@@ -31,11 +32,13 @@ macro_rules! identity_type {
 }
 
 identity_type!(StudyIdentity);
+identity_type!(SweepIdentity);
 identity_type!(SequenceIdentity);
 identity_type!(StepIdentity);
 identity_type!(StateTransitionIdentity);
 identity_type!(ConstraintPlanIdentity);
 identity_type!(GeneratorIdentity);
+identity_type!(SignalMaterializationIdentity);
 identity_type!(SignalRealizationIdentity);
 identity_type!(SolverExcitationIdentity);
 identity_type!(ProblemIdentity);
@@ -73,15 +76,55 @@ impl StudyIdentity {
     }
 }
 
+impl SweepIdentity {
+    pub fn new(
+        sweep_contract_digest: Digest,
+        studies: Vec<StudyIdentity>,
+        composition_policy_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        if studies.is_empty() {
+            return Err(AnalysisExecutionError::Invalid(
+                "sweep identity requires at least one study".into(),
+            ));
+        }
+        let mut unique = studies.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() != studies.len() {
+            return Err(AnalysisExecutionError::Invalid(
+                "sweep identity contains duplicate studies".into(),
+            ));
+        }
+        Self::derive(
+            "sweep",
+            &(sweep_contract_digest, studies, composition_policy_digest),
+        )
+    }
+}
+
 impl SequenceIdentity {
     pub fn new(study: StudyIdentity, sequence_digest: Digest) -> AnalysisExecutionResult<Self> {
         Self::derive("sequence", &(study, sequence_digest))
+    }
+
+    pub fn from_authored(
+        study: StudyIdentity,
+        sequence: &AnalysisSequence,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::new(study, derive_digest("authored-sequence", sequence)?)
     }
 }
 
 impl StepIdentity {
     pub fn new(sequence: SequenceIdentity, step_digest: Digest) -> AnalysisExecutionResult<Self> {
         Self::derive("step", &(sequence, step_digest))
+    }
+
+    pub fn from_authored(
+        sequence: SequenceIdentity,
+        step: &ProcedureStep,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::new(sequence, derive_digest("authored-step", step)?)
     }
 }
 
@@ -125,21 +168,41 @@ impl GeneratorIdentity {
     }
 }
 
-impl SignalRealizationIdentity {
+impl SignalMaterializationIdentity {
     pub fn new(
         authored_signal_digest: Digest,
         generator: Option<GeneratorIdentity>,
         sampling_policy_digest: Digest,
-        realized_content_digest: Digest,
+        mut frozen_input_digests: Vec<Digest>,
     ) -> AnalysisExecutionResult<Self> {
+        frozen_input_digests.sort_unstable();
+        let count = frozen_input_digests.len();
+        frozen_input_digests.dedup();
+        if frozen_input_digests.len() != count {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal materialization contains duplicate frozen inputs".into(),
+            ));
+        }
         Self::derive(
-            "signal-realization",
+            "signal-materialization",
             &(
                 authored_signal_digest,
                 generator,
                 sampling_policy_digest,
-                realized_content_digest,
+                frozen_input_digests,
             ),
+        )
+    }
+}
+
+impl SignalRealizationIdentity {
+    pub fn new(
+        materialization: SignalMaterializationIdentity,
+        realized_content_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "signal-realization",
+            &(materialization, realized_content_digest),
         )
     }
 }
@@ -245,6 +308,7 @@ impl ExecutionPlanIdentity {
 impl AnalysisWorkloadIdentity {
     pub fn new(
         study: StudyIdentity,
+        step: StepIdentity,
         execution_plan: ExecutionPlanIdentity,
         kind: AnalysisWorkKind,
         work_contract_digest: Digest,
@@ -254,6 +318,7 @@ impl AnalysisWorkloadIdentity {
             "workload",
             &(
                 study,
+                step,
                 execution_plan,
                 kind,
                 work_contract_digest,

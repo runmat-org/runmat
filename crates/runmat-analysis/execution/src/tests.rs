@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use runmat_analysis_core::{
+    validate_model_sequence, AnalysisSequence, ProcedureStep, ProcedureStepId, SequenceDependency,
+    SequenceDependencyReason,
+};
 use runmat_analysis_fea::execution::{
     AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
@@ -17,7 +21,7 @@ fn digest(label: &str) -> Digest {
     Digest::sha256(label)
 }
 
-fn execution_identities() -> (StudyIdentity, ExecutionPlanIdentity) {
+fn execution_identities() -> (StudyIdentity, StepIdentity, ExecutionPlanIdentity) {
     let study = StudyIdentity::new(digest("study"), Some(digest("project"))).unwrap();
     let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
     let step = StepIdentity::new(sequence, digest("step")).unwrap();
@@ -32,6 +36,7 @@ fn execution_identities() -> (StudyIdentity, ExecutionPlanIdentity) {
     let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
     (
         study,
+        step,
         ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap(),
     )
 }
@@ -68,9 +73,10 @@ fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
     let root = objects
         .root_reference(&access(), ValueRefKind::DriverObject)
         .unwrap();
-    let (study, execution_plan) = execution_identities();
+    let (study, step, execution_plan) = execution_identities();
     let workload = AnalysisWorkloadRequest::new(
         study,
+        step,
         execution_plan,
         AnalysisWorkKind::Solve,
         vec![AnalysisWorkloadInput {
@@ -126,9 +132,10 @@ fn portable_program_packages_every_manifest_and_chunk_under_one_access_scope() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let (study, execution_plan) = execution_identities();
+    let (study, step, execution_plan) = execution_identities();
     let workload = AnalysisWorkloadRequest::new(
         study,
+        step,
         execution_plan,
         AnalysisWorkKind::Solve,
         vec![AnalysisWorkloadInput {
@@ -185,9 +192,10 @@ fn workload_rejects_identity_and_access_tampering() {
     let root = objects
         .root_reference(&access(), ValueRefKind::DriverObject)
         .unwrap();
-    let (study, execution_plan) = execution_identities();
+    let (study, step, execution_plan) = execution_identities();
     let mut workload = AnalysisWorkloadRequest::new(
         study,
+        step,
         execution_plan,
         AnalysisWorkKind::MaterializeSignal,
         vec![AnalysisWorkloadInput {
@@ -235,7 +243,7 @@ fn worker_capability_inventory_uses_generic_execution_capabilities() {
 
 #[test]
 fn logical_task_identity_is_independent_of_pool_placement() {
-    let (study, execution_plan) = execution_identities();
+    let (study, step, execution_plan) = execution_identities();
     let input = prepare_analysis_objects(
         AnalysisNumericalObjectKind::AccuracyEvidence,
         digest("accuracy-input"),
@@ -250,6 +258,7 @@ fn logical_task_identity_is_independent_of_pool_placement() {
         .unwrap();
     let workload = AnalysisWorkloadRequest::new(
         study,
+        step,
         execution_plan,
         AnalysisWorkKind::EvaluateAccuracy,
         vec![AnalysisWorkloadInput {
@@ -319,6 +328,145 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     assert_eq!(first.request.id, second.request.id);
 }
 
+#[test]
+fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
+    );
+    model.sequence = AnalysisSequence {
+        sequence_id: "parallel-branches".into(),
+        steps: vec![
+            ProcedureStep::structural_static("right"),
+            ProcedureStep::structural_static("root"),
+            ProcedureStep::structural_static("left"),
+        ],
+        dependencies: vec![
+            SequenceDependency {
+                predecessor: ProcedureStepId("root".into()),
+                successor: ProcedureStepId("right".into()),
+                reason: SequenceDependencyReason::AuthoredOrdering,
+            },
+            SequenceDependency {
+                predecessor: ProcedureStepId("root".into()),
+                successor: ProcedureStepId("left".into()),
+                reason: SequenceDependencyReason::AuthoredOrdering,
+            },
+        ],
+        transitions: Vec::new(),
+        branches: Vec::new(),
+    };
+    let validated = validate_model_sequence(&model).unwrap();
+    let study = StudyIdentity::new(digest("parallel-study"), None).unwrap();
+    let sequence = SequenceIdentity::from_authored(study, validated.sequence()).unwrap();
+    let (_, _, execution_plan) = execution_identities();
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::SemanticState,
+        digest("parallel-input"),
+        b"parallel sequence input",
+        8,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = input
+        .root_reference(&access(), ValueRefKind::DriverObject)
+        .unwrap();
+    let prepared = ["right", "root", "left"]
+        .into_iter()
+        .map(|step_id| {
+            let authored_step = validated
+                .sequence()
+                .steps
+                .iter()
+                .find(|step| step.step_id.as_str() == step_id)
+                .unwrap();
+            let step = StepIdentity::from_authored(sequence, authored_step).unwrap();
+            let workload = AnalysisWorkloadRequest::new(
+                study,
+                step,
+                execution_plan,
+                AnalysisWorkKind::Solve,
+                vec![AnalysisWorkloadInput {
+                    kind: input.manifest.kind,
+                    logical_identity: input.manifest.logical_identity,
+                    payload_digest: input.manifest.payload_digest,
+                    manifest_digest: input.root.digest,
+                    manifest_encoded_length: input.root.encoded_length,
+                    reference_kind: ValueRefKind::DriverObject,
+                }],
+                vec![AnalysisNumericalObjectKind::SemanticState],
+                BTreeSet::from([AnalysisCapabilityRequirement::Host {
+                    abi: ANALYSIS_HOST_ABI.into(),
+                }]),
+            )
+            .unwrap();
+            let capabilities = workload.generic_capabilities().unwrap();
+            let host = AnalysisHostWorkload::new(workload, access()).unwrap();
+            let invocation = host
+                .prepare_program_request(revision(), std::slice::from_ref(&root))
+                .unwrap();
+            PreparedAnalysisStepTask {
+                step_id: authored_step.step_id.clone(),
+                host,
+                program_roots: invocation
+                    .request()
+                    .arguments
+                    .iter()
+                    .map(|argument| match argument {
+                        runmat_execution::value::ValuePayload::Object(reference) => {
+                            reference.as_ref().clone()
+                        }
+                        runmat_execution::value::ValuePayload::Inline(_) => {
+                            panic!("analysis graph inputs must remain externalized")
+                        }
+                    })
+                    .collect(),
+                context: AnalysisExecutionContext {
+                    scope_id: ExecutionScopeId::derive(&[b"parallel-study"]),
+                    pool_id: PoolId::derive(&[step_id.as_bytes()]),
+                    program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
+                        b"analysis-program",
+                    ]),
+                    resources: runmat_execution::resource::ResourceRequest {
+                        cpu_millicores: 1000,
+                        memory_bytes: 1024 * 1024,
+                        scratch_bytes: 1024,
+                        max_wall_millis: 60_000,
+                        max_artifact_bytes: 1024 * 1024,
+                        max_egress_bytes: 0,
+                        max_relay_bytes: 0,
+                        accelerators: Vec::new(),
+                        required_capabilities: capabilities,
+                    },
+                    retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
+                    deadline_unix_millis: None,
+                    priority: 0,
+                },
+            }
+        })
+        .collect();
+
+    let graph = compile_analysis_sequence_graph(&validated, prepared).unwrap();
+    assert_eq!(graph.study, study);
+    assert_eq!(
+        graph
+            .tasks
+            .iter()
+            .map(|task| task.step_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["root", "left", "right"]
+    );
+    assert!(graph.tasks[0].submission.dependencies.is_empty());
+    assert_eq!(
+        graph.tasks[1].submission.dependencies,
+        BTreeSet::from([graph.tasks[0].submission.request.id])
+    );
+    assert_eq!(
+        graph.tasks[2].submission.dependencies,
+        BTreeSet::from([graph.tasks[0].submission.request.id])
+    );
+}
+
 #[derive(Default)]
 struct MemoryObjects(BTreeMap<Digest, Vec<u8>>);
 
@@ -386,9 +534,10 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     for object in &input.objects {
         runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object).unwrap();
     }
-    let (study, execution_plan) = execution_identities();
+    let (study, step, execution_plan) = execution_identities();
     let workload = AnalysisWorkloadRequest::new(
         study,
+        step,
         execution_plan,
         AnalysisWorkKind::Solve,
         vec![AnalysisWorkloadInput {

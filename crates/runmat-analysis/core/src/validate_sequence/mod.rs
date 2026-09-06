@@ -8,9 +8,12 @@ mod tests;
 
 use crate::{
     AnalysisModel, AnalysisSequence, AnalysisValidationError, ProcedureStep, StateTransition,
+    ValidatedAnalysisSequence,
 };
 
-pub(crate) fn validate_sequence(model: &AnalysisModel) -> Result<(), AnalysisValidationError> {
+pub(crate) fn validate_sequence(
+    model: &AnalysisModel,
+) -> Result<ValidatedAnalysisSequence, AnalysisValidationError> {
     let sequence = &model.sequence;
     if sequence.sequence_id.trim().is_empty() {
         return Err(sequence_error(sequence, "sequence id must be non-empty"));
@@ -35,7 +38,8 @@ pub(crate) fn validate_sequence(model: &AnalysisModel) -> Result<(), AnalysisVal
         state::validate_inputs(procedure_step, model, &validated_graph)?;
         state::validate_restart(procedure_step, &validated_graph)?;
     }
-    state::validate_transitions(sequence, &validated_graph)
+    state::validate_transitions(sequence, &validated_graph)?;
+    Ok(graph::owned_topology(sequence, &validated_graph))
 }
 
 fn sequence_error(

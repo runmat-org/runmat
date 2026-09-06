@@ -112,7 +112,7 @@ mod tests {
         Digest::sha256(label)
     }
 
-    fn identities() -> (StudyIdentity, ExecutionPlanIdentity) {
+    fn identities() -> (StudyIdentity, StepIdentity, ExecutionPlanIdentity) {
         let study = StudyIdentity::new(digest("study"), None).unwrap();
         let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
         let step = StepIdentity::new(sequence, digest("step")).unwrap();
@@ -127,6 +127,7 @@ mod tests {
         let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
         (
             study,
+            step,
             ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap(),
         )
     }
@@ -196,9 +197,10 @@ mod tests {
                 reference_kind: ValueRefKind::DriverObject,
             })
             .collect();
-        let (study, execution_plan) = identities();
+        let (study, step, execution_plan) = identities();
         let workload = AnalysisWorkloadRequest::new(
             study,
+            step,
             execution_plan,
             AnalysisWorkKind::Solve,
             workload_inputs,

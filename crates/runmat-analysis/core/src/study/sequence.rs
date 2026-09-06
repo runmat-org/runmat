@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -31,6 +33,51 @@ pub struct AnalysisSequence {
     pub dependencies: Vec<SequenceDependency>,
     pub transitions: Vec<StateTransition>,
     pub branches: Vec<SequenceBranch>,
+}
+
+/// An owned analysis sequence whose semantic graph has passed all model validation.
+///
+/// The execution layer consumes this value instead of reconstructing procedure
+/// ordering from generic scheduler edges. Its fields are private so callers cannot
+/// manufacture a value that bypasses the analysis validation boundary.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ValidatedAnalysisSequence {
+    sequence: AnalysisSequence,
+    topological_order: Vec<ProcedureStepId>,
+    parallel_levels: Vec<Vec<ProcedureStepId>>,
+    direct_predecessors: BTreeMap<ProcedureStepId, Vec<ProcedureStepId>>,
+}
+
+impl ValidatedAnalysisSequence {
+    pub(crate) fn new(
+        sequence: AnalysisSequence,
+        topological_order: Vec<ProcedureStepId>,
+        parallel_levels: Vec<Vec<ProcedureStepId>>,
+        direct_predecessors: BTreeMap<ProcedureStepId, Vec<ProcedureStepId>>,
+    ) -> Self {
+        Self {
+            sequence,
+            topological_order,
+            parallel_levels,
+            direct_predecessors,
+        }
+    }
+
+    pub fn sequence(&self) -> &AnalysisSequence {
+        &self.sequence
+    }
+
+    pub fn topological_order(&self) -> &[ProcedureStepId] {
+        &self.topological_order
+    }
+
+    pub fn parallel_levels(&self) -> &[Vec<ProcedureStepId>] {
+        &self.parallel_levels
+    }
+
+    pub fn direct_predecessors(&self) -> &BTreeMap<ProcedureStepId, Vec<ProcedureStepId>> {
+        &self.direct_predecessors
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

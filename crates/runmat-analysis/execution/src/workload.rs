@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, AnalysisWorkloadIdentity, ExecutionPlanIdentity,
-    StudyIdentity,
+    StepIdentity, StudyIdentity,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::resource::Capability;
@@ -43,6 +43,7 @@ pub struct AnalysisWorkloadInput {
 pub struct AnalysisWorkloadRequest {
     pub schema_version: u16,
     pub study: StudyIdentity,
+    pub step: StepIdentity,
     pub execution_plan: ExecutionPlanIdentity,
     pub identity: AnalysisWorkloadIdentity,
     pub kind: AnalysisWorkKind,
@@ -54,6 +55,7 @@ pub struct AnalysisWorkloadRequest {
 impl AnalysisWorkloadRequest {
     pub fn new(
         study: StudyIdentity,
+        step: StepIdentity,
         execution_plan: ExecutionPlanIdentity,
         kind: AnalysisWorkKind,
         inputs: Vec<AnalysisWorkloadInput>,
@@ -63,6 +65,7 @@ impl AnalysisWorkloadRequest {
         let contract_digest = work_contract_digest(&inputs, &outputs, &required_capabilities)?;
         let identity = AnalysisWorkloadIdentity::new(
             study,
+            step,
             execution_plan,
             kind,
             contract_digest,
@@ -71,6 +74,7 @@ impl AnalysisWorkloadRequest {
         let request = Self {
             schema_version: 1,
             study,
+            step,
             execution_plan,
             identity,
             kind,
@@ -121,6 +125,7 @@ impl AnalysisWorkloadRequest {
         }
         let expected = Self::new_unchecked_identity(
             self.study,
+            self.step,
             self.execution_plan,
             self.kind,
             &self.inputs,
@@ -137,6 +142,7 @@ impl AnalysisWorkloadRequest {
 
     fn new_unchecked_identity(
         study: StudyIdentity,
+        step: StepIdentity,
         execution_plan: ExecutionPlanIdentity,
         kind: AnalysisWorkKind,
         inputs: &[AnalysisWorkloadInput],
@@ -145,6 +151,7 @@ impl AnalysisWorkloadRequest {
     ) -> AnalysisBridgeResult<AnalysisWorkloadIdentity> {
         Ok(AnalysisWorkloadIdentity::new(
             study,
+            step,
             execution_plan,
             kind,
             work_contract_digest(inputs, outputs, capabilities)?,

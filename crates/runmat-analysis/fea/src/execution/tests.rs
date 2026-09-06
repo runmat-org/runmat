@@ -6,26 +6,31 @@ fn digest(label: &str) -> Digest {
     Digest::sha256(label)
 }
 
+fn step_identity(study: StudyIdentity) -> StepIdentity {
+    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
+    StepIdentity::new(sequence, digest("step")).unwrap()
+}
+
 fn identity_graph() -> (
     StudyIdentity,
     ExecutionPlanIdentity,
     SignalRealizationIdentity,
 ) {
     let study = StudyIdentity::new(digest("study"), Some(digest("project"))).unwrap();
-    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
-    let step = StepIdentity::new(sequence, digest("step")).unwrap();
+    let step = step_identity(study);
     let constraints =
         ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
     let generator =
         GeneratorIdentity::new(digest("callable"), digest("captures"), digest("generator"))
             .unwrap();
-    let signal = SignalRealizationIdentity::new(
+    let materialization = SignalMaterializationIdentity::new(
         digest("signal"),
         Some(generator),
         digest("sampling"),
-        digest("samples"),
+        vec![digest("frozen-input")],
     )
     .unwrap();
+    let signal = SignalRealizationIdentity::new(materialization, digest("samples")).unwrap();
     let excitation =
         SolverExcitationIdentity::new(step, signal, digest("target"), digest("projection"))
             .unwrap();
@@ -48,6 +53,7 @@ fn layered_identities_are_deterministic_and_preserve_argument_order() {
 
     let workload_a = AnalysisWorkloadIdentity::new(
         first.0,
+        step_identity(first.0),
         first.1,
         AnalysisWorkKind::Solve,
         digest("solve-contract"),
@@ -56,6 +62,7 @@ fn layered_identities_are_deterministic_and_preserve_argument_order() {
     .unwrap();
     let workload_b = AnalysisWorkloadIdentity::new(
         first.0,
+        step_identity(first.0),
         first.1,
         AnalysisWorkKind::Solve,
         digest("solve-contract"),
@@ -81,22 +88,58 @@ fn generator_capture_and_realized_content_invalidate_the_realization() {
         digest("generator"),
     )
     .unwrap();
-    let changed_capture = SignalRealizationIdentity::new(
+    let changed_materialization = SignalMaterializationIdentity::new(
         digest("signal"),
         Some(generator),
         digest("sampling"),
-        digest("samples"),
+        vec![digest("frozen-input")],
     )
     .unwrap();
-    let changed_content = SignalRealizationIdentity::new(
+    let changed_capture =
+        SignalRealizationIdentity::new(changed_materialization, digest("samples")).unwrap();
+    let baseline_materialization = SignalMaterializationIdentity::new(
         digest("signal"),
-        None,
+        Some(
+            GeneratorIdentity::new(digest("callable"), digest("captures"), digest("generator"))
+                .unwrap(),
+        ),
         digest("sampling"),
-        digest("changed-samples"),
+        vec![digest("frozen-input")],
     )
     .unwrap();
+    let changed_content =
+        SignalRealizationIdentity::new(baseline_materialization, digest("changed-samples"))
+            .unwrap();
+    let changed_input_materialization = SignalMaterializationIdentity::new(
+        digest("signal"),
+        Some(
+            GeneratorIdentity::new(digest("callable"), digest("captures"), digest("generator"))
+                .unwrap(),
+        ),
+        digest("sampling"),
+        vec![digest("changed-frozen-input")],
+    )
+    .unwrap();
+    let changed_input =
+        SignalRealizationIdentity::new(changed_input_materialization, digest("samples")).unwrap();
     assert_ne!(baseline, changed_capture);
     assert_ne!(baseline, changed_content);
+    assert_ne!(baseline, changed_input);
+}
+
+#[test]
+fn sweep_identity_preserves_authored_order_and_rejects_duplicate_studies() {
+    let first = StudyIdentity::new(digest("study-a"), None).unwrap();
+    let second = StudyIdentity::new(digest("study-b"), None).unwrap();
+    let forward =
+        SweepIdentity::new(digest("sweep"), vec![first, second], digest("composition")).unwrap();
+    let reverse =
+        SweepIdentity::new(digest("sweep"), vec![second, first], digest("composition")).unwrap();
+
+    assert_ne!(forward, reverse);
+    assert!(
+        SweepIdentity::new(digest("sweep"), vec![first, first], digest("composition")).is_err()
+    );
 }
 
 #[test]
