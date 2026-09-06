@@ -3,6 +3,7 @@
 
 # Rust
 /target/
+**/.runmat-wasm-registry-*/
 
 # VSCode
 .vscode/

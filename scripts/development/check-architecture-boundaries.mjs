@@ -130,6 +130,13 @@ for (const header of ["matrix.h", "mex.h"]) {
 }
 
 const allRust = rustSources("crates");
+const builtinSourceEntries = fs.readdirSync(
+  path.join(repo, "crates/runmat-runtime/src/builtins"),
+  { withFileTypes: true },
+);
+if (builtinSourceEntries.some((entry) => entry.name.startsWith(".runmat-wasm-registry-"))) {
+  fail("temporary wasm registry generation directories must not remain in the runtime source tree");
+}
 const valueDeclarations = allRust
   .filter(({ text }) => /(?:^|\n)\s*pub(?:\([^)]*\))?\s+enum\s+Value(?:\s|\{|<)/.test(text))
   .map(({ path: sourcePath }) => sourcePath);
@@ -1452,12 +1459,60 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
-const legacyIoResolvers = read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs");
-if (/\bpub fn (?:addpath|rmpath|genpath|savepath)_type\b/.test(legacyIoResolvers)) {
-  fail("legacy runtime type resolvers must not reclaim migrated search-path inference authority");
+enforceMigratedBuiltinFamily({
+  name: "process-environment family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/inference.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment/getenv/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment/setenv/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment/isenv/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/environment/unsetenv/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/getenv.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/setenv.rs",
+    "docs/builtins/reference/getenv.json",
+    "docs/builtins/reference/setenv.json",
+    "docs/builtins/reference/isenv.json",
+    "docs/builtins/reference/unsetenv.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/getenv.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/setenv.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/isenv.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/unsetenv.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+]) {
+  const source = read(sourcePath);
+  if (/"(?:getenv|setenv|isenv|unsetenv)"/.test(source)) {
+    fail(`${sourcePath} must dispatch process-environment behavior through typed rules and entries`);
+  }
 }
-if (/"(?:addpath|rmpath|genpath|savepath)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
-  fail("legacy name-selected semantics must not reclaim migrated search-path authority");
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/io/repl_fs/environment",
+)) {
+  if (/\bstd::env::/.test(text)) {
+    fail(`${sourcePath} bypasses the native/browser process-environment service`);
+  }
+}
+const legacyIoResolvers = read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs");
+if (/\bpub fn (?:addpath|rmpath|genpath|savepath|getenv|setenv|isenv|unsetenv)_type\b/.test(legacyIoResolvers)) {
+  fail("legacy runtime type resolvers must not reclaim migrated search-path or environment inference authority");
+}
+if (/"(?:addpath|rmpath|genpath|savepath|getenv|setenv|isenv|unsetenv)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim migrated search-path or environment authority");
 }
 
 if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(

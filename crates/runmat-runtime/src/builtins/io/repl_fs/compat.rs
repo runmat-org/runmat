@@ -272,32 +272,6 @@ simple_descriptor!(
     &OUTPUT_VALUE,
     BuiltinOutputMode::Fixed
 );
-pub const ISENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isenv accepts host-text environment names; integer and resident numeric paths reject before provider or environment access.",
-};
-simple_descriptor!(
-    ISENV_SIGNATURES,
-    ISENV_DESCRIPTOR,
-    "tf = isenv(name)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-simple_descriptor!(
-    UNSETENV_SIGNATURES,
-    UNSETENV_DESCRIPTOR,
-    "status = unsetenv(name)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-pub const UNSETENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "unsetenv accepts a host text environment-variable name; integer and resident numeric values reject before provider or environment access.",
-};
 simple_descriptor!(
     MATLABROOT_SIGNATURES,
     MATLABROOT_DESCRIPTOR,
@@ -782,51 +756,6 @@ async fn path_predicate_builtin(
     }
 }
 
-#[runtime_builtin(
-    name = "isenv",
-    category = "io/repl_fs",
-    summary = "Return true when environment variables are defined.",
-    keywords = "isenv,environment,variable,predicate",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::bool_type),
-    descriptor(crate::builtins::io::repl_fs::compat::ISENV_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::ISENV_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn isenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(value_contains_resident) {
-        return Err(compat_error(
-            "isenv",
-            "isenv: name must be text; provider-resident numeric values are invalid",
-        ));
-    }
-    let args = gather_args("isenv", &args).await?;
-    if args.len() != 1 {
-        return Err(compat_error("isenv", "isenv: expected exactly one input"));
-    }
-    match &args[0] {
-        Value::StringArray(array) => logical_array(
-            array
-                .data
-                .iter()
-                .map(|name| runtime_env::var(name).is_ok())
-                .collect(),
-            array.shape.clone(),
-            "isenv",
-        ),
-        Value::Cell(array) => {
-            let mut out = Vec::with_capacity(array.data.len());
-            for value in &array.data {
-                out.push(runtime_env::var(&scalar_text(value, "isenv", "name")?).is_ok());
-            }
-            logical_array(out, array.shape.clone(), "isenv")
-        }
-        value => Ok(Value::Bool(
-            runtime_env::var(&scalar_text(value, "isenv", "name")?).is_ok(),
-        )),
-    }
-}
-
 fn value_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
@@ -837,39 +766,6 @@ fn value_contains_resident(value: &Value) -> bool {
         Value::OutputList(values) => values.iter().any(value_contains_resident),
         _ => false,
     }
-}
-
-#[runtime_builtin(
-    name = "unsetenv",
-    category = "io/repl_fs",
-    summary = "Remove an environment variable.",
-    keywords = "unsetenv,environment,variable,remove",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::repl_fs::compat::UNSETENV_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::UNSETENV_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn unsetenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(value_contains_resident) {
-        return Err(compat_error(
-            "unsetenv",
-            "unsetenv: name must be text; provider-resident numeric values are invalid",
-        ));
-    }
-    let args = gather_args("unsetenv", &args).await?;
-    if args.len() != 1 {
-        return Err(compat_error(
-            "unsetenv",
-            "unsetenv: expected exactly one input",
-        ));
-    }
-    let name = scalar_text(&args[0], "unsetenv", "name")?;
-    if name.is_empty() || name.contains('=') || name.contains('\0') {
-        return Ok(Value::Num(1.0));
-    }
-    runtime_env::remove_var(&name);
-    Ok(Value::Num(0.0))
 }
 
 #[runtime_builtin(
@@ -2201,38 +2097,10 @@ mod tests {
     }
 
     #[test]
-    fn environment_predicates_and_unsetenv_share_runtime_env() {
-        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
-        runtime_env::set_var("RUNMAT_COMPAT_ENV_TEST", "1");
-        assert_eq!(
-            run(isenv_builtin(vec![Value::String(
-                "RUNMAT_COMPAT_ENV_TEST".to_string()
-            )]))
-            .unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            run(unsetenv_builtin(vec![Value::String(
-                "RUNMAT_COMPAT_ENV_TEST".to_string()
-            )]))
-            .unwrap(),
-            Value::Num(0.0)
-        );
-        assert_eq!(
-            run(isenv_builtin(vec![Value::String(
-                "RUNMAT_COMPAT_ENV_TEST".to_string()
-            )]))
-            .unwrap(),
-            Value::Bool(false)
-        );
-    }
-
-    #[test]
     fn path_and_environment_predicates_reject_resident_numeric_inputs_before_access() {
         for result in [
             run(isfile_builtin(vec![unowned_resident_value()])),
             run(isfolder_builtin(vec![unowned_resident_value()])),
-            run(isenv_builtin(vec![unowned_resident_value()])),
         ] {
             let error = result.expect_err("resident numeric input must be invalid text");
             assert!(error.message().contains("provider-resident numeric"));

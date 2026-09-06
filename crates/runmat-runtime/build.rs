@@ -18,6 +18,7 @@ fn split_list(value: &str) -> Vec<String> {
 }
 
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(runmat_generating_wasm_registry)");
     ensure_wasm_registry_state();
 
     // Only act when BLAS/LAPACK feature is enabled
@@ -129,6 +130,7 @@ fn ensure_wasm_registry_state() {
     let registry_path = manifest_dir.join(WASM_REGISTRY_RELATIVE_PATH);
 
     if generating {
+        println!("cargo:rustc-cfg=runmat_generating_wasm_registry");
         let out_path = env::var(WASM_REGISTRY_OUT_ENV).unwrap_or_else(|_| {
             panic!(
                 "{WASM_REGISTRY_ENV}=1 requires {WASM_REGISTRY_OUT_ENV}; use \

@@ -1,5 +1,6 @@
 mod addpath;
 mod cd;
+mod environment;
 mod genpath;
 mod inference;
 mod path;
@@ -11,6 +12,7 @@ mod search_path;
 
 pub use addpath::*;
 pub use cd::*;
+pub use environment::*;
 pub use genpath::*;
 pub use path::*;
 pub use pwd::*;

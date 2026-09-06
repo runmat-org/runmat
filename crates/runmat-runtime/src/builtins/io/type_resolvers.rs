@@ -270,18 +270,6 @@ pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num])
 }
 
-pub fn getenv_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Unknown;
-    }
-    match args.first() {
-        Some(Type::Cell { .. }) => Type::cell_of(Type::String),
-        Some(Type::String) => Type::String,
-        Some(Type::Unknown) => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 pub fn ls_type(args: &[Type], ctx: &ResolveContext) -> Type {
     string_type(args, ctx)
 }
@@ -301,10 +289,6 @@ pub fn rmdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
 pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Unknown
-}
-
-pub fn setenv_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
 }
 
 pub fn tempdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -559,12 +543,10 @@ mod tests {
         &[],
         Type::Union(vec![Type::String, Type::Num])
     );
-    assert_resolver!(getenv_type_resolver, getenv_type, &[], Type::Unknown);
     assert_resolver!(ls_type_resolver, ls_type, &[], Type::String);
     assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
     assert_resolver!(rmdir_type_resolver, rmdir_type, &[], Type::Num);
-    assert_resolver!(setenv_type_resolver, setenv_type, &[], Type::Num);
     assert_resolver!(tempdir_type_resolver, tempdir_type, &[], Type::String);
     assert_resolver!(tempname_type_resolver, tempname_type, &[], Type::String);
 

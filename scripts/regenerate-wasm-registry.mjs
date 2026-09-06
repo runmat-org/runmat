@@ -16,6 +16,13 @@ const registryPath = join(
 const tmpDir = mkdtempSync(join(dirname(registryPath), ".runmat-wasm-registry-"));
 const tmpRegistry = join(tmpDir, "generated_wasm_registry.rs");
 
+class GenerationFailure extends Error {
+  constructor(status) {
+    super(`wasm registry generation failed with status ${status}`);
+    this.status = status;
+  }
+}
+
 try {
   console.log("==> generating wasm builtin registry for runmat-runtime/plot-web");
   const result = spawnSync(
@@ -41,7 +48,7 @@ try {
     },
   );
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    throw new GenerationFailure(result.status ?? 1);
   }
 
   let contents = readFileSync(tmpRegistry, "utf8");
@@ -51,7 +58,7 @@ try {
     console.error(
       `generated wasm registry is empty or incomplete (${entryCount} entries, ${builtinCount} builtins)`,
     );
-    process.exit(1);
+    throw new GenerationFailure(1);
   }
 
   contents = contents
@@ -65,11 +72,11 @@ try {
     );
   if (!contents.includes("pub const REGISTRY_COMPLETE: bool = true;")) {
     console.error("failed to mark generated wasm registry complete");
-    process.exit(1);
+    throw new GenerationFailure(1);
   }
   if (!contents.includes(`pub const REGISTRY_ENTRY_COUNT: usize = ${entryCount};`)) {
     console.error("failed to stamp generated wasm registry entry count");
-    process.exit(1);
+    throw new GenerationFailure(1);
   }
 
   writeFileSync(tmpRegistry, contents);
@@ -77,6 +84,12 @@ try {
   console.log(
     `==> wrote ${registryPath} (${entryCount} registry entries, ${builtinCount} builtins)`,
   );
+} catch (error) {
+  if (error instanceof GenerationFailure) {
+    process.exitCode = error.status;
+  } else {
+    throw error;
+  }
 } finally {
   rmSync(tmpDir, { recursive: true, force: true });
 }
