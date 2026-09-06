@@ -88,6 +88,7 @@ pub(crate) fn prepared(
         frozen_project_digest: Some(Digest::sha256(b"project")),
         geometry_source_digest: expected_source,
         workload_template: workload(),
+        signal_materializations: Vec::new(),
         exact_meshing,
     })
     .unwrap()

@@ -9,14 +9,18 @@ use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
-use runmat_types::{CapabilityRequirement, EffectKind, ValueKindFact};
+use runmat_types::{
+    CapabilityRequirement, DimensionFact, EffectKind, NumericClass, NumericDomain, ShapeFact,
+    ValueFact, ValueKindFact,
+};
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
 const ADMISSION_PREFIX: &[u8] = b"runmat-analysis-generator-admission/v1\0";
 const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 65_536, 4096, 32);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdmittedSignalGenerator {
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
@@ -147,6 +151,10 @@ fn validate_static_contract(
             "signal generator output must be statically numeric".into(),
         ));
     }
+    validate_axis_parameter(&callable.parameters[0])?;
+    for (argument, parameter) in generator.arguments.iter().zip(&callable.parameters[1..]) {
+        validate_authored_parameter(argument, parameter)?;
+    }
 
     if matches!(
         generator.effects,
@@ -192,6 +200,92 @@ fn validate_static_contract(
         )));
     }
     Ok(())
+}
+
+fn validate_axis_parameter(parameter: &ValueFact) -> AnalysisBridgeResult<()> {
+    if !accepts_f64(parameter) || !accepts_column(&parameter.shape) {
+        return Err(AnalysisBridgeError::Invalid(
+            "signal generator axis parameter must accept an N-by-1 real double array".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_authored_parameter(
+    argument: &GeneratorArgument,
+    parameter: &ValueFact,
+) -> AnalysisBridgeResult<()> {
+    let valid = match argument {
+        GeneratorArgument::Boolean(_) => {
+            accepts_kind(parameter, |kind| matches!(kind, ValueKindFact::Logical))
+                && accepts_scalar(&parameter.shape)
+        }
+        GeneratorArgument::SignedInteger(_) => {
+            accepts_numeric_class(parameter, NumericClass::Int64)
+                && accepts_scalar(&parameter.shape)
+        }
+        GeneratorArgument::UnsignedInteger(_) => {
+            accepts_numeric_class(parameter, NumericClass::UInt64)
+                && accepts_scalar(&parameter.shape)
+        }
+        GeneratorArgument::Real(_) => accepts_f64(parameter) && accepts_scalar(&parameter.shape),
+        GeneratorArgument::Text(_) => {
+            accepts_kind(parameter, |kind| matches!(kind, ValueKindFact::String))
+                && accepts_scalar(&parameter.shape)
+        }
+        GeneratorArgument::RealVector(_) => {
+            accepts_f64(parameter) && accepts_column(&parameter.shape)
+        }
+        GeneratorArgument::Artifact(_) => true,
+    };
+    if !valid {
+        return Err(AnalysisBridgeError::Invalid(
+            "signal generator parameter does not accept its frozen argument representation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn accepts_f64(parameter: &ValueFact) -> bool {
+    accepts_numeric_class(parameter, NumericClass::Double)
+}
+
+fn accepts_numeric_class(parameter: &ValueFact, expected: NumericClass) -> bool {
+    accepts_kind(parameter, |kind| {
+        matches!(
+            kind,
+            ValueKindFact::Numeric(numeric)
+                if numeric.class == expected && numeric.domain == NumericDomain::Real
+        )
+    })
+}
+
+fn accepts_kind(parameter: &ValueFact, expected: impl FnOnce(&ValueKindFact) -> bool) -> bool {
+    matches!(&parameter.kind, ValueKindFact::Unknown) || expected(&parameter.kind)
+}
+
+fn accepts_scalar(shape: &ShapeFact) -> bool {
+    matches!(shape, ShapeFact::Unknown | ShapeFact::Scalar)
+        || matches!(
+            shape,
+            ShapeFact::Shaped { dims }
+                if !dims.is_empty()
+                    && dims
+                        .iter()
+                        .all(|dimension| matches!(dimension, DimensionFact::Known(1)))
+        )
+}
+
+fn accepts_column(shape: &ShapeFact) -> bool {
+    match shape {
+        ShapeFact::Unknown | ShapeFact::Ranked { rank: 2 } => true,
+        ShapeFact::Shaped { dims } => {
+            dims.len() == 2
+                && !matches!(dims[0], DimensionFact::Known(_))
+                && matches!(dims[1], DimensionFact::Known(1))
+        }
+        ShapeFact::Scalar | ShapeFact::Ranked { .. } => false,
+    }
 }
 
 fn sample_points(policy: &SignalSamplingPolicy) -> AnalysisBridgeResult<Vec<f64>> {
@@ -273,6 +367,14 @@ mod tests {
         }))
     }
 
+    fn numeric_column() -> ValueFact {
+        let mut fact = numeric();
+        fact.shape = ShapeFact::Shaped {
+            dims: vec![DimensionFact::Unknown, DimensionFact::Known(1)],
+        };
+        fact
+    }
+
     fn signal() -> PhysicalSignal {
         PhysicalSignal::Force(Signal::<Force> {
             signal_id: SignalId("pulse".into()),
@@ -316,7 +418,7 @@ mod tests {
             function: ProgramFunctionId(7),
             callable: CallableFact {
                 identity: None,
-                parameters: vec![numeric(), numeric()],
+                parameters: vec![numeric_column(), numeric()],
                 parameters_complete: true,
                 outputs: vec![output.clone()],
                 outputs_complete: true,
@@ -436,6 +538,33 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn rejects_parameters_that_cannot_accept_the_materialization_wire_values() {
+        let mut scalar_axis = analysis();
+        scalar_axis.callable.parameters[0] = numeric();
+        assert!(admit_named_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &scalar_axis,
+            &BTreeSet::new(),
+        )
+        .is_err());
+
+        let mut wrong_argument_class = analysis();
+        wrong_argument_class.callable.parameters[1].kind = ValueKindFact::Logical;
+        assert!(admit_named_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &wrong_argument_class,
+            &BTreeSet::new(),
+        )
+        .is_err());
     }
 
     #[test]

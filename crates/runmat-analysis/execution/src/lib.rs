@@ -35,13 +35,15 @@ pub use serial::{
     CompletedAnalysisWorkload,
 };
 pub use signal_materialization::{
-    canonicalize_signal_generator_outputs, plan_signal_generator_chunks, SignalGeneratorChunk,
-    SignalGeneratorChunkOutput,
+    canonicalize_signal_generator_outputs, plan_signal_generator_chunks,
+    validate_signal_generator_chunks, SignalGeneratorChunk, SignalGeneratorChunkOutput,
 };
 pub use signal_program::{
     build_signal_generator_task_submission, prepare_signal_generator_program,
-    PreparedSignalGeneratorChunk, PreparedSignalGeneratorProgram, SignalGeneratorExecutionContext,
-    SIGNAL_GENERATOR_EXECUTION_MODE, SIGNAL_GENERATOR_TARGET_PROFILE,
+    prepare_signal_materialization, PreparedSignalGeneratorChunk, PreparedSignalGeneratorProgram,
+    PreparedSignalMaterialization, SignalGeneratorExecutionContext,
+    SignalMaterializationExpectation, SIGNAL_GENERATOR_EXECUTION_MODE,
+    SIGNAL_GENERATOR_TARGET_PROFILE,
 };
 pub use structural::{
     import_structural_linear_result, prepare_structural_linear_program,

@@ -15,22 +15,115 @@ use runmat_execution_artifact::{
 use runmat_execution_runner::TaskSubmission;
 
 use crate::{
-    AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult, SignalGeneratorChunk,
+    validate_signal_generator_chunks, AdmittedSignalGenerator, AnalysisBridgeError,
+    AnalysisBridgeResult, SignalGeneratorChunk,
 };
 
 pub const SIGNAL_GENERATOR_EXECUTION_MODE: &str = "analysis-signal-generator";
 pub const SIGNAL_GENERATOR_TARGET_PROFILE: &str = "portable-executable-unit-v3";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PreparedSignalGeneratorProgram {
     pub descriptor: ProgramExecutionDescriptor,
     pub chunks: Vec<PreparedSignalGeneratorChunk>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PreparedSignalGeneratorChunk {
     pub plan: SignalGeneratorChunk,
     pub request: ProgramExecutionRequest,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedSignalMaterialization {
+    pub authored: runmat_analysis_core::PhysicalSignal,
+    pub admitted: AdmittedSignalGenerator,
+    pub program: PreparedSignalGeneratorProgram,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignalMaterializationExpectation {
+    pub authored: runmat_analysis_core::PhysicalSignal,
+    pub admitted: AdmittedSignalGenerator,
+}
+
+impl SignalMaterializationExpectation {
+    pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        self.admitted.program_revision.validate()?;
+        let generator = self.authored.generator().ok_or_else(|| {
+            AnalysisBridgeError::Invalid(
+                "signal materialization expectation is not callable-backed".into(),
+            )
+        })?;
+        if generator.qualified_function != self.admitted.callable.qualified_name
+            || self.admitted.sample_points.len() < 2
+            || self
+                .admitted
+                .sample_points
+                .iter()
+                .any(|point| !point.is_finite())
+            || self
+                .admitted
+                .sample_points
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "signal materialization expectation differs from its admission",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl PreparedSignalMaterialization {
+    pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        self.program.descriptor.validate_for_portable_host()?;
+        validate_signal_generator_chunks(
+            &self.authored,
+            &self.admitted,
+            &self
+                .program
+                .chunks
+                .iter()
+                .map(|chunk| chunk.plan.clone())
+                .collect::<Vec<_>>(),
+        )?;
+        if self.program.descriptor.recipe.program_revision != self.admitted.program_revision
+            || self.program.descriptor.function
+                != usize::try_from(self.admitted.function.0).unwrap_or(usize::MAX)
+            || self.program.descriptor.requested_outputs != 1
+            || self.program.descriptor.recipe.execution_mode != SIGNAL_GENERATOR_EXECUTION_MODE
+            || self.program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV3
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "prepared signal program differs from its admitted callable",
+            ));
+        }
+        for chunk in &self.program.chunks {
+            chunk.request.validate_for_portable_host()?;
+            if chunk.request.recipe != self.program.descriptor.recipe
+                || chunk.request.artifact != self.program.descriptor.artifact
+                || chunk.request.function != self.program.descriptor.function
+                || chunk.request.requested_outputs != self.program.descriptor.requested_outputs
+                || chunk.request.arguments != chunk.plan.arguments
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "prepared signal chunk differs from its exact program descriptor",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn expectation(&self) -> AnalysisBridgeResult<SignalMaterializationExpectation> {
+        self.validate()?;
+        Ok(SignalMaterializationExpectation {
+            authored: self.authored.clone(),
+            admitted: self.admitted.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +212,23 @@ pub fn prepare_signal_generator_program(
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     Ok(PreparedSignalGeneratorProgram { descriptor, chunks })
+}
+
+pub fn prepare_signal_materialization(
+    authored: runmat_analysis_core::PhysicalSignal,
+    admitted: AdmittedSignalGenerator,
+    executable: ExecutableUnitEnvelope,
+    chunks: Vec<SignalGeneratorChunk>,
+    input_objects: Vec<ProgramExecutionObjectLocation>,
+) -> AnalysisBridgeResult<PreparedSignalMaterialization> {
+    let program = prepare_signal_generator_program(&admitted, executable, chunks, input_objects)?;
+    let prepared = PreparedSignalMaterialization {
+        authored,
+        admitted,
+        program,
+    };
+    prepared.validate()?;
+    Ok(prepared)
 }
 
 pub fn build_signal_generator_task_submission(

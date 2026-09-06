@@ -37,6 +37,8 @@ struct ExactStructuralStudyPublication {
     meshing_objects: Vec<ValueRef>,
     boundary_root: ValueRef,
     boundary_objects: Vec<ValueRef>,
+    signal_roots: Vec<ValueRef>,
+    signal_objects: Vec<ValueRef>,
     analysis_root: ValueRef,
     analysis_objects: Vec<ValueRef>,
 }
@@ -50,6 +52,11 @@ impl ExactStructuralStudyPublication {
             || self.meshing_objects.is_empty()
             || self.boundary_objects.is_empty()
             || self.analysis_objects.is_empty()
+            || self.signal_roots.len() > self.signal_objects.len()
+            || self
+                .signal_roots
+                .iter()
+                .any(|root| !self.signal_objects.contains(root))
         {
             return Err(protocol("exact structural study publication is invalid"));
         }
@@ -57,6 +64,7 @@ impl ExactStructuralStudyPublication {
             .meshing_objects
             .iter()
             .chain(&self.boundary_objects)
+            .chain(&self.signal_objects)
             .chain(&self.analysis_objects)
         {
             if reference.kind != ValueRefKind::ResultObject
@@ -80,6 +88,7 @@ impl ExactStructuralStudyPublication {
             }
             reference_inventory(inventory)?;
         }
+        reference_inventory(&self.signal_objects)?;
         Ok(())
     }
 
@@ -123,6 +132,7 @@ pub struct ExactStructuralStudyResultExpectation {
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
     pub workload_template: StructuralLinearWorkload,
+    pub signal_materializations: Vec<runmat_analysis_execution::SignalMaterializationExpectation>,
     pub expected_meshing_request: MeshingRequest,
 }
 
@@ -131,6 +141,31 @@ impl ExactStructuralStudyResultExpectation {
         self.artifact_access.validate().map_err(protocol)?;
         self.workload_template.validate().map_err(protocol)?;
         self.expected_meshing_request.validate().map_err(protocol)?;
+        let authored_signals = self
+            .workload_template
+            .model
+            .signals
+            .iter()
+            .filter(|signal| signal.generator().is_some())
+            .collect::<Vec<_>>();
+        if authored_signals.len() != self.signal_materializations.len()
+            || authored_signals
+                .iter()
+                .zip(&self.signal_materializations)
+                .any(|(signal, expected)| *signal != &expected.authored)
+        {
+            return Err(protocol(
+                "whole-study signal expectations differ from its authored workload",
+            ));
+        }
+        for materialization in &self.signal_materializations {
+            materialization.validate().map_err(protocol)?;
+            if materialization.admitted.program_revision != self.program_revision {
+                return Err(protocol(
+                    "whole-study signal expectation uses another program revision",
+                ));
+            }
+        }
         if self.authored_study_digest.bytes() == &[0; 32]
             || self.geometry_source_digest.bytes() == &[0; 32]
             || self
@@ -148,6 +183,7 @@ pub(crate) fn package_exact_structural_study_result(
     decoded: &DecodedExactStructuralStudyRoot,
     meshing: &ExactMeshingDagRunResult,
     boundary: &runmat_analysis_execution::PreparedAnalysisObjects,
+    signals: &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
     analysis_response: &ProgramExecutionResponse,
     unresolved_workload_digest: Digest,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
@@ -170,6 +206,25 @@ pub(crate) fn package_exact_structural_study_result(
         .first()
         .ok_or_else(|| protocol("boundary resolution closure is empty"))?
         .clone();
+    let signal_closures = signals
+        .iter()
+        .map(|signal| {
+            signal
+                .objects
+                .references(&decoded.artifact_access, ValueRefKind::ResultObject)
+                .map_err(protocol)
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let signal_roots = signal_closures
+        .iter()
+        .map(|objects| {
+            objects
+                .first()
+                .cloned()
+                .ok_or_else(|| protocol("signal realization closure is empty"))
+        })
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let signal_objects = unique_references(signal_closures.into_iter().flatten())?;
     let publication = ExactStructuralStudyPublication {
         schema_version: 1,
         program_revision: request.recipe.program_revision.clone(),
@@ -186,6 +241,8 @@ pub(crate) fn package_exact_structural_study_result(
         meshing_objects: meshing.result_objects.clone(),
         boundary_root,
         boundary_objects: boundary_objects.clone(),
+        signal_roots,
+        signal_objects: signal_objects.clone(),
         analysis_root: (**analysis_root).clone(),
         analysis_objects: analysis_objects.clone(),
     };
@@ -219,6 +276,7 @@ pub(crate) fn package_exact_structural_study_result(
         .result_objects
         .iter()
         .chain(&boundary_objects)
+        .chain(&signal_objects)
         .chain(analysis_objects)
         .chain(std::iter::once(&publication_root))
     {
@@ -304,6 +362,7 @@ pub fn import_exact_structural_study_result(
         .meshing_objects
         .iter()
         .chain(&publication.boundary_objects)
+        .chain(&publication.signal_objects)
         .chain(&publication.analysis_objects)
         .cloned()
         .chain(std::iter::once((**root).clone()))
@@ -370,10 +429,90 @@ pub fn import_exact_structural_study_result(
             "boundary resolution differs from the returned geometry or mesh",
         ));
     }
+    if publication.signal_roots.len() != expected.signal_materializations.len() {
+        return Err(protocol(
+            "whole-study signal result roots differ from the expected materializations",
+        ));
+    }
+    let mut materialized_signals = BTreeMap::new();
+    let mut admitted_signal_objects = Vec::new();
+    for (root, prepared) in publication
+        .signal_roots
+        .iter()
+        .zip(&expected.signal_materializations)
+    {
+        let manifest =
+            runmat_analysis_fea::execution::AnalysisObjectManifest::from_canonical_bytes(&read(
+                source, root,
+            )?)
+            .map_err(protocol)?;
+        let objects = runmat_analysis_execution::import_analysis_objects(
+            source,
+            root,
+            AnalysisNumericalObjectKind::Signal,
+            manifest.logical_identity,
+            manifest.payload_digest,
+            &expected.artifact_access,
+            limits,
+        )
+        .map_err(protocol)?;
+        let references = objects
+            .references(&expected.artifact_access, ValueRefKind::ResultObject)
+            .map_err(protocol)?;
+        for reference in references {
+            if !publication.signal_objects.contains(&reference) {
+                return Err(protocol(
+                    "signal realization closure contains an undeclared object",
+                ));
+            }
+            admitted_signal_objects.push(reference);
+        }
+        let realization =
+            runmat_analysis_fea::execution::CanonicalSignalRealization::from_canonical_bytes(
+                &objects.payload(),
+            )
+            .map_err(protocol)?;
+        let signal = runmat_analysis_execution::materialize_signal_for_solver(
+            &prepared.authored,
+            &prepared.admitted,
+            &realization,
+        )
+        .map_err(protocol)?;
+        materialized_signals.insert(prepared.authored.signal_id().clone(), signal);
+    }
+    let admitted_signal_objects = unique_references(admitted_signal_objects)?;
+    if reference_inventory(&admitted_signal_objects)?
+        != reference_inventory(&publication.signal_objects)?
+    {
+        return Err(protocol(
+            "signal realization inventory contains unreferenced objects",
+        ));
+    }
     let aliases =
         runmat_analysis_core::BoundaryRegionAliases::new(boundary_resolution.aliases.clone())
             .map_err(protocol)?;
     let mut resolved_workload = expected.workload_template.clone();
+    resolved_workload.model.signals = resolved_workload
+        .model
+        .signals
+        .iter()
+        .map(|signal| {
+            materialized_signals
+                .get(signal.signal_id())
+                .cloned()
+                .unwrap_or_else(|| signal.clone())
+        })
+        .collect();
+    if resolved_workload
+        .model
+        .signals
+        .iter()
+        .any(|signal| signal.generator().is_some())
+    {
+        return Err(protocol(
+            "whole-study result retained an unmaterialized signal generator",
+        ));
+    }
     resolved_workload.model =
         runmat_analysis_core::resolve_boundary_region_aliases(&resolved_workload.model, &aliases)
             .map_err(protocol)?;
@@ -416,6 +555,23 @@ fn reference_inventory(
         }
     }
     Ok(inventory)
+}
+
+fn unique_references(
+    references: impl IntoIterator<Item = ValueRef>,
+) -> NativeExecutionResult<Vec<ValueRef>> {
+    let mut inventory = BTreeMap::new();
+    for reference in references {
+        match inventory.insert(reference.id, reference.clone()) {
+            Some(existing) if existing != reference => {
+                return Err(protocol(
+                    "signal object identity is associated with conflicting metadata",
+                ))
+            }
+            _ => {}
+        }
+    }
+    Ok(inventory.into_values().collect())
 }
 
 fn prepare_analysis_program_for_import(

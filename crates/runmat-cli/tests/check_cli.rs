@@ -95,7 +95,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     .unwrap();
     fs::write(
         temp.path().join("src/+loads/pulse.m"),
-        "function y = pulse(t, magnitude)\narguments\n    t double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
+        "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
     )
     .unwrap();
     let fixture = repository.join("crates/runmat-cli/tests/fixtures/box_static.fea");

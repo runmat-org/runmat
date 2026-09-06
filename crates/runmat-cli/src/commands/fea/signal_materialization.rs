@@ -6,7 +6,7 @@ use runmat_analysis_core::{AnalysisModel, PhysicalSignal};
 use runmat_analysis_execution::{
     build_signal_generator_task_submission, canonicalize_signal_generator_outputs,
     materialize_signal_for_solver, plan_signal_generator_chunks, prepare_analysis_objects,
-    prepare_signal_generator_program, PreparedSignalGeneratorProgram, SignalGeneratorChunkOutput,
+    prepare_signal_materialization, PreparedSignalMaterialization, SignalGeneratorChunkOutput,
     SignalGeneratorExecutionContext,
 };
 use runmat_analysis_fea::execution::{
@@ -26,17 +26,13 @@ use runmat_execution_runner_native::{
 
 use crate::cli::Cli;
 
-use super::callables::{compile_signal_generators, CompiledSignalGenerator};
+use super::callables::{
+    compile_signal_generators, compile_signal_generators_in_frozen, CompiledSignalGenerator,
+};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const SIGNAL_TASK_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
 const SIGNAL_TASK_SCRATCH_BYTES: u64 = 128 * 1024 * 1024;
-
-struct UniqueMaterialization {
-    authored: PhysicalSignal,
-    compiled: CompiledSignalGenerator,
-    program: PreparedSignalGeneratorProgram,
-}
 
 pub(super) async fn materialize_study(
     document_path: &std::path::Path,
@@ -119,46 +115,18 @@ async fn materialize_signals(
     if compiled.len() != generator_signals.len() {
         bail!("compiled signal generator inventory is incomplete");
     }
-
-    let maximum_inline_result_bytes = usize::try_from(ValueLimits::default().max_inline_bytes)
-        .context("inline result bound exceeds this host")?;
-    let mut unique = BTreeMap::<SignalMaterializationIdentity, UniqueMaterialization>::new();
-    for (authored, compiled) in generator_signals.iter().cloned().zip(&compiled) {
-        compiled.validate()?;
-        let chunks = plan_signal_generator_chunks(
-            &authored,
-            &compiled.admission,
-            None,
-            maximum_inline_result_bytes,
-            |_| {
-                Err(runmat_analysis_execution::AnalysisBridgeError::Invalid(
-                    "generator artifact arguments require the immutable artifact resolver".into(),
-                ))
-            },
-        )?;
-        let program = prepare_signal_generator_program(
-            &compiled.admission,
-            compiled.executable.clone(),
-            chunks,
-            Vec::new(),
-        )?;
-        if let Some(existing) = unique.get(&compiled.admission.materialization_identity) {
-            if existing.authored != authored
-                || existing.compiled.admission != compiled.admission
-                || existing.compiled.executable != compiled.executable
-            {
+    let prepared = prepare_compiled_materializations(&generator_signals, &compiled)?;
+    let mut unique =
+        BTreeMap::<SignalMaterializationIdentity, PreparedSignalMaterialization>::new();
+    for prepared in prepared {
+        let identity = prepared.admitted.materialization_identity;
+        if let Some(existing) = unique.get(&identity) {
+            if existing != &prepared {
                 bail!("signal materialization identity collides with different frozen input");
             }
             continue;
         }
-        unique.insert(
-            compiled.admission.materialization_identity,
-            UniqueMaterialization {
-                authored,
-                compiled: compiled.clone(),
-                program,
-            },
-        );
+        unique.insert(identity, prepared);
     }
 
     let mut native_config = NativeExecutionConfig::for_current_executable()?;
@@ -186,7 +154,7 @@ async fn materialize_signals(
             submissions.push((
                 chunk.request.clone(),
                 build_signal_generator_task_submission(
-                    &materialization.compiled.admission,
+                    &materialization.admitted,
                     chunk,
                     BTreeSet::new(),
                     SignalGeneratorExecutionContext {
@@ -228,7 +196,7 @@ async fn materialize_signals(
             .context("signal task results do not cover the prepared chunk inventory")?;
         let realization = canonicalize_signal_generator_outputs(
             &materialization.authored,
-            &materialization.compiled.admission,
+            &materialization.admitted,
             None,
             &materialization
                 .program
@@ -254,7 +222,7 @@ async fn materialize_signals(
             *identity,
             materialize_signal_for_solver(
                 &materialization.authored,
-                &materialization.compiled.admission,
+                &materialization.admitted,
                 &realization,
             )?,
         );
@@ -278,6 +246,66 @@ async fn materialize_signals(
                 .get(&compiled.admission.materialization_identity)
                 .cloned()
                 .context("materialized signal replacement is absent")
+        })
+        .collect()
+}
+
+pub(super) async fn prepare_signal_materializations_in_frozen(
+    document_path: &std::path::Path,
+    signals: &[PhysicalSignal],
+    frozen: &runmat_package::FrozenProject,
+    config: &RunMatRuntimeConfig,
+) -> Result<Vec<PreparedSignalMaterialization>> {
+    let generator_signals = signals
+        .iter()
+        .filter(|signal| signal.generator().is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    let compiled = compile_signal_generators_in_frozen(
+        document_path,
+        &generator_signals,
+        frozen,
+        config,
+        &BTreeSet::new(),
+    )
+    .await?;
+    prepare_compiled_materializations(&generator_signals, &compiled)
+}
+
+fn prepare_compiled_materializations(
+    generator_signals: &[PhysicalSignal],
+    compiled: &[CompiledSignalGenerator],
+) -> Result<Vec<PreparedSignalMaterialization>> {
+    if compiled.len() != generator_signals.len() {
+        bail!("compiled signal generator inventory is incomplete");
+    }
+    let maximum_inline_result_bytes = usize::try_from(ValueLimits::default().max_inline_bytes)
+        .context("inline result bound exceeds this host")?;
+    generator_signals
+        .iter()
+        .cloned()
+        .zip(compiled)
+        .map(|(authored, compiled)| {
+            compiled.validate()?;
+            let chunks = plan_signal_generator_chunks(
+                &authored,
+                &compiled.admission,
+                None,
+                maximum_inline_result_bytes,
+                |_| {
+                    Err(runmat_analysis_execution::AnalysisBridgeError::Invalid(
+                        "generator artifact arguments require the immutable artifact resolver"
+                            .into(),
+                    ))
+                },
+            )?;
+            Ok(prepare_signal_materialization(
+                authored,
+                compiled.admission.clone(),
+                compiled.executable.clone(),
+                chunks,
+                Vec::new(),
+            )?)
         })
         .collect()
 }

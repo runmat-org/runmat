@@ -71,7 +71,34 @@ pub(super) async fn compile_signal_generators(
     let resolved = crate::commands::package::resolve_for_source(document_path, cli)
         .await?
         .context("callable-backed FEA signals require an enclosing frozen RunMat project")?;
-    let frozen = &resolved.resolved.frozen;
+    compile_signal_generators_in_frozen(
+        document_path,
+        signals,
+        &resolved.resolved.frozen,
+        config,
+        available_capabilities,
+    )
+    .await
+}
+
+pub(super) async fn compile_signal_generators_in_frozen(
+    document_path: &Path,
+    signals: &[PhysicalSignal],
+    frozen: &runmat_package::FrozenProject,
+    config: &RunMatRuntimeConfig,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> Result<Vec<CompiledSignalGenerator>> {
+    let requested = signals
+        .iter()
+        .filter_map(|signal| {
+            signal
+                .generator()
+                .map(|generator| (signal, generator.qualified_function.as_str()))
+        })
+        .collect::<Vec<_>>();
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
     let project = frozen.revision();
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project.graph_digest.bytes()),

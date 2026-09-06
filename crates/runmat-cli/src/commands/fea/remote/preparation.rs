@@ -23,11 +23,14 @@ pub(super) struct RemoteStudySource {
     pub(super) intent: PreparedStructuralStudyIntent,
     pub(super) geometry_name: String,
     pub(super) geometry_bytes: Vec<u8>,
+    pub(super) signal_materializations:
+        Vec<runmat_analysis_execution::PreparedSignalMaterialization>,
 }
 
 pub(super) fn prepare_study_source(
     spec: &AnalysisStudySpec,
     context: OperationContext,
+    signal_materializations: Vec<runmat_analysis_execution::PreparedSignalMaterialization>,
 ) -> Result<RemoteStudySource> {
     let geometry_path = std::path::PathBuf::from(&spec.geometry.source.path);
     let geometry_name = geometry_path
@@ -47,6 +50,7 @@ pub(super) fn prepare_study_source(
         intent,
         geometry_name,
         geometry_bytes,
+        signal_materializations,
     })
 }
 
@@ -66,6 +70,7 @@ pub(super) fn prepare_sweep_root(
                 authority,
                 &study.geometry_name,
                 &study.geometry_bytes,
+                study.signal_materializations.clone(),
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -86,6 +91,7 @@ pub(super) fn prepare_root(
     authority: &str,
     geometry_name: &str,
     geometry_bytes: &[u8],
+    signal_materializations: Vec<runmat_analysis_execution::PreparedSignalMaterialization>,
 ) -> Result<PreparedExactStructuralStudyRoot> {
     let access = artifact_access(authority);
     let import_options = ExactCadImportOptions {
@@ -122,6 +128,7 @@ pub(super) fn prepare_root(
             frozen_project_digest: Some(*revision.graph_digest()),
             geometry_source_digest: study.geometry_source_digest(),
             workload_template: study.workload_template().clone(),
+            signal_materializations,
             exact_meshing,
         },
     )?)

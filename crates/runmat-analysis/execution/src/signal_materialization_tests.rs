@@ -237,6 +237,29 @@ fn canonicalization_rejects_substituted_chunks_wrong_shapes_and_nonfinite_values
 }
 
 #[test]
+fn transported_chunk_plan_rejects_axis_and_authored_argument_tampering() {
+    let signal = signal(SignalShape::Scalar, SignalPrecision::Real64);
+    let admitted = admitted();
+    let chunks = plan_signal_generator_chunks(
+        &signal,
+        &admitted,
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 16,
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap();
+
+    let mut changed_axis = chunks.clone();
+    changed_axis[0].sample_points[1] = 0.5_f64.to_bits();
+    assert!(validate_signal_generator_chunks(&signal, &admitted, &changed_axis).is_err());
+
+    let mut changed_argument = chunks;
+    changed_argument[0].arguments[1] =
+        ValuePayload::Inline(Box::new(InlineValue::F64Bits(3.0_f64.to_bits())));
+    assert!(validate_signal_generator_chunks(&signal, &admitted, &changed_argument).is_err());
+}
+
+#[test]
 fn declared_single_precision_is_canonicalized_at_that_precision() {
     let signal = signal(SignalShape::Scalar, SignalPrecision::Real32);
     let admitted = admitted();

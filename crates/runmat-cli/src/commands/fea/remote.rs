@@ -19,6 +19,7 @@ use crate::commands::job::submit::RemoteSubmissionOptions;
 mod materialization;
 mod preparation;
 
+use super::signal_materialization::prepare_signal_materializations_in_frozen;
 pub(crate) use materialization::{materialize_remote_outputs, materialize_remote_sweep_outputs};
 use preparation::{
     prepare_remote_execution, prepare_remote_sweep_execution, prepare_root, prepare_study_source,
@@ -34,13 +35,28 @@ pub(super) async fn execute_study(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<Option<OperationEnvelope<AnalysisStudyRunData>>> {
-    let source_study = prepare_study_source(&spec, context)?;
-    let study = &source_study.intent;
-    let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(study.continuation_bytes().map_err(anyhow::Error::msg)?);
     let resolved = crate::commands::package::resolve_for_source(source, cli)
         .await?
         .context("remote FEA requires a runmat.toml project containing the study document")?;
+    let signals = spec
+        .model
+        .as_ref()
+        .map_or(&[][..], |model| model.signals.as_slice());
+    let signal_materializations = prepare_signal_materializations_in_frozen(
+        source,
+        signals,
+        &resolved.resolved.frozen,
+        config,
+    )
+    .await?;
+    let signal_expectations = signal_materializations
+        .iter()
+        .map(runmat_analysis_execution::PreparedSignalMaterialization::expectation)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let source_study = prepare_study_source(&spec, context, signal_materializations)?;
+    let study = &source_study.intent;
+    let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(study.continuation_bytes().map_err(anyhow::Error::msg)?);
     let project_identity = resolved.resolved.frozen.revision();
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project_identity.graph_digest.bytes()),
@@ -53,6 +69,7 @@ pub(super) async fn execute_study(
         "bundle-sizing-authority",
         &source_study.geometry_name,
         &source_study.geometry_bytes,
+        source_study.signal_materializations.clone(),
     )?;
     let mut bundle_builder =
         ExecutionBundleBuilder::native(&resolved.resolved.frozen, revision.clone())?
@@ -79,6 +96,7 @@ pub(super) async fn execute_study(
                 run_id,
                 &source_study.geometry_name,
                 &source_study.geometry_bytes,
+                source_study.signal_materializations.clone(),
             )?;
             prepare_remote_execution(prepared, revision.clone(), bundle_archive)
         },
@@ -92,6 +110,7 @@ pub(super) async fn execute_study(
             on_run_created: None,
             output_intent: SavedOutputIntent::StructuralStudy {
                 continuation: continuation.clone(),
+                signal_materializations: signal_expectations.clone(),
                 revision: revision.clone(),
                 materialization: crate::commands::job::secret::OutputMaterialization::Pending,
                 result: None,
@@ -125,6 +144,7 @@ pub(super) async fn execute_study(
         outputs.response,
         objects,
         &continuation,
+        &signal_expectations,
         revision,
     )?;
     crate::commands::job::secret::mark_structural_study_materialized(
@@ -145,11 +165,51 @@ pub(super) async fn execute_sweep(
 ) -> Result<Option<OperationEnvelope<AnalysisStudySweepData>>> {
     let identity =
         analysis_study_sweep_identity(&spec, &context).map_err(super::report_operation_error)?;
+    let resolved = crate::commands::package::resolve_for_source(source, cli)
+        .await?
+        .context("remote FEA requires a runmat.toml project containing the sweep document")?;
+    let signal_counts = spec
+        .studies
+        .iter()
+        .map(|study| {
+            study.model.as_ref().map_or(0, |model| {
+                model
+                    .signals
+                    .iter()
+                    .filter(|signal| signal.generator().is_some())
+                    .count()
+            })
+        })
+        .collect::<Vec<_>>();
+    let signals = spec
+        .studies
+        .iter()
+        .filter_map(|study| study.model.as_ref())
+        .flat_map(|model| model.signals.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut materializations = prepare_signal_materializations_in_frozen(
+        source,
+        &signals,
+        &resolved.resolved.frozen,
+        config,
+    )
+    .await?
+    .into_iter();
     let studies = spec
         .studies
         .iter()
-        .map(|study| prepare_study_source(study, context.clone()))
+        .zip(signal_counts)
+        .map(|(study, count)| {
+            prepare_study_source(
+                study,
+                context.clone(),
+                materializations.by_ref().take(count).collect(),
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
+    if materializations.next().is_some() {
+        anyhow::bail!("remote sweep signal materialization inventory is oversized");
+    }
     let continuations = studies
         .iter()
         .map(|study| {
@@ -160,9 +220,16 @@ pub(super) async fn execute_sweep(
                 .map_err(anyhow::Error::msg)
         })
         .collect::<Result<Vec<_>>>()?;
-    let resolved = crate::commands::package::resolve_for_source(source, cli)
-        .await?
-        .context("remote FEA requires a runmat.toml project containing the sweep document")?;
+    let signal_expectations = studies
+        .iter()
+        .map(|study| {
+            study
+                .signal_materializations
+                .iter()
+                .map(runmat_analysis_execution::PreparedSignalMaterialization::expectation)
+                .collect::<std::result::Result<Vec<_>, _>>()
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     let project_identity = resolved.resolved.frozen.revision();
     let revision = ProgramRevision::new(
         Digest::from_bytes(*project_identity.graph_digest.bytes()),
@@ -215,6 +282,7 @@ pub(super) async fn execute_sweep(
             output_intent: SavedOutputIntent::StructuralSweep {
                 spec: Box::new(spec.clone()),
                 continuations: continuations.clone(),
+                signal_materializations: signal_expectations.clone(),
                 revision: revision.clone(),
                 materialization: crate::commands::job::secret::OutputMaterialization::Pending,
                 result: None,
@@ -249,6 +317,7 @@ pub(super) async fn execute_sweep(
         objects,
         &spec,
         &continuations,
+        &signal_expectations,
         revision,
     )?;
     crate::commands::job::secret::mark_structural_sweep_materialized(

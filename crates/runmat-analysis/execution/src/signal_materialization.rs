@@ -13,7 +13,8 @@ use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
 const CHUNK_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-signal-chunk/v1\0";
 const RESULT_ENVELOPE_BYTES: usize = 4096;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SignalGeneratorChunk {
     pub ordinal: u32,
     pub first_sample: usize,
@@ -99,18 +100,13 @@ pub fn plan_signal_generator_chunks(
         for argument in &arguments {
             argument.validate(ValueLimits::default())?;
         }
-        let identity = Digest::sha256(runmat_canonical_codec::encode_contract(
-            CHUNK_IDENTITY_PREFIX,
-            "signal-generator-chunk",
-            &(
-                admitted.materialization_identity,
-                ordinal,
-                first_sample,
-                &point_bits,
-                &arguments,
-            ),
-            runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
-        )?);
+        let identity = chunk_identity(
+            admitted.materialization_identity,
+            ordinal,
+            first_sample,
+            &point_bits,
+            &arguments,
+        )?;
         chunks.push(SignalGeneratorChunk {
             ordinal,
             first_sample,
@@ -135,6 +131,7 @@ pub fn canonicalize_signal_generator_outputs(
     chunks: &[SignalGeneratorChunk],
     outputs: &[SignalGeneratorChunkOutput],
 ) -> AnalysisBridgeResult<CanonicalSignalRealization> {
+    validate_signal_generator_chunks(signal, admitted, chunks)?;
     let generator = matching_generator(signal, admitted)?;
     if chunks.len() != outputs.len()
         || chunks
@@ -208,6 +205,71 @@ pub fn canonicalize_signal_generator_outputs(
     )?)
 }
 
+/// Revalidate a transported chunk plan against its authored signal and admitted callable.
+pub fn validate_signal_generator_chunks(
+    signal: &PhysicalSignal,
+    admitted: &AdmittedSignalGenerator,
+    chunks: &[SignalGeneratorChunk],
+) -> AnalysisBridgeResult<()> {
+    let generator = matching_generator(signal, admitted)?;
+    if chunks.is_empty() {
+        return Err(AnalysisBridgeError::Invalid(
+            "signal generator produced no executable chunks".into(),
+        ));
+    }
+    let mut expected_first_sample = 0_usize;
+    for (ordinal, chunk) in chunks.iter().enumerate() {
+        let expected_ordinal = u32::try_from(ordinal).map_err(|_| {
+            AnalysisBridgeError::Invalid("signal chunk count exceeds its identity bound".into())
+        })?;
+        let end = expected_first_sample
+            .checked_add(chunk.sample_points.len())
+            .ok_or_else(|| AnalysisBridgeError::Invalid("signal sample count overflows".into()))?;
+        let expected_points = admitted
+            .sample_points
+            .get(expected_first_sample..end)
+            .ok_or(AnalysisBridgeError::Identity(
+                "signal chunks exceed the admitted sample axis",
+            ))?;
+        if chunk.ordinal != expected_ordinal
+            || chunk.first_sample != expected_first_sample
+            || chunk.sample_points
+                != expected_points
+                    .iter()
+                    .map(|point| point.to_bits())
+                    .collect::<Vec<_>>()
+            || chunk.arguments.first() != Some(&axis_argument(expected_points)?)
+            || chunk.arguments.len() != generator.arguments.len() + 1
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "signal chunk differs from its admitted sample or argument layout",
+            ));
+        }
+        for (declared, encoded) in generator.arguments.iter().zip(&chunk.arguments[1..]) {
+            validate_encoded_argument(declared, encoded)?;
+        }
+        let identity = chunk_identity(
+            admitted.materialization_identity,
+            chunk.ordinal,
+            chunk.first_sample,
+            &chunk.sample_points,
+            &chunk.arguments,
+        )?;
+        if chunk.identity != identity {
+            return Err(AnalysisBridgeError::Identity(
+                "signal chunk identity differs from its canonical plan",
+            ));
+        }
+        expected_first_sample = end;
+    }
+    if expected_first_sample != admitted.sample_points.len() {
+        return Err(AnalysisBridgeError::Identity(
+            "signal chunks do not cover every admitted sample",
+        ));
+    }
+    Ok(())
+}
+
 fn matching_generator<'a>(
     signal: &'a PhysicalSignal,
     admitted: &AdmittedSignalGenerator,
@@ -264,6 +326,64 @@ fn encode_argument(
         GeneratorArgument::Artifact(artifact) => return resolve_artifact(artifact),
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
+}
+
+fn validate_encoded_argument(
+    declared: &GeneratorArgument,
+    encoded: &ValuePayload,
+) -> AnalysisBridgeResult<()> {
+    match declared {
+        GeneratorArgument::Artifact(artifact) => {
+            let expected = artifact
+                .content_digest
+                .parse::<Digest>()
+                .map_err(AnalysisBridgeError::Platform)?;
+            let ValuePayload::Object(reference) = encoded else {
+                return Err(AnalysisBridgeError::Identity(
+                    "signal artifact argument is not an immutable object reference",
+                ));
+            };
+            if reference.logical_digest != expected {
+                return Err(AnalysisBridgeError::Identity(
+                    "signal artifact argument differs from its declared content",
+                ));
+            }
+        }
+        _ => {
+            let expected = encode_argument(declared, &mut |_| {
+                Err(AnalysisBridgeError::Invalid(
+                    "unexpected signal artifact argument".into(),
+                ))
+            })?;
+            if encoded != &expected {
+                return Err(AnalysisBridgeError::Identity(
+                    "signal argument differs from its authored value",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn chunk_identity(
+    materialization: runmat_analysis_fea::execution::SignalMaterializationIdentity,
+    ordinal: u32,
+    first_sample: usize,
+    sample_points: &[u64],
+    arguments: &[ValuePayload],
+) -> AnalysisBridgeResult<Digest> {
+    Ok(Digest::sha256(runmat_canonical_codec::encode_contract(
+        CHUNK_IDENTITY_PREFIX,
+        "signal-generator-chunk",
+        &(
+            materialization,
+            ordinal,
+            first_sample,
+            sample_points,
+            arguments,
+        ),
+        runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
+    )?))
 }
 
 enum DecodedValues {

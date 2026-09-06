@@ -40,44 +40,19 @@ pub(crate) async fn execute(
             });
         studies.push((study, study_root, meshing_index));
     }
-
-    let mut meshing_tasks = tokio::task::JoinSet::new();
-    for (meshing_index, meshing_request) in meshing_requests.into_iter().enumerate() {
-        let pool = Arc::clone(&pool);
-        let resources = resources.clone();
-        let task_scope = format!("{run_id}/mesh/{meshing_index}");
-        meshing_tasks.spawn(async move {
-            let outcome = super::exact_meshing::execute_for_composition(
-                pool,
-                &meshing_request,
-                &task_scope,
-                &resources,
-            )
-            .await?;
-            let outcome = match outcome {
-                super::exact_meshing::RemoteExactMeshingComposition::Completed(completed) => {
-                    SharedMeshingOutcome::Completed(completed)
-                }
-                super::exact_meshing::RemoteExactMeshingComposition::Terminal(terminal) => {
-                    SharedMeshingOutcome::Terminal(super::exact_structural_study::composition(
-                        terminal,
-                    ))
-                }
-            };
-            Ok::<_, NativeExecutionError>((meshing_index, outcome))
-        });
-    }
-
-    let mut meshing_outcomes = (0..meshing_tasks.len()).map(|_| None).collect::<Vec<_>>();
-    while let Some(completed) = meshing_tasks.join_next().await {
-        let (meshing_index, outcome) = completed
-            .map_err(|error| protocol(format!("remote meshing coordinator failed: {error}")))??;
-        meshing_outcomes[meshing_index] = Some(outcome);
-    }
-    let meshing_outcomes = meshing_outcomes
-        .into_iter()
-        .map(|outcome| outcome.ok_or_else(|| protocol("remote meshing group did not terminate")))
-        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let signal_execution = super::signal_materialization::execute(
+        Arc::clone(&pool),
+        studies
+            .iter()
+            .flat_map(|(_, study, _)| study.signal_materializations.iter().cloned()),
+        &decoded.artifact_access,
+        &resources,
+    );
+    let meshing_execution =
+        execute_shared_meshing(Arc::clone(&pool), meshing_requests, &run_id, &resources);
+    let (signal_outcomes, meshing_outcomes) = tokio::join!(signal_execution, meshing_execution);
+    let signal_outcomes = signal_outcomes?;
+    let meshing_outcomes = meshing_outcomes?;
 
     if decoded.fail_fast {
         if let Some((failed_group, terminal)) =
@@ -120,11 +95,17 @@ pub(crate) async fn execute(
         let shared_meshing = meshing_outcomes[meshing_index].clone();
         let pool = Arc::clone(&pool);
         let resources = resources.clone();
+        let signal_outcomes = signal_outcomes.clone();
         tasks.spawn(async move {
             let outcome = match shared_meshing {
                 SharedMeshingOutcome::Completed(completed) => {
                     super::exact_structural_study::execute_with_completed_meshing(
-                        pool, &study, study_root, completed, &resources,
+                        pool,
+                        &study,
+                        study_root,
+                        completed,
+                        &signal_outcomes,
+                        &resources,
                     )
                     .await?
                 }
@@ -174,6 +155,52 @@ pub(crate) async fn execute(
         outcomes,
         pool,
     )
+}
+
+async fn execute_shared_meshing(
+    pool: Arc<RemotePoolDriver>,
+    meshing_requests: Vec<ProgramExecutionRequest>,
+    run_id: &str,
+    resources: &AllocationResources,
+) -> NativeExecutionResult<Vec<SharedMeshingOutcome>> {
+    let mut meshing_tasks = tokio::task::JoinSet::new();
+    for (meshing_index, meshing_request) in meshing_requests.into_iter().enumerate() {
+        let pool = Arc::clone(&pool);
+        let resources = resources.clone();
+        let task_scope = format!("{run_id}/mesh/{meshing_index}");
+        meshing_tasks.spawn(async move {
+            let outcome = super::exact_meshing::execute_for_composition(
+                pool,
+                &meshing_request,
+                &task_scope,
+                &resources,
+            )
+            .await?;
+            let outcome = match outcome {
+                super::exact_meshing::RemoteExactMeshingComposition::Completed(completed) => {
+                    SharedMeshingOutcome::Completed(completed)
+                }
+                super::exact_meshing::RemoteExactMeshingComposition::Terminal(terminal) => {
+                    SharedMeshingOutcome::Terminal(super::exact_structural_study::composition(
+                        terminal,
+                    ))
+                }
+            };
+            Ok::<_, NativeExecutionError>((meshing_index, outcome))
+        });
+    }
+
+    let mut meshing_outcomes = (0..meshing_tasks.len()).map(|_| None).collect::<Vec<_>>();
+    while let Some(completed) = meshing_tasks.join_next().await {
+        let (meshing_index, outcome) = completed
+            .map_err(|error| protocol(format!("remote meshing coordinator failed: {error}")))??;
+        meshing_outcomes[meshing_index] = Some(outcome);
+    }
+    let meshing_outcomes = meshing_outcomes
+        .into_iter()
+        .map(|outcome| outcome.ok_or_else(|| protocol("remote meshing group did not terminate")))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    Ok(meshing_outcomes)
 }
 
 fn composition_terminal(

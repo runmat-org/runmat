@@ -58,18 +58,34 @@ pub(super) async fn execute_for_composition(
     resources: &AllocationResources,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     let decoded = crate::decode_exact_structural_study_root(request, pool.as_ref())?;
-    let completed = match super::exact_meshing::execute_for_composition(
+    let signal_materializations = decoded.signal_materializations.clone();
+    let artifact_access = decoded.artifact_access.clone();
+    let meshing = super::exact_meshing::execute_for_composition(
         Arc::clone(&pool),
         &decoded.exact_meshing,
         run_id,
         resources,
-    )
-    .await?
-    {
+    );
+    let signals = super::signal_materialization::execute(
+        Arc::clone(&pool),
+        signal_materializations,
+        &artifact_access,
+        resources,
+    );
+    let (meshing, signal_outcomes) = tokio::join!(meshing, signals);
+    let completed = match meshing? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
     };
-    execute_with_completed_meshing(pool, request, decoded, completed, resources).await
+    execute_with_completed_meshing(
+        pool,
+        request,
+        decoded,
+        completed,
+        &signal_outcomes?,
+        resources,
+    )
+    .await
 }
 
 pub(super) async fn execute_with_completed_meshing(
@@ -77,6 +93,10 @@ pub(super) async fn execute_with_completed_meshing(
     request: &ProgramExecutionRequest,
     decoded: crate::DecodedExactStructuralStudyRoot,
     completed: Box<super::exact_meshing::CompletedRemoteExactMeshing>,
+    signal_outcomes: &BTreeMap<
+        runmat_analysis_fea::execution::SignalMaterializationIdentity,
+        super::signal_materialization::RemoteSignalMaterializationOutcome,
+    >,
     resources: &AllocationResources,
 ) -> NativeExecutionResult<RemoteExactStructuralStudyComposition> {
     if completed.result.artifact.geometry.source_digest.bytes()
@@ -112,6 +132,14 @@ pub(super) async fn execute_with_completed_meshing(
     )?;
 
     let mut workload = decoded.workload_template.clone();
+    let completed_signals = match super::signal_materialization::apply_to_workload(
+        &mut workload,
+        &decoded.signal_materializations,
+        signal_outcomes,
+    ) {
+        Ok(completed) => completed,
+        Err(terminal) => return Ok(signal_composition(terminal)),
+    };
     if let Err(error) = resolve_workload_boundary_aliases(&mut workload, &resolution) {
         return Ok(RemoteExactStructuralStudyComposition::Failed(error));
     }
@@ -201,6 +229,7 @@ pub(super) async fn execute_with_completed_meshing(
             &decoded,
             &completed.result,
             &boundary_objects,
+            &completed_signals,
             &analysis_response,
             unresolved_workload_digest,
         )?;
@@ -208,6 +237,27 @@ pub(super) async fn execute_with_completed_meshing(
         pool.register_execution_object(object.reference, object.bytes)?;
     }
     Ok(RemoteExactStructuralStudyComposition::Completed(response))
+}
+
+fn signal_composition(
+    outcome: super::signal_materialization::RemoteSignalMaterializationOutcome,
+) -> RemoteExactStructuralStudyComposition {
+    match outcome {
+        super::signal_materialization::RemoteSignalMaterializationOutcome::Completed(_) => {
+            RemoteExactStructuralStudyComposition::Failed(
+                "completed signal materialization was used as a terminal outcome".into(),
+            )
+        }
+        super::signal_materialization::RemoteSignalMaterializationOutcome::Failed(message) => {
+            RemoteExactStructuralStudyComposition::Failed(message)
+        }
+        super::signal_materialization::RemoteSignalMaterializationOutcome::Cancelled => {
+            RemoteExactStructuralStudyComposition::Cancelled
+        }
+        super::signal_materialization::RemoteSignalMaterializationOutcome::Indeterminate(
+            message,
+        ) => RemoteExactStructuralStudyComposition::Indeterminate(message),
+    }
 }
 
 pub(super) fn composition(

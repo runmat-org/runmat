@@ -4,18 +4,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
-use runmat_analysis_execution::analysis_worker_capabilities;
-use runmat_analysis_fea::execution::{StructuralLinearWorkload, StudyIdentity, SweepIdentity};
+use runmat_analysis_core::{
+    GeneratorDomain, GeneratorEffectPolicy, PhysicalSignal, SignalExtrapolation, SignalGenerator,
+    SignalInterpolation, SignalRepresentation, SignalSamplingPolicy,
+};
+use runmat_analysis_execution::{
+    admit_named_signal_generator, analysis_worker_capabilities, plan_signal_generator_chunks,
+    prepare_signal_materialization, PreparedSignalMaterialization,
+};
+use runmat_analysis_fea::execution::{
+    SignalMaterializationIdentity, StructuralLinearWorkload, StudyIdentity, SweepIdentity,
+};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT;
-use runmat_execution::resource::ResourceInventory;
+use runmat_execution::resource::{Capability, ResourceInventory};
+use runmat_execution::value::ValueLimits;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ArtifactAccess, ExecutionBundleBuilder};
+use runmat_execution_artifact::{ArtifactAccess, BundleCallable, ExecutionBundleBuilder};
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_transport_native::control::ResourceRequest;
 use runmat_execution_transport_native::frame::FrameLimits;
@@ -48,6 +58,8 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         "[package]\nname = \"remote-exact-structural-study\"\n[sources]\nroots = [\"src\"]\n",
     )
     .unwrap();
+    let generator_source = "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = t * [0, 0, 0];\ny(:, 2) = magnitude;\nend\n";
+    std::fs::write(project_root.path().join("src/pulse.m"), generator_source).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
         BTreeSet::new(),
@@ -79,7 +91,13 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     })
     .unwrap();
     let source_digest = Digest::sha256(BOX);
-    let workload = box_structural_workload();
+    let (workload, signal_materialization) = generated_box_workload(
+        &project,
+        revision.clone(),
+        project_root.path().join("src/pulse.m"),
+        generator_source,
+    )
+    .await;
     let first_study_digest = Digest::sha256(b"box structural study A");
     let second_study_digest = Digest::sha256(b"box structural study B");
     let invalid_study_digest = Digest::sha256(b"box structural study invalid boundary");
@@ -90,6 +108,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
         workload_template: workload.clone(),
+        signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
@@ -99,11 +118,12 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: second_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workload_template: workload,
+        workload_template: workload.clone(),
+        signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
     .unwrap();
-    let mut invalid_workload = box_structural_workload();
+    let mut invalid_workload = workload;
     invalid_workload.model.constraints[0].visit_targets_mut(|target| {
         *target = runmat_analysis_core::RegionTarget::boundary("face_999999");
     });
@@ -114,6 +134,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
         workload_template: invalid_workload,
+        signal_materializations: vec![signal_materialization],
         exact_meshing,
     })
     .unwrap();
@@ -173,6 +194,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         std::iter::empty(),
         false,
     ));
+    capabilities.insert(Capability::ProcessIsolation);
     let resources = ResourceRequest {
         cpu_millicores: 500,
         memory_bytes: 1 << 30,
@@ -279,6 +301,38 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         else {
             panic!("remote exact structural sweep did not complete")
         };
+        assert_eq!(
+            pool.snapshot()
+                .tasks
+                .values()
+                .filter(|task| task.submission.request.callable.qualified_name == "pulse")
+                .count(),
+            1,
+            "identical signal materializations must execute once across a sweep"
+        );
+        let diagnostic_sweep = import_exact_structural_sweep_result(
+            pool.as_ref(),
+            completed.response.clone(),
+            &expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                diagnostic_sweep.entries[0].terminal,
+                ExactStructuralSweepTerminal::Succeeded(_)
+            ),
+            "first remote structural sweep entry did not succeed: {:?}",
+            diagnostic_sweep.entries[0].terminal
+        );
+        assert!(
+            matches!(
+                diagnostic_sweep.entries[1].terminal,
+                ExactStructuralSweepTerminal::Succeeded(_)
+            ),
+            "second remote structural sweep entry did not succeed: {:?}",
+            diagnostic_sweep.entries[1].terminal
+        );
         let mut wrong_request = expectation.clone();
         wrong_request.studies[0]
             .expected_meshing_request
@@ -287,6 +341,23 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             pool.as_ref(),
             completed.response.clone(),
             &wrong_request,
+            ObjectInventoryLimits::default(),
+        )
+        .is_err());
+        let mut wrong_signal = expectation.clone();
+        wrong_signal.studies[0].signal_materializations[0]
+            .admitted
+            .materialization_identity = SignalMaterializationIdentity::new(
+            Digest::sha256(b"substituted signal"),
+            None,
+            Digest::sha256(b"substituted sampling"),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(import_exact_structural_sweep_result(
+            pool.as_ref(),
+            completed.response.clone(),
+            &wrong_signal,
             ObjectInventoryLimits::default(),
         )
         .is_err());
@@ -362,6 +433,12 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             runmat_analysis_core::AnalysisProcedure::Static
         );
         assert!(result
+            .resolved_workload
+            .model
+            .signals
+            .iter()
+            .all(|signal| signal.generator().is_none()));
+        assert!(result
             .boundary_resolution
             .aliases
             .contains_key("face_000001"));
@@ -413,6 +490,95 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     };
     let (server_result, ()) = tokio::join!(server, client);
     server_result.unwrap();
+}
+
+async fn generated_box_workload(
+    project: &runmat_package::FrozenProject,
+    revision: ProgramRevision,
+    source_path: std::path::PathBuf,
+    source_text: &str,
+) -> (StructuralLinearWorkload, PreparedSignalMaterialization) {
+    let mut workload = box_structural_workload();
+    let signal = workload
+        .model
+        .signals
+        .first_mut()
+        .expect("cantilever fixture must contain its force signal");
+    let PhysicalSignal::Force(force) = signal else {
+        panic!("cantilever fixture signal must be force")
+    };
+    force.representation = SignalRepresentation::Generator(SignalGenerator {
+        qualified_function: "pulse".into(),
+        arguments: vec![runmat_analysis_core::GeneratorArgument::Real(-1_000.0)],
+        domain: GeneratorDomain::TimeSeconds,
+        sampling: SignalSamplingPolicy::Uniform {
+            start: 0.0,
+            end: 1.0,
+            sample_count: 5,
+        },
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+        effects: GeneratorEffectPolicy::Pure,
+    });
+    let authored = signal.clone();
+
+    let symbols = runmat_package::source_symbols_from_frozen(project, &source_path);
+    let definition = symbols
+        .definitions
+        .iter()
+        .find(|definition| definition.name == "pulse")
+        .expect("frozen pulse definition");
+    let source_id = definition
+        .source_id
+        .as_ref()
+        .expect("frozen pulse source id");
+    let owner_identity = source_id.package_instance.to_string();
+    let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .unwrap();
+    let unit = session
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::frozen(
+                owner_identity.clone(),
+                source_id.relative_path.as_str(),
+                source_path.to_string_lossy(),
+                source_text,
+            ),
+            Some(revision.clone()),
+        )
+        .await
+        .unwrap();
+    let executable = unit.portable_envelope_for(Some("pulse")).unwrap();
+    let function = unit
+        .function_analysis(executable.manifest.identity.entrypoint_function)
+        .cloned()
+        .expect("pulse static facts");
+    let executable_source_digest = unit.revision().source_digest.parse::<Digest>().unwrap();
+    let admitted = admit_named_signal_generator(
+        &authored,
+        revision,
+        BundleCallable {
+            owner_identity,
+            qualified_name: "pulse".into(),
+            source_digest: Digest::sha256(source_text),
+        },
+        executable_source_digest,
+        &function,
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    let chunks = plan_signal_generator_chunks(
+        &authored,
+        &admitted,
+        None,
+        usize::try_from(ValueLimits::default().max_inline_bytes).unwrap(),
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap();
+    let prepared =
+        prepare_signal_materialization(authored, admitted, executable, chunks, Vec::new()).unwrap();
+    (workload, prepared)
 }
 
 fn box_structural_workload() -> StructuralLinearWorkload {
