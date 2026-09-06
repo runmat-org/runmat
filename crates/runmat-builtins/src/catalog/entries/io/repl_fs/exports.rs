@@ -1,6 +1,7 @@
 pub use super::addpath::*;
 pub use super::cd::*;
 pub use super::directory_lifecycle::*;
+pub use super::directory_listing::*;
 pub use super::environment::*;
 pub use super::file_transfer::*;
 pub use super::genpath::*;

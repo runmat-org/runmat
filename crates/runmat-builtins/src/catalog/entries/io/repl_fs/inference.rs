@@ -12,6 +12,9 @@ pub(in crate::catalog::entries::io) fn infer(
         IoReplFsInferenceRule::DirectoryLifecycle(rule) => {
             super::directory_lifecycle::infer(rule, request, entry)
         }
+        IoReplFsInferenceRule::DirectoryListing(rule) => {
+            super::directory_listing::infer(rule, request, entry)
+        }
         IoReplFsInferenceRule::Environment(rule) => super::environment::infer(rule, request, entry),
         IoReplFsInferenceRule::FileTransfer(rule) => {
             super::file_transfer::infer(rule, request, entry)

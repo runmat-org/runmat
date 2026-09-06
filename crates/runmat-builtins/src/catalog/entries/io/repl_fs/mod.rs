@@ -1,6 +1,7 @@
 mod addpath;
 mod cd;
 mod directory_lifecycle;
+mod directory_listing;
 mod environment;
 mod exports;
 mod file_transfer;

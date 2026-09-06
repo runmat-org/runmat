@@ -1653,6 +1653,59 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "directory-listing family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_listing",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_listing/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_listing/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_listing/dir/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_listing/ls/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing/dir/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing/ls/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/dir.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/ls.rs",
+    "docs/builtins/reference/dir.json",
+    "docs/builtins/reference/ls.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/dir.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/ls.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+]) {
+  if (/"(?:dir|ls)"/.test(read(sourcePath))) {
+    fail(`${sourcePath} must route directory-listing inference by typed rules, not builtin names`);
+  }
+}
+if (/\bpub fn (?:dir|ls)_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy dir/ls type resolvers must not return after catalog cutover");
+}
+if (/"(?:dir|ls)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim directory-listing authority");
+}
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/io/repl_fs/directory_listing",
+)) {
+  if (/glob::glob\b/.test(text)) {
+    fail(`${sourcePath} must enumerate through runmat-filesystem, not the host glob walker`);
+  }
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
