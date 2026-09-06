@@ -12,7 +12,9 @@ pub const PATHSEP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::PathSyntax(PathSyntaxInferenceRule::PathListSeparator),
+            IoReplFsInferenceRule::path(PathInferenceRule::Syntax(
+                PathSyntaxInferenceRule::PathListSeparator,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,

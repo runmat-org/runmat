@@ -25,7 +25,9 @@ pub const DIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::DirectoryListing(DirectoryListingInferenceRule::Metadata),
+            IoReplFsInferenceRule::directory(DirectoryInferenceRule::Listing(
+                DirectoryListingInferenceRule::Metadata,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

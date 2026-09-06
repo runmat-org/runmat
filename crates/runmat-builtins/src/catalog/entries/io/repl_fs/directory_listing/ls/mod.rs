@@ -24,7 +24,9 @@ pub const LS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::DirectoryListing(DirectoryListingInferenceRule::Names),
+            IoReplFsInferenceRule::directory(DirectoryInferenceRule::Listing(
+                DirectoryListingInferenceRule::Names,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

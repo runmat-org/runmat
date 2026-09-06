@@ -1373,7 +1373,12 @@ for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/entries/io/console/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/exports.rs", 32],
-  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/directory.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/file.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/path.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/working_directory.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/text_input.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path/mod.rs", 32],
 ])) {
@@ -1393,6 +1398,20 @@ if (/IoInferenceRule::(?:ClearConsole|ChangeDirectory|CurrentDirectory|SearchPat
 }
 if (rustSources("crates/runmat-builtins/src/catalog/inference/io").length > 0) {
   fail("IO inference belongs beside its catalog entries; the secondary inference tree must not return");
+}
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference",
+)) {
+  if (/"[^"\n]*"/.test(text)) {
+    fail(`${sourcePath} is a typed routing layer and must not select policy from string literals`);
+  }
+  if (/\b(?:if|for|while|loop)\b/.test(text)) {
+    fail(`${sourcePath} is a typed routing layer and must not acquire conditional domain policy`);
+  }
+  const matchCount = (text.match(/\bmatch\b/g) ?? []).length;
+  if (matchCount !== 1) {
+    fail(`${sourcePath} must contain exactly one exhaustive typed dispatch match (found ${matchCount})`);
+  }
 }
 for (const obsolete of [
   "crates/runmat-builtins/src/catalog/inference/routing/io/console.rs",
@@ -1679,10 +1698,45 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "source-inventory family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/source_inventory",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/source_inventory",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/source_inventory/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/source_inventory/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/source_inventory/what/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/source_inventory/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/source_inventory/what/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/what.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/what.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+]) {
+  if (/"what"/.test(read(sourcePath))) {
+    fail(`${sourcePath} must route source-inventory inference by typed rules, not builtin names`);
+  }
+}
+if (/(?:WHAT_(?:DESCRIPTOR|INTEGER_AUDIT)|name\s*=\s*"what"|what_builtin)/.test(
+  read("crates/runmat-runtime/src/builtins/io/repl_fs/compat.rs"),
+)) {
+  fail("the REPL-filesystem compatibility bucket must not reclaim what ownership");
+}
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
 ]) {
   if (/"(?:dir|ls)"/.test(read(sourcePath))) {
@@ -1709,7 +1763,7 @@ for (const { path: sourcePath, text } of rustSources(
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/inference.rs",
 ]) {
@@ -1729,7 +1783,7 @@ if (/"(?:isfile|isfolder)"\s*(?:\||=>)/.test(
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/file_transfer/inference.rs",
@@ -1751,7 +1805,7 @@ if (/"(?:copyfile|movefile)"\s*(?:\||=>)/.test(
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/directory_lifecycle/inference.rs",
@@ -1788,7 +1842,7 @@ if (/\b(?:struct WarningPolicy|struct WarningManager|static WARNING_MANAGER)\b/.
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_syntax/inference.rs",
@@ -1811,7 +1865,7 @@ if (/"(?:fullfile|fileparts|filesep|pathsep)"\s*(?:\||=>)/.test(
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/inference.rs",
@@ -1834,7 +1888,7 @@ if (/"(?:tempdir|tempname)"\s*(?:\||=>)/.test(
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/inference.rs",
-  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
 ]) {
   const source = read(sourcePath);

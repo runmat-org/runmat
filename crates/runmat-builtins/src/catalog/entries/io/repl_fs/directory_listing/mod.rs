@@ -2,7 +2,6 @@ mod dir;
 mod facts;
 mod inference;
 mod ls;
-mod validation;
 
 use crate::{BuiltinCatalogEntry, DirectoryListingInferenceRule};
 use runmat_types::{CallInference, CallRequest};

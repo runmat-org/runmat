@@ -17,7 +17,7 @@ pub(in crate::catalog::entries::io::repl_fs::directory_listing) fn infer(
     if request
         .arguments
         .first()
-        .is_some_and(|argument| !super::super::validation::scalar_text(argument))
+        .is_some_and(|argument| !super::super::super::text_input::scalar(argument))
     {
         diagnostics.push(argument_error(
             "RM-CATALOG-LS-NAME",

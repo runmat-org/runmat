@@ -28,7 +28,7 @@ pub const ADDPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::SearchPath(SearchPathInferenceRule::Add),
+            IoReplFsInferenceRule::path(PathInferenceRule::Search(SearchPathInferenceRule::Add)),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

@@ -27,7 +27,9 @@ pub const GENPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::SearchPath(SearchPathInferenceRule::Generate),
+            IoReplFsInferenceRule::path(PathInferenceRule::Search(
+                SearchPathInferenceRule::Generate,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

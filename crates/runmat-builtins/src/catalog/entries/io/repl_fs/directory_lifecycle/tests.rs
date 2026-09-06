@@ -13,17 +13,17 @@ fn entries_are_canonical_and_use_typed_family_rules() {
     assert!(matches!(
         mkdir.contract.inference_rule,
         BuiltinInferenceRule::Io(crate::IoInferenceRule::ReplFs(
-            crate::IoReplFsInferenceRule::DirectoryLifecycle(
+            crate::IoReplFsInferenceRule::Directory(crate::DirectoryInferenceRule::Lifecycle(
                 crate::DirectoryLifecycleInferenceRule::Create
-            )
+            ))
         ))
     ));
     assert!(matches!(
         rmdir.contract.inference_rule,
         BuiltinInferenceRule::Io(crate::IoInferenceRule::ReplFs(
-            crate::IoReplFsInferenceRule::DirectoryLifecycle(
+            crate::IoReplFsInferenceRule::Directory(crate::DirectoryInferenceRule::Lifecycle(
                 crate::DirectoryLifecycleInferenceRule::Remove
-            )
+            ))
         ))
     ));
 }

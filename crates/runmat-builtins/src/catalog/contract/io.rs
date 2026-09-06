@@ -13,22 +13,62 @@ pub enum IoConsoleInferenceRule {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum IoReplFsInferenceRule {
-    ChangeDirectory,
-    CurrentDirectory,
-    DirectoryLifecycle(DirectoryLifecycleInferenceRule),
+    WorkingDirectory(WorkingDirectoryInferenceRule),
+    Directory(DirectoryInferenceRule),
     Environment(EnvironmentInferenceRule),
-    DirectoryListing(DirectoryListingInferenceRule),
-    FileTransfer(FileTransferInferenceRule),
-    PathPredicate(PathPredicateInferenceRule),
-    PathSyntax(PathSyntaxInferenceRule),
-    SearchPath(SearchPathInferenceRule),
-    TemporaryPath(TemporaryPathInferenceRule),
+    File(FileInferenceRule),
+    Path(PathInferenceRule),
+    SourceInventory(SourceInventoryInferenceRule),
+}
+
+impl IoReplFsInferenceRule {
+    pub const fn directory(rule: DirectoryInferenceRule) -> Self {
+        Self::Directory(rule)
+    }
+
+    pub const fn file(rule: FileInferenceRule) -> Self {
+        Self::File(rule)
+    }
+
+    pub const fn path(rule: PathInferenceRule) -> Self {
+        Self::Path(rule)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum WorkingDirectoryInferenceRule {
+    Change,
+    Current,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DirectoryInferenceRule {
+    Lifecycle(DirectoryLifecycleInferenceRule),
+    Listing(DirectoryListingInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FileInferenceRule {
+    Transfer(FileTransferInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum PathInferenceRule {
+    Predicate(PathPredicateInferenceRule),
+    Syntax(PathSyntaxInferenceRule),
+    Search(SearchPathInferenceRule),
+    Temporary(TemporaryPathInferenceRule),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DirectoryListingInferenceRule {
     Metadata,
     Names,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SourceInventoryInferenceRule {
+    FolderContents,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

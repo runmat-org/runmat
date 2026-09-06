@@ -1,6 +1,6 @@
 use runmat_types::{ShapeFact, ValueFact, ValueKindFact};
 
-pub(super) fn scalar_text(value: &ValueFact) -> bool {
+pub(super) fn scalar(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::Character => character_row(&value.shape),
         ValueKindFact::String | ValueKindFact::Unknown => {

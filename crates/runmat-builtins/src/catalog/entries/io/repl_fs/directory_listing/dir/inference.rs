@@ -15,7 +15,7 @@ pub(in crate::catalog::entries::io::repl_fs::directory_listing) fn infer(
         ));
     }
     for (index, argument) in request.arguments.iter().take(2).enumerate() {
-        if !super::super::validation::scalar_text(argument) {
+        if !super::super::super::text_input::scalar(argument) {
             diagnostics.push(argument_error(
                 if index == 0 {
                     "RM-CATALOG-DIR-NAME"

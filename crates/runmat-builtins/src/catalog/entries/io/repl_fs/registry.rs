@@ -17,6 +17,7 @@ pub(in crate::catalog::entries::io) fn extend_entries(
             super::pwd::ENTRIES,
             super::rmpath::ENTRIES,
             super::savepath::ENTRIES,
+            super::source_inventory::ENTRIES,
             super::temporary_path::ENTRIES,
         ],
     );
