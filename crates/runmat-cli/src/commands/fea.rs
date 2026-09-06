@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use log::info;
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_runtime::analysis::{
-    analysis_run_study_op, analysis_run_study_sweep_op, load_fea_document_from_path_async,
-    AnalysisStudyRunData, AnalysisStudySweepData, FeaResolvedDocument,
+    analysis_run_study_sweep_op, load_fea_document_from_path_async, AnalysisStudyRunData,
+    AnalysisStudySweepData, FeaResolvedDocument,
 };
 use runmat_runtime::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use serde::Serialize;
@@ -13,6 +13,8 @@ use crate::cli::Cli;
 use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::presentation;
 use crate::AlreadyReportedCliError;
+
+mod portable;
 
 pub async fn execute_fea_path(
     path: PathBuf,
@@ -58,7 +60,12 @@ pub async fn execute_fea_path(
                 );
                 eprintln!("  {}", styles.info("validating, planning, and solving"));
             }
-            let envelope = analysis_run_study_op(&spec, context).map_err(report_operation_error)?;
+            let executor = portable::InlineStructuralExecutor::new(&spec, config)?;
+            let envelope =
+                runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
+                    &spec, context, &executor,
+                )
+                .map_err(report_operation_error)?;
             if json {
                 print_envelope(&envelope, config.runtime.verbose)?;
             } else {

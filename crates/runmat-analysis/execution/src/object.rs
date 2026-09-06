@@ -117,9 +117,21 @@ pub fn import_analysis_objects(
             "analysis object closure exceeds its inventory limits".into(),
         ));
     }
+    let namespace = match root.kind {
+        ValueRefKind::ResultObject | ValueRefKind::WorkerObject => ObjectNamespace::ResultValue,
+        ValueRefKind::CheckpointObject => ObjectNamespace::Checkpoint,
+        ValueRefKind::DriverObject
+        | ValueRefKind::ProjectObject
+        | ValueRefKind::BroadcastObject => ObjectNamespace::InputValue,
+        ValueRefKind::ResidentObject | ValueRefKind::SlicedObject => {
+            return Err(AnalysisBridgeError::Invalid(
+                "analysis object reference kind has no portable numerical namespace".into(),
+            ))
+        }
+    };
     let mut objects = Vec::with_capacity(manifest.chunks.len() + 1);
     objects.push(logical_object(
-        ObjectNamespace::InputValue,
+        namespace,
         "analysis/manifests",
         ANALYSIS_MANIFEST_MEDIA_TYPE,
         manifest_bytes,
@@ -144,7 +156,7 @@ pub fn import_analysis_objects(
         }
         payload.extend_from_slice(&bytes);
         objects.push(logical_object(
-            ObjectNamespace::InputValue,
+            namespace,
             &format!("analysis/chunks/{:08}", chunk.ordinal),
             ANALYSIS_CHUNK_MEDIA_TYPE,
             bytes,

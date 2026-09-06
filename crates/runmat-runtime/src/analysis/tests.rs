@@ -869,6 +869,26 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
     }
 }
 
+#[test]
+fn study_content_digest_excludes_artifact_destinations() {
+    let mut first = sample_linear_static_study_spec();
+    first.solver_mesh_artifact_path = Some("first/solver-mesh.rmmesh".to_string());
+    first.meshing_evidence_artifact_path = Some("first/meshing-evidence.json".to_string());
+    let mut second = first.clone();
+    second.solver_mesh_artifact_path = Some("second/solver-mesh.rmmesh".to_string());
+    second.meshing_evidence_artifact_path = Some("second/meshing-evidence.json".to_string());
+
+    assert_eq!(
+        analysis_study_content_digest(&first),
+        analysis_study_content_digest(&second)
+    );
+    second.execution.steps[0].backend = ComputeBackend::Gpu;
+    assert_ne!(
+        analysis_study_content_digest(&first),
+        analysis_study_content_digest(&second)
+    );
+}
+
 fn fea_document_yaml(document: serde_json::Value) -> String {
     serde_yaml::to_string(&document).expect("FEA document fixture should serialize")
 }
@@ -2185,6 +2205,96 @@ fn analysis_run_study_executes_linear_static_path() {
         Some("linear_static_structural")
     );
     drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+struct CanonicalStructuralExecutor {
+    calls: AtomicU64,
+}
+
+impl StructuralLinearExecutor for CanonicalStructuralExecutor {
+    fn execute(
+        &self,
+        workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> Result<runmat_analysis_fea::FeaRunResult, String> {
+        use runmat_meshing_core::CanonicalMeshingContract;
+
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let workload =
+            runmat_analysis_fea::execution::StructuralLinearWorkload::from_canonical_bytes(
+                &workload
+                    .canonical_bytes()
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+            &mesh.canonical_encode().map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let run = runmat_analysis_fea::run_linear_static_with_options(
+            &workload.model,
+            workload.backend,
+            runmat_analysis_fea::LinearStaticSolveOptions {
+                formulation_requirement: workload.formulation_requirement,
+                preconditioner_kind: workload.preconditioner,
+                algebra_backend_kind: workload.algebra_backend,
+                solver_mesh_artifact_path: None,
+                solver_mesh: Some(mesh),
+                require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
+                thermo_mechanical_context: workload.thermo_mechanical_context,
+                electro_thermal_context: workload.electro_thermal_context,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        runmat_analysis_fea::execution::StructuralLinearWorkloadResult::from_canonical_bytes(
+            &runmat_analysis_fea::execution::StructuralLinearWorkloadResult {
+                schema_version: 1,
+                run,
+            }
+            .canonical_bytes()
+            .map_err(|error| error.to_string())?,
+        )
+        .map(|result| result.run)
+        .map_err(|error| error.to_string())
+    }
+}
+
+#[test]
+fn portable_structural_study_reenters_shared_runtime_persistence() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("portable-run-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("portable-run-study-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let envelope = analysis_run_study_with_structural_executor_op(
+        &spec,
+        OperationContext::new(None, None),
+        &executor,
+    )
+    .expect("portable structural study should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(envelope.operation, "fea.run_study");
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("portable run load should succeed")
+        .expect("portable run should be persisted");
+    assert_eq!(persisted.run.identity, envelope.data.identity);
+    assert_eq!(persisted.run_status, envelope.data.run_status);
+    assert_eq!(
+        persisted.production_publishable,
+        envelope.data.production_publishable
+    );
+    assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_dir_all(&solver_mesh_root);
 }
@@ -4558,7 +4668,10 @@ fn one_analysis_material_applies_uniformly_without_changing_the_mesh() {
     let model = sample_solid_model();
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
-    assert_eq!(material_coverage_gap_detail(&model, &mesh), None);
+    assert_eq!(
+        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        None
+    );
 }
 
 #[test]
@@ -4567,8 +4680,8 @@ fn multiple_analysis_materials_require_mesh_region_coverage() {
     model.material_assignments.clear();
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
-    let gap =
-        material_coverage_gap_detail(&model, &mesh).expect("region coverage must be required");
+    let gap = linear_static_result::material_coverage_gap_detail(&model, &mesh)
+        .expect("region coverage must be required");
     assert!(gap.contains("2 materials and no region assignments"));
 
     model.material_assignments = vec![MaterialAssignment {
@@ -4577,7 +4690,10 @@ fn multiple_analysis_materials_require_mesh_region_coverage() {
         assigned_material_id: "mat_polymer".to_string(),
         confidence: EvidenceConfidence::Verified,
     }];
-    assert_eq!(material_coverage_gap_detail(&model, &mesh), None);
+    assert_eq!(
+        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        None
+    );
 }
 
 #[test]

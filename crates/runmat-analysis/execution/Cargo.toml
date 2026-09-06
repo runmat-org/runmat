@@ -14,8 +14,10 @@ runmat-canonical-codec = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-execution-runner = { workspace = true }
+runmat-meshing-core = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+runmat-analysis-core = { workspace = true }
 serde_json = { workspace = true }

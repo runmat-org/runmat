@@ -5,6 +5,7 @@ mod host;
 mod object;
 mod response;
 mod serial;
+mod structural;
 mod task;
 mod transport;
 mod workload;
@@ -19,6 +20,10 @@ pub use response::AnalysisHostResponse;
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
     CompletedAnalysisWorkload,
+};
+pub use structural::{
+    import_structural_linear_result, prepare_structural_linear_program,
+    PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
 };
 pub use task::{build_analysis_task_submission, AnalysisExecutionContext};
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};

@@ -6,9 +6,10 @@ use super::contracts::{AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverO
 use super::{
     analysis_run_acoustic_with_options_op, analysis_run_cfd_with_options_op,
     analysis_run_cht_with_options_op, analysis_run_electromagnetic_with_options_op,
-    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_options,
+    analysis_run_fsi_with_options_op, analysis_run_linear_static_with_executor,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
+    StructuralLinearExecutor,
 };
 
 pub(super) fn execute_study_step(
@@ -16,6 +17,7 @@ pub(super) fn execute_study_step(
     execution: &AnalysisExecutionStep,
     solver_mesh_artifact_path: Option<&str>,
     context: &OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     match &execution.solver_options {
         AnalysisSolverOptions::StructuralLinear(authored_options) => {
@@ -24,12 +26,13 @@ pub(super) fn execute_study_step(
                 &mut options.solver_mesh_artifact_path,
                 solver_mesh_artifact_path,
             );
-            let run = analysis_run_linear_static_with_options(
+            let run = analysis_run_linear_static_with_executor(
                 model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
                 context.clone(),
+                structural_executor,
             )?;
             Ok((run, AnalysisSolverOptions::StructuralLinear(options)))
         }

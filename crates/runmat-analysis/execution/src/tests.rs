@@ -404,3 +404,204 @@ fn serial_execution_rejects_missing_and_tampered_chunks() {
     )
     .is_err());
 }
+
+struct StructuralResultKernel(Vec<u8>);
+
+impl AnalysisKernel for StructuralResultKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::Solve);
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::SemanticState,
+            logical_identity: invocation.host.workload.execution_plan.digest(),
+            payload: self.0.clone(),
+        }])
+    }
+}
+
+#[test]
+fn prepared_structural_study_closes_and_revalidates_its_real_result() {
+    use runmat_analysis_fea::execution::{
+        StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    };
+    use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+    use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
+    use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
+    use runmat_analysis_fea::{
+        run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
+    };
+    use runmat_execution::value::ValuePayload;
+    use runmat_execution_artifact::ProgramExecutionResponse;
+    use runmat_meshing_core::{
+        ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
+    };
+
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let solve = StructuralLinearWorkload {
+        schema_version: 1,
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: None,
+        electro_thermal_context: None,
+    };
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
+        face.provenance.push(PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    let assignment = solve.model.material_assignments.first().unwrap();
+    let region = PersistentEntityId {
+        kind: PersistentEntityKind::Region,
+        source_topology_id: assignment.region_id.clone(),
+        assembly_path: vec!["root".into()],
+    };
+    mesh.topology.volume_elements[0].region_id = region.clone();
+    mesh.topology.regions[0].region_id = region;
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+
+    let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: access(),
+        workload: solve.clone(),
+        mesh: mesh.clone(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_eq!(prepared.inputs.len(), 2);
+    assert_eq!(prepared.program.request.arguments.len(), 2);
+    assert!(prepared
+        .program
+        .request
+        .arguments
+        .iter()
+        .all(|input| matches!(input, ValuePayload::Object(_))));
+
+    let raw = run_linear_static_with_options(
+        &solve.model,
+        solve.backend,
+        LinearStaticSolveOptions {
+            formulation_requirement: solve.formulation_requirement,
+            preconditioner_kind: solve.preconditioner,
+            algebra_backend_kind: solve.algebra_backend,
+            solver_mesh_artifact_path: None,
+            solver_mesh: Some(mesh.clone()),
+            require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
+            thermo_mechanical_context: None,
+            electro_thermal_context: None,
+        },
+    )
+    .unwrap();
+    let encoded = StructuralLinearWorkloadResult {
+        schema_version: 1,
+        run: raw.clone(),
+    }
+    .canonical_bytes()
+    .unwrap();
+    let mut store = MemoryObjects::default();
+    for input in &prepared.inputs {
+        for object in &input.objects {
+            runmat_execution_artifact::cache::CacheExport::write_verified(&mut store, object)
+                .unwrap();
+        }
+    }
+    let completed = execute_serial_analysis(
+        &prepared.program.request,
+        &mut store,
+        &StructuralResultKernel(encoded),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&prepared.host, &completed)
+        .unwrap()
+        .program_response();
+    let decoded = import_structural_linear_result(
+        &store,
+        response.clone(),
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(decoded.run, raw);
+
+    let ProgramExecutionResponse::ExternalizedSuccess {
+        outputs,
+        mut result_objects,
+    } = response
+    else {
+        unreachable!()
+    };
+    result_objects.push(result_objects[0].clone());
+    assert!(import_structural_linear_result(
+        &store,
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        },
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+
+    let mut backend_variant = solve.clone();
+    backend_variant.backend = ComputeBackend::Gpu;
+    let backend_variant = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: access(),
+        workload: backend_variant,
+        mesh,
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_ne!(
+        prepared.host.workload.execution_plan,
+        backend_variant.host.workload.execution_plan
+    );
+
+    let mut wrong_backend = raw;
+    wrong_backend.requested_backend = ComputeBackend::Gpu;
+    let encoded = StructuralLinearWorkloadResult {
+        schema_version: 1,
+        run: wrong_backend,
+    }
+    .canonical_bytes()
+    .unwrap();
+    let completed = execute_serial_analysis(
+        &prepared.program.request,
+        &mut store,
+        &StructuralResultKernel(encoded),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&prepared.host, &completed)
+        .unwrap()
+        .program_response();
+    assert!(import_structural_linear_result(
+        &store,
+        response,
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+}

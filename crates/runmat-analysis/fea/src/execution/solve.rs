@@ -1,4 +1,7 @@
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
+use runmat_analysis_core::{
+    AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
+    FormulationRequirement, PhysicsFamily, SolutionSpace,
+};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +39,23 @@ impl StructuralLinearWorkload {
                 "unsupported structural linear workload schema".into(),
             ));
         }
+        let [step] = self.model.sequence.steps.as_slice() else {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural linear workload requires exactly one procedure step".into(),
+            ));
+        };
+        if step.procedure != AnalysisProcedure::Static
+            || step.solution_space != SolutionSpace::Direct
+            || !matches!(
+                step.family,
+                PhysicsFamily::Structural
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+            )
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural linear workload requires a structural or thermomechanical static direct procedure".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -69,12 +89,47 @@ pub struct StructuralLinearWorkloadResult {
 }
 
 impl StructuralLinearWorkloadResult {
-    pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
-        if self.schema_version != 1 {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        if self.schema_version != 1 || self.run.fields_are_empty() {
             return Err(AnalysisExecutionError::Invalid(
-                "unsupported structural linear result schema".into(),
+                "structural linear result schema or field set is invalid".into(),
             ));
         }
+        let mut field_ids = std::collections::BTreeSet::new();
+        for field in &self.run.fields {
+            if field.field_id.trim().is_empty() || !field_ids.insert(field.field_id.as_str()) {
+                return Err(AnalysisExecutionError::Invalid(
+                    "portable structural result field identities must be non-empty and unique"
+                        .into(),
+                ));
+            }
+            let AnalysisFieldValues::HostF64(values) = &field.values else {
+                return Err(AnalysisExecutionError::Invalid(
+                    "portable structural results must contain host-backed fields".into(),
+                ));
+            };
+            let Some(expected_values) = field
+                .shape
+                .iter()
+                .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+            else {
+                return Err(AnalysisExecutionError::Invalid(format!(
+                    "portable structural field `{}` shape overflows the host address space",
+                    field.field_id
+                )));
+            };
+            if values.len() != expected_values || values.iter().any(|value| !value.is_finite()) {
+                return Err(AnalysisExecutionError::Invalid(format!(
+                    "portable structural field `{}` has invalid shape or non-finite values",
+                    field.field_id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
+        self.validate()?;
         Ok(encode_contract(
             SOLVE_PREFIX,
             "structural-linear-result",
@@ -90,11 +145,7 @@ impl StructuralLinearWorkloadResult {
             bytes,
             SOLVE_LIMITS,
         )?;
-        if result.schema_version != 1 {
-            return Err(AnalysisExecutionError::Invalid(
-                "unsupported structural linear result schema".into(),
-            ));
-        }
+        result.validate()?;
         Ok(result)
     }
 }

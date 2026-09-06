@@ -16,6 +16,7 @@ use runmat_analysis_core::{
     Pressure, ProcedureStep, RegionTarget, StructuralConstraint, StructuralConstraintKind,
     Temperature, ThermalInterfaceTransfer, Velocity,
 };
+use runmat_analysis_fea::execution::StructuralLinearWorkload;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
@@ -37,15 +38,9 @@ use runmat_analysis_fea::{
     FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_STRAIN,
-    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::SolverMeshArtifact;
-use sha2::{Digest, Sha256};
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -80,6 +75,7 @@ mod fea_document_authoring;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod formulation_admission;
+mod linear_static_result;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
@@ -106,6 +102,16 @@ use study_execution::execute_study_step;
 pub struct FeaRuntimeConfig {
     pub artifact_root: Option<PathBuf>,
     pub study_artifact_root: Option<PathBuf>,
+}
+
+/// Host adapter for the path-free structural-static numerical workload. Implementations choose
+/// execution placement but may not persist results or apply runtime publication policy.
+pub trait StructuralLinearExecutor: Send + Sync {
+    fn execute(
+        &self,
+        workload: &StructuralLinearWorkload,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<FeaRunResult, String>;
 }
 
 fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
@@ -945,6 +951,22 @@ pub fn analysis_run_study_op(
     spec: &AnalysisStudySpec,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    analysis_run_study_with_structural_executor(spec, context, None)
+}
+
+pub fn analysis_run_study_with_structural_executor_op(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+    executor: &dyn StructuralLinearExecutor,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    analysis_run_study_with_structural_executor(spec, context, Some(executor))
+}
+
+fn analysis_run_study_with_structural_executor(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+    structural_executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let issue_codes = validate_study_issue_codes(spec);
     if !issue_codes.is_empty() {
         return Err(operation_error(
@@ -1032,6 +1054,7 @@ pub fn analysis_run_study_op(
         authored_execution,
         solver_mesh_artifact_path.as_deref(),
         &context,
+        structural_executor,
     )?;
     let actual_identity = &run_envelope.data.run.identity;
     if actual_identity.family() != procedure_step.family
@@ -8795,6 +8818,24 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_linear_static_with_executor(
+        model,
+        backend,
+        formulation_requirement,
+        options,
+        context,
+        None,
+    )
+}
+
+fn analysis_run_linear_static_with_executor(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
+    options: AnalysisRunOptions,
+    context: OperationContext,
+    executor: Option<&dyn StructuralLinearExecutor>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
     let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
@@ -8858,173 +8899,91 @@ pub fn analysis_run_linear_static_with_options(
         "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
         &context,
     )?;
-    let run = run_linear_static_with_options(
-        model,
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        model: model.clone(),
         backend,
-        LinearStaticSolveOptions {
-            formulation_requirement,
-            preconditioner_kind: requested_preconditioner,
-            algebra_backend_kind: requested_solver_backend,
-            solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
-            solver_mesh: solver_mesh.clone(),
-            require_solver_mesh_for_solid: true,
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
-        },
-    )
-    .map_err(|err| map_fea_run_error(AnalysisOperation::LinearStatic, model, &context, err))?;
-
-    let mut run = run;
-    let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
-
-    match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi => {}
-        PreconditionerMode::Ilu => {
-            if run.preconditioner != SolverPreconditioner::Ilu0 {
-                fallback_events.push(FallbackEvent::preconditioner(run.preconditioner));
-            }
-        }
-        PreconditionerMode::Amg => {
-            fallback_events.push(FallbackEvent::preconditioner(SolverPreconditioner::Jacobi));
-        }
-    }
-
-    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
-        fallback_events.push(FallbackEvent::solver_backend());
-    }
-
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
-        QualityGate::Pass
+        formulation_requirement,
+        preconditioner: requested_preconditioner,
+        algebra_backend: requested_solver_backend,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+        electro_thermal_context: to_fea_electro_thermal_context(electro_options),
+    };
+    let run = if let Some(executor) = executor {
+        let mesh = solver_mesh.as_ref().ok_or_else(|| {
+            operation_error(
+                AnalysisOperation::LinearStatic.name(),
+                AnalysisOperation::LinearStatic.version(),
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_MESH_REQUIRED",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "portable structural execution requires a canonical solver mesh",
+                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+            )
+        })?;
+        executor.execute(&workload, mesh).map_err(|message| {
+            operation_error(
+                AnalysisOperation::LinearStatic.name(),
+                AnalysisOperation::LinearStatic.version(),
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_LINEAR_STATIC.PORTABLE_EXECUTION_FAILED",
+                    error_type: OperationErrorType::Backend,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                message,
+                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+            )
+        })?
     } else {
-        QualityGate::Warn
-    };
-
-    let has_material_assignment_conflict = run.diagnostics.iter().any(|diag| {
-        diag.code
-            .starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_")
-    });
-    let field_topology_reasons = field_topology_quality_reasons(&run.fields, solver_mesh.as_ref());
-    let solid_mesh_reasons = solid_mesh_quality_reasons(model, solver_mesh.as_ref());
-    let mesh_validation_reasons = Vec::new();
-    let missing_solid_mesh_reasons = missing_solid_solver_mesh_reasons(model, solver_mesh.as_ref());
-    let solid_mesh_has_failure = solid_mesh_reasons.iter().any(|reason| {
-        matches!(
-            reason.code,
-            QualityReasonCode::SolidMeshNoVolumeElements
-                | QualityReasonCode::SolidMeshUnsupportedElementKind
-                | QualityReasonCode::SolidMeshUnmappedLoadRegion
-                | QualityReasonCode::SolidMeshUnmappedConstraintRegion
-                | QualityReasonCode::SolidMeshUnmappedBoundaryRegion
-                | QualityReasonCode::SolidMeshMaterialCoverageIncomplete
-                | QualityReasonCode::SolidMeshRenderTopologyIncomplete
-                | QualityReasonCode::SolidMeshQualityMinJacobianFailed
+        run_linear_static_with_options(
+            model,
+            backend,
+            LinearStaticSolveOptions {
+                formulation_requirement,
+                preconditioner_kind: requested_preconditioner,
+                algebra_backend_kind: requested_solver_backend,
+                solver_mesh_artifact_path: options.solver_mesh_artifact_path.clone(),
+                solver_mesh: solver_mesh.clone(),
+                require_solver_mesh_for_solid: true,
+                thermo_mechanical_context: workload.thermo_mechanical_context.clone(),
+                electro_thermal_context: workload.electro_thermal_context.clone(),
+            },
         )
-    }) || !mesh_validation_reasons.is_empty();
-    let result_quality =
-        if run.fields_are_empty() || solid_mesh_has_failure || !field_topology_reasons.is_empty() {
-            QualityGate::Fail
-        } else if !missing_solid_mesh_reasons.is_empty()
-            || !solid_mesh_reasons.is_empty()
-            || has_material_assignment_conflict
-        {
-            QualityGate::Warn
-        } else {
-            QualityGate::Pass
-        };
-
-    let mut quality_reasons = Vec::new();
-    if has_material_assignment_conflict {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::MaterialAssignmentConflict,
-            detail: "material assignment confidence conflict detected".to_string(),
-        });
-    }
-    quality_reasons.extend(solid_mesh_reasons);
-    quality_reasons.extend(mesh_validation_reasons);
-    quality_reasons.extend(field_topology_reasons);
-    quality_reasons.extend(missing_solid_mesh_reasons);
-    if solver_convergence == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: "solver convergence gate is warning".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_solver_backend_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
-        });
-    }
-    let numerically_acceptable = match options.quality_policy {
-        QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && quality_reasons.is_empty()
-        }
-        QualityPolicy::Balanced => {
-            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
-        }
-        QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
-        }
+        .map_err(|err| map_fea_run_error(AnalysisOperation::LinearStatic, model, &context, err))?
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
-    let run_status = classify_run_status(result_quality, numerically_acceptable);
-    let solver_backend = run.solver_backend;
-    let execution_backend = run.execution_backend;
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method;
-    let preconditioner = run.preconditioner;
 
-    let result = AnalysisRunResult {
-        run_id: storage::next_run_id(),
-        run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
-        modal_results: None,
-        thermal_results: None,
-        transient_results: None,
-        nonlinear_results: None,
-        electromagnetic_results: None,
-        model_validity: QualityGate::Pass,
-        solver_convergence,
-        result_quality,
-        run_status,
-        numerically_acceptable,
-        production_publishable,
-        quality_reasons,
-        production_publication_reasons,
-        provenance: RunProvenance {
+    let result = linear_static_result::admit_linear_static_result(
+        linear_static_result::LinearStaticResultInput {
+            model,
+            solver_mesh: solver_mesh.as_ref(),
             requested_backend: backend,
-            execution_backend,
-            solver_backend,
-            solver_device_apply_k_ratio,
-            solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
-            deterministic_mode: options.deterministic_mode,
-            solver_method,
-            preconditioner,
-            quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events,
+            formulation_requirement,
+            options: &options,
         },
-    };
+        run,
+    )
+    .map_err(|message| {
+        operation_error(
+            AnalysisOperation::LinearStatic.name(),
+            AnalysisOperation::LinearStatic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_LINEAR_STATIC.RESULT_ADMISSION_FAILED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            message,
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        )
+    })?;
 
     persist_fea_run_result_with_progress(
         AnalysisOperation::LinearStatic.name(),
@@ -9040,283 +8999,6 @@ pub fn analysis_run_linear_static_with_options(
         &context,
         result,
     ))
-}
-
-fn field_topology_quality_reasons(
-    fields: &[AnalysisField],
-    solver_mesh: Option<&SolverMeshArtifact>,
-) -> Vec<QualityReason> {
-    let Some(mesh) = solver_mesh else {
-        return Vec::new();
-    };
-    fields
-        .iter()
-        .filter_map(|field| primary_solver_mesh_field_expected_count(field, mesh).map(|expected| (field, expected)))
-        .filter_map(|(field, expected)| {
-            let descriptor = AnalysisFieldDescriptor::from_field(field);
-            let actual = descriptor_entity_count(field, &descriptor);
-            (actual != expected).then(|| QualityReason {
-                code: QualityReasonCode::FieldTopologyMismatch,
-                detail: format!(
-                    "field {} topology mismatch: topology_id={} location={:?} element_kind={} expected_entity_count={} actual_entity_count={}",
-                    field.field_id,
-                    descriptor.topology_id.as_deref().unwrap_or("none"),
-                    descriptor.location,
-                    descriptor.element_kind.as_deref().unwrap_or("none"),
-                    expected,
-                    actual
-                ),
-            })
-        })
-        .collect()
-}
-
-fn solid_mesh_quality_reasons(
-    model: &AnalysisModel,
-    solver_mesh: Option<&SolverMeshArtifact>,
-) -> Vec<QualityReason> {
-    let Some(mesh) = solver_mesh else {
-        return Vec::new();
-    };
-    let mut reasons = Vec::new();
-    if mesh.topology.volume_elements.is_empty() {
-        reasons.push(QualityReason {
-            code: QualityReasonCode::SolidMeshNoVolumeElements,
-            detail: "solver mesh has no volume elements".to_string(),
-        });
-    }
-    if let Some(detail) = material_coverage_gap_detail(model, mesh) {
-        reasons.push(QualityReason {
-            code: QualityReasonCode::SolidMeshMaterialCoverageIncomplete,
-            detail,
-        });
-    }
-    if let Some(detail) = render_topology_gap_detail(mesh) {
-        reasons.push(QualityReason {
-            code: QualityReasonCode::SolidMeshRenderTopologyIncomplete,
-            detail,
-        });
-    }
-    reasons.extend(boundary_region_mapping_reasons(model, mesh));
-    reasons
-}
-
-fn render_topology_gap_detail(mesh: &SolverMeshArtifact) -> Option<String> {
-    if mesh.topology.volume_elements.is_empty() {
-        return None;
-    }
-    let renderable_boundary_face_count = mesh.topology.boundary_faces.len();
-    if renderable_boundary_face_count == 0 {
-        return Some(format!(
-            "solver mesh has {} volume elements but no boundary faces for solver field visualization",
-            mesh.topology.volume_elements.len()
-        ));
-    }
-    None
-}
-
-fn missing_solid_solver_mesh_reasons(
-    model: &AnalysisModel,
-    solver_mesh: Option<&SolverMeshArtifact>,
-) -> Vec<QualityReason> {
-    if solver_mesh.is_some() || model_has_explicit_structural_elements(model) {
-        return Vec::new();
-    }
-    vec![QualityReason {
-        code: QualityReasonCode::MissingSolidAnalysisMesh,
-        detail: "linear static structural result requires a canonical solver mesh".to_string(),
-    }]
-}
-
-fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
-    model
-        .structural
-        .as_ref()
-        .is_some_and(|structural| !structural.elements.is_empty())
-}
-
-fn boundary_region_mapping_reasons(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-) -> Vec<QualityReason> {
-    let boundary_region_ids = mesh
-        .topology
-        .boundary_faces
-        .iter()
-        .flat_map(|face| {
-            face.provenance
-                .iter()
-                .map(|entity| entity.source_topology_id.as_str())
-        })
-        .collect::<HashSet<_>>();
-    let mut reasons = Vec::new();
-    for action in &model.excitations {
-        let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
-        else {
-            continue;
-        };
-        if target.expected_topology != runmat_analysis_core::ExpectedTopology::BoundaryFace {
-            continue;
-        }
-        if !boundary_region_ids.contains(target.region_id.as_str()) {
-            reasons.push(QualityReason {
-                code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
-                detail: format!(
-                    "excitation `{}` references region `{}` but the solver mesh has no matching boundary provenance",
-                    action.excitation().excitation_id.0,
-                    target.region_id
-                ),
-            });
-        }
-    }
-    for constraint in &model.constraints {
-        let Some(target) = constraint.target() else {
-            continue;
-        };
-        if !boundary_region_ids.contains(target.region_id.as_str()) {
-            reasons.push(QualityReason {
-                code: QualityReasonCode::SolidMeshUnmappedConstraintRegion,
-                detail: format!(
-                    "constraint `{}` references region `{}` but the solver mesh has no matching boundary provenance",
-                    constraint.constraint_id(), target.region_id
-                ),
-            });
-        }
-    }
-    for boundary in &model.boundaries {
-        if !boundary_region_ids.contains(boundary.target.region_id.as_str()) {
-            reasons.push(QualityReason {
-                code: QualityReasonCode::SolidMeshUnmappedBoundaryRegion,
-                detail: format!(
-                    "boundary `{}` references region `{}` but the solver mesh has no matching boundary provenance",
-                    boundary.boundary_id, boundary.target.region_id
-                ),
-            });
-        }
-    }
-    reasons
-}
-
-fn material_coverage_gap_detail(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-) -> Option<String> {
-    if mesh.topology.volume_elements.is_empty() {
-        return None;
-    }
-    if model.material_assignments.is_empty() {
-        return (model.materials.len() != 1).then(|| {
-            format!(
-                "solver mesh has {} regions but model has {} materials and no region assignments",
-                mesh.topology.regions.len(),
-                model.materials.len()
-            )
-        });
-    }
-    let material_ids = model
-        .materials
-        .iter()
-        .map(|material| material.material_id.as_str())
-        .collect::<HashSet<_>>();
-    let assigned_regions = model
-        .material_assignments
-        .iter()
-        .filter(|assignment| material_ids.contains(assignment.assigned_material_id.as_str()))
-        .map(|assignment| assignment.region_id.as_str())
-        .collect::<HashSet<_>>();
-    let mut uncovered = mesh
-        .topology
-        .regions
-        .iter()
-        .map(|region| region.region_id.source_topology_id.as_str())
-        .filter(|region_id| !assigned_regions.contains(region_id))
-        .collect::<Vec<_>>();
-    uncovered.sort_unstable();
-    uncovered.dedup();
-    if uncovered.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "solver mesh regions lack valid analysis material assignments: {}",
-            uncovered.join(",")
-        ))
-    }
-}
-
-fn primary_solver_mesh_field_expected_count(
-    field: &AnalysisField,
-    mesh: &SolverMeshArtifact,
-) -> Option<usize> {
-    if matches!(
-        field.field_id.as_str(),
-        FEA_FIELD_STRUCTURAL_ROTATION
-            | FEA_FIELD_STRUCTURAL_REACTION_FORCE
-            | FEA_FIELD_STRUCTURAL_REACTION_MOMENT
-    ) {
-        return None;
-    }
-    if let Some(count) = mesh_field_topology_expected_count(field, mesh) {
-        return Some(count);
-    }
-
-    match field.field_id.as_str() {
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT | FEA_FIELD_STRUCTURAL_NODAL_VON_MISES => {
-            Some(mesh.topology.nodes.len())
-        }
-        FEA_FIELD_STRUCTURAL_STRAIN
-        | FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY
-        | FEA_FIELD_STRUCTURAL_STRESS
-        | FEA_FIELD_STRUCTURAL_VON_MISES => Some(mesh.topology.volume_elements.len()),
-        _ => None,
-    }
-}
-
-fn mesh_field_topology_expected_count(
-    field: &AnalysisField,
-    mesh: &SolverMeshArtifact,
-) -> Option<usize> {
-    let descriptor = AnalysisFieldDescriptor::from_field(field);
-    let topology_id = descriptor.topology_id.as_deref()?;
-    let location = solver_mesh_field_topology_location(descriptor.location)?;
-
-    mesh.topology
-        .field_topologies
-        .iter()
-        .find(|topology| topology.topology_id == topology_id && topology.location == location)
-        .map(|topology| topology.ordered_entity_ids.len())
-}
-
-fn solver_mesh_field_topology_location(
-    location: AnalysisFieldLocation,
-) -> Option<runmat_meshing_core::FieldTopologyLocation> {
-    match location {
-        AnalysisFieldLocation::Node => Some(runmat_meshing_core::FieldTopologyLocation::Node),
-        AnalysisFieldLocation::Element => {
-            Some(runmat_meshing_core::FieldTopologyLocation::VolumeElement)
-        }
-        AnalysisFieldLocation::BoundaryFace => {
-            Some(runmat_meshing_core::FieldTopologyLocation::BoundaryFace)
-        }
-        _ => None,
-    }
-}
-
-fn descriptor_entity_count(field: &AnalysisField, descriptor: &AnalysisFieldDescriptor) -> usize {
-    if descriptor.entity_count > 0 {
-        return descriptor.entity_count;
-    }
-    if matches!(
-        descriptor.location,
-        AnalysisFieldLocation::Global | AnalysisFieldLocation::Mode
-    ) {
-        return field.element_count();
-    }
-    if let Some(first_dim) = field.shape.first().copied() {
-        if field.shape.len() > 1 || descriptor.component_count.is_some() {
-            return first_dim;
-        }
-    }
-    field.element_count()
 }
 
 pub fn analysis_run_electromagnetic_op(
@@ -10473,11 +10155,23 @@ fn study_issue_message(code: &str) -> &'static str {
     }
 }
 
+pub fn analysis_study_content_digest(spec: &AnalysisStudySpec) -> runmat_execution::Digest {
+    let mut semantic_spec = spec.clone();
+    semantic_spec.solver_mesh_artifact_path = None;
+    semantic_spec.meshing_evidence_artifact_path = None;
+    let payload = serde_json::to_vec(&semantic_spec)
+        .unwrap_or_else(|_| format!("{semantic_spec:?}").into_bytes());
+    runmat_execution::Digest::sha256(&payload)
+}
+
 fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
-    let payload = serde_json::to_vec(spec).unwrap_or_else(|_| format!("{spec:?}").into_bytes());
-    let mut hasher = Sha256::new();
-    hasher.update(payload);
-    format!("sha256:{:x}", hasher.finalize())
+    let digest = analysis_study_content_digest(spec);
+    let mut encoded = String::with_capacity(64);
+    for byte in digest.bytes() {
+        use std::fmt::Write as _;
+        write!(&mut encoded, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    format!("sha256:{encoded}")
 }
 
 fn study_operation_sequence(spec: &AnalysisStudySpec, run_op_version: &str) -> Vec<String> {

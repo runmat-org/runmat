@@ -6210,6 +6210,8 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-aot",
  "runmat-builtins",
  "runmat-config",
@@ -6329,11 +6331,13 @@ dependencies = [
 name = "runmat-analysis-execution"
 version = "0.6.2"
 dependencies = [
+ "runmat-analysis-core",
  "runmat-analysis-fea",
  "runmat-canonical-codec",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
+ "runmat-meshing-core",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
