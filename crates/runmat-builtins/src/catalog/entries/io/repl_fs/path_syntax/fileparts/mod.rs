@@ -14,7 +14,7 @@ pub const FILEPARTS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::PathSyntax(PathSyntaxInferenceRule::Split),
+            IoReplFsInferenceRule::path(PathInferenceRule::Syntax(PathSyntaxInferenceRule::Split)),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,

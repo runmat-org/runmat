@@ -23,7 +23,9 @@ pub const MKDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::DirectoryLifecycle(DirectoryLifecycleInferenceRule::Create),
+            IoReplFsInferenceRule::directory(DirectoryInferenceRule::Lifecycle(
+                DirectoryLifecycleInferenceRule::Create,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

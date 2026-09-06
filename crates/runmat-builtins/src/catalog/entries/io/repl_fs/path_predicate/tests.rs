@@ -1,5 +1,5 @@
 use super::*;
-use crate::{BuiltinInferenceRule, IoInferenceRule, IoReplFsInferenceRule};
+use crate::{BuiltinInferenceRule, IoInferenceRule, IoReplFsInferenceRule, PathInferenceRule};
 use runmat_types::{
     CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact,
     ValueKindFact,
@@ -11,9 +11,12 @@ fn entries_are_identity_local_and_use_typed_rules() {
         (&ISFILE_CATALOG_ENTRY, PathPredicateInferenceRule::File),
         (&ISFOLDER_CATALOG_ENTRY, PathPredicateInferenceRule::Folder),
     ] {
-        assert!(
-            matches!(entry.contract.inference_rule, BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(IoReplFsInferenceRule::PathPredicate(rule))) if rule == expected)
-        );
+        assert!(matches!(
+            entry.contract.inference_rule,
+            BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
+                IoReplFsInferenceRule::Path(PathInferenceRule::Predicate(rule))
+            )) if rule == expected
+        ));
         assert_eq!(entry.documentation.examples.len(), 4);
     }
 }

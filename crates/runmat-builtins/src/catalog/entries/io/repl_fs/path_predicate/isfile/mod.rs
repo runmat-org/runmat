@@ -22,7 +22,9 @@ pub const ISFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::PathPredicate(PathPredicateInferenceRule::File),
+            IoReplFsInferenceRule::path(PathInferenceRule::Predicate(
+                PathPredicateInferenceRule::File,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

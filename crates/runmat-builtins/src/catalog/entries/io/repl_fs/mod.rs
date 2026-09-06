@@ -15,7 +15,9 @@ mod registry;
 mod rmpath;
 mod savepath;
 mod search_path;
+mod source_inventory;
 mod temporary_path;
+mod text_input;
 
 pub use exports::*;
 

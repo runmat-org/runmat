@@ -11,4 +11,5 @@ pub use super::path_syntax::*;
 pub use super::pwd::*;
 pub use super::rmpath::*;
 pub use super::savepath::*;
+pub use super::source_inventory::*;
 pub use super::temporary_path::*;

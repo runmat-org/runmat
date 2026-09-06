@@ -1,5 +1,6 @@
 use crate::{
-    BuiltinInferenceRule, IoInferenceRule, IoReplFsInferenceRule, TemporaryPathInferenceRule,
+    BuiltinInferenceRule, IoInferenceRule, IoReplFsInferenceRule, PathInferenceRule,
+    TemporaryPathInferenceRule,
 };
 use runmat_types::{
     CallRequest, LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
@@ -59,9 +60,9 @@ fn family_rules_are_typed() {
         let entry = crate::builtin_catalog_entry_by_name(name).expect("catalog entry");
         assert_eq!(
             entry.contract.inference_rule,
-            BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-                IoReplFsInferenceRule::TemporaryPath(expected)
-            ))
+            BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(IoReplFsInferenceRule::Path(
+                PathInferenceRule::Temporary(expected)
+            )))
         );
     }
 }

@@ -23,6 +23,7 @@ pub mod pwd;
 pub mod rmpath;
 pub mod run;
 pub mod savepath;
+pub(crate) mod source_inventory;
 pub(crate) mod temporary_path;
 pub mod uigetdir;
 pub mod uigetfile;

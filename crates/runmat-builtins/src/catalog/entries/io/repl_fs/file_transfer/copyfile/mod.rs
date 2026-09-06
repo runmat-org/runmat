@@ -23,7 +23,9 @@ pub const COPYFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::FileTransfer(FileTransferInferenceRule::Copy),
+            IoReplFsInferenceRule::file(FileInferenceRule::Transfer(
+                FileTransferInferenceRule::Copy,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

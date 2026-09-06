@@ -22,7 +22,9 @@ pub const ISFOLDER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::PathPredicate(PathPredicateInferenceRule::Folder),
+            IoReplFsInferenceRule::path(PathInferenceRule::Predicate(
+                PathPredicateInferenceRule::Folder,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

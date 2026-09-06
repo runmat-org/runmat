@@ -24,7 +24,9 @@ pub const TEMPNAME_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::TemporaryPath(TemporaryPathInferenceRule::UniqueName),
+            IoReplFsInferenceRule::path(PathInferenceRule::Temporary(
+                TemporaryPathInferenceRule::UniqueName,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

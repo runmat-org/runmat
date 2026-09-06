@@ -11,9 +11,12 @@ fn entries_are_canonical_and_use_typed_family_rules() {
         ("movefile", FileTransferInferenceRule::Move),
     ] {
         let entry = builtin_catalog_entry_by_name(name).expect("catalog entry");
-        assert!(
-            matches!(entry.contract.inference_rule, BuiltinInferenceRule::Io(crate::IoInferenceRule::ReplFs(crate::IoReplFsInferenceRule::FileTransfer(rule))) if rule == expected)
-        );
+        assert!(matches!(
+            entry.contract.inference_rule,
+            BuiltinInferenceRule::Io(crate::IoInferenceRule::ReplFs(
+                crate::IoReplFsInferenceRule::File(crate::FileInferenceRule::Transfer(rule))
+            )) if rule == expected
+        ));
     }
 }
 

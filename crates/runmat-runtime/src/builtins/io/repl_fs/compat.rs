@@ -262,19 +262,6 @@ pub const SYSTEM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAu
     notes: "system accepts a host character vector or string command, not numeric input; integer and resident numeric values reject before provider or process access.",
 };
 simple_descriptor!(
-    WHAT_SIGNATURES,
-    WHAT_DESCRIPTOR,
-    "info = what(folder)",
-    &INPUTS_ONE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-pub const WHAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "what accepts no input or one host text folder name; integer and resident numeric values reject before provider or filesystem access.",
-};
-simple_descriptor!(
     FILEATTRIB_SIGNATURES,
     FILEATTRIB_DESCRIPTOR,
     "[status, attributes] = fileattrib(path)",
@@ -680,72 +667,7 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-#[runtime_builtin(
-    name = "what",
-    category = "io/repl_fs",
-    summary = "Summarize MATLAB-related files in a folder.",
-    keywords = "what,folder,files,classes,packages",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
-    descriptor(crate::builtins::io::repl_fs::compat::WHAT_DESCRIPTOR),
-    integer_audit(crate::builtins::io::repl_fs::compat::WHAT_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::io::repl_fs::compat"
-)]
-async fn what_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(|value| {
-        crate::builtins::common::validation::value_contains_native_integer_class(value)
-            || value_contains_resident(value)
-    }) {
-        return Err(compat_error(
-            "what",
-            "what: folder must be a host string scalar or character vector",
-        ));
-    }
-    let args = gather_args("what", &args).await?;
-    if args.len() > 1 {
-        return Err(compat_error("what", "what: too many input arguments"));
-    }
-    let folder = if let Some(value) = args.first() {
-        value_to_path(value, "what", "folder")?
-    } else {
-        vfs::current_dir().map_err(|err| compat_error("what", format!("what: {err}")))?
-    };
-    let entries = vfs::read_dir_async(&folder)
-        .await
-        .map_err(|err| compat_error("what", format!("what: {err}")))?;
-    let mut m = Vec::new();
-    let mut mat = Vec::new();
-    let mut mex = Vec::new();
-    let mut classes = Vec::new();
-    let mut packages = Vec::new();
-    for entry in entries {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if entry.is_dir() {
-            if let Some(stripped) = name.strip_prefix('@') {
-                classes.push(stripped.to_string());
-            } else if let Some(stripped) = name.strip_prefix('+') {
-                packages.push(stripped.to_string());
-            }
-            continue;
-        }
-        if name.ends_with(".m") {
-            m.push(name);
-        } else if name.ends_with(".mat") {
-            mat.push(name);
-        } else if name.contains(".mex") {
-            mex.push(name);
-        }
-    }
-    let mut st = StructValue::new();
-    st.insert("path", char_value(&path_to_string(&folder)));
-    st.insert("m", cellstr(m)?);
-    st.insert("mat", cellstr(mat)?);
-    st.insert("mex", cellstr(mex)?);
-    st.insert("classes", cellstr(classes)?);
-    st.insert("packages", cellstr(packages)?);
-    Ok(Value::Struct(st))
-}
-
+#[cfg(windows)]
 fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
     let len = values.len();
     Ok(Value::Cell(
@@ -1765,15 +1687,6 @@ mod tests {
 
     fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
         futures::executor::block_on(value)
-    }
-
-    #[test]
-    fn what_rejects_integer_folder_before_filesystem_access() {
-        let error = run(what_builtin(vec![Value::Int(runmat_value::IntValue::U64(
-            u64::MAX,
-        ))]))
-        .expect_err("integer folder must reject");
-        assert!(error.message().contains("host string scalar"));
     }
 
     #[test]

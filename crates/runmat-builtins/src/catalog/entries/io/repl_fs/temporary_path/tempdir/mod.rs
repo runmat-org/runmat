@@ -17,7 +17,9 @@ pub const TEMPDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::TemporaryPath(TemporaryPathInferenceRule::Directory),
+            IoReplFsInferenceRule::path(PathInferenceRule::Temporary(
+                TemporaryPathInferenceRule::Directory,
+            )),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,

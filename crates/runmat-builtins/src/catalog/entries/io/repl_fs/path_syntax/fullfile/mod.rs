@@ -15,7 +15,7 @@ pub const FULLFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::PathSyntax(PathSyntaxInferenceRule::Join),
+            IoReplFsInferenceRule::path(PathInferenceRule::Syntax(PathSyntaxInferenceRule::Join)),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
