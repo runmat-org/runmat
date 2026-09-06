@@ -84,6 +84,7 @@ impl AnalysisWorkloadRequest {
 
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
         if self.schema_version != 1
+            || self.inputs.is_empty()
             || self.inputs.len() > MAX_INPUTS
             || self.outputs.is_empty()
             || self.outputs.len() > MAX_OUTPUTS

@@ -215,11 +215,30 @@ fn worker_capability_inventory_uses_generic_execution_capabilities() {
 #[test]
 fn logical_task_identity_is_independent_of_pool_placement() {
     let (study, execution_plan) = execution_identities();
+    let input = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::AccuracyEvidence,
+        digest("accuracy-input"),
+        b"accuracy evidence input",
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = input
+        .root_reference(&access(), ValueRefKind::DriverObject)
+        .unwrap();
     let workload = AnalysisWorkloadRequest::new(
         study,
         execution_plan,
         AnalysisWorkKind::EvaluateAccuracy,
-        Vec::new(),
+        vec![AnalysisWorkloadInput {
+            kind: input.manifest.kind,
+            logical_identity: input.manifest.logical_identity,
+            payload_digest: input.manifest.payload_digest,
+            manifest_digest: input.root.digest,
+            manifest_encoded_length: input.root.encoded_length,
+            reference_kind: ValueRefKind::DriverObject,
+        }],
         vec![AnalysisNumericalObjectKind::AccuracyEvidence],
         BTreeSet::from([AnalysisCapabilityRequirement::Host {
             abi: ANALYSIS_HOST_ABI.into(),
@@ -248,7 +267,7 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     };
     let first = build_analysis_task_submission(
         &workload,
-        Vec::new(),
+        vec![root.clone()],
         Vec::new(),
         BTreeSet::new(),
         context(b"pool-a"),
@@ -256,7 +275,7 @@ fn logical_task_identity_is_independent_of_pool_placement() {
     .unwrap();
     let second = build_analysis_task_submission(
         &workload,
-        Vec::new(),
+        vec![root],
         Vec::new(),
         BTreeSet::new(),
         context(b"pool-b"),
@@ -558,6 +577,35 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .is_err());
+
+    let access_variant = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: ArtifactAccess {
+            authorization_scope: "another-run-authority".into(),
+            encryption_context: digest("another-encryption-context"),
+        },
+        workload: solve.clone(),
+        mesh: mesh.clone(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_eq!(prepared.host.workload, access_variant.host.workload);
+    assert_eq!(
+        prepared.program.request.recipe,
+        access_variant.program.request.recipe
+    );
+    assert_eq!(
+        prepared.program.request.artifact,
+        access_variant.program.request.artifact
+    );
+    assert_ne!(
+        prepared.program.request.arguments,
+        access_variant.program.request.arguments
+    );
 
     let mut backend_variant = solve.clone();
     backend_variant.backend = ComputeBackend::Gpu;

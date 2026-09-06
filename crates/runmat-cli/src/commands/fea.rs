@@ -60,7 +60,7 @@ pub async fn execute_fea_path(
                 );
                 eprintln!("  {}", styles.info("validating, planning, and solving"));
             }
-            let executor = portable::InlineStructuralExecutor::new(&spec, config)?;
+            let executor = portable::LocalProcessStructuralExecutor::new(&spec, config)?;
             let envelope =
                 runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
                     &spec, context, &executor,

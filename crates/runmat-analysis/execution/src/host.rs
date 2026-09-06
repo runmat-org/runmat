@@ -16,12 +16,18 @@ const HOST_PREFIX: &[u8] = b"runmat-analysis-host-workload/v1\0";
 const HOST_DOMAIN: &str = "host-workload";
 const HOST_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnalysisHostWorkload {
     pub schema_version: u16,
     pub workload: AnalysisWorkloadRequest,
     pub artifact_access: ArtifactAccess,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnalysisHostProgram {
+    schema_version: u16,
+    workload: AnalysisWorkloadRequest,
 }
 
 impl AnalysisHostWorkload {
@@ -54,13 +60,25 @@ impl AnalysisHostWorkload {
         Ok(encode_contract(
             HOST_PREFIX,
             HOST_DOMAIN,
-            self,
+            &AnalysisHostProgram {
+                schema_version: self.schema_version,
+                workload: self.workload.clone(),
+            },
             HOST_LIMITS,
         )?)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisBridgeResult<Self> {
-        let host: Self = decode_contract(HOST_PREFIX, HOST_DOMAIN, bytes, HOST_LIMITS)?;
+    pub fn from_canonical_bytes(
+        bytes: &[u8],
+        artifact_access: ArtifactAccess,
+    ) -> AnalysisBridgeResult<Self> {
+        let program: AnalysisHostProgram =
+            decode_contract(HOST_PREFIX, HOST_DOMAIN, bytes, HOST_LIMITS)?;
+        let host = Self {
+            schema_version: program.schema_version,
+            workload: program.workload,
+            artifact_access,
+        };
         host.validate()?;
         Ok(host)
     }
@@ -121,7 +139,6 @@ impl AnalysisHostWorkload {
                 "program request is not an analysis host workload".into(),
             ));
         }
-        let host = Self::from_canonical_bytes(&request.artifact.executable_bytes)?;
         let roots = request
             .arguments
             .iter()
@@ -132,6 +149,18 @@ impl AnalysisHostWorkload {
                 )),
             })
             .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+        let first_root = roots.first().ok_or_else(|| {
+            AnalysisBridgeError::Invalid(
+                "analysis host workload requires at least one externalized input root".into(),
+            )
+        })?;
+        let host = Self::from_canonical_bytes(
+            &request.artifact.executable_bytes,
+            ArtifactAccess {
+                authorization_scope: first_root.authorization_scope.clone(),
+                encryption_context: first_root.encryption_context,
+            },
+        )?;
         host.validate_inputs(&roots)?;
         Ok(host)
     }
