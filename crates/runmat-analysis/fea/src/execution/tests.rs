@@ -237,6 +237,113 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
     assert!(!String::from_utf8_lossy(&bytes).contains("artifact_path"));
 }
 
+fn signal_realization(values: Vec<f64>) -> CanonicalSignalRealization {
+    use runmat_analysis_core::{
+        GeneratorDomain, GeneratorProvenance, PhysicalQuantityKind, SignalApproximationEvidence,
+        SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
+    };
+
+    let generator = GeneratorIdentity::new(
+        digest("callable"),
+        digest("captures"),
+        digest("generator-contract"),
+    )
+    .unwrap();
+    let materialization = SignalMaterializationIdentity::new(
+        digest("authored-signal"),
+        Some(generator),
+        digest("sampling"),
+        vec![digest("frozen-input")],
+    )
+    .unwrap();
+    CanonicalSignalRealization::new(CanonicalSignalRealizationInput {
+        materialization,
+        signal_id: SignalId("launch.force".into()),
+        quantity: PhysicalQuantityKind::Force,
+        shape: SignalShape::Scalar,
+        topology_entity_count: None,
+        domain: GeneratorDomain::TimeSeconds,
+        sample_points: vec![0.0, 0.5, 1.0],
+        precision: SignalPrecision::Real64,
+        values: CanonicalSignalValues::real(values),
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 3,
+        },
+        provenance: GeneratorProvenance {
+            project_revision: digest("project").to_string(),
+            callable_id: "loads.launch_force".into(),
+            frozen_input_digest: digest("frozen-input").to_string(),
+        },
+    })
+    .unwrap()
+}
+
+#[test]
+fn canonical_signal_realization_round_trips_and_layers_content_identity() {
+    let first = signal_realization(vec![0.0, 4.0, 0.0]);
+    let decoded =
+        CanonicalSignalRealization::from_canonical_bytes(&first.canonical_bytes().unwrap())
+            .unwrap();
+    assert_eq!(decoded, first);
+
+    let changed = signal_realization(vec![0.0, 5.0, 0.0]);
+    assert_ne!(first.content_digest, changed.content_digest);
+    assert_ne!(first.identity, changed.identity);
+
+    let mut tampered = first;
+    tampered.values = CanonicalSignalValues::real([0.0, f64::NAN, 0.0]);
+    assert!(tampered.validate().is_err());
+}
+
+#[test]
+fn topology_signal_realization_requires_exact_entity_shape() {
+    use runmat_analysis_core::{
+        GeneratorDomain, GeneratorProvenance, PhysicalQuantityKind, SignalApproximationEvidence,
+        SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
+    };
+
+    let materialization = SignalMaterializationIdentity::new(
+        digest("field-signal"),
+        None,
+        digest("field-sampling"),
+        Vec::new(),
+    )
+    .unwrap();
+    let input = CanonicalSignalRealizationInput {
+        materialization,
+        signal_id: SignalId("thermal.field".into()),
+        quantity: PhysicalQuantityKind::Temperature,
+        shape: SignalShape::TopologyField {
+            topology_id: digest("mesh").to_string(),
+            component_count: 1,
+        },
+        topology_entity_count: Some(4),
+        domain: GeneratorDomain::TimeSeconds,
+        sample_points: vec![0.0, 1.0],
+        precision: SignalPrecision::Real64,
+        values: CanonicalSignalValues::real([300.0; 7]),
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::Reject,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: 2,
+        },
+        provenance: GeneratorProvenance {
+            project_revision: digest("project").to_string(),
+            callable_id: "thermal.field".into(),
+            frozen_input_digest: digest("inputs").to_string(),
+        },
+    };
+    assert!(CanonicalSignalRealization::new(input).is_err());
+}
+
 fn workload_task(workload: AnalysisWorkloadIdentity) -> AnalysisTaskIdentity {
     AnalysisTaskIdentity::new(workload, Vec::new()).unwrap()
 }

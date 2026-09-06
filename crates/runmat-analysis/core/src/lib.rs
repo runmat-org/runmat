@@ -560,6 +560,8 @@ mod tests {
                     end: 1.0,
                     sample_count: 101,
                 },
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
                 effects: GeneratorEffectPolicy::Pure,
             }),
         )];

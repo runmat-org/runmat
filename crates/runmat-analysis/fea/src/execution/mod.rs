@@ -6,6 +6,7 @@
 mod error;
 mod identity;
 mod object;
+mod signal;
 mod solve;
 mod sweep;
 
@@ -23,6 +24,9 @@ pub use object::{
     AnalysisObjectManifest, ChunkedAnalysisPayload, ANALYSIS_CHUNK_MEDIA_TYPE,
     ANALYSIS_CHUNK_VALUE_SCHEMA, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     DEFAULT_ANALYSIS_CHUNK_BYTES,
+};
+pub use signal::{
+    CanonicalSignalRealization, CanonicalSignalRealizationInput, CanonicalSignalValues,
 };
 pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
 pub use sweep::{ComposedSweepResult, SweepEntryDisposition, SweepEntryOutcome};

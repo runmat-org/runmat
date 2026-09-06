@@ -1,5 +1,6 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
+mod callable;
 mod error;
 mod graph;
 mod host;
@@ -11,6 +12,7 @@ mod task;
 mod transport;
 mod workload;
 
+pub use callable::{admit_named_signal_generator, AdmittedSignalGenerator};
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,

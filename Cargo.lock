@@ -6339,6 +6339,8 @@ dependencies = [
  "runmat-execution-artifact",
  "runmat-execution-runner",
  "runmat-meshing-core",
+ "runmat-mir",
+ "runmat-types",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

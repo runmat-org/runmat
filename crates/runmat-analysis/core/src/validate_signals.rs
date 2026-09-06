@@ -110,8 +110,11 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
         }
         SignalRepresentation::Generator(generator) => {
             validate_sample_count(&signal.evidence, 0)?;
-            if !matches!(signal.provenance, SignalProvenance::Generated(_)) {
-                return Err("callable-backed signals require generator provenance".to_string());
+            if !matches!(signal.provenance, SignalProvenance::Authored) {
+                return Err(
+                    "callable declarations are authored; generated provenance belongs to their materialized artifact"
+                        .to_string(),
+                );
             }
             validate_generator(generator)
         }
@@ -433,8 +436,9 @@ fn is_identifier(value: &str) -> bool {
 mod tests {
     use crate::{
         Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal, Signal,
-        SignalApproximationEvidence, SignalGenerator, SignalId, SignalPrecision, SignalProvenance,
-        SignalRepresentation, SignalSamplingPolicy, SignalShape,
+        SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
+        SignalInterpolation, SignalPrecision, SignalProvenance, SignalRepresentation,
+        SignalSamplingPolicy, SignalShape,
     };
 
     use super::validate_signals;
@@ -453,6 +457,8 @@ mod tests {
                     end: 0.1,
                     sample_count: 1001,
                 },
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
                 effects: GeneratorEffectPolicy::Pure,
             }),
             precision: SignalPrecision::Real64,
@@ -467,19 +473,19 @@ mod tests {
     }
 
     #[test]
-    fn complete_generator_declaration_is_valid() {
+    fn authored_generator_declaration_is_valid() {
+        let signal = generated_force(SignalProvenance::Authored);
+
+        validate_signals(&[signal]).expect("authored generator should validate");
+    }
+
+    #[test]
+    fn generator_cannot_claim_materialized_provenance() {
         let signal = generated_force(SignalProvenance::Generated(GeneratorProvenance {
             project_revision: "sha256:project".to_string(),
             callable_id: "loads.launch_force".to_string(),
             frozen_input_digest: "sha256:inputs".to_string(),
         }));
-
-        validate_signals(&[signal]).expect("complete generator should validate");
-    }
-
-    #[test]
-    fn generator_cannot_claim_authored_provenance() {
-        let signal = generated_force(SignalProvenance::Authored);
 
         assert!(validate_signals(&[signal]).is_err());
     }

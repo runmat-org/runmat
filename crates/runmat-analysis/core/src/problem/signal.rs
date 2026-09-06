@@ -212,6 +212,41 @@ impl PhysicalSignal {
             Self::MassFlowRate(value) => value.frame.as_ref(),
         }
     }
+
+    pub fn generator(&self) -> Option<&SignalGenerator> {
+        macro_rules! generator {
+            ($signal:expr) => {
+                match &$signal.representation {
+                    SignalRepresentation::Generator(generator) => Some(generator),
+                    _ => None,
+                }
+            };
+        }
+        match self {
+            Self::Displacement(signal) => generator!(signal),
+            Self::Rotation(signal) => generator!(signal),
+            Self::Velocity(signal) => generator!(signal),
+            Self::Acceleration(signal) => generator!(signal),
+            Self::AngularVelocity(signal) => generator!(signal),
+            Self::AngularAcceleration(signal) => generator!(signal),
+            Self::Force(signal) => generator!(signal),
+            Self::Moment(signal) => generator!(signal),
+            Self::Traction(signal) => generator!(signal),
+            Self::Pressure(signal) => generator!(signal),
+            Self::BodyForceDensity(signal) => generator!(signal),
+            Self::Temperature(signal) => generator!(signal),
+            Self::TemperatureDifference(signal) => generator!(signal),
+            Self::HeatFlux(signal) => generator!(signal),
+            Self::HeatGenerationDensity(signal) => generator!(signal),
+            Self::ElectricPotential(signal) => generator!(signal),
+            Self::ElectricCurrent(signal) => generator!(signal),
+            Self::ElectricCharge(signal) => generator!(signal),
+            Self::ElectricCurrentDensity(signal) => generator!(signal),
+            Self::ElectricChargeDensity(signal) => generator!(signal),
+            Self::MagneticVectorPotential(signal) => generator!(signal),
+            Self::MassFlowRate(signal) => generator!(signal),
+        }
+    }
 }
 
 fn signal_domain<Q>(signal: &Signal<Q>) -> SignalDomainKind {
@@ -456,6 +491,8 @@ pub struct SignalGenerator {
     pub arguments: Vec<GeneratorArgument>,
     pub domain: GeneratorDomain,
     pub sampling: SignalSamplingPolicy,
+    pub interpolation: SignalInterpolation,
+    pub extrapolation: SignalExtrapolation,
     pub effects: GeneratorEffectPolicy,
 }
 
