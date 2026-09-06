@@ -8814,6 +8814,7 @@ fn prepare_linear_static_workload_template(
     Ok(StructuralLinearWorkload {
         schema_version: 1,
         model: model.clone(),
+        step_id: model.sequence.steps[0].step_id.clone(),
         backend,
         formulation_requirement,
         preconditioner: requested_preconditioner,
@@ -8821,6 +8822,7 @@ fn prepare_linear_static_workload_template(
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         electro_thermal_context: to_fea_electro_thermal_context(electro_options),
+        initial_guess_transition: None,
     })
 }
 
@@ -8965,6 +8967,7 @@ fn analysis_run_linear_static_with_executor(
                 require_solver_mesh_for_solid: prepared.workload.require_solver_mesh_for_solid,
                 thermo_mechanical_context: prepared.workload.thermo_mechanical_context.clone(),
                 electro_thermal_context: prepared.workload.electro_thermal_context.clone(),
+                initial_displacement: None,
             },
         )
         .map_err(|err| {

@@ -487,6 +487,7 @@ pub(crate) fn prepare_structural_study_analysis_program(
             artifact_access,
             workload,
             mesh,
+            initial_guess: None,
             chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),

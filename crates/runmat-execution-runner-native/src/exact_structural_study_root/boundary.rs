@@ -62,7 +62,7 @@ pub(crate) fn prepare_boundary_resolution_objects(
         .concat(),
     );
     let objects = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::SemanticState,
+        AnalysisNumericalObjectKind::BoundaryResolution,
         identity,
         &bytes,
         chunk_bytes,

@@ -8,7 +8,7 @@ use crate::{
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
-        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
     },
 };
 
@@ -32,11 +32,16 @@ pub fn solve_linear_system(
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
     let mut effective_backend_kind = backend_kind;
     let mut runtime_tensor_fallback = false;
     if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
-        if let Some(result) = solve_linear_system_runtime_tensor(summary, preconditioner_kind) {
+        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
+            summary,
+            preconditioner_kind,
+            initial_guess,
+        ) {
             return result;
         }
         effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
@@ -151,7 +156,9 @@ pub fn solve_linear_system(
     let preconditioner = build_spd_preconditioner(summary, tuned_preconditioner_kind);
     let traversal_order = graph_solver_traversal_order(summary);
     let b = &summary.operator.rhs;
-    let mut x = vec![0.0; summary.dof_count];
+    let mut x = initial_guess
+        .map(<[f64]>::to_vec)
+        .unwrap_or_else(|| vec![0.0; summary.dof_count]);
 
     let mut r = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &x));
     let mut z = preconditioner.apply(&r);
@@ -530,6 +537,7 @@ mod tests {
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
             &backend,
+            None,
         );
 
         assert!(result.converged);
@@ -558,6 +566,7 @@ mod tests {
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
             &backend,
+            None,
         );
 
         drop(cancellation);
@@ -589,6 +598,7 @@ mod tests {
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
             &backend,
+            None,
         );
 
         drop(cancellation);
@@ -604,5 +614,25 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "FEA_DENSE_DIRECT_FALLBACK"));
+    }
+
+    #[test]
+    fn matrix_free_pcg_uses_an_exact_initial_guess() {
+        let mut summary = dense_summary(4);
+        summary.operator.stiffness_dense = None;
+        summary.operator.rhs = vec![1.0; summary.dof_count];
+        let backend = CpuReferenceBackend;
+
+        let result = solve_linear_system(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &backend,
+            Some(&[1.0; 4]),
+        );
+
+        assert!(result.converged);
+        assert_eq!(result.iterations, 0);
+        assert_eq!(result.solution, vec![1.0; 4]);
     }
 }

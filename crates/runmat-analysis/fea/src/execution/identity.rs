@@ -35,6 +35,7 @@ identity_type!(StudyIdentity);
 identity_type!(SweepIdentity);
 identity_type!(SequenceIdentity);
 identity_type!(StepIdentity);
+identity_type!(StateIdentity);
 identity_type!(StateTransitionIdentity);
 identity_type!(ConstraintPlanIdentity);
 identity_type!(GeneratorIdentity);
@@ -52,6 +53,7 @@ identity_type!(AnalysisAttemptIdentity);
 identity_type!(ObservationIdentity);
 identity_type!(AccuracyIdentity);
 identity_type!(AnalysisResultIdentity);
+identity_type!(SolverResultIdentity);
 identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
 
@@ -134,11 +136,43 @@ impl StateTransitionIdentity {
         sequence: SequenceIdentity,
         predecessor: StepIdentity,
         successor: StepIdentity,
+        source_state: StateIdentity,
+        source_topology_digest: Digest,
+        target_topology_digest: Digest,
         transition_digest: Digest,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive(
             "state-transition",
-            &(sequence, predecessor, successor, transition_digest),
+            &(
+                sequence,
+                predecessor,
+                successor,
+                source_state,
+                source_topology_digest,
+                target_topology_digest,
+                transition_digest,
+            ),
+        )
+    }
+}
+
+impl StateIdentity {
+    pub fn new(
+        producer: StepIdentity,
+        state_contract_digest: Digest,
+        topology_digest: Digest,
+        source_result: SolverResultIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "semantic-state",
+            &(
+                producer,
+                state_contract_digest,
+                topology_digest,
+                source_result,
+                content_digest,
+            ),
         )
     }
 }
@@ -374,6 +408,15 @@ impl AnalysisResultIdentity {
         output_digests: Vec<Digest>,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive("result", &(workload, output_digests))
+    }
+}
+
+impl SolverResultIdentity {
+    pub fn new(
+        workload: AnalysisWorkloadIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("solver-result", &(workload, content_digest))
     }
 }
 

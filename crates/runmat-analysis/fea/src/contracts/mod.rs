@@ -469,6 +469,8 @@ pub struct LinearStaticSolveOptions {
     pub require_solver_mesh_for_solid: bool,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
+    /// Complete displacement state used only to initialize an iterative linear solve.
+    pub initial_displacement: Option<Vec<f64>>,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -482,6 +484,7 @@ impl Default for LinearStaticSolveOptions {
             require_solver_mesh_for_solid: true,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
+            initial_displacement: None,
         }
     }
 }

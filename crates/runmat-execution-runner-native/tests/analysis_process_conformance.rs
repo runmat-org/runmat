@@ -410,11 +410,16 @@ fn import_result(
         &manifest_bytes,
     )
     .unwrap();
+    let result_identity = runmat_analysis_fea::execution::SolverResultIdentity::new(
+        host.workload.identity,
+        manifest.payload_digest,
+    )
+    .unwrap();
     import_analysis_objects(
         store,
         root,
-        AnalysisNumericalObjectKind::SemanticState,
-        host.workload.execution_plan.digest(),
+        AnalysisNumericalObjectKind::SolverResult,
+        result_identity.digest(),
         manifest.payload_digest,
         &host.artifact_access,
         ObjectInventoryLimits::default(),
@@ -444,9 +449,11 @@ fn fixture_for_study(
     Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
 ) {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let step_id = model.sequence.steps[0].step_id.clone();
     let solve = StructuralLinearWorkload {
         schema_version: 1,
         model,
+        step_id,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
@@ -454,6 +461,7 @@ fn fixture_for_study(
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: None,
         electro_thermal_context: None,
+        initial_guess_transition: None,
     };
     let mesh = solver_mesh(&solve);
     let access = ArtifactAccess {
@@ -467,6 +475,7 @@ fn fixture_for_study(
         artifact_access: access,
         workload: solve,
         mesh,
+        initial_guess: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

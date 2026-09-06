@@ -596,9 +596,11 @@ fn box_structural_workload() -> StructuralLinearWorkload {
     } else {
         panic!("cantilever fixture must use a region excitation");
     }
+    let step_id = model.sequence.steps[0].step_id.clone();
     StructuralLinearWorkload {
         schema_version: 1,
         model,
+        step_id,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
@@ -606,6 +608,7 @@ fn box_structural_workload() -> StructuralLinearWorkload {
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: None,
         electro_thermal_context: None,
+        initial_guess_transition: None,
     }
 }
 

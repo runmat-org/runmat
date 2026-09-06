@@ -115,11 +115,20 @@ pub fn run_linear_static_with_options(
         Some(5),
     );
     let algebra_backend = build_backend(options.algebra_backend_kind);
+    if options.initial_displacement.as_ref().is_some_and(|values| {
+        values.len() != summary.dof_count || values.iter().any(|value| !value.is_finite())
+    }) {
+        return Err(FeaRunError::InvalidModel(format!(
+            "initial displacement state must contain exactly {} finite solver DOFs",
+            summary.dof_count
+        )));
+    }
     let solve_result = solve_linear_system(
         &summary,
         options.preconditioner_kind,
         options.algebra_backend_kind,
         algebra_backend.as_ref(),
+        options.initial_displacement.as_deref(),
     );
     emit_phase(
         "fea.run_linear_static",

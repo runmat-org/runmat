@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
     AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisWorkKind,
+    CanonicalSemanticState, CanonicalStateTransition, CanonicalStateTransitionInput,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity,
     OperatorIdentity, ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity,
-    SignalRealizationIdentity, SolverExcitationIdentity, StepIdentity, StructuralLinearWorkload,
-    StructuralLinearWorkloadResult, StudyIdentity,
+    SignalRealizationIdentity, SolverExcitationIdentity, SolverResultIdentity, StepIdentity,
+    StructuralLinearWorkload, StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::value::{ValuePayload, ValueRefKind};
@@ -33,6 +34,7 @@ pub struct StructuralLinearProgramPreparation {
     pub artifact_access: ArtifactAccess,
     pub workload: StructuralLinearWorkload,
     pub mesh: SolverMeshArtifact,
+    pub initial_guess: Option<PreparedAnalysisObjects>,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
@@ -42,6 +44,116 @@ pub struct PreparedStructuralLinearProgram {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+}
+
+/// Resolves one authored sequence step against an optional completed upstream state before
+/// preparing its immutable solver task. Scheduling and placement cannot enter this projection.
+pub fn prepare_structural_sequence_step(
+    mut preparation: StructuralLinearProgramPreparation,
+) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
+    if preparation.workload.initial_guess_transition.is_some() {
+        return Err(AnalysisBridgeError::Invalid(
+            "sequence-step preparation derives its transition and does not accept a prebound one"
+                .into(),
+        ));
+    }
+    let step = preparation.workload.procedure_step()?.clone();
+    match step.state_inputs.as_slice() {
+        [] => {
+            if preparation.initial_guess.is_some() {
+                return Err(AnalysisBridgeError::Invalid(
+                    "root sequence step cannot receive an upstream semantic state".into(),
+                ));
+            }
+        }
+        [input] if input.use_as == runmat_analysis_core::StateUse::InitialGuess => {
+            let runmat_analysis_core::StateSource::Upstream {
+                producer_step,
+                state_id,
+            } = &input.source
+            else {
+                return Err(AnalysisBridgeError::Invalid(
+                    "structural initial guess must come from an upstream sequence state".into(),
+                ));
+            };
+            let state_objects = preparation.initial_guess.as_ref().ok_or_else(|| {
+                AnalysisBridgeError::Invalid(
+                    "stateful sequence step is missing its upstream semantic state".into(),
+                )
+            })?;
+            if state_objects.manifest.kind != AnalysisNumericalObjectKind::SemanticState {
+                return Err(AnalysisBridgeError::Invalid(
+                    "stateful sequence step received a non-state numerical object".into(),
+                ));
+            }
+            let state = CanonicalSemanticState::from_canonical_bytes(&state_objects.payload())?;
+            if state.state_id != *state_id || state.kind != input.required_kind {
+                return Err(AnalysisBridgeError::Identity(
+                    "upstream semantic state differs from the selected state input",
+                ));
+            }
+            let authored_transition = preparation
+                .workload
+                .model
+                .sequence
+                .transitions
+                .iter()
+                .find(|transition| {
+                    transition.producer_step == *producer_step
+                        && transition.consumer_step == step.step_id
+                        && transition.state_id == *state_id
+                })
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid(
+                        "stateful sequence step has no matching authored transition".into(),
+                    )
+                })?;
+            let study = StudyIdentity::new(
+                preparation.authored_study_digest,
+                preparation.frozen_project_digest,
+            )?;
+            let sequence =
+                SequenceIdentity::from_authored(study, &preparation.workload.model.sequence)?;
+            let producer_contract = preparation
+                .workload
+                .model
+                .sequence
+                .steps
+                .iter()
+                .find(|candidate| candidate.step_id == *producer_step)
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid(
+                        "state transition producer is absent from the authored sequence".into(),
+                    )
+                })?;
+            let producer = StepIdentity::from_authored(sequence, producer_contract)?;
+            let consumer = StepIdentity::from_authored(sequence, &step)?;
+            if state.producer != producer {
+                return Err(AnalysisBridgeError::Identity(
+                    "upstream semantic state names a different producer step",
+                ));
+            }
+            preparation.workload.initial_guess_transition = Some(CanonicalStateTransition::new(
+                CanonicalStateTransitionInput {
+                    sequence,
+                    producer,
+                    consumer,
+                    authored: authored_transition,
+                    source: &state,
+                    target_topology_digest: Digest::from_bytes(
+                        *preparation.mesh.canonical_digest.bytes(),
+                    ),
+                },
+            )?);
+        }
+        _ => {
+            return Err(AnalysisBridgeError::Invalid(
+                "structural sequence execution currently supports at most one initial-guess state input"
+                    .into(),
+            ));
+        }
+    }
+    prepare_structural_linear_program(preparation)
 }
 
 pub fn prepare_structural_linear_program(
@@ -70,14 +182,65 @@ pub fn prepare_structural_linear_program(
         .canonical_encode()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let mesh_digest = Digest::from_bytes(*preparation.mesh.canonical_digest.bytes());
+    match (
+        preparation.workload.initial_guess_transition.as_ref(),
+        preparation.initial_guess.as_ref(),
+    ) {
+        (Some(transition), Some(state))
+            if state.manifest.kind == AnalysisNumericalObjectKind::SemanticState
+                && state.manifest.logical_identity == transition.source_state.digest() =>
+        {
+            let decoded =
+                runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
+                    &state.payload(),
+                )?;
+            if decoded.identity != transition.source_state
+                || decoded.topology_digest != mesh_digest
+                || transition.target_topology_digest != mesh_digest
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "initial-guess state differs from its transition or solver mesh",
+                ));
+            }
+        }
+        (None, None) => {}
+        _ => {
+            return Err(AnalysisBridgeError::Invalid(
+                "structural initial-guess transition and state must be supplied together".into(),
+            ));
+        }
+    }
     let identities = derive_identities(
         &preparation.workload,
         preparation.authored_study_digest,
         preparation.frozen_project_digest,
         mesh_digest,
     )?;
-    let state = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::SemanticState,
+    if let Some(transition) = preparation.workload.initial_guess_transition.as_ref() {
+        let producer = preparation
+            .workload
+            .model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id == transition.producer_step_id)
+            .ok_or_else(|| {
+                AnalysisBridgeError::Invalid(
+                    "initial-guess transition producer is absent from the authored sequence".into(),
+                )
+            })?;
+        let expected_producer = StepIdentity::from_authored(identities.sequence, producer)?;
+        if transition.sequence != identities.sequence
+            || transition.producer != expected_producer
+            || transition.consumer != identities.step
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "initial-guess transition identities differ from the authored sequence",
+            ));
+        }
+    }
+    let invocation = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::SolverInvocation,
         identities.problem.digest(),
         &solve_bytes,
         preparation.chunk_bytes,
@@ -92,7 +255,10 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let inputs = vec![state, mesh];
+    let mut inputs = vec![invocation, mesh];
+    if let Some(initial_guess) = preparation.initial_guess {
+        inputs.push(initial_guess);
+    }
     let workload_inputs = inputs
         .iter()
         .map(|input| AnalysisWorkloadInput {
@@ -114,7 +280,7 @@ pub fn prepare_structural_linear_program(
         identities.execution_plan,
         AnalysisWorkKind::Solve,
         workload_inputs,
-        vec![AnalysisNumericalObjectKind::SemanticState],
+        vec![AnalysisNumericalObjectKind::SolverResult],
         required_capabilities,
     )?;
     let host = AnalysisHostWorkload::new(workload, preparation.artifact_access)?;
@@ -151,11 +317,13 @@ pub fn import_structural_linear_result(
         .read_verified(root.logical_digest)?
         .ok_or_else(|| AnalysisBridgeError::Invalid("analysis result manifest is absent".into()))?;
     let manifest = AnalysisObjectManifest::from_canonical_bytes(&manifest_bytes)?;
+    let expected_result =
+        SolverResultIdentity::new(prepared.host.workload.identity, manifest.payload_digest)?;
     let imported = import_analysis_objects(
         source,
         root,
-        AnalysisNumericalObjectKind::SemanticState,
-        prepared.host.workload.execution_plan.digest(),
+        AnalysisNumericalObjectKind::SolverResult,
+        expected_result.digest(),
         manifest.payload_digest,
         &prepared.host.artifact_access,
         limits,
@@ -174,6 +342,7 @@ pub fn import_structural_linear_result(
 
 struct StructuralIdentities {
     study: StudyIdentity,
+    sequence: SequenceIdentity,
     step: StepIdentity,
     problem: ProblemIdentity,
     execution_plan: ExecutionPlanIdentity,
@@ -185,14 +354,7 @@ fn derive_identities(
     frozen_project_digest: Option<Digest>,
     mesh_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
-    let step_contract = workload.model.sequence.steps.first().ok_or_else(|| {
-        AnalysisBridgeError::Invalid("structural workload has no procedure step".into())
-    })?;
-    if workload.model.sequence.steps.len() != 1 {
-        return Err(AnalysisBridgeError::Invalid(
-            "structural portable execution currently requires exactly one procedure step".into(),
-        ));
-    }
+    let step_contract = workload.procedure_step()?;
     let study = StudyIdentity::new(authored_study_digest, frozen_project_digest)?;
     let sequence = SequenceIdentity::from_authored(study, &workload.model.sequence)?;
     let step = StepIdentity::from_authored(sequence, step_contract)?;
@@ -226,7 +388,10 @@ fn derive_identities(
     let problem = ProblemIdentity::new(
         step,
         contract_digest("model", &workload.model)?,
-        None,
+        workload
+            .initial_guess_transition
+            .as_ref()
+            .map(|transition| transition.identity),
         constraints,
         excitations,
     )?;
@@ -270,12 +435,13 @@ fn derive_identities(
             &(
                 ANALYSIS_HOST_ABI,
                 workload.require_solver_mesh_for_solid,
-                AnalysisNumericalObjectKind::SemanticState,
+                AnalysisNumericalObjectKind::SolverResult,
             ),
         )?,
     )?;
     Ok(StructuralIdentities {
         study,
+        sequence,
         step,
         problem,
         execution_plan,
@@ -292,13 +458,11 @@ fn contract_digest<T: Serialize>(domain: &'static str, value: &T) -> AnalysisBri
 }
 
 fn validate_result_semantics(
-    state: &PreparedAnalysisObjects,
+    invocation: &PreparedAnalysisObjects,
     result: &StructuralLinearWorkloadResult,
 ) -> AnalysisBridgeResult<()> {
-    let workload = StructuralLinearWorkload::from_canonical_bytes(&state.payload())?;
-    let step = workload.model.sequence.steps.first().ok_or_else(|| {
-        AnalysisBridgeError::Invalid("structural workload has no procedure step".into())
-    })?;
+    let workload = StructuralLinearWorkload::from_canonical_bytes(&invocation.payload())?;
+    let step = workload.procedure_step()?;
     if result.run.requested_backend != workload.backend
         || result.run.identity.family() != step.family
         || result.run.identity.procedure() != step.procedure

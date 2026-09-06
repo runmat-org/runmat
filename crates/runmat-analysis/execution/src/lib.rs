@@ -10,6 +10,7 @@ mod response;
 mod serial;
 mod signal_materialization;
 mod signal_program;
+mod state_publication;
 mod structural;
 mod task;
 mod transport;
@@ -45,9 +46,14 @@ pub use signal_program::{
     SignalMaterializationExpectation, SIGNAL_GENERATOR_EXECUTION_MODE,
     SIGNAL_GENERATOR_TARGET_PROFILE,
 };
+pub use state_publication::{
+    import_semantic_state, prepare_semantic_state_publication, PreparedSemanticStatePublication,
+    SemanticStatePublicationPreparation,
+};
 pub use structural::{
     import_structural_linear_result, prepare_structural_linear_program,
-    PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
+    prepare_structural_sequence_step, PreparedStructuralLinearProgram,
+    StructuralLinearProgramPreparation,
 };
 pub use task::{
     build_analysis_task_submission, AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,

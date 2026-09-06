@@ -35,9 +35,12 @@ pub(crate) fn access(authority: &str) -> ArtifactAccess {
 }
 
 fn workload() -> StructuralLinearWorkload {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let step_id = model.sequence.steps[0].step_id.clone();
     StructuralLinearWorkload {
         schema_version: 1,
-        model: fixture_model(FixtureId::CantileverLinearStatic),
+        model,
+        step_id,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
@@ -45,6 +48,7 @@ fn workload() -> StructuralLinearWorkload {
         require_solver_mesh_for_solid: false,
         thermo_mechanical_context: None,
         electro_thermal_context: None,
+        initial_guess_transition: None,
     }
 }
 

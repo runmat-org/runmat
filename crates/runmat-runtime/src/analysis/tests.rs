@@ -2252,6 +2252,7 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
                 require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
                 thermo_mechanical_context: workload.thermo_mechanical_context,
                 electro_thermal_context: workload.electro_thermal_context,
+                initial_displacement: None,
             },
         )
         .map_err(|error| error.to_string())?;

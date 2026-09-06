@@ -307,9 +307,12 @@ mod tests {
 
     #[test]
     fn unresolved_importer_alias_is_a_coordinator_resolution_failure() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let step_id = model.sequence.steps[0].step_id.clone();
         let mut workload = StructuralLinearWorkload {
             schema_version: 1,
-            model: fixture_model(FixtureId::CantileverLinearStatic),
+            model,
+            step_id,
             backend: ComputeBackend::Cpu,
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Jacobi,
@@ -317,6 +320,7 @@ mod tests {
             require_solver_mesh_for_solid: true,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
+            initial_guess_transition: None,
         };
         workload.model.constraints[0].visit_targets_mut(|target| {
             *target = runmat_analysis_core::RegionTarget::boundary("face_000002")

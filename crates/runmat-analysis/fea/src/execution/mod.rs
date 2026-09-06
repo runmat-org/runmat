@@ -8,6 +8,7 @@ mod identity;
 mod object;
 mod signal;
 mod solve;
+mod state;
 mod sweep;
 
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
@@ -17,7 +18,8 @@ pub use identity::{
     ExecutionPlanIdentity, GeneratorIdentity, NumericalPlanIdentity, ObservationIdentity,
     OperatorIdentity, ProblemIdentity, PublicationIdentity, SequenceIdentity,
     SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
-    StateTransitionIdentity, StepIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
+    SolverResultIdentity, StateIdentity, StateTransitionIdentity, StepIdentity, StudyIdentity,
+    SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, AnalysisChunkDescriptor, AnalysisNumericalObjectKind,
@@ -29,6 +31,10 @@ pub use signal::{
     CanonicalSignalRealization, CanonicalSignalRealizationInput, CanonicalSignalValues,
 };
 pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
+pub use state::{
+    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalStateTransition,
+    CanonicalStateTransitionInput, SemanticStatePublicationRequest,
+};
 pub use sweep::{ComposedSweepResult, SweepEntryDisposition, SweepEntryOutcome};
 
 #[cfg(test)]

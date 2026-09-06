@@ -1093,6 +1093,51 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
     }));
 }
 
+#[test]
+fn linear_static_reuses_structural_primary_state_as_an_initial_guess() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let baseline = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh.clone()),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".into()),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("baseline structural solve should succeed");
+    let initial_displacement = baseline
+        .field(crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .expect("baseline must publish host displacement")
+        .to_vec();
+
+    let reused = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            solver_mesh_artifact_path: Some("solver_mesh.cbor".into()),
+            initial_displacement: Some(initial_displacement),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("state-initialized structural solve should succeed");
+
+    assert_eq!(
+        baseline
+            .field(crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap(),
+        reused
+            .field(crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+    );
+    assert!(reused.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_CONVERGENCE" && diagnostic.message.contains("iterations=0 ")
+    }));
+}
+
 fn single_tetrahedron_solver_mesh() -> SolverMeshArtifact {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
     add_face_region(&mut mesh, 0, "root");

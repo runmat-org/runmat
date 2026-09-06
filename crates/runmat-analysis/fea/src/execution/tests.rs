@@ -219,10 +219,184 @@ fn numerical_objects_are_deterministically_chunked_and_self_validating() {
 }
 
 #[test]
+fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
+    use runmat_analysis_core::{
+        AnalysisField, ProcedureStepId, ReferenceStatePolicy, StateCompleteness, StateId,
+        StateKind, StateOutput, StatePersistence, StateTransition, StateTransitionMethod,
+        TopologyTransitionPolicy, TransitionId,
+    };
+
+    let study = StudyIdentity::new(digest("state-study"), None).unwrap();
+    let sequence = SequenceIdentity::new(study, digest("state-sequence")).unwrap();
+    let producer = StepIdentity::new(sequence, digest("producer")).unwrap();
+    let consumer = StepIdentity::new(sequence, digest("consumer")).unwrap();
+    let (_, execution_plan, _) = identity_graph();
+    let workload = AnalysisWorkloadIdentity::new(
+        study,
+        producer,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        digest("state-solve"),
+        vec![digest("state-input")],
+    )
+    .unwrap();
+    let source_result = SolverResultIdentity::new(workload, digest("solver-fields")).unwrap();
+    let topology = digest("shared-topology");
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: StateOutput {
+            state_id: StateId("equilibrium".into()),
+            kind: StateKind::StructuralPrimary,
+            completeness: StateCompleteness::Complete,
+            persistence: StatePersistence::Canonical,
+        },
+        topology_digest: topology,
+        source_result,
+        fields: vec![AnalysisField::host_f64(
+            "structural.displacement",
+            vec![2, 3],
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        )],
+    })
+    .unwrap();
+    assert_eq!(
+        CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap()).unwrap(),
+        state
+    );
+
+    let authored = StateTransition {
+        transition_id: TransitionId("reuse-equilibrium".into()),
+        producer_step: ProcedureStepId("preload".into()),
+        consumer_step: ProcedureStepId("branch".into()),
+        state_id: state.state_id.clone(),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    };
+    let transition = CanonicalStateTransition::new(CanonicalStateTransitionInput {
+        sequence,
+        producer,
+        consumer,
+        authored: &authored,
+        source: &state,
+        target_topology_digest: topology,
+    })
+    .unwrap();
+    assert_eq!(
+        CanonicalStateTransition::from_canonical_bytes(&transition.canonical_bytes().unwrap())
+            .unwrap(),
+        transition
+    );
+
+    let mut substituted_state = state.clone();
+    substituted_state.fields[0] = AnalysisField::host_f64(
+        "structural.displacement",
+        vec![2, 3],
+        vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+    );
+    assert!(substituted_state.validate().is_err());
+
+    let mut substituted_transition = transition.clone();
+    substituted_transition.target_topology_digest = digest("other-topology");
+    assert!(substituted_transition.validate().is_err());
+
+    let wrong_producer = StepIdentity::new(sequence, digest("wrong-producer")).unwrap();
+    assert!(
+        CanonicalStateTransition::new(CanonicalStateTransitionInput {
+            sequence,
+            producer: wrong_producer,
+            consumer,
+            authored: &authored,
+            source: &state,
+            target_topology_digest: topology,
+        })
+        .is_err()
+    );
+
+    let mut wrong_state = authored.clone();
+    wrong_state.state_id = StateId("other-state".into());
+    assert!(
+        CanonicalStateTransition::new(CanonicalStateTransitionInput {
+            sequence,
+            producer,
+            consumer,
+            authored: &wrong_state,
+            source: &state,
+            target_topology_digest: topology,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn semantic_state_rejects_unimplemented_projection_transitions() {
+    use runmat_analysis_core::{
+        AnalysisField, ProcedureStepId, ReferenceStatePolicy, StateCompleteness, StateId,
+        StateKind, StateOutput, StatePersistence, StateTransition, StateTransitionMethod,
+        TopologyTransitionPolicy, TransitionId,
+    };
+
+    let study = StudyIdentity::new(digest("projection-study"), None).unwrap();
+    let sequence = SequenceIdentity::new(study, digest("projection-sequence")).unwrap();
+    let producer = StepIdentity::new(sequence, digest("producer")).unwrap();
+    let consumer = StepIdentity::new(sequence, digest("consumer")).unwrap();
+    let (_, execution_plan, _) = identity_graph();
+    let workload = AnalysisWorkloadIdentity::new(
+        study,
+        producer,
+        execution_plan,
+        AnalysisWorkKind::Solve,
+        digest("projection-solve"),
+        vec![digest("projection-input")],
+    )
+    .unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: StateOutput {
+            state_id: StateId("equilibrium".into()),
+            kind: StateKind::StructuralPrimary,
+            completeness: StateCompleteness::Complete,
+            persistence: StatePersistence::Canonical,
+        },
+        topology_digest: digest("source-topology"),
+        source_result: SolverResultIdentity::new(workload, digest("solver-fields")).unwrap(),
+        fields: vec![AnalysisField::host_f64(
+            "structural.displacement",
+            vec![1, 3],
+            vec![0.0, 0.0, 0.0],
+        )],
+    })
+    .unwrap();
+    let authored = StateTransition {
+        transition_id: TransitionId("project-equilibrium".into()),
+        producer_step: ProcedureStepId("source".into()),
+        consumer_step: ProcedureStepId("target".into()),
+        state_id: state.state_id.clone(),
+        method: StateTransitionMethod::ConservativeProjection,
+        topology: TopologyTransitionPolicy::ProjectWithEvidence,
+        reference: ReferenceStatePolicy::Preserve,
+    };
+    assert!(
+        CanonicalStateTransition::new(CanonicalStateTransitionInput {
+            sequence,
+            producer,
+            consumer,
+            authored: &authored,
+            source: &state,
+            target_topology_digest: digest("target-topology"),
+        })
+        .is_err()
+    );
+}
+
+#[test]
 fn structural_linear_workload_round_trips_without_a_mesh_path() {
+    let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let step_id = model.sequence.steps[0].step_id.clone();
     let workload = StructuralLinearWorkload {
         schema_version: 1,
-        model: crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic),
+        model,
+        step_id,
         backend: crate::ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
@@ -230,6 +404,7 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: None,
         electro_thermal_context: None,
+        initial_guess_transition: None,
     };
     let bytes = workload.canonical_bytes().unwrap();
     let decoded = StructuralLinearWorkload::from_canonical_bytes(&bytes).unwrap();

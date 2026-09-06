@@ -8,7 +8,7 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::execution::{
     AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
+    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
@@ -360,7 +360,7 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
     let sequence = SequenceIdentity::from_authored(study, validated.sequence()).unwrap();
     let (_, _, execution_plan) = execution_identities();
     let input = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::SemanticState,
+        AnalysisNumericalObjectKind::SolverInvocation,
         digest("parallel-input"),
         b"parallel sequence input",
         8,
@@ -394,7 +394,7 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
                     manifest_encoded_length: input.root.encoded_length,
                     reference_kind: ValueRefKind::DriverObject,
                 }],
-                vec![AnalysisNumericalObjectKind::SemanticState],
+                vec![AnalysisNumericalObjectKind::SolverResult],
                 BTreeSet::from([AnalysisCapabilityRequirement::Host {
                     abi: ANALYSIS_HOST_ABI.into(),
                 }]),
@@ -606,10 +606,50 @@ impl AnalysisKernel for StructuralResultKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::Solve);
+        let result_identity = runmat_analysis_fea::execution::SolverResultIdentity::new(
+            invocation.host.workload.identity,
+            Digest::sha256(&self.0),
+        )?;
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::SolverResult,
+            logical_identity: result_identity.digest(),
+            payload: self.0.clone(),
+        }])
+    }
+}
+
+struct StateProjectionKernel;
+
+impl AnalysisKernel for StateProjectionKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        let request = invocation
+            .inputs
+            .iter()
+            .find(|input| {
+                input.manifest.kind == AnalysisNumericalObjectKind::StatePublicationRequest
+            })
+            .ok_or_else(|| AnalysisBridgeError::Invalid("publication request is absent".into()))?;
+        let result = invocation
+            .inputs
+            .iter()
+            .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::SolverResult)
+            .ok_or_else(|| AnalysisBridgeError::Invalid("solver result is absent".into()))?;
+        let request =
+            runmat_analysis_fea::execution::SemanticStatePublicationRequest::from_canonical_bytes(
+                &request.payload(),
+            )?;
+        let result = StructuralLinearWorkloadResult::from_canonical_bytes(&result.payload())?;
+        let state = runmat_analysis_fea::execution::CanonicalSemanticState::from_publication(
+            &request,
+            &result.run.fields,
+        )?;
         Ok(vec![AnalysisKernelOutput {
             kind: AnalysisNumericalObjectKind::SemanticState,
-            logical_identity: invocation.host.workload.execution_plan.digest(),
-            payload: self.0.clone(),
+            logical_identity: state.identity.digest(),
+            payload: state.canonical_bytes()?,
         }])
     }
 }
@@ -631,10 +671,46 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
     };
 
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let producer_step = model.sequence.steps[0].clone();
+    let state_id = producer_step.state_outputs[0].state_id.clone();
+    let mut consumer_step = producer_step.clone();
+    consumer_step.step_id = ProcedureStepId("branch".into());
+    consumer_step.state_inputs = vec![runmat_analysis_core::StateInput {
+        input_id: "preload-initial-guess".into(),
+        required_kind: runmat_analysis_core::StateKind::StructuralPrimary,
+        source: runmat_analysis_core::StateSource::Upstream {
+            producer_step: producer_step.step_id.clone(),
+            state_id: state_id.clone(),
+        },
+        use_as: runmat_analysis_core::StateUse::InitialGuess,
+        conflict: runmat_analysis_core::InitialStateConflictPolicy::Reject,
+    }];
+    let transition = runmat_analysis_core::StateTransition {
+        transition_id: runmat_analysis_core::TransitionId("reuse-preload".into()),
+        producer_step: producer_step.step_id.clone(),
+        consumer_step: consumer_step.step_id.clone(),
+        state_id,
+        method: runmat_analysis_core::StateTransitionMethod::InitialGuessOnly,
+        topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+        reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+    };
+    model.sequence = AnalysisSequence {
+        sequence_id: "preload-and-branch".into(),
+        steps: vec![producer_step.clone(), consumer_step.clone()],
+        dependencies: vec![SequenceDependency {
+            predecessor: producer_step.step_id.clone(),
+            successor: consumer_step.step_id.clone(),
+            reason: SequenceDependencyReason::StateTransfer,
+        }],
+        transitions: vec![transition],
+        branches: Vec::new(),
+    };
+    let step_id = producer_step.step_id.clone();
     let solve = StructuralLinearWorkload {
         schema_version: 1,
         model,
+        step_id,
         backend: ComputeBackend::Cpu,
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
@@ -642,6 +718,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: None,
         electro_thermal_context: None,
+        initial_guess_transition: None,
     };
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -671,6 +748,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: solve.clone(),
         mesh: mesh.clone(),
+        initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -686,7 +764,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .all(|input| matches!(input, ValuePayload::Object(_))));
 
     let raw = run_linear_static_with_options(
-        &solve.model,
+        &solve.solver_model().unwrap(),
         solve.backend,
         LinearStaticSolveOptions {
             formulation_requirement: solve.formulation_requirement,
@@ -697,6 +775,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
+            initial_displacement: None,
         },
     )
     .unwrap();
@@ -728,6 +807,104 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert_eq!(decoded.run, raw);
 
+    let state_prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
+        source_host: prepared.host.clone(),
+        source_result: completed.outputs[0].clone(),
+        declaration: solve.model.sequence.steps[0].state_outputs[0].clone(),
+        topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
+    state_prepared.program.write_to(&mut store).unwrap();
+    let state_completed = execute_serial_analysis(
+        &state_prepared.program.request,
+        &mut store,
+        &StateProjectionKernel,
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let state_response = AnalysisHostResponse::completed(&state_prepared.host, &state_completed)
+        .unwrap()
+        .program_response();
+    let state = import_semantic_state(
+        &store,
+        state_response,
+        &state_prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        state.fields[0].field_id,
+        runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
+    );
+    assert_eq!(state.source_result, state_prepared.request.source_result);
+
+    let mut branch_workload = solve.clone();
+    branch_workload.step_id = consumer_step.step_id.clone();
+    let branch = prepare_structural_sequence_step(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: access(),
+        workload: branch_workload,
+        mesh: mesh.clone(),
+        initial_guess: Some(state_completed.outputs[0].clone()),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_eq!(branch.inputs.len(), 3);
+    assert_eq!(
+        branch
+            .inputs
+            .iter()
+            .map(|input| input.manifest.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            AnalysisNumericalObjectKind::SolverInvocation,
+            AnalysisNumericalObjectKind::Mesh,
+            AnalysisNumericalObjectKind::SemanticState,
+        ]
+    );
+    assert_ne!(prepared.host.workload.step, branch.host.workload.step);
+    assert_ne!(
+        prepared.host.workload.execution_plan,
+        branch.host.workload.execution_plan
+    );
+    let branch_invocation =
+        runmat_analysis_fea::execution::StructuralLinearWorkload::from_canonical_bytes(
+            &branch.inputs[0].payload(),
+        )
+        .unwrap();
+    let branch_transition = branch_invocation.initial_guess_transition.unwrap();
+    assert_eq!(branch_transition.source_state, state.identity);
+    assert_eq!(branch_transition.producer, prepared.host.workload.step);
+    assert_eq!(branch_transition.consumer, branch.host.workload.step);
+
+    let mut substituted_state = state_completed.outputs[0].clone();
+    substituted_state.manifest.logical_identity = digest("substituted-state");
+    let mut substituted_workload = solve.clone();
+    substituted_workload.step_id = consumer_step.step_id.clone();
+    assert!(
+        prepare_structural_sequence_step(StructuralLinearProgramPreparation {
+            authored_study_digest: digest("authored-study"),
+            frozen_project_digest: None,
+            program_revision: revision(),
+            artifact_access: access(),
+            workload: substituted_workload,
+            mesh: mesh.clone(),
+            initial_guess: Some(substituted_state),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
+        .is_err()
+    );
+
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
         mut result_objects,
@@ -757,6 +934,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         },
         workload: solve.clone(),
         mesh: mesh.clone(),
+        initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -785,6 +963,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: backend_variant,
         mesh,
+        initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

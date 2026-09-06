@@ -404,7 +404,7 @@ pub fn import_exact_structural_study_result(
     let boundary_objects = runmat_analysis_execution::import_analysis_objects(
         source,
         &publication.boundary_root,
-        AnalysisNumericalObjectKind::SemanticState,
+        AnalysisNumericalObjectKind::BoundaryResolution,
         boundary_manifest.logical_identity,
         boundary_manifest.payload_digest,
         &expected.artifact_access,

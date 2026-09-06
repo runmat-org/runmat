@@ -144,6 +144,7 @@ fn prepare_local_program(
         artifact_access: artifact_access(study_digest),
         workload: workload.clone(),
         mesh: mesh.clone(),
+        initial_guess: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,
         required_capabilities: BTreeSet::new(),
@@ -156,7 +157,9 @@ fn prepare_local_program(
         .map_err(|error| error.to_string())?;
     task_capabilities.insert(Capability::ProcessIsolation);
     Ok(PreparedLocalProgram {
-        maximum_wall_millis: workload.model.sequence.steps[0]
+        maximum_wall_millis: workload
+            .procedure_step()
+            .map_err(|error| error.to_string())?
             .accuracy
             .resources
             .maximum_wall_time_milliseconds,
