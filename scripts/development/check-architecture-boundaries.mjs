@@ -1378,6 +1378,8 @@ for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/file.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/path.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference/working_directory.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/installation_path/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/installation_path/inference.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/text_input.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path/mod.rs", 32],
@@ -1420,6 +1422,36 @@ for (const obsolete of [
   if (fs.existsSync(path.join(repo, obsolete))) {
     fail(`${obsolete} duplicates the domain-owned IO inference router`);
   }
+}
+
+enforceMigratedBuiltinFamily({
+  name: "installation-root identity",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/installation_path",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/installation_path",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/installation_path/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/installation_path/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/installation_path/matlabroot/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/matlabroot.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/matlabroot.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+const installationSources = [
+  ...rustSources("crates/runmat-builtins/src/catalog/entries/io/repl_fs/installation_path"),
+  ...rustSources("crates/runmat-runtime/src/builtins/io/repl_fs/installation_path"),
+].map(({ text }) => text).join("\n");
+if (/compat::MATLABROOT_DESCRIPTOR|type_resolvers::string_type/.test(installationSources)) {
+  fail("matlabroot must use its identity-local catalog and inference authority");
+}
+const replCompatibility = read("crates/runmat-runtime/src/builtins/io/repl_fs/compat.rs");
+if (/name\s*=\s*"matlabroot"|\bMATLABROOT_DESCRIPTOR\b|\bmatlabroot_builtin\b/.test(replCompatibility)) {
+  fail("the REPL-filesystem compatibility bucket must not regain matlabroot ownership");
 }
 
 const cdRuntimePath = "crates/runmat-runtime/src/builtins/io/repl_fs/cd/mod.rs";

@@ -7,6 +7,7 @@ mod exports;
 mod file_transfer;
 mod genpath;
 mod inference;
+mod installation_path;
 mod path;
 mod path_predicate;
 mod path_syntax;

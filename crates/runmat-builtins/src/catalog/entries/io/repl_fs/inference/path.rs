@@ -7,6 +7,9 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        PathInferenceRule::Installation(rule) => {
+            super::super::installation_path::infer(rule, request, entry)
+        }
         PathInferenceRule::Predicate(rule) => {
             super::super::path_predicate::infer(rule, request, entry)
         }
