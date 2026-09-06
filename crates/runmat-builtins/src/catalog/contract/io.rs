@@ -17,9 +17,16 @@ pub enum IoReplFsInferenceRule {
     CurrentDirectory,
     DirectoryLifecycle(DirectoryLifecycleInferenceRule),
     Environment(EnvironmentInferenceRule),
+    FileTransfer(FileTransferInferenceRule),
     PathSyntax(PathSyntaxInferenceRule),
     SearchPath(SearchPathInferenceRule),
     TemporaryPath(TemporaryPathInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum FileTransferInferenceRule {
+    Copy,
+    Move,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
