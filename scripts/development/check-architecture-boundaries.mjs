@@ -1372,6 +1372,7 @@ for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/entries/io/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/console/mod.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/exports.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs", 32],
   ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path/mod.rs", 32],
@@ -1630,6 +1631,48 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "path-predicate family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_predicate",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/inference.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/isfile/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/isfolder/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/path_predicate/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/isfile.json",
+    "docs/builtins/reference/isfolder.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/isfile.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/isfolder.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path_predicate/inference.rs",
+]) {
+  if (/"(?:isfile|isfolder)"/.test(read(sourcePath))) {
+    fail(`${sourcePath} must route path-predicate inference by typed rules, not builtin names`);
+  }
+}
+const replFsCompatibility = read("crates/runmat-runtime/src/builtins/io/repl_fs/compat.rs");
+if (/(?:ISFILE|ISFOLDER)_(?:DESCRIPTOR|INTEGER_AUDIT)|name\s*=\s*"(?:isfile|isfolder)"|path_predicate_builtin/.test(replFsCompatibility)) {
+  fail("the REPL-filesystem compatibility bucket must not reclaim path-predicate ownership");
+}
+if (/"(?:isfile|isfolder)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim path-predicate authority");
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/inference.rs",
   "crates/runmat-builtins/src/catalog/entries/io/mod.rs",

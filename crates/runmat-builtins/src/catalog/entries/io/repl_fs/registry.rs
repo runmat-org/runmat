@@ -11,6 +11,7 @@ pub(in crate::catalog::entries::io) fn extend_entries(
             super::file_transfer::ENTRIES,
             super::genpath::ENTRIES,
             super::path::ENTRIES,
+            super::path_predicate::ENTRIES,
             super::path_syntax::ENTRIES,
             super::pwd::ENTRIES,
             super::rmpath::ENTRIES,

@@ -17,6 +17,9 @@ pub(in crate::catalog::entries::io) fn infer(
             super::file_transfer::infer(rule, request, entry)
         }
         IoReplFsInferenceRule::PathSyntax(rule) => super::path_syntax::infer(rule, request, entry),
+        IoReplFsInferenceRule::PathPredicate(rule) => {
+            super::path_predicate::infer(rule, request, entry)
+        }
         IoReplFsInferenceRule::SearchPath(rule) => super::search_path::infer(rule, request, entry),
         IoReplFsInferenceRule::TemporaryPath(rule) => {
             super::temporary_path::infer(rule, request, entry)

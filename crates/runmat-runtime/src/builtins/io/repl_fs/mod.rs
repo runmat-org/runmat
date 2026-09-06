@@ -17,6 +17,7 @@ pub mod opentoline;
 pub mod path;
 mod path_list;
 mod path_mutation;
+pub(crate) mod path_predicate;
 pub(crate) mod path_syntax;
 pub mod pcode;
 pub mod pwd;
