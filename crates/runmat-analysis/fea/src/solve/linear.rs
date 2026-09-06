@@ -114,7 +114,29 @@ pub fn solve_linear_system(
                     diagnostics,
                 };
             }
-            Err(message) => {
+            Err(DenseSolveError::Cancelled) => {
+                initial_diagnostics.push(FeaDiagnostic {
+                    code: "FEA_SOLVER_CANCELLED".to_string(),
+                    severity: FeaDiagnosticSeverity::Warning,
+                    message: "dense direct solve cancelled".to_string(),
+                });
+                return LinearSolveResult {
+                    iterations: 0,
+                    residual_norm: algebra_backend
+                        .dot(&summary.operator.rhs, &summary.operator.rhs)
+                        .sqrt(),
+                    converged: false,
+                    host_sync_count: 0,
+                    solver_backend: effective_backend_kind,
+                    device_apply_k_count: 0,
+                    device_apply_k_attempt_count: 0,
+                    solution: vec![0.0; summary.dof_count],
+                    solver_method: SolverMethod::DenseDirect,
+                    preconditioner: SolverPreconditioner::None,
+                    diagnostics: initial_diagnostics,
+                };
+            }
+            Err(DenseSolveError::Numerical(message)) => {
                 initial_diagnostics.push(FeaDiagnostic {
                     code: "FEA_DENSE_DIRECT_FALLBACK".to_string(),
                     severity: FeaDiagnosticSeverity::Warning,
@@ -177,6 +199,9 @@ pub fn solve_linear_system(
     let mut iterations = 0u32;
     let mut converged = false;
     for _ in 0..max_iters {
+        if crate::is_fea_cancelled() {
+            break;
+        }
         let ap = apply_k(&summary.operator, &p);
         let denom = algebra_backend.dot(&p, &ap);
         if denom.abs() <= 1.0e-18 {
@@ -230,12 +255,20 @@ pub fn solve_linear_system(
     }
 }
 
-fn solve_dense_direct(summary: &AssemblySummary, dense: &[f64]) -> Result<Vec<f64>, String> {
+enum DenseSolveError {
+    Cancelled,
+    Numerical(String),
+}
+
+fn solve_dense_direct(
+    summary: &AssemblySummary,
+    dense: &[f64],
+) -> Result<Vec<f64>, DenseSolveError> {
     let n = summary.dof_count;
     if dense.len() != n.saturating_mul(n) || summary.operator.rhs.len() != n {
-        return Err(
+        return Err(DenseSolveError::Numerical(
             "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        );
+        ));
     }
     let free_dofs = (0..n)
         .filter(|idx| !summary.operator.constrained[*idx])
@@ -262,6 +295,9 @@ fn solve_dense_direct(summary: &AssemblySummary, dense: &[f64]) -> Result<Vec<f6
 
     let mut free_solution = solve_dense_square(&a, &b)?;
     for _ in 0..3 {
+        if crate::is_fea_cancelled() {
+            return Err(DenseSolveError::Cancelled);
+        }
         let residual = dense_residual(&a, &free_solution, &b);
         let residual_norm = residual
             .iter()
@@ -286,20 +322,20 @@ fn solve_dense_direct(summary: &AssemblySummary, dense: &[f64]) -> Result<Vec<f6
     for (local, &global) in free_dofs.iter().enumerate() {
         x[global] = free_solution[local];
         if !x[global].is_finite() {
-            return Err(format!(
+            return Err(DenseSolveError::Numerical(format!(
                 "dense direct solve skipped because solution component {global} is non-finite"
-            ));
+            )));
         }
     }
     Ok(x)
 }
 
-fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
+fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, DenseSolveError> {
     let n = b.len();
     if a.len() != n.saturating_mul(n) {
-        return Err(
+        return Err(DenseSolveError::Numerical(
             "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        );
+        ));
     }
     let mut a = a.to_vec();
     let mut b = b.to_vec();
@@ -312,6 +348,9 @@ fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
         .collect::<Vec<_>>();
 
     for pivot in 0..n {
+        if crate::is_fea_cancelled() {
+            return Err(DenseSolveError::Cancelled);
+        }
         let mut pivot_row = pivot;
         let mut pivot_score = scaled_pivot_score(&a, &row_scales, n, pivot, pivot);
         for row in (pivot + 1)..n {
@@ -323,9 +362,9 @@ fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
         }
         let pivot_abs = a[pivot_row * n + pivot].abs();
         if pivot_abs <= 1.0e-18 || !pivot_abs.is_finite() || !pivot_score.is_finite() {
-            return Err(format!(
+            return Err(DenseSolveError::Numerical(format!(
                 "dense direct solve skipped because pivot {pivot} is singular or non-finite"
-            ));
+            )));
         }
         if pivot_row != pivot {
             for col in 0..n {
@@ -335,6 +374,9 @@ fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
         }
 
         for row in (pivot + 1)..n {
+            if crate::is_fea_cancelled() {
+                return Err(DenseSolveError::Cancelled);
+            }
             let factor = a[row * n + pivot] / a[pivot * n + pivot];
             if factor == 0.0 {
                 continue;
@@ -349,21 +391,24 @@ fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, String> {
 
     let mut x = vec![0.0_f64; n];
     for row in (0..n).rev() {
+        if crate::is_fea_cancelled() {
+            return Err(DenseSolveError::Cancelled);
+        }
         let mut rhs = b[row];
         for col in (row + 1)..n {
             rhs -= a[row * n + col] * x[col];
         }
         let diag = a[row * n + row];
         if diag.abs() <= 1.0e-18 || !diag.is_finite() {
-            return Err(format!(
+            return Err(DenseSolveError::Numerical(format!(
                 "dense direct solve skipped because diagonal {row} is singular or non-finite"
-            ));
+            )));
         }
         x[row] = rhs / diag;
         if !x[row].is_finite() {
-            return Err(format!(
+            return Err(DenseSolveError::Numerical(format!(
                 "dense direct solve skipped because solution component {row} is non-finite"
-            ));
+            )));
         }
     }
     Ok(x)
@@ -497,5 +542,67 @@ mod tests {
             .iter()
             .any(|diag| diag.code == "FEA_SOLVER_METHOD"
                 && diag.message.contains("solver=dense_direct")));
+    }
+
+    #[test]
+    fn matrix_free_pcg_stops_before_an_iteration_when_cancelled() {
+        let mut summary = dense_summary(12);
+        summary.operator.stiffness_dense = None;
+        summary.operator.rhs = vec![1.0; summary.dof_count];
+        let cancellation =
+            crate::replace_fea_progress_context(None, Some(std::sync::Arc::new(|| true)));
+        let backend = CpuReferenceBackend;
+
+        let result = solve_linear_system(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &backend,
+        );
+
+        drop(cancellation);
+        assert_eq!(result.iterations, 0);
+        assert!(!result.converged);
+    }
+
+    #[test]
+    fn dense_elimination_observes_cancellation_after_work_begins() {
+        let mut summary = dense_summary(8);
+        let mut stiffness = vec![0.0; 64];
+        for index in 0..8 {
+            stiffness[index * 8 + index] = 2.0;
+        }
+        summary.operator.stiffness_dense = Some(stiffness);
+        summary.operator.stiffness_diag = vec![2.0; 8];
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let polls_for_cancellation = std::sync::Arc::clone(&polls);
+        let cancellation = crate::replace_fea_progress_context(
+            None,
+            Some(std::sync::Arc::new(move || {
+                polls_for_cancellation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
+            })),
+        );
+        let backend = CpuReferenceBackend;
+
+        let result = solve_linear_system(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &backend,
+        );
+
+        drop(cancellation);
+        assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 2);
+        assert_eq!(result.solver_method, SolverMethod::DenseDirect);
+        assert_eq!(result.iterations, 0);
+        assert!(!result.converged);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_SOLVER_CANCELLED"));
+        assert!(!result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_DENSE_DIRECT_FALLBACK"));
     }
 }

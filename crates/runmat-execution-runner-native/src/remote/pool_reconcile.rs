@@ -28,6 +28,16 @@ pub(super) async fn reconcile_workers(
     worker_pool: &DriverWorkerPool,
     registered: &mut HashMap<String, WorkerId>,
 ) -> NativeExecutionResult<()> {
+    let recorded = registered
+        .iter()
+        .map(|(allocation, worker)| (allocation.clone(), *worker))
+        .collect::<Vec<_>>();
+    for (allocation, worker) in recorded {
+        if !pool.worker_is_ready_and_routed(worker).await {
+            registered.remove(&allocation);
+            pool.remove_worker(worker, true).await?;
+        }
+    }
     let live_allocations = worker_pool
         .workers
         .iter()
@@ -56,13 +66,20 @@ pub(super) async fn reconcile_workers(
             continue;
         };
         verify_evidence(authority, worker)?;
-        if !worker.run_key_envelope_authorized {
-            authorize_worker(control, authority, run_key, worker).await?;
-        }
         let worker_id = WorkerId::derive(&[
             authority.run_id.as_bytes(),
             worker.allocation_lease_id.as_bytes(),
         ]);
+        // Reconciliation may be cancelled immediately after add_worker atomically admits the
+        // worker but before this local allocation index is updated. Recover only a ready worker
+        // with a live route; lost workers must reconnect through normal admission.
+        if pool.worker_is_ready_and_routed(worker_id).await {
+            registered.insert(worker.allocation_lease_id.clone(), worker_id);
+            continue;
+        }
+        if !worker.run_key_envelope_authorized {
+            authorize_worker(control, authority, run_key, worker).await?;
+        }
         let channel = RelayRemoteWorkerChannel::connect(
             &worker_relay_url(authority, &worker.allocation_lease_id)?,
             &[

@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::state::PoolState;
@@ -24,6 +25,23 @@ type CompletionResult = Result<AttemptSuccess, String>;
 
 mod completion;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct WorkerRouteIdentity {
+    worker_id: runmat_execution::identity::WorkerId,
+    generation: u64,
+}
+
+#[derive(Clone)]
+struct WorkerRoute {
+    identity: WorkerRouteIdentity,
+    channel: Arc<dyn RemoteWorkerChannel>,
+}
+
+enum FailedRoute {
+    Observed(WorkerRouteIdentity),
+    Missing,
+}
+
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
@@ -33,7 +51,9 @@ pub struct RemotePoolDriver {
     project_revision: ProjectRevisionRecord,
     bundle: Arc<[u8]>,
     driver: Mutex<Driver>,
-    channels: RwLock<HashMap<runmat_execution::identity::WorkerId, Arc<dyn RemoteWorkerChannel>>>,
+    worker_registration: AsyncMutex<()>,
+    channels: RwLock<HashMap<runmat_execution::identity::WorkerId, WorkerRoute>>,
+    next_route_generation: AtomicU64,
     installed_nodes: AsyncMutex<BTreeSet<String>>,
     value_scope: String,
     values: super::pool_values::RemoteValueCatalog,
@@ -93,7 +113,9 @@ impl RemotePoolDriver {
             project_revision,
             bundle,
             driver: Mutex::new(driver),
+            worker_registration: AsyncMutex::new(()),
             channels: RwLock::new(HashMap::new()),
+            next_route_generation: AtomicU64::new(1),
             installed_nodes: AsyncMutex::new(BTreeSet::new()),
             value_scope: value_scope.into(),
             values: super::pool_values::RemoteValueCatalog::default(),
@@ -153,40 +175,113 @@ impl RemotePoolDriver {
         self: &Arc<Self>,
         channel: Arc<dyn RemoteWorkerChannel>,
     ) -> NativeExecutionResult<()> {
+        let _registration = self.worker_registration.lock().await;
         let worker = channel.worker().clone();
         if worker.pool_id != self.pool_id {
             return Err(NativeExecutionError::Configuration(
                 "remote worker belongs to a different pool".into(),
             ));
         }
-        let node = channel.node_identity().to_string();
         {
-            let mut installed = self.installed_nodes.lock().await;
-            let receipt = if installed.contains(&node) {
-                channel.activate_bundle(self.bundle_digest).await?
-            } else {
-                channel
-                    .install_bundle(self.bundle_digest, &self.bundle)
-                    .await?
-            };
-            if receipt.bundle_digest != self.bundle_digest
-                || receipt.bundle_identity != self.bundle_identity
-                || receipt.project_revision != self.project_revision
-                || receipt.stored_bytes != self.bundle.len() as u64
-            {
-                return Err(NativeExecutionError::Protocol(
-                    "remote worker did not acknowledge the exact bundle".into(),
-                ));
+            let driver = self.driver.lock().expect("remote driver poisoned");
+            let snapshot = driver.snapshot();
+            let pool = snapshot
+                .pools
+                .get(&self.pool_id)
+                .ok_or_else(|| NativeExecutionError::Protocol("remote pool disappeared".into()))?;
+            let recoverable_lost_worker = pool.workers.get(&worker.id).is_some_and(|existing| {
+                existing.lifecycle == runmat_execution_runner::pool::WorkerLifecycle::Lost
+                    && existing.active_attempts == 0
+                    && existing.spec == worker
+            });
+            if pool.workers.contains_key(&worker.id) && !recoverable_lost_worker {
+                return Err(NativeExecutionError::Configuration(format!(
+                    "remote worker {} is already registered",
+                    worker.id
+                )));
             }
-            if !installed.contains(&node) {
-                installed.insert(node);
+            let live_worker_count = pool
+                .workers
+                .values()
+                .filter(|worker| {
+                    !matches!(
+                        worker.lifecycle,
+                        runmat_execution_runner::pool::WorkerLifecycle::Lost
+                            | runmat_execution_runner::pool::WorkerLifecycle::Stopped
+                    )
+                })
+                .count();
+            if live_worker_count >= pool.spec.max_workers as usize && !recoverable_lost_worker {
+                return Err(NativeExecutionError::Configuration(format!(
+                    "remote pool {} is at its worker limit",
+                    self.pool_id
+                )));
             }
         }
-        self.channels.write().await.insert(worker.id, channel);
+        let described = channel.describe_worker().await?;
+        if described != worker {
+            return Err(NativeExecutionError::Protocol(
+                "remote worker inventory differs from its encrypted description".into(),
+            ));
+        }
+        let node = channel.node_identity().to_string();
+        let node_was_installed = self.installed_nodes.lock().await.contains(&node);
+        let receipt = if node_was_installed {
+            match channel.activate_bundle(self.bundle_digest).await {
+                Ok(receipt) => receipt,
+                Err(_) => {
+                    channel
+                        .install_bundle(self.bundle_digest, &self.bundle)
+                        .await?
+                }
+            }
+        } else {
+            channel
+                .install_bundle(self.bundle_digest, &self.bundle)
+                .await?
+        };
+        if receipt.bundle_digest != self.bundle_digest
+            || receipt.bundle_identity != self.bundle_identity
+            || receipt.project_revision != self.project_revision
+            || receipt.stored_bytes != self.bundle.len() as u64
+        {
+            return Err(NativeExecutionError::Protocol(
+                "remote worker did not acknowledge the exact bundle".into(),
+            ));
+        }
+        // Acquire every fallible asynchronous guard before mutating driver state.
+        // Once RegisterWorker succeeds, publishing the route and installed-node
+        // bookkeeping is synchronous, so cancellation cannot leave a half-admitted
+        // worker behind.
+        let mut installed_nodes = self.installed_nodes.lock().await;
+        let mut channels = self.channels.write().await;
+        let route_generation = self
+            .next_route_generation
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |generation| {
+                generation.checked_add(1)
+            })
+            .map_err(|_| {
+                NativeExecutionError::Protocol("remote route generation exhausted".into())
+            })?;
         let actions = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
             driver.handle(DriverCommand::RegisterWorker(worker))?
         };
+        if !node_was_installed {
+            installed_nodes.insert(node);
+        }
+        channels.insert(
+            channel.worker().id,
+            WorkerRoute {
+                identity: WorkerRouteIdentity {
+                    worker_id: channel.worker().id,
+                    generation: route_generation,
+                },
+                channel,
+            },
+        );
+        drop(channels);
+        drop(installed_nodes);
         self.dispatch(actions);
         self.refresh_pool_state()?;
         Ok(())
@@ -247,21 +342,55 @@ impl RemotePoolDriver {
         worker_id: runmat_execution::identity::WorkerId,
         lost: bool,
     ) -> NativeExecutionResult<()> {
-        let channel = self.channels.write().await.remove(&worker_id);
-        let actions = {
-            let mut driver = self.driver.lock().expect("remote driver poisoned");
-            if lost {
-                driver.handle(DriverCommand::WorkerLost(worker_id))?
-            } else {
-                driver.handle(DriverCommand::DrainWorker(worker_id))?
-            }
+        let _draining_registration = if lost {
+            None
+        } else {
+            Some(self.worker_registration.lock().await)
+        };
+        let (channel, actions) = if lost {
+            let mut channels = self.channels.write().await;
+            let channel = channels.remove(&worker_id).map(|route| route.channel);
+            let actions = self
+                .driver
+                .lock()
+                .expect("remote driver poisoned")
+                .handle(DriverCommand::WorkerLost(worker_id))?;
+            drop(channels);
+            (channel, actions)
+        } else {
+            let channel = self
+                .channels
+                .read()
+                .await
+                .get(&worker_id)
+                .map(|route| Arc::clone(&route.channel));
+            let actions = self
+                .driver
+                .lock()
+                .expect("remote driver poisoned")
+                .handle(DriverCommand::DrainWorker(worker_id))?;
+            (channel, actions)
         };
         self.dispatch(actions);
         self.resolve_non_success_terminals();
         if !lost {
             if let Some(channel) = channel {
-                channel.drain().await?;
+                if let Err(error) = channel.drain().await {
+                    let mut channels = self.channels.write().await;
+                    channels.remove(&worker_id);
+                    let actions = self
+                        .driver
+                        .lock()
+                        .expect("remote driver poisoned")
+                        .handle(DriverCommand::WorkerLost(worker_id))?;
+                    drop(channels);
+                    self.dispatch(actions);
+                    self.resolve_non_success_terminals();
+                    self.refresh_pool_state()?;
+                    return Err(error);
+                }
             }
+            self.channels.write().await.remove(&worker_id);
         }
         self.refresh_pool_state()?;
         Ok(())
@@ -279,11 +408,41 @@ impl RemotePoolDriver {
         Ok(())
     }
 
+    /// Advances deadline, wall-time, and cancellation escalation state using wall-clock time.
+    pub fn tick(self: &Arc<Self>) -> NativeExecutionResult<()> {
+        let actions =
+            self.driver
+                .lock()
+                .expect("remote driver poisoned")
+                .handle(DriverCommand::Tick {
+                    now_millis: now_millis(),
+                })?;
+        self.dispatch(actions);
+        self.resolve_non_success_terminals();
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> runmat_execution_runner::DriverSnapshot {
         self.driver
             .lock()
             .expect("remote driver poisoned")
             .snapshot()
+    }
+
+    pub(super) async fn worker_is_ready_and_routed(
+        &self,
+        worker_id: runmat_execution::identity::WorkerId,
+    ) -> bool {
+        let routed = self.channels.read().await.contains_key(&worker_id);
+        routed
+            && self
+                .snapshot()
+                .pools
+                .get(&self.pool_id)
+                .and_then(|pool| pool.workers.get(&worker_id))
+                .is_some_and(|worker| {
+                    worker.lifecycle == runmat_execution_runner::pool::WorkerLifecycle::Ready
+                })
     }
 
     fn refresh_pool_state(self: &Arc<Self>) -> NativeExecutionResult<()> {
@@ -293,7 +452,14 @@ impl RemotePoolDriver {
             .pools
             .get(&self.pool_id)
             .ok_or_else(|| NativeExecutionError::Protocol("remote pool disappeared".into()))?;
-        let ready = pool.workers.len() as u32 >= pool.spec.min_workers;
+        let ready_workers = pool
+            .workers
+            .values()
+            .filter(|worker| {
+                worker.lifecycle == runmat_execution_runner::pool::WorkerLifecycle::Ready
+            })
+            .count() as u32;
+        let ready = ready_workers >= pool.spec.min_workers;
         let target = if ready {
             PoolState::Ready
         } else {
@@ -332,7 +498,7 @@ impl RemotePoolDriver {
     fn launch(self: &Arc<Self>, request: AttemptRequest) {
         let this = Arc::clone(self);
         tokio::spawn(async move {
-            let channel = this.channels.read().await.get(&request.worker_id).cloned();
+            let route = this.channels.read().await.get(&request.worker_id).cloned();
             let program = this
                 .programs
                 .lock()
@@ -345,19 +511,21 @@ impl RemotePoolDriver {
                 .expect("remote progress registry poisoned")
                 .get(&request.task_id)
                 .cloned();
-            let report = match (channel, program) {
-                (Some(channel), Some(mut program)) => {
+            let (report, failed_route) = match (route, program) {
+                (Some(route), Some(mut program)) => {
+                    let route_identity = route.identity;
+                    let channel = route.channel;
                     program.arguments = request.task.inputs.clone();
                     let transfer = this
                         .execution_objects
-                        .transfer_all(channel.as_ref(), request.worker_id)
+                        .transfer_all(channel.as_ref(), route_identity)
                         .await;
                     let transfer = match transfer {
                         Ok(()) => {
                             this.values
                                 .transfer(
                                     channel.as_ref(),
-                                    request.worker_id,
+                                    route_identity,
                                     &program.arguments,
                                     &this.execution_objects,
                                 )
@@ -366,10 +534,12 @@ impl RemotePoolDriver {
                         Err(error) => Err(error),
                     };
                     match transfer {
-                        Err(error) => AttemptReport::Failed {
-                            kind: AttemptFailureKind::Rejected,
-                            message: error.to_string(),
-                        },
+                        Err(error) => (
+                            AttemptReport::Lost {
+                                message: error.to_string(),
+                            },
+                            Some(FailedRoute::Observed(route_identity)),
+                        ),
                         Ok(()) => match super::pool_progress::execute(
                             channel.as_ref(),
                             RemoteAttempt {
@@ -390,34 +560,116 @@ impl RemotePoolDriver {
                                     )
                                     .await
                                 {
-                                    Ok(()) => AttemptReport::Succeeded { result },
-                                    Err(error) => AttemptReport::Failed {
-                                        kind: AttemptFailureKind::Rejected,
-                                        message: error.to_string(),
-                                    },
+                                    Ok(()) => (AttemptReport::Succeeded { result }, None),
+                                    Err(error) => (
+                                        AttemptReport::Lost {
+                                            message: error.to_string(),
+                                        },
+                                        Some(FailedRoute::Observed(route_identity)),
+                                    ),
                                 }
                             }
-                            Ok(report) => report,
-                            Err(error) => AttemptReport::Lost {
-                                message: error.to_string(),
-                            },
+                            Ok(report) => (report, None),
+                            Err(error) => (
+                                AttemptReport::Lost {
+                                    message: error.to_string(),
+                                },
+                                Some(FailedRoute::Observed(route_identity)),
+                            ),
                         },
                     }
                 }
-                _ => AttemptReport::Failed {
-                    kind: AttemptFailureKind::Infrastructure,
-                    message: "remote worker route or exact program is unavailable".into(),
-                },
+                (None, _) => (
+                    AttemptReport::Lost {
+                        message: "remote worker route is unavailable".into(),
+                    },
+                    Some(FailedRoute::Missing),
+                ),
+                (Some(_), None) => (
+                    AttemptReport::Failed {
+                        kind: AttemptFailureKind::Infrastructure,
+                        message: "remote exact program is unavailable".into(),
+                    },
+                    None,
+                ),
             };
-            this.apply_report(BackendReport::for_request(&request, report));
+            if let Some(failed_route) = failed_route {
+                let fenced = match failed_route {
+                    FailedRoute::Observed(identity) => this.fence_failed_route(identity).await,
+                    FailedRoute::Missing => this
+                        .remove_worker(request.worker_id, true)
+                        .await
+                        .map(|()| true),
+                };
+                if !matches!(fenced, Ok(true)) {
+                    this.apply_report(BackendReport::for_request(&request, report));
+                }
+            } else {
+                this.apply_report(BackendReport::for_request(&request, report));
+            }
         });
+    }
+
+    async fn fence_failed_route(
+        self: &Arc<Self>,
+        failed_route: WorkerRouteIdentity,
+    ) -> NativeExecutionResult<bool> {
+        let mut channels = self.channels.write().await;
+        let is_current = channels
+            .get(&failed_route.worker_id)
+            .is_some_and(|route| route.identity == failed_route);
+        if !is_current {
+            return Ok(false);
+        }
+        channels.remove(&failed_route.worker_id);
+        let actions = self
+            .driver
+            .lock()
+            .expect("remote driver poisoned")
+            .handle(DriverCommand::WorkerLost(failed_route.worker_id))?;
+        drop(channels);
+        self.dispatch(actions);
+        self.resolve_non_success_terminals();
+        self.refresh_pool_state()?;
+        Ok(true)
     }
 
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {
         let this = Arc::clone(self);
         tokio::spawn(async move {
-            if let Some(channel) = this.channels.read().await.get(&request.worker_id).cloned() {
-                let _ = channel.cancel(&request).await;
+            let channel = this
+                .channels
+                .read()
+                .await
+                .get(&request.worker_id)
+                .map(|route| Arc::clone(&route.channel));
+            match channel {
+                Some(channel) => {
+                    if channel.cancel(&request).await.is_err() {
+                        if this.remove_worker(request.worker_id, true).await.is_err() {
+                            this.apply_report(BackendReport::for_request(
+                                &request,
+                                AttemptReport::Lost {
+                                    message: "remote worker cancellation acknowledgement was lost"
+                                        .into(),
+                                },
+                            ));
+                        }
+                        return;
+                    }
+                }
+                None => {
+                    if this.remove_worker(request.worker_id, true).await.is_err() {
+                        this.apply_report(BackendReport::for_request(
+                            &request,
+                            AttemptReport::Lost {
+                                message: "remote worker route disappeared during cancellation"
+                                    .into(),
+                            },
+                        ));
+                    }
+                    return;
+                }
             }
             this.apply_report(BackendReport::for_request(
                 &request,

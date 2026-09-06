@@ -49,6 +49,22 @@ impl Default for MeshingRequestSettings {
     }
 }
 
+/// Algorithm identities implemented by the production meshing host.
+///
+/// Worker capability admission and workload construction share this authority so an algorithm
+/// upgrade cannot silently make submitted work unschedulable.
+pub fn production_algorithm_versions() -> AlgorithmVersionSet {
+    AlgorithmVersionSet {
+        geometry: "geometry/exact-brep".into(),
+        curve: "curve/exact-metric".into(),
+        surface: "surface/exact-cdt".into(),
+        plc: "plc/canonical".into(),
+        tetrahedron: "tetrahedron/constrained-delaunay".into(),
+        optimization: "optimization/quality-convergence".into(),
+        validation: "validation/independent".into(),
+    }
+}
+
 /// Resolves product settings into the one canonical request accepted by the exact DAG.
 ///
 /// Algorithm identities are implementation facts, not user-selectable backend controls.
@@ -62,15 +78,7 @@ pub fn resolve_meshing_request(
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: settings.element_order,
         deterministic_seed: settings.deterministic_seed,
-        algorithms: AlgorithmVersionSet {
-            geometry: "geometry/exact-brep".into(),
-            curve: "curve/exact-metric".into(),
-            surface: "surface/exact-cdt".into(),
-            plc: "plc/canonical".into(),
-            tetrahedron: "tetrahedron/constrained-delaunay".into(),
-            optimization: "optimization/quality-convergence".into(),
-            validation: "validation/independent".into(),
-        },
+        algorithms: production_algorithm_versions(),
         tolerance,
         metric: MetricFieldRequest {
             combination: MetricCombinationRule::MostRestrictiveIntersection,

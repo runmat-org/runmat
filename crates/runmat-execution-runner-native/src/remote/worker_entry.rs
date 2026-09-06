@@ -91,6 +91,31 @@ pub(crate) async fn run_remote_worker_relay_cached(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,
 ) -> NativeExecutionResult<()> {
+    run_remote_worker_relay_cached_with_meshing(request, bundle_cache, None).await
+}
+
+pub(crate) async fn run_remote_meshing_worker_relay_cached(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+    kernel: Arc<dyn MeshingStageKernel>,
+    limits: crate::NativeMeshingHostLimits,
+) -> NativeExecutionResult<()> {
+    limits.validate()?;
+    run_remote_worker_relay_cached_with_meshing(
+        request,
+        bundle_cache,
+        Some(super::worker_execution::RemoteMeshingHost::new(
+            kernel, limits,
+        )),
+    )
+    .await
+}
+
+async fn run_remote_worker_relay_cached_with_meshing(
+    request: RemoteWorkerRelayRequest<'_>,
+    bundle_cache: Option<std::path::PathBuf>,
+    meshing_host: Option<super::worker_execution::RemoteMeshingHost>,
+) -> NativeExecutionResult<()> {
     let RemoteWorkerRelayRequest {
         url,
         headers,
@@ -115,7 +140,7 @@ pub(crate) async fn run_remote_worker_relay_cached(
                 run_key,
                 limits,
                 bundle_cache,
-                meshing_host: None,
+                meshing_host,
             },
         ))
         .await

@@ -393,6 +393,8 @@ pub(crate) mod bridge {
     unsafe extern "C++" {
         include!("src/occt/occt_bridge.hxx");
 
+        fn exact_kernel_abi() -> String;
+
         fn import_cad_bytes(
             path: &str,
             bytes: &[u8],

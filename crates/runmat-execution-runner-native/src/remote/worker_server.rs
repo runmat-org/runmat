@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V3,
+    REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::RemoteFrameRoute;
 use super::worker_protocol::{
@@ -34,6 +34,7 @@ struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     cooperative: bool,
+    finished: tokio::sync::watch::Receiver<bool>,
 }
 
 pub(super) struct WorkerLoopContext {
@@ -115,7 +116,7 @@ pub(super) async fn run_worker_loop(
                 "remote worker command used the wrong encrypted frame kind",
             ));
         }
-        if request.schema_version != REMOTE_WORKER_PROTOCOL_V3
+        if request.schema_version != REMOTE_WORKER_PROTOCOL_VERSION
             || request.driver_fence != driver_fence
         {
             reply_kind(
@@ -132,6 +133,21 @@ pub(super) async fn run_worker_loop(
             continue;
         }
         match request.command {
+            RemoteWorkerCommand::Describe => {
+                reply(
+                    connection.as_ref(),
+                    &sender,
+                    limits,
+                    RemoteWorkerReply {
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
+                        correlation_id: request.correlation_id,
+                        outcome: RemoteWorkerOutcome::WorkerDescription {
+                            worker: worker.clone(),
+                        },
+                    },
+                )
+                .await?;
+            }
             RemoteWorkerCommand::InstallBundle {
                 bundle_digest,
                 bundle,
@@ -154,7 +170,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -183,7 +199,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -222,7 +238,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -258,10 +274,14 @@ pub(super) async fn run_worker_loop(
                     attempt.program.artifact.form,
                     ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
                 );
-                let cooperative = attempt.program.artifact.form == ExecutableForm::MeshingWorkload;
+                let cooperative = matches!(
+                    attempt.program.artifact.form,
+                    ExecutableForm::MeshingWorkload | ExecutableForm::AnalysisWorkload
+                );
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
                 let cancellation_for_task = Arc::clone(&cancellation);
+                let (finished_sender, finished) = tokio::sync::watch::channel(false);
                 let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
                 let (start_sender, start_receiver) = tokio::sync::oneshot::channel();
@@ -334,7 +354,7 @@ pub(super) async fn run_worker_loop(
                         &sender,
                         limits,
                         RemoteWorkerReply {
-                            schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                             correlation_id,
                             outcome: RemoteWorkerOutcome::Attempt { report },
                         },
@@ -342,6 +362,7 @@ pub(super) async fn run_worker_loop(
                     .await;
                     let mut state = state_for_task.lock().await;
                     state.attempts.remove(&attempt_id);
+                    finished_sender.send_replace(true);
                     if state.draining && state.attempts.is_empty() {
                         drain_complete_for_task.notify_waiters();
                     }
@@ -352,24 +373,37 @@ pub(super) async fn run_worker_loop(
                         task,
                         cancellation,
                         cooperative,
+                        finished,
                     },
                 );
                 let _ = start_sender.send(());
             }
             RemoteWorkerCommand::Cancel { attempt_id } => {
                 let mut state = state.lock().await;
+                let mut completion = None;
+                let mut aborted_task = None;
                 if let Some(active) = state.attempts.get(&attempt_id) {
                     active.cancellation.cancel();
-                    if !active.cooperative {
-                        if let Some(active) = state.attempts.remove(&attempt_id) {
-                            active.task.abort();
-                        }
+                    if active.cooperative {
+                        completion = Some(active.finished.clone());
+                    } else if let Some(active) = state.attempts.remove(&attempt_id) {
+                        active.task.abort();
+                        aborted_task = Some(active.task);
                     }
                 }
-                if state.draining && state.attempts.is_empty() {
+                let drained = state.draining && state.attempts.is_empty();
+                if drained {
                     drain_complete.notify_waiters();
                 }
                 drop(state);
+                if let Some(mut completion) = completion {
+                    if !*completion.borrow() {
+                        let _ = completion.changed().await;
+                    }
+                }
+                if let Some(aborted_task) = aborted_task {
+                    let _ = aborted_task.await;
+                }
                 reply(
                     connection.as_ref(),
                     &sender,
@@ -405,7 +439,7 @@ pub(super) async fn run_worker_loop(
                     limits,
                     FrameKind::Artifact,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V3,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -428,6 +462,13 @@ async fn validate_attempt(
         || attempt.scheduling.worker_id != worker.id
     {
         return Some("attempt is outside live worker authority".into());
+    }
+    if !runmat_execution_runner::scheduler::fits(
+        &worker.resources,
+        &Default::default(),
+        &attempt.scheduling.task.resources,
+    ) {
+        return Some("attempt resources exceed the worker's declared inventory".into());
     }
     let Some(bundle) = state.bundle.as_ref() else {
         return Some("exact execution bundle is not installed".into());

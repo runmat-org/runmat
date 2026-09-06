@@ -408,6 +408,9 @@ fn solve_runtime_tensor_linear_system_internal(
     let mut device_apply_k_attempt_count: u32 = 0;
 
     for _ in 0..max_iters {
+        if crate::is_fea_cancelled() {
+            break;
+        }
         device_apply_k_attempt_count = device_apply_k_attempt_count.saturating_add(1);
         let ap = match apply_k_device(&device_operator, &p) {
             Some(value) => {

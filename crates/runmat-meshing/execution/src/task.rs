@@ -26,6 +26,7 @@ use crate::{
 };
 
 pub const MESHING_EXECUTION_CALLABLE_OWNER: &str = "runmat.meshing.v2";
+pub const EXACT_CAD_ADMISSION_CAPABILITY: &str = "runmat.meshing.exact-cad-admission";
 const STAGE_MANIFEST_SCHEMA: &str = "runmat.meshing.stage-manifest.v2";
 const EXACT_GEOMETRY_SCHEMA: &str = "runmat.geometry.exact-manifest.v2";
 const FACETED_GEOMETRY_SCHEMA: &str = "runmat.geometry.faceted-solid.v2";
@@ -305,33 +306,67 @@ pub fn exact_meshing_worker_capabilities(
             "exact meshing capabilities require an exact B-rep document".into(),
         ));
     };
+    exact_meshing_worker_capability_inventory(
+        std::slice::from_ref(&model.kernel_abi),
+        &request.algorithms,
+        std::slice::from_ref(&request.element_order),
+        capability_cohort,
+    )
+}
+
+/// Returns the complete capability inventory implemented by a native meshing worker.
+///
+/// A worker advertises all exact-kernel ABIs, algorithm versions, element orders, and deterministic
+/// cohorts it can actually execute. Individual workloads continue to request one exact member of
+/// each category through [`exact_meshing_worker_capabilities`].
+pub fn exact_meshing_worker_capability_inventory<'a>(
+    exact_kernel_abis: &[String],
+    algorithms: &runmat_meshing_core::AlgorithmVersionSet,
+    element_orders: &[runmat_meshing_core::ElementOrder],
+    capability_cohorts: impl IntoIterator<Item = &'a str>,
+) -> MeshingExecutionResult<BTreeSet<Capability>> {
+    algorithms.validate()?;
+    if exact_kernel_abis.is_empty() || element_orders.is_empty() {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing worker capability inventory is incomplete".into(),
+        ));
+    }
     let mut capabilities = BTreeSet::from([Capability::ProcessIsolation]);
+    capabilities.insert(Capability::Custom(EXACT_CAD_ADMISSION_CAPABILITY.into()));
     capabilities.insert(Capability::Custom(format!(
         "runmat.meshing.host:{}",
         crate::MESHING_HOST_ABI
     )));
-    capabilities.insert(Capability::Custom(format!(
-        "runmat.meshing.exact-cad:{}",
-        model.kernel_abi
-    )));
+    for abi in exact_kernel_abis {
+        if abi.is_empty() || abi.len() > 256 || abi.chars().any(char::is_control) {
+            return Err(MeshingExecutionError::Invalid(
+                "meshing exact-kernel capability is invalid".into(),
+            ));
+        }
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.exact-cad:{abi}"
+        )));
+    }
     for version in [
-        &request.algorithms.geometry,
-        &request.algorithms.curve,
-        &request.algorithms.surface,
-        &request.algorithms.plc,
-        &request.algorithms.tetrahedron,
-        &request.algorithms.optimization,
-        &request.algorithms.validation,
+        &algorithms.geometry,
+        &algorithms.curve,
+        &algorithms.surface,
+        &algorithms.plc,
+        &algorithms.tetrahedron,
+        &algorithms.optimization,
+        &algorithms.validation,
     ] {
         capabilities.insert(Capability::Custom(format!(
             "runmat.meshing.algorithm:{version}"
         )));
     }
-    capabilities.insert(Capability::Custom(format!(
-        "runmat.meshing.element-order:{}",
-        order_name(request.element_order)
-    )));
-    if let Some(cohort) = capability_cohort {
+    for order in element_orders {
+        capabilities.insert(Capability::Custom(format!(
+            "runmat.meshing.element-order:{}",
+            order_name(*order)
+        )));
+    }
+    for cohort in capability_cohorts {
         if cohort.is_empty() || cohort.len() > 256 || cohort.chars().any(char::is_control) {
             return Err(MeshingExecutionError::Invalid(
                 "meshing capability cohort is invalid".into(),

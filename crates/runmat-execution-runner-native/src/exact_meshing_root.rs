@@ -1,6 +1,6 @@
 //! Portable, content-addressed root contract for exact CAD admission and meshing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
@@ -14,7 +14,7 @@ use runmat_execution_artifact::{
     MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
-use runmat_geometry_core::{GeometryDocument, PersistentEntityId};
+use runmat_geometry_core::{GeometryDocument, PersistentEntityId, PersistentEntityKind};
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
 use runmat_meshing_core::{MeshingRequest, PlatformBuildIdentity};
 use runmat_meshing_execution::{
@@ -136,6 +136,7 @@ struct SourceCadManifest {
 pub struct PreparedExactMeshingRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
+    meshing_request: MeshingRequest,
 }
 
 pub struct ExactMeshingRootPreparation<'a> {
@@ -158,6 +159,10 @@ impl PreparedExactMeshingRoot {
 
     pub fn objects(&self) -> &[LogicalObject] {
         &self.objects
+    }
+
+    pub fn meshing_request(&self) -> &MeshingRequest {
+        &self.meshing_request
     }
 
     /// Returns every immutable program that must be bundled before this root can run.
@@ -214,8 +219,27 @@ impl ExactGeometryAdmission {
         {
             return Err(protocol("exact geometry admission contract is invalid"));
         }
+        validate_source_face_order(&self.source_face_ids)?;
         Ok(())
     }
+}
+
+fn validate_source_face_order(
+    source_face_ids: &BTreeMap<u64, PersistentEntityId>,
+) -> NativeExecutionResult<()> {
+    let mut identities = BTreeSet::new();
+    for (expected_index, (source_index, identity)) in source_face_ids.iter().enumerate() {
+        identity.validate().map_err(protocol)?;
+        if *source_index != expected_index as u64
+            || identity.kind != PersistentEntityKind::Face
+            || !identities.insert(identity)
+        {
+            return Err(protocol(
+                "exact geometry admission source-face map is not a contiguous face bijection",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn execute_exact_meshing_root_admission<S>(
@@ -439,7 +463,11 @@ pub fn prepare_exact_meshing_root(
         requested_outputs: 1,
     };
     request.validate().map_err(protocol)?;
-    Ok(PreparedExactMeshingRoot { request, objects })
+    Ok(PreparedExactMeshingRoot {
+        request,
+        objects,
+        meshing_request: root.meshing_request,
+    })
 }
 
 pub fn decode_exact_meshing_root(
@@ -618,6 +646,14 @@ mod tests {
 
     use super::*;
 
+    fn face(source: &str, occurrence: &str) -> PersistentEntityId {
+        PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: source.into(),
+            assembly_path: vec!["root".into(), occurrence.into()],
+        }
+    }
+
     fn revision() -> ProgramRevision {
         ProgramRevision::new(
             Digest::sha256(b"exact-root-graph"),
@@ -730,6 +766,22 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.to_string().contains("byte bounds"));
+    }
+
+    #[test]
+    fn source_face_order_requires_contiguous_unique_face_occurrences() {
+        let valid = BTreeMap::from([(0, face("shared", "a")), (1, face("shared", "b"))]);
+        validate_source_face_order(&valid).unwrap();
+
+        let sparse = BTreeMap::from([(0, face("a", "a")), (2, face("b", "b"))]);
+        assert!(validate_source_face_order(&sparse).is_err());
+
+        let duplicate = BTreeMap::from([(0, face("same", "a")), (1, face("same", "a"))]);
+        assert!(validate_source_face_order(&duplicate).is_err());
+
+        let mut non_face = face("solid", "a");
+        non_face.kind = PersistentEntityKind::Solid;
+        assert!(validate_source_face_order(&BTreeMap::from([(0, non_face)])).is_err());
     }
 
     #[cfg(feature = "occt-native")]

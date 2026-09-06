@@ -45,6 +45,12 @@ pub trait RemoteWorkerChannel: Send + Sync {
 
     fn worker(&self) -> &WorkerSpec;
 
+    /// Fetches the worker description through the channel's encrypted protocol.
+    ///
+    /// The returned inventory is verified against the allocation metadata before
+    /// the worker is admitted to the authoritative driver.
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec>;
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,

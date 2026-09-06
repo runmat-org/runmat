@@ -48,6 +48,10 @@ impl RemoteWorkerChannel for RelayRemoteWorkerChannel {
         self.protocol.worker()
     }
 
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        self.protocol.describe_worker().await
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,

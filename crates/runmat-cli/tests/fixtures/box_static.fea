@@ -8,7 +8,15 @@ geometry:
 
 model:
   template: linear_static_structural
-  defaults: template_scaffold
+  defaults: none
+
+materials:
+  steel:
+    name: Structural steel
+    mechanical:
+      youngs_modulus_pa: 200000000000.0
+      poisson_ratio: 0.3
+      density_kg_per_m3: 7850.0
 
 regions:
   fixed_face:

@@ -1,28 +1,32 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use runmat_execution::identity::{ArtifactId, PoolId};
-use runmat_execution::state::TaskState;
-use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, OutputContract, TaskId};
+use runmat_execution::identity::PoolId;
+use runmat_execution::{CancellationReason, ExecutionScopeId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{
     ProgramExecutionObject, ProgramExecutionRequest, ProgramExecutionResponse,
 };
-use runmat_execution_runner::{PoolSpec, TaskSubmission};
+use runmat_execution_runner::PoolSpec;
 use runmat_execution_transport_native::control::{
     DriverAuthority, DriverControlPlane, ResourceRequest as AllocationResources,
 };
 
 use super::pool_reconcile::{reconcile_workers, validate_pool_intent};
-use super::pool_resources::{pool_inventory, task_resources};
+use super::pool_resources::pool_inventory;
+use super::pool_wait::{
+    await_running_operation, await_startup_operation, RunningWait, StartupWait,
+};
 use super::RemotePoolDriver;
-use crate::{NativeExecutionError, NativeExecutionResult, EXACT_MESHING_ROOT_EXECUTION_MODE};
+use crate::{
+    NativeExecutionError, NativeExecutionResult, EXACT_MESHING_ROOT_EXECUTION_MODE,
+    EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE,
+};
 
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
-const CANCELLATION_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const DRIVER_TICK_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(crate) enum RemotePoolExecutionOutcome {
     Completed(RemotePoolExecutionResult),
@@ -80,47 +84,181 @@ pub(super) async fn execute(
     for object in input_objects {
         pool.register_execution_object(object.reference, object.bytes)?;
     }
-    let mut worker_pool = control
-        .resize_workers(authority, 0, desired_workers, resources.clone())
-        .await
-        .map_err(protocol)?;
-    validate_pool_intent(&worker_pool, desired_workers, &resources)?;
     let deadline = tokio::time::Instant::now() + WORKER_READY_TIMEOUT;
+    let mut driver_ticks = tokio::time::interval(DRIVER_TICK_INTERVAL);
+    driver_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    driver_ticks.tick().await;
+    let worker_pool = match await_startup_operation(
+        control.resize_workers(authority, 0, desired_workers, resources.clone()),
+        &mut driver_ticks,
+        &pool,
+        &mut cancellation,
+        deadline,
+    )
+    .await?
+    {
+        StartupWait::Completed(Ok(worker_pool), false) => worker_pool,
+        StartupWait::Completed(Ok(worker_pool), true) => {
+            return super::pool_allocation::finalize(
+                control,
+                authority,
+                &worker_pool.resources,
+                worker_pool.generation,
+                Ok(RemotePoolExecutionOutcome::Cancelled),
+            )
+            .await;
+        }
+        StartupWait::Completed(Err(primary), cancelled) => {
+            return super::pool_allocation::resolve_failed_initial(
+                control,
+                authority,
+                desired_workers,
+                &resources,
+                primary.to_string(),
+                cancelled,
+            )
+            .await;
+        }
+        StartupWait::Deadline(cancelled) => {
+            return super::pool_allocation::resolve_failed_initial(
+                control,
+                authority,
+                desired_workers,
+                &resources,
+                "initial worker allocation exceeded its deadline".into(),
+                cancelled,
+            )
+            .await;
+        }
+    };
+    let generation = Arc::new(std::sync::atomic::AtomicU64::new(worker_pool.generation));
+    let outcome = match validate_pool_intent(&worker_pool, desired_workers, &resources) {
+        Ok(()) => {
+            execute_with_allocated_workers(AllocatedExecution {
+                control,
+                authority,
+                run_key,
+                pool,
+                pool_id,
+                request,
+                desired_workers,
+                resources: resources.clone(),
+                cancellation,
+                worker_pool,
+                generation: Arc::clone(&generation),
+                deadline,
+                driver_ticks,
+            })
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    super::pool_allocation::finalize(
+        control,
+        authority,
+        &resources,
+        generation.load(std::sync::atomic::Ordering::Acquire),
+        outcome,
+    )
+    .await
+}
+
+struct AllocatedExecution<'a> {
+    control: &'a dyn DriverControlPlane,
+    authority: &'a DriverAuthority,
+    run_key: &'a RunKeyMaterial,
+    pool: Arc<RemotePoolDriver>,
+    pool_id: PoolId,
+    request: ProgramExecutionRequest,
+    desired_workers: u32,
+    resources: AllocationResources,
+    cancellation: tokio::sync::watch::Receiver<bool>,
+    worker_pool: runmat_execution_transport_native::control::DriverWorkerPool,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    deadline: tokio::time::Instant,
+    driver_ticks: tokio::time::Interval,
+}
+
+async fn execute_with_allocated_workers(
+    execution: AllocatedExecution<'_>,
+) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
+    let AllocatedExecution {
+        control,
+        authority,
+        run_key,
+        pool,
+        pool_id,
+        request,
+        desired_workers,
+        resources,
+        mut cancellation,
+        mut worker_pool,
+        generation,
+        deadline,
+        mut driver_ticks,
+    } = execution;
     let mut registered = HashMap::new();
     while registered.len() < desired_workers as usize {
         if *cancellation.borrow() {
             pool.cancel(CancellationReason::User)?;
             return Ok(RemotePoolExecutionOutcome::Cancelled);
         }
-        reconcile_workers(
-            control,
-            authority,
-            run_key,
-            pool_id,
+        match await_startup_operation(
+            reconcile_workers(
+                control,
+                authority,
+                run_key,
+                pool_id,
+                &pool,
+                &worker_pool,
+                &mut registered,
+            ),
+            &mut driver_ticks,
             &pool,
-            &worker_pool,
-            &mut registered,
+            &mut cancellation,
+            deadline,
         )
-        .await?;
-        if registered.len() == desired_workers as usize {
-            break;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(protocol(
-                "remote workers did not become ready before the deadline",
-            ));
-        }
-        tokio::select! {
-            changed = cancellation.changed() => {
-                if changed.is_ok() && *cancellation.borrow() {
-                    pool.cancel(CancellationReason::User)?;
+        .await?
+        {
+            StartupWait::Completed(result, cancelled) => {
+                result?;
+                if cancelled {
                     return Ok(RemotePoolExecutionOutcome::Cancelled);
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+            StartupWait::Deadline(cancelled) => {
+                if cancelled {
+                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                }
+                return Err(protocol(
+                    "remote workers did not become ready before the deadline",
+                ));
+            }
         }
-        worker_pool = control
-            .resize_workers(
+        if registered.len() == desired_workers as usize {
+            break;
+        }
+        match await_startup_operation(
+            tokio::time::sleep(Duration::from_millis(250)),
+            &mut driver_ticks,
+            &pool,
+            &mut cancellation,
+            deadline,
+        )
+        .await?
+        {
+            StartupWait::Completed((), true) | StartupWait::Deadline(true) => {
+                return Ok(RemotePoolExecutionOutcome::Cancelled);
+            }
+            StartupWait::Completed((), false) => {}
+            StartupWait::Deadline(false) => {
+                return Err(protocol(
+                    "remote workers did not become ready before the deadline",
+                ));
+            }
+        }
+        match await_startup_operation(
+            control.resize_workers(
                 authority,
                 worker_pool
                     .generation
@@ -128,14 +266,37 @@ pub(super) async fn execute(
                     .ok_or_else(|| protocol("Server returned an invalid worker pool generation"))?,
                 desired_workers,
                 resources.clone(),
-            )
-            .await
-            .map_err(protocol)?;
-        validate_pool_intent(&worker_pool, desired_workers, &resources)?;
+            ),
+            &mut driver_ticks,
+            &pool,
+            &mut cancellation,
+            deadline,
+        )
+        .await?
+        {
+            StartupWait::Completed(result, cancelled) => {
+                worker_pool = result.map_err(protocol)?;
+                generation.store(worker_pool.generation, std::sync::atomic::Ordering::Release);
+                validate_pool_intent(&worker_pool, desired_workers, &resources)?;
+                if cancelled {
+                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                }
+            }
+            StartupWait::Deadline(true) => {
+                return Ok(RemotePoolExecutionOutcome::Cancelled);
+            }
+            StartupWait::Deadline(false) => {
+                return Err(protocol(
+                    "remote workers did not become ready before the deadline",
+                ));
+            }
+        }
     }
 
     let run_id = authority.run_id.clone();
     let exact_meshing = request.recipe.execution_mode == EXACT_MESHING_ROOT_EXECUTION_MODE;
+    let exact_structural_study =
+        request.recipe.execution_mode == EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE;
     let pool_for_execution = Arc::clone(&pool);
     let resources_for_execution = resources.clone();
     let mut execution = if exact_meshing {
@@ -145,32 +306,54 @@ pub(super) async fn execute(
             run_id,
             resources_for_execution,
         )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
+    } else if exact_structural_study {
+        Box::pin(super::exact_structural_study::execute(
+            pool_for_execution,
+            request,
+            run_id,
+            resources_for_execution,
+        )) as std::pin::Pin<Box<dyn std::future::Future<Output = _>>>
     } else {
-        Box::pin(execute_single_root(
+        Box::pin(super::pool_tasks::execute_single_root(
             pool_for_execution,
             request,
             run_id,
             resources_for_execution,
         ))
     };
+    let mut reconcile_ticks = tokio::time::interval(RECONCILE_INTERVAL);
+    reconcile_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    driver_ticks.tick().await;
+    reconcile_ticks.tick().await;
+    let mut cancellation_requested = false;
+    let mut cancellation_open = true;
     loop {
-        if *cancellation.borrow() {
+        if *cancellation.borrow() && !cancellation_requested {
             pool.cancel(CancellationReason::User)?;
-            let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
-            return Ok(RemotePoolExecutionOutcome::Cancelled);
+            cancellation_requested = true;
         }
         tokio::select! {
-            result = &mut execution => return result,
-            changed = cancellation.changed() => {
-                if changed.is_ok() && *cancellation.borrow() {
+            result = &mut execution => {
+                return if cancellation_requested {
+                    super::pool_tasks::observed_execution(&pool, result, true)
+                } else {
+                    result
+                };
+            },
+            changed = cancellation.changed(), if cancellation_open => {
+                if changed.is_err() {
+                    cancellation_open = false;
+                } else if *cancellation.borrow() && !cancellation_requested {
                     pool.cancel(CancellationReason::User)?;
-                    let _ = tokio::time::timeout(CANCELLATION_DRAIN_TIMEOUT, &mut execution).await;
-                    return Ok(RemotePoolExecutionOutcome::Cancelled);
+                    cancellation_requested = true;
                 }
             }
-            _ = tokio::time::sleep(RECONCILE_INTERVAL) => {
-                worker_pool = control
-                    .resize_workers(
+            _ = driver_ticks.tick() => {
+                pool.tick()?;
+            }
+            _ = reconcile_ticks.tick(), if !cancellation_requested => {
+                let resize = async {
+                    control.resize_workers(
                         authority,
                         worker_pool.generation.checked_sub(1).ok_or_else(|| {
                             protocol("Server returned an invalid worker pool generation")
@@ -179,152 +362,109 @@ pub(super) async fn execute(
                         resources.clone(),
                     )
                     .await
-                    .map_err(protocol)?;
-                validate_pool_intent(&worker_pool, desired_workers, &resources)?;
-                reconcile_workers(
-                    control,
-                    authority,
-                    run_key,
-                    pool_id,
+                    .map_err(protocol)
+                };
+                let (resized, completed) = match await_running_operation(
+                    resize,
+                    &mut execution,
+                    &mut driver_ticks,
                     &pool,
-                    &worker_pool,
-                    &mut registered,
-                )
-                .await?;
+                    &mut cancellation,
+                    &mut cancellation_requested,
+                    tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
+                ).await? {
+                    RunningWait::Operation(resized, completed) => match resized {
+                        Ok(resized) => (resized, completed),
+                        Err(error) => {
+                            if let Err(outcome) = super::pool_allocation::reconcile_or_indeterminate(
+                                control,
+                                authority,
+                                desired_workers,
+                                &resources,
+                                generation.as_ref(),
+                                format!("remote worker control failed: {error}"),
+                            ).await {
+                                return Ok(outcome);
+                            }
+                            return Err(error);
+                        }
+                    },
+                    RunningWait::Deadline(completed) => {
+                        if let Err(outcome) = super::pool_allocation::reconcile_or_indeterminate(
+                            control,
+                            authority,
+                            desired_workers,
+                            &resources,
+                            generation.as_ref(),
+                            "remote worker control operation exceeded its deadline",
+                        ).await {
+                            return Ok(outcome);
+                        }
+                        if let Some(result) = completed {
+                            return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                        }
+                        if cancellation_requested {
+                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                        }
+                        return Err(protocol("remote worker control operation exceeded its deadline"));
+                    }
+                };
+                worker_pool = resized;
+                generation.store(worker_pool.generation, std::sync::atomic::Ordering::Release);
+                validate_pool_intent(&worker_pool, desired_workers, &resources)?;
+                if let Some(result) = completed {
+                    return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                }
+                if cancellation_requested {
+                    continue;
+                }
+                let reconcile = reconcile_workers(
+                        control,
+                        authority,
+                        run_key,
+                        pool_id,
+                        &pool,
+                        &worker_pool,
+                        &mut registered,
+                    );
+                match await_running_operation(
+                    reconcile,
+                    &mut execution,
+                    &mut driver_ticks,
+                    &pool,
+                    &mut cancellation,
+                    &mut cancellation_requested,
+                    tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
+                ).await? {
+                    RunningWait::Operation(result, completed) => {
+                        result?;
+                        if let Some(result) = completed {
+                            return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                        }
+                    }
+                    RunningWait::Deadline(completed) => {
+                        if let Err(outcome) = super::pool_allocation::reconcile_or_indeterminate(
+                            control,
+                            authority,
+                            desired_workers,
+                            &resources,
+                            generation.as_ref(),
+                            "remote worker reconciliation exceeded its deadline",
+                        ).await {
+                            return Ok(outcome);
+                        }
+                        if let Some(result) = completed {
+                            return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                        }
+                        if cancellation_requested {
+                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                        }
+                        return Err(protocol("remote worker reconciliation exceeded its deadline"));
+                    }
+                }
             }
         }
     }
-}
-
-async fn execute_single_root(
-    pool: Arc<RemotePoolDriver>,
-    request: ProgramExecutionRequest,
-    run_id: String,
-    resources: AllocationResources,
-) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    let (task_id, completion) = submit_root_task(
-        &pool,
-        &request,
-        &run_id,
-        b"remote-root",
-        &resources,
-        RetryPolicy::Never,
-    )?;
-    match completion.wait().await {
-        Ok(success) if success.result_objects.is_empty() => match success.outputs.as_slice() {
-            [value] => packaged(
-                ProgramExecutionResponse::Success {
-                    value: value.clone(),
-                },
-                pool,
-            )
-            .map(RemotePoolExecutionOutcome::Completed),
-            _ => Err(protocol(
-                "remote worker returned an invalid inline output count",
-            )),
-        },
-        Ok(success) => packaged(
-            ProgramExecutionResponse::ExternalizedSuccess {
-                outputs: success.outputs,
-                result_objects: success.result_objects,
-            },
-            pool,
-        )
-        .map(RemotePoolExecutionOutcome::Completed),
-        Err(message) => task_failure_outcome(pool, task_id, message),
-    }
-}
-
-pub(super) fn submit_root_task(
-    pool: &Arc<RemotePoolDriver>,
-    request: &ProgramExecutionRequest,
-    run_id: &str,
-    task_domain: &[u8],
-    resources: &AllocationResources,
-    retry: RetryPolicy,
-) -> NativeExecutionResult<(TaskId, crate::RemoteTaskCompletion)> {
-    let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
-    let task_id = TaskId::derive(&[run_id.as_bytes(), task_domain]);
-    let completion = pool.submit(
-        TaskSubmission {
-            request: TaskRequest {
-                id: task_id,
-                scope_id: pool.scope_id(),
-                pool_id: pool.pool_id(),
-                program_artifact_id: artifact_id,
-                callable: Callable {
-                    owner_identity: "remote-run".into(),
-                    qualified_name: request.recipe.entrypoint.clone(),
-                    entrypoint_digest: Digest::sha256(request.recipe.entrypoint.as_bytes()),
-                },
-                inputs: request.arguments.clone(),
-                outputs: OutputContract {
-                    requested_outputs: request.requested_outputs,
-                },
-                resources: task_resources(resources)?,
-                retry,
-                deadline_unix_millis: None,
-            },
-            dependencies: BTreeSet::new(),
-            priority: 0,
-        },
-        request.clone(),
-    )?;
-    Ok((task_id, completion))
-}
-
-pub(super) fn task_failure_outcome(
-    pool: Arc<RemotePoolDriver>,
-    task_id: TaskId,
-    message: String,
-) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
-    if state == Some(TaskState::Indeterminate) {
-        Ok(RemotePoolExecutionOutcome::Indeterminate(message))
-    } else {
-        packaged(ProgramExecutionResponse::Failure { message }, pool)
-            .map(RemotePoolExecutionOutcome::Completed)
-    }
-}
-
-pub(super) fn execution_failure_outcome(
-    pool: Arc<RemotePoolDriver>,
-    message: String,
-) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
-    if pool
-        .snapshot()
-        .tasks
-        .values()
-        .any(|task| task.state == TaskState::Indeterminate)
-    {
-        Ok(RemotePoolExecutionOutcome::Indeterminate(message))
-    } else {
-        packaged(ProgramExecutionResponse::Failure { message }, pool)
-            .map(RemotePoolExecutionOutcome::Completed)
-    }
-}
-
-pub(super) fn packaged(
-    response: ProgramExecutionResponse,
-    pool: std::sync::Arc<RemotePoolDriver>,
-) -> NativeExecutionResult<RemotePoolExecutionResult> {
-    if let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &response {
-        for reference in result_objects {
-            if pool
-                .execution_object(reference)
-                .map_err(protocol)?
-                .is_none()
-            {
-                return Err(protocol(
-                    "remote result object is absent from the worker pool",
-                ));
-            }
-        }
-    }
-    Ok(RemotePoolExecutionResult {
-        response,
-        objects: super::result_objects::RemoteResultObjects::Pool(pool),
-    })
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

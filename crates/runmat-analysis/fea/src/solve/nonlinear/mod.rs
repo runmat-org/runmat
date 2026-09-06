@@ -227,7 +227,10 @@ pub fn solve_nonlinear_system(
     let mut min_contact_gap = f64::INFINITY;
     let mut contact_active_entity_count = 0usize;
 
-    for index in 0..options.increment_count {
+    'increments: for index in 0..options.increment_count {
+        if crate::is_fea_cancelled() {
+            break;
+        }
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
         let thermo_time_sample =
             thermo_mechanical::sample_time_profile(thermo_context, load_factor);
@@ -288,6 +291,9 @@ pub fn solve_nonlinear_system(
         let mut stall_steps_in_increment = 0usize;
         let mut prior_residual = residual;
         while iterations < options.max_newton_iters.max(1) {
+            if crate::is_fea_cancelled() {
+                break 'increments;
+            }
             let refresh_tangent = tangent_age >= tangent_refresh_interval;
             if refresh_tangent {
                 tangent_rebuild_count = tangent_rebuild_count.saturating_add(1);
@@ -313,6 +319,9 @@ pub fn solve_nonlinear_system(
                 let mut accepted = false;
                 let mut trial_scale = 1.0;
                 for _ in 0..options.max_line_search_backtracks {
+                    if crate::is_fea_cancelled() {
+                        break 'increments;
+                    }
                     trial_scale *= line_search_reduction;
                     line_search_backtracks = line_search_backtracks.saturating_add(1);
                     line_search_backtracks_in_increment =
@@ -339,6 +348,10 @@ pub fn solve_nonlinear_system(
                 stall_steps_in_increment = stall_steps_in_increment.saturating_add(1);
             }
             prior_residual = residual;
+        }
+
+        if crate::is_fea_cancelled() {
+            break;
         }
 
         max_line_search_backtracks_per_increment =

@@ -23,6 +23,8 @@ struct OcctPreviewSessionChunkOptions;
 struct OcctPreviewSessionChunkPayload;
 struct OcctPreviewSessionStartPayload;
 
+rust::String exact_kernel_abi();
+
 OcctImportPayload import_cad_bytes(rust::Str path,
                                    rust::Slice<const std::uint8_t> bytes,
                                    rust::Str materialized_path,

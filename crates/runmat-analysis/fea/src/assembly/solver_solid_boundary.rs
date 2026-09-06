@@ -190,7 +190,7 @@ fn boundary_face_matches_region(
 ) -> bool {
     face.provenance
         .iter()
-        .any(|entity| entity.source_topology_id == region_id)
+        .any(|entity| entity.matches_analysis_selection(region_id))
 }
 
 fn apply_solver_mesh_pressure(

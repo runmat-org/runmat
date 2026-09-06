@@ -3,7 +3,7 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{AtomicCreateResult, DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 #[cfg(not(target_arch = "wasm32"))]
@@ -199,6 +199,25 @@ impl FsProvider for SandboxFsProvider {
         fs::set_permissions(target, perms)
     }
 
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let target = self.resolve(path);
+        let parent = target.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "atomic publication path has no parent directory",
+            )
+        })?;
+        fs::create_dir_all(parent)?;
+        let canonical_parent = fs::canonicalize(parent)?;
+        if !canonical_parent.starts_with(&self.root) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "atomic publication parent escapes the filesystem sandbox",
+            ));
+        }
+        crate::native::atomic_create_new_native(&target, bytes)
+    }
+
     async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
@@ -348,5 +367,25 @@ mod tests {
         let canonical = executor::block_on(provider.canonicalize(Path::new("./data/./file.bin")))
             .expect("canonicalize");
         assert_eq!(virtual_path(&canonical), "/data/file.bin");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_publication_rejects_a_symlinked_parent_escape() {
+        use std::os::unix::fs::symlink;
+
+        let sandbox_root = tempdir().expect("sandbox root");
+        let outside = tempdir().expect("outside root");
+        symlink(outside.path(), sandbox_root.path().join("escape")).unwrap();
+        let provider =
+            SandboxFsProvider::new(sandbox_root.path().to_path_buf()).expect("sandbox provider");
+
+        let error = executor::block_on(
+            provider.atomic_create_new(Path::new("/escape/artifact"), b"payload"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!outside.path().join("artifact").exists());
     }
 }

@@ -2126,6 +2126,25 @@ pub enum AnalysisSolverOptions {
 }
 
 impl AnalysisSolverOptions {
+    pub(super) fn clear_solver_mesh_artifact_path(&mut self) {
+        match self {
+            Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
+            Self::AcousticHelmholtz(_) => {}
+            Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
+            Self::IncompressibleFlow(options) => options.solver_mesh_artifact_path = None,
+            Self::ConjugateHeatTransfer(options) => options.solver_mesh_artifact_path = None,
+            Self::FluidStructureInteraction(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+            Self::StructuralNonlinear(options) => options.solver_mesh_artifact_path = None,
+            Self::ElectromagneticPotential(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+        }
+    }
+
     pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
         use AnalysisProcedure::{
             HarmonicResponse, ModalExtraction, Nonlinear, Static, TransientResponse,

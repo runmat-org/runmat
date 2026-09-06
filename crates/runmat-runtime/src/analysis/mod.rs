@@ -97,8 +97,17 @@ use execution_dispatch::{execution_operation, run_operation_for_identity, Analys
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
 use result_policy::{classify_run_status, evaluate_production_publication};
-pub use structural_study::PreparedStructuralStudy;
-use structural_study::PreparedStudyRun;
+#[cfg(test)]
+use structural_study::run_evidence_stage;
+pub use structural_study::{
+    analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
+    PreparedStructuralStudy, PreparedStructuralStudyIntent, StructuralStudyCompletionIdentity,
+    STRUCTURAL_STUDY_INTENT_MAX_BYTES,
+};
+use structural_study::{
+    complete_study_run, persist_immutable_study_evidence, study_completion_from_prepared,
+    study_evidence_root, PreparedStudyRun,
+};
 use study_execution::execute_study_step;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -820,7 +829,7 @@ pub fn analysis_validate_study_op(
         })
         .collect();
     let study_fingerprint = study_fingerprint(spec);
-    let evidence_artifact_path = persist_study_evidence(
+    let evidence_artifact_path = persist_immutable_study_evidence(
         &study_fingerprint,
         "validate",
         serde_json::json!({
@@ -924,7 +933,7 @@ pub fn analysis_plan_study_op(
     let run_operation = operation.name().to_string();
     let run_op_version = operation.version().to_string();
     let operation_sequence = study_operation_sequence(spec, &run_op_version);
-    let evidence_artifact_path = persist_study_evidence(
+    let evidence_artifact_path = persist_immutable_study_evidence(
         &study_fingerprint,
         "plan",
         serde_json::json!({
@@ -1044,7 +1053,11 @@ pub fn analysis_complete_structural_study_op(
     let resolved_solver_options =
         AnalysisSolverOptions::StructuralLinear(prepared.linear.options.clone());
     let run = analysis_complete_linear_static_run_op(prepared.linear, result)?;
-    complete_study_run(prepared.study, run, resolved_solver_options)
+    complete_study_run(
+        study_completion_from_prepared(prepared.study),
+        run,
+        resolved_solver_options,
+    )
 }
 
 fn analysis_run_study_with_structural_executor(
@@ -1060,10 +1073,73 @@ fn analysis_run_study_with_structural_executor(
         &prepared.context,
         structural_executor,
     )?;
-    complete_study_run(prepared, run_envelope, resolved_solver_options)
+    complete_study_run(
+        study_completion_from_prepared(prepared),
+        run_envelope,
+        resolved_solver_options,
+    )
 }
 
 fn prepare_study_run(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<PreparedStudyRun, OperationErrorEnvelope> {
+    let mut prepared = prepare_study_semantics(spec, context)?;
+    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &prepared.context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
+                error_type: OperationErrorType::Backend,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            message,
+            BTreeMap::new(),
+        )
+    })?;
+    let aliases = runmat_analysis_core::BoundaryRegionAliases::new(study_mesh.boundary_region_ids)
+        .map_err(|error| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                &prepared.context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                error.to_string(),
+                BTreeMap::new(),
+            )
+        })?;
+    prepared.model =
+        runmat_analysis_core::resolve_boundary_region_aliases(&prepared.model, &aliases).map_err(
+            |error| {
+                operation_error(
+                    ANALYSIS_RUN_STUDY_OPERATION,
+                    ANALYSIS_RUN_STUDY_OP_VERSION,
+                    &prepared.context,
+                    OperationErrorSpec {
+                        error_code: "RM.FEA.RUN_STUDY.BOUNDARY_RESOLUTION_FAILED",
+                        error_type: OperationErrorType::Validation,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    error.to_string(),
+                    BTreeMap::new(),
+                )
+            },
+        )?;
+    prepared.solver_mesh_artifact_path = study_mesh.artifact_path;
+    prepared.meshing_evidence_artifact_path = study_mesh.evidence_path;
+    Ok(prepared)
+}
+
+fn prepare_study_semantics(
     spec: &AnalysisStudySpec,
     context: OperationContext,
 ) -> Result<PreparedStudyRun, OperationErrorEnvelope> {
@@ -1094,7 +1170,7 @@ fn prepare_study_run(
     }
 
     let study_fingerprint = study_fingerprint(spec);
-    let mut model = resolve_study_model(spec, &context)?;
+    let model = resolve_study_model(spec, &context)?;
     spec.execution
         .validate_against(&model.sequence)
         .map_err(|message| {
@@ -1125,30 +1201,12 @@ fn prepare_study_run(
     let planned_operation = execution_operation(authored_execution, &procedure_step)
         .expect("resolved execution must select a supported solver operation");
     let operation_sequence = study_operation_sequence(spec, planned_operation.version());
-    let study_mesh = meshing::resolve_study_mesh(spec).map_err(|message| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.MESHING_FAILED",
-                error_type: OperationErrorType::Backend,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            message,
-            BTreeMap::new(),
-        )
-    })?;
-    let solver_mesh_artifact_path = study_mesh.artifact_path;
-    let meshing_evidence_artifact_path = study_mesh.evidence_path;
     analysis_validate(
         &model,
         spec.geometry.units,
         &CoordinateFrame::Global,
         context.clone(),
     )?;
-    meshing::apply_boundary_region_ids(&mut model, &study_mesh.boundary_region_ids);
     Ok(PreparedStudyRun {
         spec: spec.clone(),
         context,
@@ -1157,184 +1215,9 @@ fn prepare_study_run(
         authored_execution: authored_execution.clone(),
         procedure_step,
         operation_sequence,
-        solver_mesh_artifact_path,
-        meshing_evidence_artifact_path,
+        solver_mesh_artifact_path: None,
+        meshing_evidence_artifact_path: None,
     })
-}
-
-fn complete_study_run(
-    prepared: PreparedStudyRun,
-    run_envelope: OperationEnvelope<AnalysisRunResult>,
-    resolved_solver_options: AnalysisSolverOptions,
-) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let PreparedStudyRun {
-        spec,
-        context,
-        study_fingerprint,
-        model,
-        authored_execution,
-        procedure_step,
-        operation_sequence,
-        solver_mesh_artifact_path,
-        meshing_evidence_artifact_path,
-    } = prepared;
-    let actual_identity = &run_envelope.data.run.identity;
-    if actual_identity.family() != procedure_step.family
-        || actual_identity.procedure() != procedure_step.procedure
-        || actual_identity.solution_space() != procedure_step.solution_space
-    {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.RESULT_IDENTITY_MISMATCH",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            "solver result identity does not match the requested procedure step",
-            BTreeMap::from([
-                (
-                    "requested_identity".to_string(),
-                    format!("{procedure_step:?}"),
-                ),
-                (
-                    "actual_identity".to_string(),
-                    format!("{actual_identity:?}"),
-                ),
-            ]),
-        ));
-    }
-    let run_operation = run_envelope.operation.clone();
-    let run_op_version = run_envelope.op_version.clone();
-    let expected_operation = run_operation_for_identity(actual_identity).ok_or_else(|| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.RESULT_IDENTITY_UNSUPPORTED",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            "solver returned an admitted identity without a runtime operation",
-            BTreeMap::from([(
-                "actual_identity".to_string(),
-                format!("{actual_identity:?}"),
-            )]),
-        )
-    })?;
-    if run_operation != expected_operation.name() || run_op_version != expected_operation.version()
-    {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.OPERATION_IDENTITY_MISMATCH",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            "solver operation name or version does not match the result identity",
-            BTreeMap::from([
-                ("run_operation".to_string(), run_operation.clone()),
-                ("run_op_version".to_string(), run_op_version.clone()),
-                (
-                    "identity_operation".to_string(),
-                    expected_operation.name().to_string(),
-                ),
-                (
-                    "identity_op_version".to_string(),
-                    expected_operation.version().to_string(),
-                ),
-            ]),
-        ));
-    }
-    let resolved_execution = AnalysisExecutionStep {
-        step_id: authored_execution.step_id.clone(),
-        backend: authored_execution.backend,
-        requirement: authored_execution.requirement,
-        solver_options: resolved_solver_options,
-    };
-    let evidence_artifact_path = persist_study_evidence(
-        &study_fingerprint,
-        "run",
-        serde_json::json!({
-            "schema_version": "fea_study_run_artifact/v1",
-            "study_id": spec.study_id.clone(),
-            "model_id": model.model_id.0.clone(),
-            "model_template": spec.create_model_intent.template,
-            "procedure_step": procedure_step,
-            "execution": resolved_execution,
-            "identity": run_envelope.data.run.identity.clone(),
-            "solver_mesh_artifact_path": solver_mesh_artifact_path.clone(),
-            "meshing_evidence_artifact_path": meshing_evidence_artifact_path.clone(),
-            "study_fingerprint": study_fingerprint.clone(),
-            "operation_sequence": operation_sequence.clone(),
-            "run_operation": run_operation.clone(),
-            "run_op_version": run_op_version.clone(),
-            "run_id": run_envelope.data.run_id.clone(),
-            "run_status": run_envelope.data.run_status,
-            "numerically_acceptable": run_envelope.data.numerically_acceptable,
-            "production_publishable": run_envelope.data.production_publishable,
-            "solver_convergence": run_envelope.data.solver_convergence,
-            "result_quality": run_envelope.data.result_quality,
-            "quality_reasons": run_envelope.data.quality_reasons.clone(),
-            "production_publication_reasons": run_envelope.data.production_publication_reasons.clone(),
-            "provenance": run_envelope.data.provenance.clone(),
-        }),
-    )
-    .map_err(|err| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to persist study run evidence artifact: {err}"),
-            BTreeMap::from([
-                ("study_id".to_string(), spec.study_id.clone()),
-                ("run_id".to_string(), run_envelope.data.run_id.clone()),
-            ]),
-        )
-    })?;
-
-    Ok(OperationEnvelope::new(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &context,
-        AnalysisStudyRunData {
-            study_id: spec.study_id.clone(),
-            model_id: model.model_id.0.clone(),
-            model_template: spec.create_model_intent.template,
-            procedure_step,
-            execution: resolved_execution,
-            identity: run_envelope.data.run.identity.clone(),
-            solver_mesh_artifact_path,
-            meshing_evidence_artifact_path,
-            study_fingerprint,
-            operation_sequence,
-            run_operation,
-            run_op_version,
-            run_id: run_envelope.data.run_id,
-            run_status: run_envelope.data.run_status,
-            numerically_acceptable: run_envelope.data.numerically_acceptable,
-            production_publishable: run_envelope.data.production_publishable,
-            solver_convergence: run_envelope.data.solver_convergence,
-            result_quality: run_envelope.data.result_quality,
-            quality_reasons: run_envelope.data.quality_reasons,
-            production_publication_reasons: run_envelope.data.production_publication_reasons,
-            provenance: run_envelope.data.provenance,
-            evidence_artifact_path,
-        },
-    ))
 }
 
 pub fn analysis_plan_study_sweep_op(
@@ -8958,13 +8841,43 @@ pub fn analysis_prepare_linear_static_run_op(
     context: OperationContext,
 ) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
+    let workload = prepare_linear_static_workload_template(
+        model,
+        backend,
+        formulation_requirement,
+        &options,
+        &context,
+    )?;
+    let solver_mesh = resolve_solver_mesh_artifact(
+        model,
+        options.solver_mesh_artifact_path.as_deref(),
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
+        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
+        &context,
+    )?;
+    Ok(PreparedStructuralLinearRun {
+        workload,
+        solver_mesh,
+        options,
+        context,
+    })
+}
+
+fn prepare_linear_static_workload_template(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    formulation_requirement: FormulationRequirement,
+    options: &AnalysisRunOptions,
+    context: &OperationContext,
+) -> Result<StructuralLinearWorkload, OperationErrorEnvelope> {
     let thermo_options = model_thermo_coupling_options(model);
     if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
                 AnalysisOperation::LinearStatic.name(),
                 AnalysisOperation::LinearStatic.version(),
-                &context,
+                context,
                 OperationErrorSpec {
                     error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
                     error_type: OperationErrorType::Input,
@@ -8982,7 +8895,7 @@ pub fn analysis_prepare_linear_static_run_op(
             return Err(operation_error(
                 AnalysisOperation::LinearStatic.name(),
                 AnalysisOperation::LinearStatic.version(),
-                &context,
+                context,
                 OperationErrorSpec {
                     error_code: AnalysisOperation::LinearStatic
                         .invalid_electro_thermal_options_error_code(),
@@ -9012,15 +8925,7 @@ pub fn analysis_prepare_linear_static_run_op(
             }
         }
     };
-    let solver_mesh = resolve_solver_mesh_artifact(
-        model,
-        options.solver_mesh_artifact_path.as_deref(),
-        AnalysisOperation::LinearStatic.name(),
-        AnalysisOperation::LinearStatic.version(),
-        "RM.FEA.RUN_LINEAR_STATIC.SOLVER_MESH_INVALID",
-        &context,
-    )?;
-    let workload = StructuralLinearWorkload {
+    Ok(StructuralLinearWorkload {
         schema_version: 1,
         model: model.clone(),
         backend,
@@ -9030,18 +8935,31 @@ pub fn analysis_prepare_linear_static_run_op(
         require_solver_mesh_for_solid: true,
         thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         electro_thermal_context: to_fea_electro_thermal_context(electro_options),
-    };
-    Ok(PreparedStructuralLinearRun {
-        workload,
-        solver_mesh,
-        options,
-        context,
     })
 }
 
 pub fn analysis_complete_linear_static_run_op(
     prepared: PreparedStructuralLinearRun,
     run: FeaRunResult,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_complete_linear_static_run_with_id(prepared, run, None)
+}
+
+fn analysis_complete_linear_static_run_with_id(
+    prepared: PreparedStructuralLinearRun,
+    run: FeaRunResult,
+    assigned_run_id: Option<&str>,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let context = prepared.context.clone();
+    let envelope = analysis_admit_linear_static_run_with_id(prepared, run, assigned_run_id)?;
+    persist_linear_static_run(&context, &envelope.data)?;
+    Ok(envelope)
+}
+
+fn analysis_admit_linear_static_run_with_id(
+    prepared: PreparedStructuralLinearRun,
+    run: FeaRunResult,
+    assigned_run_id: Option<&str>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let result = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
@@ -9050,6 +8968,7 @@ pub fn analysis_complete_linear_static_run_op(
             requested_backend: prepared.workload.backend,
             formulation_requirement: prepared.workload.formulation_requirement,
             options: &prepared.options,
+            assigned_run_id,
         },
         run,
     )
@@ -9072,20 +8991,25 @@ pub fn analysis_complete_linear_static_run_op(
         )
     })?;
 
-    persist_fea_run_result_with_progress(
-        AnalysisOperation::LinearStatic.name(),
-        AnalysisOperation::LinearStatic.version(),
-        "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
-        &prepared.context,
-        &result,
-    )?;
-
     Ok(OperationEnvelope::new(
         AnalysisOperation::LinearStatic.name(),
         AnalysisOperation::LinearStatic.version(),
         &prepared.context,
         result,
     ))
+}
+
+fn persist_linear_static_run(
+    context: &OperationContext,
+    result: &AnalysisRunResult,
+) -> Result<(), OperationErrorEnvelope> {
+    persist_fea_run_result_with_progress(
+        AnalysisOperation::LinearStatic.name(),
+        AnalysisOperation::LinearStatic.version(),
+        "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
+        context,
+        result,
+    )
 }
 
 fn analysis_run_linear_static_with_executor(
@@ -10323,17 +10247,28 @@ fn study_issue_message(code: &str) -> &'static str {
     }
 }
 
+/// Computes the authored study's placement-independent content identity.
+///
+/// The geometry source digest identifies the input bytes. Local source and generated artifact
+/// paths identify storage locations, so they cannot participate in a portable study identity.
 pub fn analysis_study_content_digest(spec: &AnalysisStudySpec) -> runmat_execution::Digest {
     let mut semantic_spec = spec.clone();
+    semantic_spec.geometry.source.path.clear();
     semantic_spec.solver_mesh_artifact_path = None;
     semantic_spec.meshing_evidence_artifact_path = None;
+    for execution in &mut semantic_spec.execution.steps {
+        execution.solver_options.clear_solver_mesh_artifact_path();
+    }
     let payload = serde_json::to_vec(&semantic_spec)
         .unwrap_or_else(|_| format!("{semantic_spec:?}").into_bytes());
     runmat_execution::Digest::sha256(&payload)
 }
 
 fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
-    let digest = analysis_study_content_digest(spec);
+    study_fingerprint_from_digest(analysis_study_content_digest(spec))
+}
+
+fn study_fingerprint_from_digest(digest: runmat_execution::Digest) -> String {
     let mut encoded = String::with_capacity(64);
     for byte in digest.bytes() {
         use std::fmt::Write as _;
@@ -10407,40 +10342,6 @@ fn resolve_solver_mesh_artifact(
         ));
     }
     Ok(Some(mesh))
-}
-
-fn study_evidence_root() -> PathBuf {
-    let config = current_fea_runtime_config();
-    config
-        .study_artifact_root
-        .or_else(|| {
-            std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT")
-                .or_else(|_| std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT"))
-                .ok()
-                .map(PathBuf::from)
-        })
-        .unwrap_or_else(|| {
-            config
-                .artifact_root
-                .unwrap_or_else(default_fea_artifact_root)
-                .join("studies")
-        })
-}
-
-fn persist_study_evidence(
-    study_fingerprint: &str,
-    stage: &str,
-    payload: serde_json::Value,
-) -> Result<String, String> {
-    let study_key = study_fingerprint.replace(':', "_");
-    let root = study_evidence_root().join(study_key);
-    fs_create_dir_all(&root)
-        .map_err(|err| format!("failed to create study evidence directory: {err}"))?;
-    let path = root.join(format!("{stage}.json"));
-    let bytes = serde_json::to_vec_pretty(&payload)
-        .map_err(|err| format!("failed to encode study evidence payload: {err}"))?;
-    atomic_write_bytes(&path, &bytes)?;
-    Ok(path.display().to_string())
 }
 
 fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -10517,7 +10418,10 @@ fn render_topology_from_solver_mesh(
             let region_ids: Vec<String> = face
                 .provenance
                 .iter()
-                .map(|entity| entity.source_topology_id.clone())
+                .flat_map(|entity| {
+                    std::iter::once(entity.source_topology_id.clone())
+                        .chain(entity.analysis_selection_id().ok())
+                })
                 .collect();
             Some((triangle, volume_element_index, region_ids))
         })

@@ -1,7 +1,10 @@
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{
+    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
+    PublicationDurability,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::Value as JsonValue;
@@ -9,6 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use url::Url;
+use uuid::Uuid;
 
 #[derive(Default)]
 pub struct NativeFsProvider;
@@ -96,6 +100,10 @@ impl FsProvider for NativeFsProvider {
         fs::set_permissions(path, perms)
     }
 
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        atomic_create_new_native(path, bytes)
+    }
+
     async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
@@ -174,6 +182,92 @@ impl FsProvider for NativeFsProvider {
         }
         fs::write(path, data)
     }
+}
+
+pub(crate) fn atomic_create_new_native(
+    path: &Path,
+    bytes: &[u8],
+) -> io::Result<AtomicCreateResult> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic publication path has no parent directory",
+        )
+    })?;
+    fs::create_dir_all(parent)?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    let mut staged = None;
+    for _ in 0..16 {
+        let candidate = parent.join(format!(
+            ".{file_name}.publish-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        match options.open(&candidate) {
+            Ok(mut file) => {
+                if let Err(error) =
+                    std::io::Write::write_all(&mut file, bytes).and_then(|()| file.sync_all())
+                {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error);
+                }
+                staged = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let staged = staged.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique atomic publication staging path",
+        )
+    })?;
+
+    let publication = match fs::hard_link(&staged, path) {
+        Ok(()) => {
+            let durability = match fs::File::open(parent).and_then(|directory| directory.sync_all())
+            {
+                Ok(()) => PublicationDurability::Durable,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    PublicationDurability::AtomicVisibility
+                }
+                Err(_) => PublicationDurability::AtomicVisibility,
+            };
+            Ok(AtomicCreateResult::Published { durability })
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => (|| {
+            let metadata = fs::symlink_metadata(path)?;
+            if metadata.file_type().is_symlink() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "atomic publication target must not be a symbolic link",
+                ));
+            }
+            if !metadata.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "atomic publication target is not a regular file",
+                ));
+            }
+            Ok(AtomicCreateResult::Existing(fs::read(path)?))
+        })(),
+        Err(error) => Err(error),
+    };
+    let _ = fs::remove_file(&staged);
+    publication
 }
 
 fn dataset_manifest_path(path: &str) -> PathBuf {
@@ -255,5 +349,63 @@ impl From<fs::FileType> for FsFileType {
         } else {
             FsFileType::Other
         }
+    }
+}
+
+#[cfg(test)]
+mod atomic_create_tests {
+    use super::*;
+    use futures::executor;
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn concurrent_native_publishers_choose_exactly_one_complete_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("artifact.json");
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = [b"first".to_vec(), b"second".to_vec()].map(|payload| {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                executor::block_on(NativeFsProvider.atomic_create_new(&path, &payload))
+            })
+        });
+        let outcomes = handles.map(|handle| handle.join().unwrap().unwrap());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AtomicCreateResult::Published { .. }))
+                .count(),
+            1
+        );
+        let winning = fs::read(&path).unwrap();
+        assert!(winning == b"first" || winning == b"second");
+        assert!(outcomes.iter().any(
+            |outcome| matches!(outcome, AtomicCreateResult::Existing(bytes) if bytes == &winning)
+        ));
+        assert!(fs::read_dir(directory.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".publish-")
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_publication_rejects_an_existing_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let outside = directory.path().join("outside.json");
+        let target = directory.path().join("artifact.json");
+        fs::write(&outside, b"outside").unwrap();
+        symlink(&outside, &target).unwrap();
+        let error = executor::block_on(NativeFsProvider.atomic_create_new(&target, b"candidate"))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(fs::read(outside).unwrap(), b"outside");
     }
 }

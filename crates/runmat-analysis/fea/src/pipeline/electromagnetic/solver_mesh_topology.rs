@@ -99,9 +99,11 @@ pub(super) fn boundary_node_indices<'a>(
         .boundary_faces
         .iter()
         .filter(|face| {
-            face.provenance
-                .iter()
-                .any(|entity| selector_ids.contains(entity.source_topology_id.as_str()))
+            face.provenance.iter().any(|entity| {
+                selector_ids
+                    .iter()
+                    .any(|selector| entity.matches_analysis_selection(selector))
+            })
         })
         .flat_map(|face| face.node_ids.iter())
         .filter_map(|node_id| node_indices.get(node_id).copied())
@@ -139,6 +141,7 @@ fn norm(vector: [f64; 3]) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     use runmat_meshing_core::{fixtures, ElementOrder};
 
     use super::boundary_node_indices;
@@ -150,5 +153,31 @@ mod tests {
 
         assert_eq!(boundary_node_indices(&mesh, ["ground"]), vec![0, 1, 2]);
         assert!(boundary_node_indices(&mesh, ["missing"]).is_empty());
+    }
+
+    #[test]
+    fn persistent_boundary_selector_distinguishes_repeated_face_occurrences() {
+        let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let first = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "shared-part-face".into(),
+            assembly_path: vec!["root".into(), "instance-a".into()],
+        };
+        let second = PersistentEntityId {
+            assembly_path: vec!["root".into(), "instance-b".into()],
+            ..first.clone()
+        };
+        mesh.topology.boundary_faces[0].provenance = vec![first.clone()];
+        mesh.topology.boundary_faces[1].provenance = vec![second];
+
+        let first_selection = first.analysis_selection_id().unwrap();
+        assert_eq!(
+            boundary_node_indices(&mesh, [first_selection.as_str()]),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            boundary_node_indices(&mesh, ["shared-part-face"]),
+            vec![0, 1, 2, 3]
+        );
     }
 }

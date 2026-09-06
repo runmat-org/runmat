@@ -274,7 +274,7 @@ pub(super) async fn run_remote_driver(
                         transition(
                             control.as_ref(),
                             &config,
-                            DriverRunTarget::Indeterminate,
+                            DriverRunTarget::Cancelled,
                             Some("cancelled-during-execution"),
                             None,
                             None,

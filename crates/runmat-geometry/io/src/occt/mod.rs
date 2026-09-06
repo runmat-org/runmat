@@ -51,6 +51,11 @@ mod native;
 #[cfg(all(target_arch = "wasm32", feature = "occt-wasm-host"))]
 mod wasm;
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub(crate) fn exact_kernel_abi() -> String {
+    ffi::bridge::exact_kernel_abi()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OcctCadFormat {
     Step,

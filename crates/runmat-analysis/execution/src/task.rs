@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub const ANALYSIS_EXECUTION_CALLABLE_OWNER: &str = "runmat.analysis.host";
+pub const DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS: u16 = 3;
 
 #[derive(Clone, Debug)]
 pub struct AnalysisExecutionContext {

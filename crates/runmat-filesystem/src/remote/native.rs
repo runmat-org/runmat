@@ -1,7 +1,10 @@
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{
+    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
+    PublicationDurability,
+};
 use async_trait::async_trait;
 use chrono::DateTime;
 use crossbeam_utils::thread;
@@ -348,6 +351,7 @@ impl RemoteInner {
         path: &str,
         size_bytes: u64,
         content_sha256: &str,
+        create_new: bool,
     ) -> io::Result<UploadSessionStartResponse> {
         self.post_json(
             "/fs/upload-session/start",
@@ -356,6 +360,7 @@ impl RemoteInner {
                 size_bytes: size_bytes as i64,
                 content_type: None,
                 content_sha256: content_sha256.to_string(),
+                create_new,
             },
         )
     }
@@ -801,7 +806,17 @@ impl RemoteFsProvider {
     }
 
     fn upload_multipart_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
-        if data.is_empty() {
+        self.upload_multipart_file_with_fallback(path, data, create_new, true)
+    }
+
+    fn upload_multipart_file_with_fallback(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        allow_legacy_fallback: bool,
+    ) -> io::Result<()> {
+        if data.is_empty() && allow_legacy_fallback {
             self.inner.upload_chunk(FsWriteChunkRequest {
                 path,
                 offset: 0,
@@ -814,17 +829,24 @@ impl RemoteFsProvider {
             return Ok(());
         }
         let content_sha256 = sha256_hex(data);
-        let session =
-            match self
-                .inner
-                .upload_session_start(path, data.len() as u64, &content_sha256)
-            {
-                Ok(session) => session,
-                Err(err) if err.kind() == ErrorKind::NotFound => {
-                    return self.upload_multipart_file_legacy(path, data, create_new);
-                }
-                Err(err) => return Err(err),
-            };
+        let session = match self.inner.upload_session_start(
+            path,
+            data.len() as u64,
+            &content_sha256,
+            create_new,
+        ) {
+            Ok(session) => session,
+            Err(err) if err.kind() == ErrorKind::NotFound && allow_legacy_fallback => {
+                return self.upload_multipart_file_legacy(path, data, create_new);
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                return Err(io::Error::new(
+                    ErrorKind::Unsupported,
+                    "remote atomic publication requires upload-session support",
+                ));
+            }
+            Err(err) => return Err(err),
+        };
         let chunk_size = (session.chunk_size_bytes as usize).max(1);
         let mut tasks = Vec::new();
         let mut offset = 0usize;
@@ -1225,6 +1247,19 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let normalized = self.normalize(path);
+        match self.upload_multipart_file_with_fallback(&normalized, bytes, true, false) {
+            Ok(()) => Ok(AtomicCreateResult::Published {
+                durability: PublicationDurability::AtomicVisibility,
+            }),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                self.read(path).await.map(AtomicCreateResult::Existing)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
@@ -1466,6 +1501,8 @@ struct UploadSessionStartRequest {
     size_bytes: i64,
     content_type: Option<String>,
     content_sha256: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    create_new: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1738,6 +1775,8 @@ mod tests {
     #[derive(Clone)]
     struct UploadSessionTestState {
         path: String,
+        size_bytes: i64,
+        create_new: bool,
         chunk_count: usize,
     }
 
@@ -1900,6 +1939,8 @@ mod tests {
                 session_id.clone(),
                 UploadSessionTestState {
                     path: req.path,
+                    size_bytes: req.size_bytes,
+                    create_new: req.create_new,
                     chunk_count: 0,
                 },
             );
@@ -2011,6 +2052,12 @@ mod tests {
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .remove(&req.session_id)
             .ok_or(StatusCode::NOT_FOUND)?;
+        if state.path != req.path
+            || state.size_bytes != req.size_bytes
+            || state.create_new != req.create_new
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
         let mut data = Vec::new();
         for chunk_index in 0..state.chunk_count {
             let chunk_path = harness.resolve(&format!(
@@ -2432,6 +2479,48 @@ mod tests {
             std::fs::read(harness.resolve("/reports/session.bin")).expect("read winner"),
             b"winner"
         );
+    }
+
+    #[test]
+    fn remote_atomic_publication_returns_the_complete_winner() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = Arc::new(
+            RemoteFsProvider::new(RemoteFsConfig {
+                base_url: base,
+                auth_token: None,
+                chunk_bytes: 1024,
+                parallel_requests: 2,
+                direct_read_threshold_bytes: u64::MAX,
+                direct_write_threshold_bytes: 1024,
+                timeout: Duration::from_secs(30),
+                ..RemoteFsConfig::default()
+            })
+            .expect("provider"),
+        );
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let handles = [b"first".to_vec(), b"second".to_vec()].map(|payload| {
+            let provider = Arc::clone(&provider);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                executor::block_on(
+                    provider.atomic_create_new(Path::new("/reports/atomic.bin"), &payload),
+                )
+            })
+        });
+        let outcomes = handles.map(|handle| handle.join().unwrap().unwrap());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AtomicCreateResult::Published { .. }))
+                .count(),
+            1
+        );
+        let winning = std::fs::read(harness.resolve("/reports/atomic.bin")).unwrap();
+        assert!(winning == b"first" || winning == b"second");
+        assert!(outcomes.iter().any(
+            |outcome| matches!(outcome, AtomicCreateResult::Existing(bytes) if bytes == &winning)
+        ));
     }
 
     #[test]

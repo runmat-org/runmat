@@ -123,7 +123,11 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         }
     };
     if let Some(mesh) = supplied_mesh.as_ref() {
-        crate::analysis::meshing::apply_boundary_region_ids(&mut model, &mesh.boundary_region_ids);
+        let aliases =
+            runmat_analysis_core::BoundaryRegionAliases::new(mesh.boundary_region_ids.clone())
+                .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
+        model = runmat_analysis_core::resolve_boundary_region_aliases(&model, &aliases)
+            .map_err(|error| builtin_error(STUDY_NAME, &ERROR_INPUT, error.to_string()))?;
     }
     let execution = match supplied_execution {
         Some(execution) => {

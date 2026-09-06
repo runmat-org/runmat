@@ -27,7 +27,9 @@ pub use structural::{
     import_structural_linear_result, prepare_structural_linear_program,
     PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
 };
-pub use task::{build_analysis_task_submission, AnalysisExecutionContext};
+pub use task::{
+    build_analysis_task_submission, AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+};
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{
     analysis_worker_capabilities, AnalysisCapabilityRequirement, AnalysisWorkloadInput,

@@ -15,6 +15,7 @@ pub mod problem {
     pub mod prescribed_value;
     pub mod quantity;
     pub mod reference_point;
+    pub mod region_resolution;
     pub mod response_spectrum;
     pub mod signal;
     pub mod structure;
@@ -81,6 +82,9 @@ pub use problem::quantity::{
     TurbulenceIntensity, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
+pub use problem::region_resolution::{
+    resolve_boundary_region_aliases, BoundaryRegionAliases, BoundaryRegionResolutionError,
+};
 pub use problem::response_spectrum::{
     DirectionalCombination, ModalCombination, ModalTruncationPolicy, ResponseSpectrum,
     ResponseSpectrumId, ShockResponseSpectrumMethod, SpectrumAbscissa, SpectrumConstruction,

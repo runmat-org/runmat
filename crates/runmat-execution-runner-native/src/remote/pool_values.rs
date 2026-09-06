@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::identity::{ValueId, WorkerId};
+use runmat_execution::identity::ValueId;
 use runmat_execution::value::{ValuePayload, ValueRef};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -14,7 +14,7 @@ type StoredValue = (ValueRef, Arc<[u8]>);
 #[derive(Default)]
 pub(super) struct RemoteValueCatalog {
     objects: Mutex<HashMap<ValueId, StoredValue>>,
-    transferred: AsyncMutex<HashSet<(WorkerId, ValueId)>>,
+    transferred: AsyncMutex<HashSet<(super::pool::WorkerRouteIdentity, ValueId)>>,
 }
 
 impl RemoteValueCatalog {
@@ -41,7 +41,7 @@ impl RemoteValueCatalog {
     pub(super) async fn transfer(
         &self,
         channel: &dyn RemoteWorkerChannel,
-        worker_id: WorkerId,
+        route: super::pool::WorkerRouteIdentity,
         values: &[ValuePayload],
         execution_objects: &RemoteObjectCatalog,
     ) -> NativeExecutionResult<()> {
@@ -50,7 +50,7 @@ impl RemoteValueCatalog {
             if execution_objects.contains(&reference)? {
                 continue;
             }
-            let key = (worker_id, reference.id);
+            let key = (route, reference.id);
             if self.transferred.lock().await.contains(&key) {
                 continue;
             }

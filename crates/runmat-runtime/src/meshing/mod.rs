@@ -15,7 +15,8 @@ pub use persistence::write_canonical_artifact_pair;
 #[cfg(feature = "plot-core")]
 pub use visualization::{solver_mesh_figure, SolverMeshFigureOptions};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeshingContactDefinition {
     pub side_a_face_selectors: Vec<String>,
     pub side_b_face_selectors: Vec<String>,

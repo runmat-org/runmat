@@ -105,9 +105,11 @@ impl SavedRemoteRun {
             let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(continuation)
                 .context("saved structural study continuation is malformed")?;
-            if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
-                anyhow::bail!("saved structural study continuation exceeds its bound");
-            }
+            runmat_runtime::analysis::PreparedStructuralStudyIntent::from_continuation_bytes(
+                &bytes,
+            )
+            .map_err(anyhow::Error::msg)
+            .context("saved structural study continuation is invalid")?;
             if (*materialization == OutputMaterialization::Materialized) != result.is_some() {
                 anyhow::bail!("saved structural study materialization state is inconsistent");
             }
@@ -334,9 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_study_continuation_round_trips() {
-        let temp = tempfile::tempdir().unwrap();
-        std::env::set_var("RUNMAT_CLI_CONFIG_DIR", temp.path());
+    fn malformed_structural_study_continuation_is_rejected() {
         let key =
             runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([11; 32]).unwrap();
         let continuation = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"continuation");
@@ -353,11 +353,6 @@ mod tests {
                 result: None,
             },
         );
-        save(&saved).unwrap();
-        assert_eq!(
-            load("run_structural").unwrap().output_intent,
-            saved.output_intent
-        );
-        std::env::remove_var("RUNMAT_CLI_CONFIG_DIR");
+        assert!(saved.validate("run_structural").is_err());
     }
 }

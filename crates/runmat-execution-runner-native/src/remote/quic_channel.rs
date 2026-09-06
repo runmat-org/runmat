@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V3,
+    REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::{QuicFrameRoute, RemoteFrameRoute};
 use super::{
@@ -121,7 +121,9 @@ impl QuicRemoteWorkerChannel {
                 };
                 let reply: RemoteWorkerReply =
                     match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V3 => reply,
+                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_VERSION => {
+                            reply
+                        }
                         _ => break,
                     };
                 if let RemoteWorkerOutcome::Progress {
@@ -184,7 +186,7 @@ impl QuicRemoteWorkerChannel {
             _ => None,
         };
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V3,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: correlation_id.clone(),
             driver_fence: self.driver_fence,
             command,
@@ -255,6 +257,18 @@ impl RemoteWorkerChannel for QuicRemoteWorkerChannel {
 
     fn worker(&self) -> &WorkerSpec {
         &self.worker
+    }
+
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        match self
+            .request(FrameKind::Control, RemoteWorkerCommand::Describe)
+            .await?
+        {
+            RemoteWorkerOutcome::WorkerDescription { worker } => Ok(worker),
+            _ => Err(protocol(
+                "remote worker returned the wrong description reply",
+            )),
+        }
     }
 
     async fn install_bundle(

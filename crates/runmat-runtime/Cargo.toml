@@ -162,3 +162,4 @@ wgpu = "0.19"
 
 [dependencies.serde_json]
 version = "1.0"
+features = ["float_roundtrip"]

@@ -21,6 +21,7 @@ use runmat_execution_runner::{
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
+use tokio::sync::Notify;
 
 use super::{run_remote_worker_quic, QuicRemoteWorkerChannel, RemoteWorkerQuicRequest};
 use super::{RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteWorkerChannel};
@@ -34,8 +35,11 @@ struct FakeWorker {
     maximum_active: Arc<AtomicUsize>,
     delay: Duration,
     cancellations: Arc<AtomicUsize>,
+    cancellation_signal: Arc<Notify>,
+    cancel_ack_gate: Option<Arc<Notify>>,
     drains: Arc<AtomicUsize>,
     bundle: Arc<Vec<u8>>,
+    described: Option<WorkerSpec>,
 }
 
 struct ResultObjectWorker {
@@ -46,6 +50,88 @@ struct ResultObjectWorker {
     corrupt_download: bool,
 }
 
+struct FailingRouteWorker {
+    spec: WorkerSpec,
+    bundle: Arc<Vec<u8>>,
+    fail_execute: bool,
+    fail_drain: bool,
+}
+
+#[async_trait]
+impl RemoteWorkerChannel for FailingRouteWorker {
+    fn node_identity(&self) -> &str {
+        "node-failing-route"
+    }
+
+    fn worker(&self) -> &WorkerSpec {
+        &self.spec
+    }
+
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        Ok(self.spec.clone())
+    }
+
+    async fn install_bundle(
+        &self,
+        bundle_digest: Digest,
+        bundle: &[u8],
+    ) -> NativeExecutionResult<RemoteBundleReceipt> {
+        Ok(bundle_receipt(bundle_digest, bundle))
+    }
+
+    async fn activate_bundle(
+        &self,
+        bundle_digest: Digest,
+    ) -> NativeExecutionResult<RemoteBundleReceipt> {
+        Ok(bundle_receipt(bundle_digest, &self.bundle))
+    }
+
+    async fn transfer_value(
+        &self,
+        reference: runmat_execution::value::ValueRef,
+        encoded: &[u8],
+    ) -> NativeExecutionResult<super::RemoteValueReceipt> {
+        Ok(super::RemoteValueReceipt {
+            value_id: reference.id,
+            encoded_bytes: encoded.len() as u64,
+        })
+    }
+
+    async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
+        if self.fail_execute {
+            Err(crate::NativeExecutionError::Protocol(
+                "fixture route failed".into(),
+            ))
+        } else {
+            Ok(AttemptReport::Succeeded {
+                result: AttemptSuccess {
+                    outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                        attempt.scheduling.worker_id.to_string(),
+                    )))],
+                    result_objects: Vec::new(),
+                },
+            })
+        }
+    }
+
+    async fn cancel(
+        &self,
+        _request: &runmat_execution_runner::AttemptRequest,
+    ) -> NativeExecutionResult<()> {
+        Ok(())
+    }
+
+    async fn drain(&self) -> NativeExecutionResult<()> {
+        if self.fail_drain {
+            Err(crate::NativeExecutionError::Protocol(
+                "fixture drain failed".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[async_trait]
 impl RemoteWorkerChannel for ResultObjectWorker {
     fn node_identity(&self) -> &str {
@@ -54,6 +140,10 @@ impl RemoteWorkerChannel for ResultObjectWorker {
 
     fn worker(&self) -> &WorkerSpec {
         &self.spec
+    }
+
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        Ok(self.spec.clone())
     }
 
     async fn install_bundle(
@@ -129,6 +219,10 @@ impl RemoteWorkerChannel for FakeWorker {
         &self.spec
     }
 
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        Ok(self.described.clone().unwrap_or_else(|| self.spec.clone()))
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,
@@ -141,16 +235,19 @@ impl RemoteWorkerChannel for FakeWorker {
     async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.maximum_active.fetch_max(active, Ordering::SeqCst);
-        tokio::time::sleep(self.delay).await;
-        self.active.fetch_sub(1, Ordering::SeqCst);
-        Ok(AttemptReport::Succeeded {
-            result: AttemptSuccess {
-                outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
-                    attempt.scheduling.worker_id.to_string(),
-                )))],
-                result_objects: Vec::new(),
+        let report = tokio::select! {
+            () = tokio::time::sleep(self.delay) => AttemptReport::Succeeded {
+                result: AttemptSuccess {
+                    outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                        attempt.scheduling.worker_id.to_string(),
+                    )))],
+                    result_objects: Vec::new(),
+                },
             },
-        })
+            () = self.cancellation_signal.notified() => AttemptReport::Cancelled,
+        };
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(report)
     }
 
     async fn activate_bundle(
@@ -176,6 +273,13 @@ impl RemoteWorkerChannel for FakeWorker {
         _request: &runmat_execution_runner::AttemptRequest,
     ) -> NativeExecutionResult<()> {
         self.cancellations.fetch_add(1, Ordering::SeqCst);
+        if let Some(gate) = &self.cancel_ack_gate {
+            gate.notified().await;
+        }
+        self.cancellation_signal.notify_waiters();
+        while self.active.load(Ordering::SeqCst) != 0 {
+            tokio::task::yield_now().await;
+        }
         Ok(())
     }
 
@@ -183,6 +287,135 @@ impl RemoteWorkerChannel for FakeWorker {
         self.drains.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn remote_pool_rejects_worker_inventory_that_differs_from_description() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-description-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-description-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let advertised = WorkerSpec {
+        id: WorkerId::derive(&[b"advertised-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    let mut described = advertised.clone();
+    described.resources = inventory(500);
+    let installs = Arc::new(AtomicUsize::new(0));
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        6,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+
+    let error = pool
+        .add_worker(Arc::new(FakeWorker {
+            node: "node-description-mismatch".into(),
+            spec: advertised,
+            installs: Arc::clone(&installs),
+            active: Arc::new(AtomicUsize::new(0)),
+            maximum_active: Arc::new(AtomicUsize::new(0)),
+            delay: Duration::ZERO,
+            cancellations: Arc::new(AtomicUsize::new(0)),
+            cancellation_signal: Arc::new(Notify::new()),
+            cancel_ack_gate: None,
+            drains: Arc::new(AtomicUsize::new(0)),
+            bundle,
+            described: Some(described),
+        }))
+        .await
+        .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("inventory differs from its encrypted description"));
+    assert_eq!(installs.load(Ordering::SeqCst), 0);
+    assert!(pool.snapshot().pools[&pool_id].workers.is_empty());
+}
+
+#[tokio::test]
+async fn duplicate_worker_registration_preserves_the_original_route_and_state() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-duplicate-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-duplicate-pool"]);
+    let worker_id = WorkerId::derive(&[b"remote-duplicate-worker"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        6,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let original_installs = Arc::new(AtomicUsize::new(0));
+    let original_drains = Arc::new(AtomicUsize::new(0));
+    pool.add_worker(Arc::new(FakeWorker {
+        node: "node-original".into(),
+        spec: WorkerSpec {
+            id: worker_id,
+            pool_id,
+            resources: inventory(1_000),
+        },
+        installs: Arc::clone(&original_installs),
+        active: Arc::new(AtomicUsize::new(0)),
+        maximum_active: Arc::new(AtomicUsize::new(0)),
+        delay: Duration::ZERO,
+        cancellations: Arc::new(AtomicUsize::new(0)),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
+        drains: Arc::clone(&original_drains),
+        bundle: Arc::clone(&bundle),
+        described: None,
+    }))
+    .await
+    .unwrap();
+    let snapshot_before_duplicate = pool.snapshot();
+    let replacement_installs = Arc::new(AtomicUsize::new(0));
+    let replacement_drains = Arc::new(AtomicUsize::new(0));
+
+    let error = pool
+        .add_worker(Arc::new(FakeWorker {
+            node: "node-replacement".into(),
+            spec: WorkerSpec {
+                id: worker_id,
+                pool_id,
+                resources: inventory(1_000),
+            },
+            installs: Arc::clone(&replacement_installs),
+            active: Arc::new(AtomicUsize::new(0)),
+            maximum_active: Arc::new(AtomicUsize::new(0)),
+            delay: Duration::ZERO,
+            cancellations: Arc::new(AtomicUsize::new(0)),
+            cancellation_signal: Arc::new(Notify::new()),
+            cancel_ack_gate: None,
+            drains: Arc::clone(&replacement_drains),
+            bundle,
+            described: None,
+        }))
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("already registered"));
+    assert_eq!(pool.snapshot(), snapshot_before_duplicate);
+    assert_eq!(original_installs.load(Ordering::SeqCst), 1);
+    assert_eq!(replacement_installs.load(Ordering::SeqCst), 0);
+
+    pool.remove_worker(worker_id, false).await.unwrap();
+    assert_eq!(original_drains.load(Ordering::SeqCst), 1);
+    assert_eq!(replacement_drains.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -220,8 +453,11 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
             maximum_active: Arc::clone(&maximum_active),
             delay: Duration::from_millis(25),
             cancellations: Arc::new(AtomicUsize::new(0)),
+            cancellation_signal: Arc::new(Notify::new()),
+            cancel_ack_gate: None,
             drains: Arc::new(AtomicUsize::new(0)),
             bundle: Arc::clone(&bundle),
+            described: None,
         }))
         .await
         .unwrap();
@@ -413,8 +649,11 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         maximum_active: Arc::new(AtomicUsize::new(0)),
         delay: Duration::from_secs(30),
         cancellations: Arc::clone(&cancellations),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
         drains: Arc::clone(&drains),
         bundle: Arc::clone(&bundle),
+        described: None,
     }))
     .await
     .unwrap();
@@ -478,8 +717,11 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         maximum_active: Arc::new(AtomicUsize::new(0)),
         delay: Duration::from_secs(30),
         cancellations: Arc::new(AtomicUsize::new(0)),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
         drains: Arc::clone(&drains),
         bundle,
+        described: None,
     }))
     .await
     .unwrap();
@@ -510,6 +752,364 @@ async fn remote_pool_cancels_active_work_and_fences_lost_workers() {
         runmat_execution::state::TaskState::Indeterminate
     );
     assert_eq!(drains.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-route-recovery-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-route-recovery-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        21,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let worker = WorkerSpec {
+        id: WorkerId::derive(&[b"route-recovery-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    pool.add_worker(Arc::new(FailingRouteWorker {
+        spec: worker.clone(),
+        bundle: Arc::clone(&bundle),
+        fail_execute: true,
+        fail_drain: false,
+    }))
+    .await
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let task_id = TaskId::derive(&[b"route-recovery-task"]);
+    let mut retrying = submission(scope_id, pool_id, task_id, artifact_id);
+    retrying.request.retry = RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 };
+    let completion = pool.submit(retrying, program).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let snapshot = pool.snapshot();
+            let lifecycle = snapshot.pools[&pool_id].workers[&worker.id].lifecycle;
+            if lifecycle == runmat_execution_runner::pool::WorkerLifecycle::Lost {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!pool.worker_is_ready_and_routed(worker.id).await);
+
+    pool.add_worker(Arc::new(FailingRouteWorker {
+        spec: worker.clone(),
+        bundle,
+        fail_execute: false,
+        fail_drain: false,
+    }))
+    .await
+    .unwrap();
+    let success = tokio::time::timeout(Duration::from_secs(1), completion.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(success.result_objects.is_empty());
+    assert_eq!(pool.snapshot().tasks[&task_id].attempt_count, 2);
+}
+
+#[tokio::test]
+async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-stale-result-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-stale-result-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        23,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let worker = WorkerSpec {
+        id: WorkerId::derive(&[b"stale-result-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    let old_active = Arc::new(AtomicUsize::new(0));
+    pool.add_worker(Arc::new(FakeWorker {
+        node: "node-stale-result".into(),
+        spec: worker.clone(),
+        installs: Arc::new(AtomicUsize::new(0)),
+        active: Arc::clone(&old_active),
+        maximum_active: Arc::new(AtomicUsize::new(0)),
+        delay: Duration::from_millis(150),
+        cancellations: Arc::new(AtomicUsize::new(0)),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
+        drains: Arc::new(AtomicUsize::new(0)),
+        bundle: Arc::clone(&bundle),
+        described: None,
+    }))
+    .await
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let task_id = TaskId::derive(&[b"stale-result-task"]);
+    let mut retrying = submission(scope_id, pool_id, task_id, artifact_id);
+    retrying.request.retry = RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 };
+    let completion = pool.submit(retrying, program).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while old_active.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    pool.remove_worker(worker.id, true).await.unwrap();
+    let replacement_worker = WorkerSpec {
+        id: WorkerId::derive(&[b"replacement-result-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    pool.add_worker(Arc::new(FakeWorker {
+        node: "node-stale-result".into(),
+        spec: replacement_worker,
+        installs: Arc::new(AtomicUsize::new(0)),
+        active: Arc::new(AtomicUsize::new(0)),
+        maximum_active: Arc::new(AtomicUsize::new(0)),
+        delay: Duration::ZERO,
+        cancellations: Arc::new(AtomicUsize::new(0)),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
+        drains: Arc::new(AtomicUsize::new(0)),
+        bundle,
+        described: None,
+    }))
+    .await
+    .unwrap();
+    completion.wait().await.unwrap();
+    let committed_attempt = pool.snapshot().tasks[&task_id]
+        .committed
+        .as_ref()
+        .unwrap()
+        .attempt_id;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let snapshot = pool.snapshot();
+    assert_eq!(snapshot.tasks[&task_id].attempt_count, 2);
+    assert_eq!(
+        snapshot.tasks[&task_id]
+            .committed
+            .as_ref()
+            .unwrap()
+            .attempt_id,
+        committed_attempt
+    );
+    assert_eq!(
+        snapshot.tasks[&task_id].state,
+        runmat_execution::state::TaskState::Succeeded
+    );
+}
+
+#[tokio::test]
+async fn failed_drain_fences_the_worker_and_removes_its_route() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-drain-failure-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-drain-failure-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        22,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let worker = WorkerSpec {
+        id: WorkerId::derive(&[b"drain-failure-worker"]),
+        pool_id,
+        resources: inventory(1_000),
+    };
+    pool.add_worker(Arc::new(FailingRouteWorker {
+        spec: worker.clone(),
+        bundle,
+        fail_execute: false,
+        fail_drain: true,
+    }))
+    .await
+    .unwrap();
+
+    assert!(pool.remove_worker(worker.id, false).await.is_err());
+    assert_eq!(
+        pool.snapshot().pools[&pool_id].workers[&worker.id].lifecycle,
+        runmat_execution_runner::pool::WorkerLifecycle::Lost
+    );
+    assert!(!pool.worker_is_ready_and_routed(worker.id).await);
+}
+
+#[tokio::test]
+async fn remote_pool_resolves_cancellation_only_after_worker_quiescence_acknowledgement() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-cancel-ack-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-cancel-ack-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        14,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let active = Arc::new(AtomicUsize::new(0));
+    let cancellations = Arc::new(AtomicUsize::new(0));
+    let cancel_ack_gate = Arc::new(Notify::new());
+    pool.add_worker(Arc::new(FakeWorker {
+        node: "node-cancel-ack".into(),
+        spec: WorkerSpec {
+            id: WorkerId::derive(&[b"cancel-ack-worker"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+        installs: Arc::new(AtomicUsize::new(0)),
+        active: Arc::clone(&active),
+        maximum_active: Arc::new(AtomicUsize::new(0)),
+        delay: Duration::from_secs(30),
+        cancellations: Arc::clone(&cancellations),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: Some(Arc::clone(&cancel_ack_gate)),
+        drains: Arc::new(AtomicUsize::new(0)),
+        bundle,
+        described: None,
+    }))
+    .await
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let completion = pool
+        .submit(
+            submission(
+                scope_id,
+                pool_id,
+                TaskId::derive(&[b"cancel-ack-task"]),
+                artifact_id,
+            ),
+            program,
+        )
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while active.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    pool.cancel(runmat_execution::CancellationReason::User)
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while cancellations.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut waiter = tokio::spawn(completion.wait());
+    assert!(tokio::time::timeout(Duration::from_millis(25), &mut waiter)
+        .await
+        .is_err());
+    assert_eq!(active.load(Ordering::SeqCst), 1);
+
+    cancel_ack_gate.notify_one();
+    let result = tokio::time::timeout(Duration::from_secs(1), &mut waiter)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.is_err());
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn remote_pool_tick_enforces_task_deadlines() {
+    let scope_id = ExecutionScopeId::derive(&[b"remote-deadline-scope"]);
+    let pool_id = PoolId::derive(&[b"remote-deadline-pool"]);
+    let bundle = Arc::new(executable_bundle().await.2);
+    let pool = RemotePoolDriver::new(
+        scope_id,
+        PoolSpec {
+            id: pool_id,
+            min_workers: 1,
+            max_workers: 1,
+            max_in_flight: 1,
+            resource_limit: inventory(1_000),
+        },
+        13,
+        bundle.as_ref().clone(),
+    )
+    .unwrap();
+    let active = Arc::new(AtomicUsize::new(0));
+    let cancellations = Arc::new(AtomicUsize::new(0));
+    pool.add_worker(Arc::new(FakeWorker {
+        node: "node-deadline".into(),
+        spec: WorkerSpec {
+            id: WorkerId::derive(&[b"deadline-worker"]),
+            pool_id,
+            resources: inventory(1_000),
+        },
+        installs: Arc::new(AtomicUsize::new(0)),
+        active: Arc::clone(&active),
+        maximum_active: Arc::new(AtomicUsize::new(0)),
+        delay: Duration::from_secs(30),
+        cancellations: Arc::clone(&cancellations),
+        cancellation_signal: Arc::new(Notify::new()),
+        cancel_ack_gate: None,
+        drains: Arc::new(AtomicUsize::new(0)),
+        bundle,
+        described: None,
+    }))
+    .await
+    .unwrap();
+    let (program, artifact_id) = program().await;
+    let task_id = TaskId::derive(&[b"deadline-task"]);
+    let mut deadline_submission = submission(scope_id, pool_id, task_id, artifact_id);
+    deadline_submission.request.deadline_unix_millis = Some(1);
+    let completion = pool.submit(deadline_submission, program).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while active.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    pool.tick().unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), completion.wait())
+            .await
+            .unwrap()
+            .is_err()
+    );
+    assert_eq!(cancellations.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        pool.snapshot().tasks[&task_id].state,
+        runmat_execution::state::TaskState::Cancelled
+    );
 }
 
 #[tokio::test]
@@ -592,7 +1192,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
             super::RemoteWorkerChannelConfig {
                 run_identity: "run-quic-worker".into(),
                 node_identity: "node-quic".into(),
-                worker,
+                worker: worker.clone(),
                 driver_fence: 9,
                 session_id: [7; 16],
                 run_key,
@@ -606,6 +1206,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         )
         .await
         .unwrap();
+        assert_eq!(channel.describe_worker().await.unwrap(), worker);
         let digest = Digest::sha256(&bundle);
         let expected_receipt = bundle_receipt(digest, &bundle);
         assert_eq!(

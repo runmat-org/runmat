@@ -97,13 +97,19 @@ pub fn solve_modal_system(
         (8usize, 3usize, 1.0e-4)
     };
 
-    for mode_idx in 0..target_mode_count {
+    'modes: for mode_idx in 0..target_mode_count {
+        if crate::is_fea_cancelled() {
+            break;
+        }
         let mut q = vec![0.0; summary.operator.dof_count];
         q[unconstrained[mode_idx]] = 1.0;
         normalize_mass(&summary.operator, &mut q);
         let mut linear_guess: Option<Vec<f64>> = None;
 
         for iter in 0..max_inverse_iters {
+            if crate::is_fea_cancelled() {
+                break 'modes;
+            }
             let q_prev = q.clone();
             let mq = apply_m(&summary.operator, &q);
             let solve_start = Instant::now();
@@ -119,6 +125,9 @@ pub fn solve_modal_system(
                     initial_guess: linear_guess.as_deref(),
                 },
             );
+            if crate::is_fea_cancelled() {
+                break 'modes;
+            }
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if let Some(solve) = z.runtime_tensor {
                 solver_backend = solve.solver_backend;
@@ -183,7 +192,7 @@ pub fn solve_modal_system(
         residual_norms.push(residual);
     }
 
-    let converged = !frequencies_hz.is_empty();
+    let converged = !crate::is_fea_cancelled() && !frequencies_hz.is_empty();
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,

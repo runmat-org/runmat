@@ -55,6 +55,7 @@ pub(super) async fn execute(
     if program.artifact.form == ExecutableForm::AnalysisWorkload {
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
+            let _guard = install_analysis_cancellation(&cancellation);
             crate::execute_analysis_program_request(
                 &program,
                 &mut objects,
@@ -118,6 +119,16 @@ pub(super) async fn execute(
     .await
 }
 
+fn install_analysis_cancellation(
+    cancellation: &AttemptCancellation,
+) -> runmat_analysis_fea::FeaProgressContextGuard {
+    let cancellation_flag = cancellation.flag();
+    runmat_analysis_fea::replace_fea_progress_context(
+        None,
+        Some(Arc::new(move || cancellation_flag.load(Ordering::Acquire))),
+    )
+}
+
 pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
     match response {
         ProgramExecutionResponse::Success { value } => AttemptReport::Succeeded {
@@ -163,5 +174,19 @@ impl MeshingProgressSink for ChannelProgress {
 fn failure(message: &str) -> ProgramExecutionResponse {
     ProgramExecutionResponse::Failure {
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{install_analysis_cancellation, AttemptCancellation};
+
+    #[test]
+    fn remote_attempt_cancellation_reaches_analysis_solver_context() {
+        let cancellation = AttemptCancellation::default();
+        let _guard = install_analysis_cancellation(&cancellation);
+        assert!(!runmat_analysis_fea::is_fea_cancelled());
+        cancellation.cancel();
+        assert!(runmat_analysis_fea::is_fea_cancelled());
     }
 }

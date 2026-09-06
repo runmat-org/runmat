@@ -1,7 +1,10 @@
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{
+    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
+    PublicationDurability,
+};
 use async_trait::async_trait;
 use js_sys::{ArrayBuffer, Uint8Array};
 use log::{info, warn};
@@ -429,12 +432,14 @@ impl RemoteFsProvider {
         path: &str,
         size_bytes: u64,
         content_sha256: &str,
+        create_new: bool,
     ) -> io::Result<UploadSessionStartResponse> {
         let body = UploadSessionStartRequest {
             path: path.to_string(),
             size_bytes: size_bytes as i64,
             content_type: None,
             content_sha256: content_sha256.to_string(),
+            create_new,
         };
         let payload = serde_json::to_vec(&body).map_err(map_serde_err)?;
         let text = self.send_text(
@@ -645,17 +650,35 @@ impl RemoteFsProvider {
         create_new: bool,
         hash: Option<&str>,
     ) -> io::Result<()> {
-        if data.is_empty() {
+        self.upload_unsharded_file_with_fallback(path, data, create_new, hash, true)
+    }
+
+    fn upload_unsharded_file_with_fallback(
+        &self,
+        path: &str,
+        data: &[u8],
+        create_new: bool,
+        hash: Option<&str>,
+        allow_legacy_fallback: bool,
+    ) -> io::Result<()> {
+        if data.is_empty() && allow_legacy_fallback {
             return self.upload_unsharded_file_legacy(path, data, create_new, hash);
         }
         let content_sha256 = sha256_hex(data);
-        let session = match self.upload_session_start(path, data.len() as u64, &content_sha256) {
-            Ok(session) => session,
-            Err(err) if err.kind() == ErrorKind::NotFound => {
-                return self.upload_unsharded_file_legacy(path, data, create_new, hash);
-            }
-            Err(err) => return Err(err),
-        };
+        let session =
+            match self.upload_session_start(path, data.len() as u64, &content_sha256, create_new) {
+                Ok(session) => session,
+                Err(err) if err.kind() == ErrorKind::NotFound && allow_legacy_fallback => {
+                    return self.upload_unsharded_file_legacy(path, data, create_new, hash);
+                }
+                Err(err) if err.kind() == ErrorKind::NotFound => {
+                    return Err(io::Error::new(
+                        ErrorKind::Unsupported,
+                        "remote atomic publication requires upload-session support",
+                    ));
+                }
+                Err(err) => return Err(err),
+            };
         let chunk_size = (session.chunk_size_bytes as usize).max(1);
         let mut chunks = Vec::new();
         let mut offset = 0usize;
@@ -962,6 +985,19 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let normalized = self.normalize(path);
+        match self.upload_unsharded_file_with_fallback(&normalized, bytes, true, None, false) {
+            Ok(()) => Ok(AtomicCreateResult::Published {
+                durability: PublicationDurability::AtomicVisibility,
+            }),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                self.read(path).await.map(AtomicCreateResult::Existing)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
@@ -1249,6 +1285,8 @@ struct UploadSessionStartRequest {
     size_bytes: i64,
     content_type: Option<String>,
     content_sha256: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    create_new: bool,
 }
 
 #[derive(Debug, Deserialize)]

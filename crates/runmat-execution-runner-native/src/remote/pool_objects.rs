@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use runmat_execution::identity::{ValueId, WorkerId};
+use runmat_execution::identity::ValueId;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport, FilesystemObjectStore};
@@ -21,7 +21,7 @@ struct ObjectState {
 
 pub(super) struct RemoteObjectCatalog {
     state: Mutex<ObjectState>,
-    transferred: AsyncMutex<HashSet<(WorkerId, ValueId)>>,
+    transferred: AsyncMutex<HashSet<(super::pool::WorkerRouteIdentity, ValueId)>>,
     store: FilesystemObjectStore,
     _directory: tempfile::TempDir,
 }
@@ -105,7 +105,7 @@ impl RemoteObjectCatalog {
     pub(super) async fn transfer_all(
         &self,
         channel: &dyn RemoteWorkerChannel,
-        worker_id: WorkerId,
+        route: super::pool::WorkerRouteIdentity,
     ) -> NativeExecutionResult<()> {
         let references = self
             .state
@@ -116,7 +116,7 @@ impl RemoteObjectCatalog {
             .cloned()
             .collect::<Vec<_>>();
         for reference in references {
-            let key = (worker_id, reference.id);
+            let key = (route, reference.id);
             if self.transferred.lock().await.contains(&key) {
                 continue;
             }

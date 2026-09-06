@@ -38,6 +38,17 @@ pub fn native_cad_backend_was_used() -> bool {
     false
 }
 
+/// Exact CAD kernel ABI implemented by this native build, when present.
+#[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+pub fn native_exact_kernel_abi() -> Option<String> {
+    Some(occt::exact_kernel_abi())
+}
+
+#[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
+pub fn native_exact_kernel_abi() -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;

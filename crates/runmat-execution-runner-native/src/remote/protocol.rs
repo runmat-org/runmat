@@ -1,14 +1,14 @@
 use runmat_execution::identity::AttemptId;
 use runmat_execution::value::ValueRef;
 use runmat_execution::Digest;
-use runmat_execution_runner::AttemptReport;
+use runmat_execution_runner::{AttemptReport, WorkerSpec};
 use serde::{Deserialize, Serialize};
 
 use runmat_execution_transport_native::transfer::ObjectChunk;
 
 use super::{RemoteAttempt, RemoteBundleReceipt};
 
-pub const REMOTE_WORKER_PROTOCOL_V3: u16 = 3;
+pub const REMOTE_WORKER_PROTOCOL_VERSION: u16 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,6 +22,7 @@ pub struct RemoteWorkerRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteWorkerCommand {
+    Describe,
     InstallBundle {
         bundle_digest: Digest,
         bundle: Vec<u8>,
@@ -65,6 +66,9 @@ pub struct RemoteWorkerReply {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteWorkerOutcome {
+    WorkerDescription {
+        worker: WorkerSpec,
+    },
     BundleStored {
         receipt: RemoteBundleReceipt,
     },

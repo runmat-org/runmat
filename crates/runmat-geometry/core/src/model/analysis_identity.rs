@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const PERSISTENT_SELECTION_PREFIX: &str = "persistent-entity:sha256:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeometryContractError {
@@ -126,6 +129,66 @@ impl PersistentEntityId {
         }
         Ok(())
     }
+
+    /// Returns the canonical analysis selector for this exact geometry occurrence.
+    ///
+    /// Unlike `source_topology_id`, this identity includes the entity kind and assembly path, so
+    /// repeated occurrences of the same source part cannot alias one another in solver boundary
+    /// selection.
+    pub fn analysis_selection_id(&self) -> Result<String, GeometryContractError> {
+        self.validate()?;
+        let mut digest = Sha256::new();
+        digest.update(b"runmat.geometry.persistent-analysis-selection/v1\0");
+        digest.update([persistent_kind_tag(self.kind)]);
+        update_digest_token(&mut digest, &self.source_topology_id);
+        digest.update((self.assembly_path.len() as u64).to_be_bytes());
+        for segment in &self.assembly_path {
+            update_digest_token(&mut digest, segment);
+        }
+        let digest = digest.finalize();
+        let mut selection = String::with_capacity(PERSISTENT_SELECTION_PREFIX.len() + 64);
+        selection.push_str(PERSISTENT_SELECTION_PREFIX);
+        for byte in digest {
+            use std::fmt::Write as _;
+            write!(&mut selection, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        Ok(selection)
+    }
+
+    /// Tests an analysis region selector against this exact entity.
+    ///
+    /// Canonical persistent selectors are occurrence-qualified. Plain authored selectors retain
+    /// their established source-topology matching semantics.
+    pub fn matches_analysis_selection(&self, selection_id: &str) -> bool {
+        if selection_id.starts_with(PERSISTENT_SELECTION_PREFIX) {
+            self.analysis_selection_id().as_deref() == Ok(selection_id)
+        } else {
+            self.source_topology_id == selection_id
+        }
+    }
+}
+
+fn update_digest_token(digest: &mut Sha256, value: &str) {
+    digest.update((value.len() as u64).to_be_bytes());
+    digest.update(value.as_bytes());
+}
+
+const fn persistent_kind_tag(kind: PersistentEntityKind) -> u8 {
+    match kind {
+        PersistentEntityKind::Assembly => 0,
+        PersistentEntityKind::Instance => 1,
+        PersistentEntityKind::Body => 2,
+        PersistentEntityKind::Lump => 3,
+        PersistentEntityKind::Solid => 4,
+        PersistentEntityKind::Shell => 5,
+        PersistentEntityKind::Face => 6,
+        PersistentEntityKind::Wire => 7,
+        PersistentEntityKind::Coedge => 8,
+        PersistentEntityKind::Edge => 9,
+        PersistentEntityKind::Vertex => 10,
+        PersistentEntityKind::Region => 11,
+        PersistentEntityKind::Contact => 12,
+    }
 }
 
 pub(crate) fn validate_token(
@@ -185,5 +248,26 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn analysis_selection_identity_qualifies_repeated_occurrences() {
+        let first = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "shared-part-face".into(),
+            assembly_path: vec!["root".into(), "instance-a".into()],
+        };
+        let second = PersistentEntityId {
+            assembly_path: vec!["root".into(), "instance-b".into()],
+            ..first.clone()
+        };
+
+        let first_selection = first.analysis_selection_id().unwrap();
+        let second_selection = second.analysis_selection_id().unwrap();
+        assert_ne!(first_selection, second_selection);
+        assert!(first.matches_analysis_selection(&first_selection));
+        assert!(!second.matches_analysis_selection(&first_selection));
+        assert!(first.matches_analysis_selection("shared-part-face"));
+        assert!(second.matches_analysis_selection("shared-part-face"));
     }
 }

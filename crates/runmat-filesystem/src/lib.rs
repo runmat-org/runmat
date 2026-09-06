@@ -259,6 +259,25 @@ pub struct ReadManyEntry {
     error: Option<String>,
 }
 
+/// The durability established by a successful atomic publication.
+///
+/// Every successful publication is immediately visible as one complete byte sequence. Providers
+/// report `Durable` only when they also guarantee that the published directory entry and content
+/// survive a host crash. Remote and in-memory providers generally establish atomic visibility but
+/// leave durable retention to their backing service.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublicationDurability {
+    AtomicVisibility,
+    Durable,
+}
+
+/// Result of publishing one complete byte sequence at a previously absent path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AtomicCreateResult {
+    Published { durability: PublicationDurability },
+    Existing(Vec<u8>),
+}
+
 impl ReadManyEntry {
     pub fn new(path: PathBuf, bytes: Option<Vec<u8>>) -> Self {
         Self {
@@ -386,6 +405,24 @@ pub trait FsProvider: Send + Sync + 'static {
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+
+    /// Atomically publishes `bytes` if `path` does not exist.
+    ///
+    /// Implementations must provide a linearizable no-replace operation: exactly one competing
+    /// publisher may return `Published`, and readers must observe either no entry or the complete
+    /// winning payload, never a partially written destination. `Existing` contains a complete
+    /// snapshot of the payload which won publication. The default deliberately fails instead of
+    /// emulating these semantics with a racy existence check followed by a write.
+    async fn atomic_create_new(
+        &self,
+        _path: &Path,
+        _bytes: &[u8],
+    ) -> io::Result<AtomicCreateResult> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "atomic create-if-absent is unsupported by this provider",
+        ))
+    }
 
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         let mut entries = Vec::with_capacity(paths.len());
@@ -755,6 +792,24 @@ pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     wait_for_fs(move || async move { read_async(path).await })
 }
 
+pub async fn atomic_create_new_async(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let resolved = resolve_path(path.as_ref());
+    let provider = current_provider();
+    provider.atomic_create_new(&resolved, bytes.as_ref()).await
+}
+
+pub fn atomic_create_new(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicCreateResult> {
+    let path = path.as_ref().to_path_buf();
+    let bytes = bytes.as_ref().to_vec();
+    wait_for_fs(move || async move { atomic_create_new_async(path, bytes).await })
+}
+
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
     let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
@@ -803,6 +858,11 @@ pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMeta
     let resolved = resolve_path(path.as_ref());
     let provider = current_provider();
     provider.symlink_metadata(&resolved).await
+}
+
+pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+    let path = path.as_ref().to_path_buf();
+    wait_for_fs(move || async move { symlink_metadata_async(path).await })
 }
 
 pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
@@ -1691,5 +1751,34 @@ mod tests {
         assert!(result.is_err());
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    fn atomic_publication_uses_only_the_installed_provider() {
+        let _guard = test_lock();
+        let host = tempfile::tempdir().unwrap();
+        let logical_path = host.path().join("same-logical-path");
+        std::fs::write(&logical_path, b"host").unwrap();
+        let memory = Arc::new(MemoryFsProvider::new());
+        let provider: Arc<dyn FsProvider> = memory.clone();
+        let _provider_guard = replace_provider(provider);
+
+        let outcome = atomic_create_new(&logical_path, b"provider").unwrap();
+
+        assert!(matches!(outcome, AtomicCreateResult::Published { .. }));
+        assert_eq!(
+            memory.read_project_path(&logical_path).unwrap(),
+            b"provider"
+        );
+        assert_eq!(std::fs::read(logical_path).unwrap(), b"host");
+    }
+
+    #[test]
+    fn unsupported_provider_does_not_emulate_atomic_publication() {
+        let error = futures::executor::block_on(
+            UnsupportedProvider.atomic_create_new(Path::new("/artifact"), b"payload"),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
     }
 }

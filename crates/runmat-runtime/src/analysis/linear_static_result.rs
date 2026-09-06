@@ -34,6 +34,7 @@ pub(super) struct LinearStaticResultInput<'a> {
     pub requested_backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
     pub options: &'a AnalysisRunOptions,
+    pub assigned_run_id: Option<&'a str>,
 }
 
 pub(super) fn admit_linear_static_result(
@@ -157,7 +158,10 @@ pub(super) fn admit_linear_static_result(
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     Ok(AnalysisRunResult {
-        run_id: storage::next_run_id(),
+        run_id: input
+            .assigned_run_id
+            .map(str::to_owned)
+            .unwrap_or_else(storage::next_run_id),
         render_topology: render_topology_from_solver_mesh(input.solver_mesh),
         modal_results: None,
         thermal_results: None,
@@ -309,16 +313,6 @@ fn boundary_region_mapping_reasons(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
 ) -> Vec<QualityReason> {
-    let boundary_region_ids = mesh
-        .topology
-        .boundary_faces
-        .iter()
-        .flat_map(|face| {
-            face.provenance
-                .iter()
-                .map(|entity| entity.source_topology_id.as_str())
-        })
-        .collect::<HashSet<_>>();
     let mut reasons = Vec::new();
     for action in &model.excitations {
         let runmat_analysis_core::ExcitationTarget::Region(target) = &action.excitation().target
@@ -326,7 +320,7 @@ fn boundary_region_mapping_reasons(
             continue;
         };
         if target.expected_topology == runmat_analysis_core::ExpectedTopology::BoundaryFace
-            && !boundary_region_ids.contains(target.region_id.as_str())
+            && !mesh_has_boundary_selection(mesh, &target.region_id)
         {
             reasons.push(QualityReason {
                 code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
@@ -340,7 +334,7 @@ fn boundary_region_mapping_reasons(
     }
     for constraint in &model.constraints {
         if let Some(target) = constraint.target() {
-            if !boundary_region_ids.contains(target.region_id.as_str()) {
+            if !mesh_has_boundary_selection(mesh, &target.region_id) {
                 reasons.push(QualityReason {
                     code: QualityReasonCode::SolidMeshUnmappedConstraintRegion,
                     detail: format!(
@@ -352,7 +346,7 @@ fn boundary_region_mapping_reasons(
         }
     }
     for boundary in &model.boundaries {
-        if !boundary_region_ids.contains(boundary.target.region_id.as_str()) {
+        if !mesh_has_boundary_selection(mesh, &boundary.target.region_id) {
             reasons.push(QualityReason {
                 code: QualityReasonCode::SolidMeshUnmappedBoundaryRegion,
                 detail: format!(
@@ -363,6 +357,14 @@ fn boundary_region_mapping_reasons(
         }
     }
     reasons
+}
+
+fn mesh_has_boundary_selection(mesh: &SolverMeshArtifact, selection_id: &str) -> bool {
+    mesh.topology.boundary_faces.iter().any(|face| {
+        face.provenance
+            .iter()
+            .any(|entity| entity.matches_analysis_selection(selection_id))
+    })
 }
 
 pub(super) fn material_coverage_gap_detail(

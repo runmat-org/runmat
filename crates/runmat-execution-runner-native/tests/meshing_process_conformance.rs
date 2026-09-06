@@ -172,6 +172,7 @@ impl MeshingStageKernel for SlowKernel {
 struct AdmissionThenCooperativeSlowKernel {
     calls: AtomicUsize,
     cancellation_observed: AtomicBool,
+    execution_active: AtomicBool,
 }
 
 struct ProductionAndConformanceKernel {
@@ -208,6 +209,7 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
         if self.calls.fetch_add(1, Ordering::AcqRel) == 0 {
             return AdmissionKernel.execute(invocation);
         }
+        self.execution_active.store(true, Ordering::Release);
         for work in 1..=100 {
             std::thread::sleep(Duration::from_millis(10));
             let checkpoint = MeshingStageCheckpoint {
@@ -218,9 +220,11 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
             };
             if let Err(error) = invocation.control.checkpoint(checkpoint) {
                 self.cancellation_observed.store(true, Ordering::Release);
+                self.execution_active.store(false, Ordering::Release);
                 return Err(error);
             }
         }
+        self.execution_active.store(false, Ordering::Release);
         AdmissionKernel.execute(invocation)
     }
 }
@@ -742,6 +746,7 @@ async fn remote_conformance() {
                 .expect("remote cancellation completion timeout")
                 .is_err()
         );
+        assert!(!kernel.execution_active.load(Ordering::Acquire));
         tokio::time::timeout(Duration::from_secs(5), channel.drain())
             .await
             .expect("remote meshing drain timeout")

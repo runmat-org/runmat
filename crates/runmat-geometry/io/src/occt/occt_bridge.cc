@@ -83,6 +83,10 @@
 
 namespace runmat_geometry_io {
 namespace occt_backend {
+
+rust::String exact_kernel_abi() {
+  return rust::String(std::string("occt/") + OCC_VERSION_COMPLETE + "/brep-v3");
+}
 namespace {
 
 std::string str_from_rust(rust::Str value) {

@@ -1,5 +1,5 @@
 use runmat_execution::resource::{
-    AcceleratorRequest, ResourceInventory, ResourceRequest as TaskResources,
+    AcceleratorRequest, Capability, ResourceInventory, ResourceRequest as TaskResources,
 };
 use runmat_execution_transport_native::control::ResourceRequest as AllocationResources;
 
@@ -14,8 +14,34 @@ pub(super) fn inventory(
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes,
         accelerators: accelerators(resources)?,
-        capabilities: Default::default(),
+        capabilities: native_worker_capabilities()?,
     })
+}
+
+pub(super) fn native_worker_capabilities(
+) -> NativeExecutionResult<std::collections::BTreeSet<Capability>> {
+    let mut capabilities = runmat_analysis_execution::analysis_worker_capabilities(
+        std::iter::empty(),
+        std::iter::empty(),
+        false,
+    );
+    capabilities.insert(Capability::ProcessIsolation);
+    if let Some(kernel_abi) = runmat_geometry_io::native_exact_kernel_abi() {
+        let cohort = crate::meshing_platform::native_meshing_capability_cohort();
+        capabilities.extend(
+            runmat_meshing_execution::exact_meshing_worker_capability_inventory(
+                &[kernel_abi],
+                &runmat_meshing_core::production_algorithm_versions(),
+                &[
+                    runmat_meshing_core::ElementOrder::Tet4,
+                    runmat_meshing_core::ElementOrder::Tet10,
+                ],
+                [cohort.as_str()],
+            )
+            .map_err(protocol)?,
+        );
+    }
+    Ok(capabilities)
 }
 
 pub(super) fn pool_inventory(
@@ -64,6 +90,18 @@ pub(super) fn task_resources(
     })
 }
 
+pub(super) fn task_deadline_unix_millis(
+    resources: &AllocationResources,
+) -> NativeExecutionResult<u64> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| protocol("system clock predates the Unix epoch"))?;
+    u64::try_from(now.as_millis())
+        .map_err(|_| protocol("current time overflows scheduler milliseconds"))?
+        .checked_add(resources.maximum_wall_millis)
+        .ok_or_else(|| protocol("task deadline overflows scheduler milliseconds"))
+}
+
 fn accelerators(resources: &AllocationResources) -> NativeExecutionResult<Vec<AcceleratorRequest>> {
     match (
         resources.accelerator_count,
@@ -82,4 +120,81 @@ fn accelerators(resources: &AllocationResources) -> NativeExecutionResult<Vec<Ac
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_execution::resource::Capability;
+
+    use super::native_worker_capabilities;
+
+    #[test]
+    fn native_inventory_always_advertises_analysis_and_process_isolation() {
+        let inventory = native_worker_capabilities().expect("native worker inventory");
+        let analysis = runmat_analysis_execution::analysis_worker_capabilities(
+            std::iter::empty(),
+            std::iter::empty(),
+            false,
+        );
+
+        assert!(analysis.is_subset(&inventory));
+        assert!(inventory.contains(&Capability::ProcessIsolation));
+    }
+
+    #[test]
+    fn native_inventory_advertises_exact_meshing_only_with_occt() {
+        let inventory = native_worker_capabilities().expect("native worker inventory");
+        let has_meshing_capability = inventory.iter().any(|capability| {
+            matches!(
+                capability,
+                Capability::Custom(identity) if identity.starts_with("runmat.meshing.")
+            )
+        });
+        let has_exact_kernel_capability = inventory.iter().any(|capability| {
+            matches!(
+                capability,
+                Capability::Custom(identity)
+                    if identity.starts_with("runmat.meshing.exact-cad:")
+            )
+        });
+        let has_admission_capability = inventory.contains(&Capability::Custom(
+            runmat_meshing_execution::EXACT_CAD_ADMISSION_CAPABILITY.into(),
+        ));
+        let occt_compiled = cfg!(all(feature = "occt-native", not(target_arch = "wasm32")));
+
+        assert_eq!(
+            runmat_geometry_io::native_exact_kernel_abi().is_some(),
+            occt_compiled
+        );
+        assert_eq!(has_meshing_capability, occt_compiled);
+        assert_eq!(has_exact_kernel_capability, occt_compiled);
+        assert_eq!(has_admission_capability, occt_compiled);
+    }
+
+    #[test]
+    fn production_exact_workload_is_covered_by_native_inventory() {
+        let Some(kernel_abi) = runmat_geometry_io::native_exact_kernel_abi() else {
+            return;
+        };
+        let (mut document, _, _) = runmat_geometry_fixtures::exact_tetrahedron();
+        let runmat_geometry_core::GeometryModel::ExactBRep { model } = &mut document.model else {
+            panic!("exact tetrahedron fixture must remain an exact B-rep")
+        };
+        model.kernel_abi = kernel_abi;
+        let request = runmat_meshing_core::resolve_meshing_request(
+            document.tolerance,
+            runmat_meshing_core::MeshingRequestSettings::default(),
+        )
+        .expect("production exact meshing request");
+        let cohort = crate::meshing_platform::native_meshing_capability_cohort();
+        let required = runmat_meshing_execution::exact_meshing_worker_capabilities(
+            &document,
+            &request,
+            Some(&cohort),
+        )
+        .expect("production exact workload capabilities");
+        let inventory = native_worker_capabilities().expect("native worker inventory");
+
+        assert!(required.is_subset(&inventory));
+    }
 }

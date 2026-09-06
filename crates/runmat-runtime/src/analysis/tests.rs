@@ -88,6 +88,10 @@ use runmat_meshing_core::{
 
 use super::*;
 
+mod structural_study_intent;
+mod structural_study_storage;
+mod topology_identity;
+
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
@@ -2147,7 +2151,10 @@ fn analysis_run_study_executes_linear_static_path() {
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.run_id.starts_with("run_"));
-    assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
+    assert!(Path::new(&envelope.data.evidence_artifact_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("run-") && name.ends_with(".json")));
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
@@ -2318,11 +2325,6 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
         ),
     )
     .expect("structural study preparation should succeed");
-    let continuation = prepared
-        .continuation_bytes()
-        .expect("prepared study continuation should encode");
-    let prepared = PreparedStructuralStudy::from_continuation_bytes(&continuation)
-        .expect("prepared study continuation should restore");
     let executor = CanonicalStructuralExecutor {
         calls: AtomicU64::new(0),
     };
@@ -2343,24 +2345,6 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
         .is_some());
     assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
     let _ = fs::remove_dir_all(&root);
-    let _ = fs::remove_dir_all(&solver_mesh_root);
-}
-
-#[test]
-fn structural_study_continuation_rejects_a_changed_solver_mesh() {
-    let _guard = analysis_test_guard();
-    let mut spec = sample_linear_static_study_spec();
-    let (solver_mesh_root, solver_mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("changed-continuation-solver-mesh");
-    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
-    let prepared = analysis_prepare_structural_study_op(&spec, OperationContext::new(None, None))
-        .expect("structural study preparation should succeed");
-    let continuation = prepared
-        .continuation_bytes()
-        .expect("prepared study continuation should encode");
-    fs::write(&solver_mesh_path, b"changed solver mesh").expect("replace test solver mesh");
-
-    assert!(PreparedStructuralStudy::from_continuation_bytes(&continuation).is_err());
     let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
@@ -4625,6 +4609,16 @@ fn scoped_study_artifact_root(root: &Path) -> FeaRuntimeConfigRestoreGuard {
     FeaRuntimeConfigRestoreGuard { previous }
 }
 
+fn scoped_fea_artifact_roots(root: &Path) -> FeaRuntimeConfigRestoreGuard {
+    let previous = current_fea_runtime_config();
+    configure_fea_runtime(FeaRuntimeConfig {
+        artifact_root: Some(root.to_path_buf()),
+        study_artifact_root: Some(root.join("studies")),
+    })
+    .expect("configure FEA artifact roots");
+    FeaRuntimeConfigRestoreGuard { previous }
+}
+
 fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
     let root = temp_artifact_root(test_name);
     let _ = fs::remove_dir_all(&root);
@@ -4664,13 +4658,15 @@ fn persistent_face(source_topology_id: &str) -> PersistentEntityId {
 #[test]
 fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
     let mut model = sample_model();
-    model.constraints[0].visit_targets_mut(|target| target.region_id = "face_000001".to_owned());
+    model.constraints[0].visit_targets_mut(|target| {
+        *target = RegionTarget::boundary("face_000001");
+    });
     let runmat_analysis_core::ExcitationTarget::Region(target) =
         &mut model.excitations[0].excitation_mut().target
     else {
         panic!("expected region excitation target");
     };
-    target.region_id = "face_000002".to_owned();
+    *target = RegionTarget::boundary("face_000002");
     model.sequence.steps[0]
         .observations
         .push(runmat_analysis_core::ObservationRequest::Field(
@@ -4710,21 +4706,31 @@ fn canonical_meshing_boundary_ids_replace_display_face_aliases() {
         ("face_000001".to_owned(), persistent_face("exact-face-a")),
         ("face_000002".to_owned(), persistent_face("exact-face-b")),
     ]);
+    let expected_a = aliases["face_000001"]
+        .analysis_selection_id()
+        .expect("persistent face A must produce a selection identity");
+    let expected_b = aliases["face_000002"]
+        .analysis_selection_id()
+        .expect("persistent face B must produce a selection identity");
 
-    super::meshing::apply_boundary_region_ids(&mut model, &aliases);
+    model = runmat_analysis_core::resolve_boundary_region_aliases(
+        &model,
+        &runmat_analysis_core::BoundaryRegionAliases::new(aliases).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(
         model.constraints[0].target().expect("target").region_id,
-        "exact-face-a"
+        expected_a
     );
-    assert_eq!(excitation_region_id(&model.excitations[0]), "exact-face-b");
+    assert_eq!(excitation_region_id(&model.excitations[0]), expected_b);
     assert!(matches!(
         model.sequence.steps[0].observations[0]
             .spec()
             .map(|spec| &spec.target),
         Some(runmat_analysis_core::ObservationTarget::Spatial(
             ExcitationTarget::Region(target)
-        )) if target.region_id == "exact-face-a"
+        )) if target.region_id == expected_a
     ));
 }
 

@@ -1,4 +1,7 @@
-use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use crate::{
+    AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
+    PublicationDurability,
+};
 use async_trait::async_trait;
 use std::{
     collections::BTreeMap,
@@ -392,6 +395,34 @@ impl FsProvider for MemoryFsProvider {
             None => Err(not_found(&path)),
         }
     }
+
+    async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
+        let path = normalize_path(path)?;
+        let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
+        match guard.entries.get(&path) {
+            Some(MemoryEntry::File { bytes, .. }) => {
+                return Ok(AtomicCreateResult::Existing(bytes.clone()));
+            }
+            Some(MemoryEntry::Directory) => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("not a file: {}", path.display()),
+                ));
+            }
+            None => {}
+        }
+        ensure_parent_dirs(&mut guard, &path)?;
+        guard.entries.insert(
+            path,
+            MemoryEntry::File {
+                bytes: bytes.to_vec(),
+                readonly: false,
+            },
+        );
+        Ok(AtomicCreateResult::Published {
+            durability: PublicationDurability::AtomicVisibility,
+        })
+    }
 }
 
 struct MemoryFileHandle {
@@ -578,6 +609,8 @@ fn not_found(path: &Path) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor;
+    use std::sync::{Arc, Barrier};
 
     #[tokio::test]
     async fn memory_provider_supports_crud_and_dirs() {
@@ -646,5 +679,32 @@ mod tests {
     fn memory_provider_rejects_parent_traversal() {
         let provider = MemoryFsProvider::new();
         assert!(provider.write_project_path("../secret.txt", b"no").is_err());
+    }
+
+    #[test]
+    fn concurrent_memory_publishers_choose_exactly_one_complete_payload() {
+        let provider = Arc::new(MemoryFsProvider::new());
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = [b"first".to_vec(), b"second".to_vec()].map(|payload| {
+            let provider = Arc::clone(&provider);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                executor::block_on(provider.atomic_create_new(Path::new("/artifact"), &payload))
+            })
+        });
+        let outcomes = handles.map(|handle| handle.join().unwrap().unwrap());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| matches!(outcome, AtomicCreateResult::Published { .. }))
+                .count(),
+            1
+        );
+        let winning = provider.read_project_path("/artifact").unwrap();
+        assert!(winning == b"first" || winning == b"second");
+        assert!(outcomes.iter().any(
+            |outcome| matches!(outcome, AtomicCreateResult::Existing(bytes) if bytes == &winning)
+        ));
     }
 }

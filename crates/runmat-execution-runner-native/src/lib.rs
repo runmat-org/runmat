@@ -10,6 +10,7 @@ mod exact_geometry_admission;
 mod exact_meshing_executor;
 mod exact_meshing_job;
 mod exact_meshing_root;
+mod exact_structural_study_root;
 mod local_store;
 mod materialized_project;
 mod meshing_evaluator;
@@ -43,6 +44,13 @@ pub use exact_meshing_root::{
     decode_exact_meshing_root, prepare_exact_meshing_root, DecodedExactMeshingRoot,
     ExactMeshingRootPreparation, ExactMeshingRootRequest, PreparedExactMeshingRoot,
     EXACT_MESHING_ROOT_EXECUTION_MODE, EXACT_MESHING_ROOT_TARGET_PROFILE,
+};
+pub use exact_structural_study_root::{
+    decode_exact_structural_study_root, import_exact_structural_study_result,
+    prepare_exact_structural_study_root, BoundaryRegionResolution, DecodedExactStructuralStudyRoot,
+    ExactStructuralStudyResult, ExactStructuralStudyResultExpectation,
+    ExactStructuralStudyRootPreparation, PreparedExactStructuralStudyRoot, RequiredStudyProgram,
+    EXACT_STRUCTURAL_STUDY_ROOT_EXECUTION_MODE, EXACT_STRUCTURAL_STUDY_ROOT_TARGET_PROFILE,
 };
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{

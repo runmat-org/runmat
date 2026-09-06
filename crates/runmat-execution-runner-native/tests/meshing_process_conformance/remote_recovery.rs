@@ -32,6 +32,10 @@ impl RemoteWorkerChannel for ObservedRemoteChannel {
         self.inner.worker()
     }
 
+    async fn describe_worker(&self) -> NativeExecutionResult<WorkerSpec> {
+        self.inner.describe_worker().await
+    }
+
     async fn install_bundle(
         &self,
         bundle_digest: Digest,

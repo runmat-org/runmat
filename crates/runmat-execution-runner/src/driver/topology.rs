@@ -12,7 +12,29 @@ use super::{Driver, DriverAction, DriverEventKind};
 impl Driver {
     pub(super) fn register_worker(&mut self, spec: WorkerSpec) -> RunnerResult<()> {
         let pool = self.pool_mut(spec.pool_id)?;
-        if pool.workers.len() >= pool.spec.max_workers as usize {
+        if let Some(existing) = pool.workers.get(&spec.id) {
+            if existing.lifecycle == WorkerLifecycle::Lost
+                && existing.active_attempts == 0
+                && existing.spec == spec
+            {
+                let worker_id = spec.id;
+                let pool_id = spec.pool_id;
+                pool.workers.insert(worker_id, WorkerRecord::new(spec));
+                self.emit(DriverEventKind::WorkerRegistered { worker_id, pool_id });
+                return Ok(());
+            }
+        }
+        let live_worker_count = pool
+            .workers
+            .values()
+            .filter(|worker| {
+                !matches!(
+                    worker.lifecycle,
+                    WorkerLifecycle::Lost | WorkerLifecycle::Stopped
+                )
+            })
+            .count();
+        if live_worker_count >= pool.spec.max_workers as usize {
             return Err(RunnerError::Invalid(format!(
                 "pool {} is at its worker limit",
                 spec.pool_id

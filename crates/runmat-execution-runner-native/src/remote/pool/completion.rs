@@ -57,17 +57,27 @@ impl RemotePoolDriver {
     }
 
     pub(super) fn resolve_non_success_terminals(&self) {
-        let terminal = self
+        let snapshot = self
             .driver
             .lock()
             .expect("remote driver poisoned")
-            .snapshot()
+            .snapshot();
+        let terminal = snapshot
             .tasks
             .iter()
             .filter_map(|(task_id, task)| {
+                let live_attempt = snapshot.attempts.values().any(|attempt| {
+                    attempt.request.task_id == *task_id
+                        && matches!(
+                            attempt.state,
+                            runmat_execution::state::AttemptState::Assigned
+                                | runmat_execution::state::AttemptState::Starting
+                                | runmat_execution::state::AttemptState::Running
+                        )
+                });
                 let message = match task.state {
                     TaskState::Failed => "remote task failed",
-                    TaskState::Cancelled => "remote task was cancelled",
+                    TaskState::Cancelled if !live_attempt => "remote task was cancelled",
                     TaskState::Indeterminate => "remote worker was lost",
                     _ => return None,
                 };

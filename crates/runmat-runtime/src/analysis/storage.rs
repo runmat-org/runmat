@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
-use runmat_filesystem::{DirEntry, FsFileType};
+use runmat_filesystem::{AtomicCreateResult, DirEntry, FsFileType, FsMetadata};
 use serde::{Deserialize, Serialize};
 
 use runmat_analysis_fea::AnalysisRunIdentity;
@@ -44,7 +44,7 @@ pub struct AnalysisArtifactRetentionConfig {
 }
 
 pub struct InMemoryAnalysisArtifactStore {
-    runs: RwLock<HashMap<String, AnalysisRunResult>>,
+    runs: RwLock<HashMap<String, PersistedRunArtifact>>,
 }
 
 impl InMemoryAnalysisArtifactStore {
@@ -68,22 +68,39 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .write()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        guard.insert(run.run_id.clone(), run.clone());
-        Ok(AnalysisArtifactRecord {
-            run_id: run.run_id.clone(),
-            created_at: Utc::now().to_rfc3339(),
-            identity: run.run.identity.clone(),
-            op_version: run_operation_version(run)?,
-            field_ids: super::analysis_run_field_ids(run),
-        })
+        if let Some(existing) = guard.get(&run.run_id) {
+            validate_persisted_run(existing, &run.run_id)?;
+            if existing.run != *run {
+                return Err("analysis run identity already contains different content".into());
+            }
+            return artifact_record(run, existing.created_at.clone());
+        }
+        let created_at = Utc::now().to_rfc3339();
+        guard.insert(
+            run.run_id.clone(),
+            PersistedRunArtifact {
+                schema_version: ARTIFACT_SCHEMA_VERSION.into(),
+                created_at: created_at.clone(),
+                op_version: run_operation_version(run)?,
+                run: run.clone(),
+            },
+        );
+        artifact_record(run, created_at)
     }
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
+        validate_run_id_token(run_id)?;
         let guard = self
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        Ok(guard.get(run_id).cloned())
+        guard
+            .get(run_id)
+            .map(|persisted| {
+                validate_persisted_run(persisted, run_id)?;
+                Ok(persisted.run.clone())
+            })
+            .transpose()
     }
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
@@ -91,7 +108,13 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        Ok(guard.values().cloned().collect())
+        guard
+            .iter()
+            .map(|(run_id, persisted)| {
+                validate_persisted_run(persisted, run_id)?;
+                Ok(persisted.run.clone())
+            })
+            .collect()
     }
 }
 
@@ -104,19 +127,24 @@ impl FilesystemAnalysisArtifactStore {
         Self { root }
     }
 
-    fn run_path(&self, run_id: &str) -> PathBuf {
-        self.root.join("runs").join(format!("{run_id}.json"))
+    fn run_path(&self, run_id: &str) -> Result<PathBuf, String> {
+        validate_run_id_token(run_id)?;
+        Ok(self.root.join("runs").join(format!("{run_id}.json")))
+    }
+
+    fn ensure_runs_directory(&self) -> Result<(), String> {
+        ensure_owned_directory(&self.root, "analysis artifact root")?;
+        let runs = self.root.join("runs");
+        ensure_owned_directory(&runs, "analysis artifact runs directory")?;
+        Ok(())
     }
 }
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
-        let path = self.run_path(&run.run_id);
-        if let Some(parent) = path.parent() {
-            fs_create_dir_all(parent)
-                .map_err(|err| format!("failed to create artifact directory: {err}"))?;
-        }
+        let path = self.run_path(&run.run_id)?;
+        self.ensure_runs_directory()?;
         let op_version = run_operation_version(run)?;
         let persisted = PersistedRunArtifact {
             schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -126,40 +154,50 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         };
         let bytes = serde_json::to_vec_pretty(&persisted)
             .map_err(|err| format!("failed to encode run artifact: {err}"))?;
-        atomic_write(&path, &bytes)?;
+        match runmat_filesystem::atomic_create_new(&path, &bytes)
+            .map_err(|error| format!("failed to publish immutable run artifact: {error}"))?
+        {
+            AtomicCreateResult::Published { .. } => {}
+            AtomicCreateResult::Existing(existing_bytes) => {
+                let existing = decode_persisted_run(&existing_bytes, &run.run_id)?;
+                if existing.run != *run {
+                    return Err("analysis run identity already contains different content".into());
+                }
+                return artifact_record(run, existing.created_at);
+            }
+        }
         prune_filesystem_runs(&self.root)?;
 
-        Ok(AnalysisArtifactRecord {
-            run_id: run.run_id.clone(),
-            created_at: Utc::now().to_rfc3339(),
-            identity: run.run.identity.clone(),
-            op_version,
-            field_ids: super::analysis_run_field_ids(run),
-        })
+        artifact_record(run, persisted.created_at)
     }
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
-        let path = self.run_path(run_id);
-        if !fs_exists(&path).map_err(|err| format!("failed to inspect run artifact: {err}"))? {
+        let path = self.run_path(run_id)?;
+        if !owned_directory_exists(&self.root, "analysis artifact root")?
+            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
+        {
             return Ok(None);
         }
-        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        let persisted = serde_json::from_slice::<PersistedRunArtifact>(&bytes)
-            .map_err(|err| format!("failed to parse run artifact: {err}"))?;
-        if persisted.schema_version != ARTIFACT_SCHEMA_VERSION {
-            return Err(format!(
-                "unsupported analysis run artifact schema `{}`",
-                persisted.schema_version
-            ));
+        match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
+            Ok(metadata) => {
+                return Err(format!(
+                    "analysis run artifact must be a regular file, found {:?}",
+                    metadata.file_type()
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         }
-        let run = persisted.run;
-        validate_run_identity(&run)?;
-        Ok(Some(run))
+        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
+        Ok(Some(decode_persisted_run(&bytes, run_id)?.run))
     }
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
         let runs_dir = self.root.join("runs");
-        if !fs_exists(&runs_dir).map_err(|err| format!("failed to inspect artifacts: {err}"))? {
+        if !owned_directory_exists(&self.root, "analysis artifact root")?
+            || !owned_directory_exists(&runs_dir, "analysis artifact runs directory")?
+        {
             return Ok(Vec::new());
         }
         let mut runs = Vec::new();
@@ -170,17 +208,105 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
+            if entry.file_type() != FsFileType::File {
+                return Err(format!(
+                    "analysis run artifact must be a regular file: {}",
+                    path.display()
+                ));
+            }
+            let run_id = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| {
+                    format!(
+                        "analysis run artifact filename is invalid: {}",
+                        path.display()
+                    )
+                })?;
+            validate_run_id_token(run_id)?;
             let bytes =
                 fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-            if let Ok(persisted) = serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-                if persisted.schema_version == ARTIFACT_SCHEMA_VERSION
-                    && validate_run_identity(&persisted.run).is_ok()
-                {
-                    runs.push(persisted.run);
-                }
+            if let Ok(persisted) = decode_persisted_run(&bytes, run_id) {
+                runs.push(persisted.run);
             }
         }
         Ok(runs)
+    }
+}
+
+fn decode_persisted_run(
+    bytes: &[u8],
+    expected_run_id: &str,
+) -> Result<PersistedRunArtifact, String> {
+    validate_run_id_token(expected_run_id)?;
+    let persisted = serde_json::from_slice::<PersistedRunArtifact>(bytes)
+        .map_err(|error| format!("failed to parse run artifact: {error}"))?;
+    validate_persisted_run(&persisted, expected_run_id)?;
+    Ok(persisted)
+}
+
+fn validate_persisted_run(
+    persisted: &PersistedRunArtifact,
+    expected_run_id: &str,
+) -> Result<(), String> {
+    if persisted.schema_version != ARTIFACT_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported analysis run artifact schema `{}`",
+            persisted.schema_version
+        ));
+    }
+    if persisted.run.run_id != expected_run_id {
+        return Err(format!(
+            "analysis run artifact key `{expected_run_id}` does not match embedded run ID `{}`",
+            persisted.run.run_id
+        ));
+    }
+    let expected_op_version = run_operation_version(&persisted.run)?;
+    if persisted.op_version != expected_op_version {
+        return Err(format!(
+            "analysis run artifact operation version `{}` does not match derived version `{expected_op_version}`",
+            persisted.op_version
+        ));
+    }
+    validate_run_identity(&persisted.run)?;
+    Ok(())
+}
+
+pub(super) fn ensure_owned_directory(path: &Path, label: &str) -> Result<(), String> {
+    match fs_symlink_metadata(path) {
+        Ok(metadata) => return validate_owned_directory_metadata(metadata, path, label),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to inspect {label}: {error}")),
+    }
+    fs_create_dir_all(path).map_err(|error| format!("failed to create {label}: {error}"))?;
+    let metadata = fs_symlink_metadata(path)
+        .map_err(|error| format!("failed to inspect created {label}: {error}"))?;
+    validate_owned_directory_metadata(metadata, path, label)
+}
+
+pub(super) fn owned_directory_exists(path: &Path, label: &str) -> Result<bool, String> {
+    match fs_symlink_metadata(path) {
+        Ok(metadata) => {
+            validate_owned_directory_metadata(metadata, path, label)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("failed to inspect {label}: {error}")),
+    }
+}
+
+fn validate_owned_directory_metadata(
+    metadata: FsMetadata,
+    path: &Path,
+    label: &str,
+) -> Result<(), String> {
+    if metadata.file_type() == FsFileType::Directory {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} must be a real directory and may not be a symlink: {}",
+            path.display()
+        ))
     }
 }
 
@@ -190,7 +316,21 @@ fn run_operation_version(run: &AnalysisRunResult) -> Result<String, String> {
         .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())
 }
 
+fn artifact_record(
+    run: &AnalysisRunResult,
+    created_at: String,
+) -> Result<AnalysisArtifactRecord, String> {
+    Ok(AnalysisArtifactRecord {
+        run_id: run.run_id.clone(),
+        created_at,
+        identity: run.run.identity.clone(),
+        op_version: run_operation_version(run)?,
+        field_ids: super::analysis_run_field_ids(run),
+    })
+}
+
 fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
+    validate_run_id_token(&run.run_id)?;
     let identity = &run.run.identity;
     super::run_operation_for_identity(identity)
         .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())?;
@@ -224,6 +364,22 @@ fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_run_id_token(run_id: &str) -> Result<(), String> {
+    const MAX_RUN_ID_BYTES: usize = 128;
+    if run_id.is_empty()
+        || run_id.len() > MAX_RUN_ID_BYTES
+        || !run_id.is_ascii()
+        || !run_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(format!(
+            "analysis run ID must be a 1-{MAX_RUN_ID_BYTES} byte ASCII token containing only letters, digits, `_`, or `-`"
+        ));
+    }
+    Ok(())
+}
+
 fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
     let retention = current_retention_config();
     let max_runs = retention.max_runs.unwrap_or_else(|| {
@@ -245,22 +401,34 @@ fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
     }
 
     let runs_dir = root.join("runs");
-    if !fs_exists(&runs_dir).map_err(|err| format!("failed to inspect artifacts: {err}"))? {
-        return Ok(());
-    }
+    ensure_owned_directory(root, "analysis artifact root")?;
+    ensure_owned_directory(&runs_dir, "analysis artifact runs directory")?;
     let mut artifacts = Vec::new();
     for entry in fs_read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))? {
         let path = entry.path().to_path_buf();
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
+        if entry.file_type() != FsFileType::File {
+            return Err(format!(
+                "analysis run artifact must be a regular file: {}",
+                path.display()
+            ));
+        }
+        let run_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "analysis run artifact filename is invalid: {}",
+                    path.display()
+                )
+            })?;
         let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
-        let identity = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
-            Ok(persisted) if persisted.schema_version == ARTIFACT_SCHEMA_VERSION => {
-                persisted.run.run.identity
-            }
-            _ => continue,
+        let Ok(persisted) = decode_persisted_run(&bytes, run_id) else {
+            continue;
         };
+        let identity = persisted.run.run.identity;
         let modified = fs_modified(&path).ok().flatten();
         artifacts.push((path, identity, modified));
     }
@@ -389,29 +557,12 @@ pub fn default_filesystem_artifact_root() -> PathBuf {
     PathBuf::from("artifacts")
 }
 
-fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-    fs_write(&tmp, bytes).map_err(|err| format!("failed to write temp artifact file: {err}"))?;
-    fs_rename(&tmp, path).map_err(|err| {
-        let _ = fs_remove_file(&tmp);
-        format!("failed to atomically replace run artifact: {err}")
-    })
-}
-
 fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
     runmat_filesystem::create_dir_all(path.into())
 }
 
 fn fs_read(path: impl Into<PathBuf>) -> std::io::Result<Vec<u8>> {
     runmat_filesystem::read(path.into())
-}
-
-fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
-    runmat_filesystem::write(path.into(), bytes)
 }
 
 fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
@@ -422,23 +573,12 @@ fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
     }
 }
 
-fn fs_rename(from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> std::io::Result<()> {
-    runmat_filesystem::rename(from.into(), to.into())
-}
-
 fn fs_read_dir(path: impl Into<PathBuf>) -> std::io::Result<Vec<DirEntry>> {
     runmat_filesystem::read_dir(path.into())
 }
 
-fn fs_exists(path: impl Into<PathBuf>) -> std::io::Result<bool> {
-    match runmat_filesystem::metadata(path.into()) {
-        Ok(metadata) => Ok(matches!(
-            metadata.file_type(),
-            FsFileType::Directory | FsFileType::File | FsFileType::Symlink | FsFileType::Other
-        )),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err),
-    }
+fn fs_symlink_metadata(path: impl Into<PathBuf>) -> std::io::Result<FsMetadata> {
+    runmat_filesystem::symlink_metadata(path.into())
 }
 
 fn fs_modified(path: impl Into<PathBuf>) -> std::io::Result<Option<std::time::SystemTime>> {

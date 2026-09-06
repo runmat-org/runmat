@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use runmat_analysis_core::AnalysisModel;
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::CanonicalMeshingContract;
 use sha2::{Digest as _, Sha256};
@@ -50,12 +49,21 @@ pub(super) fn resolve_study_mesh(spec: &AnalysisStudySpec) -> Result<ResolvedStu
     persist_mesh_output(&output)
 }
 
-fn meshing_contact_definitions(
+pub(super) fn meshing_contact_definitions(
     spec: &AnalysisStudySpec,
 ) -> Vec<crate::meshing::MeshingContactDefinition> {
     spec.model
         .iter()
-        .flat_map(|model| &model.interfaces)
+        .flat_map(meshing_contact_definitions_for_model)
+        .collect()
+}
+
+pub(super) fn meshing_contact_definitions_for_model(
+    model: &runmat_analysis_core::AnalysisModel,
+) -> impl Iterator<Item = crate::meshing::MeshingContactDefinition> + '_ {
+    model
+        .interfaces
+        .iter()
         .filter(|interface| {
             matches!(
                 interface.kind,
@@ -66,7 +74,6 @@ fn meshing_contact_definitions(
             side_a_face_selectors: vec![interface.primary.region_id.clone()],
             side_b_face_selectors: vec![interface.secondary.region_id.clone()],
         })
-        .collect()
 }
 
 pub(crate) fn persist_mesh_output(
@@ -104,76 +111,6 @@ pub(crate) fn persist_mesh_output(
         evidence_path: Some(evidence_path.display().to_string()),
         boundary_region_ids: output.boundary_region_ids.clone(),
     })
-}
-
-pub(crate) fn apply_boundary_region_ids(
-    model: &mut AnalysisModel,
-    aliases: &BTreeMap<String, PersistentEntityId>,
-) {
-    for constraint in &mut model.constraints {
-        constraint.visit_targets_mut(|target| {
-            if let Some(id) = aliases.get(&target.region_id) {
-                target.region_id = id.source_topology_id.clone();
-            }
-        });
-    }
-    for boundary in &mut model.boundaries {
-        if let Some(id) = aliases.get(&boundary.target.region_id) {
-            boundary.target.region_id = id.source_topology_id.clone();
-        }
-    }
-    for connector in &mut model.connectors {
-        if let Some(id) = aliases.get(&connector.primary.region_id) {
-            connector.primary.region_id = id.source_topology_id.clone();
-        }
-        if let Some(secondary) = &mut connector.secondary {
-            if let Some(id) = aliases.get(&secondary.region_id) {
-                secondary.region_id = id.source_topology_id.clone();
-            }
-        }
-    }
-    for interface in &mut model.interfaces {
-        apply_boundary_region_id(&mut interface.primary, aliases);
-        apply_boundary_region_id(&mut interface.secondary, aliases);
-    }
-    for action in &mut model.excitations {
-        if let runmat_analysis_core::ExcitationTarget::Region(target) =
-            &mut action.excitation_mut().target
-        {
-            if let Some(id) = aliases.get(&target.region_id) {
-                target.region_id = id.source_topology_id.clone();
-            }
-        }
-    }
-    for condition in &mut model.initial_conditions {
-        if let Some(target) = condition.region_target_mut() {
-            if let Some(id) = aliases.get(&target.region_id) {
-                target.region_id = id.source_topology_id.clone();
-            }
-        }
-    }
-    for step in &mut model.sequence.steps {
-        for observation in &mut step.observations {
-            let Some(spec) = observation.spec_mut() else {
-                continue;
-            };
-            if let runmat_analysis_core::ObservationTarget::Spatial(
-                runmat_analysis_core::ExcitationTarget::Region(target),
-            ) = &mut spec.target
-            {
-                apply_boundary_region_id(target, aliases);
-            }
-        }
-    }
-}
-
-fn apply_boundary_region_id(
-    target: &mut runmat_analysis_core::RegionTarget,
-    aliases: &BTreeMap<String, PersistentEntityId>,
-) {
-    if let Some(id) = aliases.get(&target.region_id) {
-        target.region_id = id.source_topology_id.clone();
-    }
 }
 
 fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
