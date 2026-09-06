@@ -2183,6 +2183,18 @@ const binaryArithmeticRuntimeComposition = read(`${binaryArithmeticRuntimeRoot}/
 if (binaryArithmeticRuntimeComposition.split("\n").length > 64) {
   fail("binary-arithmetic runtime composition must remain a bounded module router");
 }
+if (fs.existsSync(path.join(repo, `${binaryArithmeticRuntimeRoot}/output_prototype.rs`))) {
+  fail("binary-arithmetic output-prototype service must remain split by domain role");
+}
+const binaryArithmeticProviderSupport = read(
+  `${binaryArithmeticRuntimeRoot}/provider_support.rs`
+);
+if (
+  binaryArithmeticProviderSupport.split("\n").length > 160 ||
+  Buffer.byteLength(binaryArithmeticProviderSupport, "utf8") > 16 * 1024
+) {
+  fail("binary-arithmetic provider support exceeds its bounded family role");
+}
 for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot)) {
   if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
     fail(`${sourcePath} duplicates catalog-owned binary-arithmetic metadata`);
@@ -2191,24 +2203,56 @@ for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot
     fail(`${sourcePath} selects binary-arithmetic semantics from an identity string`);
   }
 }
-for (const identity of ["plus"]) {
+for (const identity of ["minus", "plus", "times"]) {
   const obsoleteFlatPath = `crates/runmat-runtime/src/builtins/math/elementwise/${identity}.rs`;
   if (fs.existsSync(path.join(repo, obsoleteFlatPath))) {
     fail(`${obsoleteFlatPath} is obsolete flat binary-arithmetic layout debt`);
   }
+  const identityPrototypePath = `${binaryArithmeticRuntimeRoot}/${identity}/output_prototype.rs`;
+  if (fs.existsSync(path.join(repo, identityPrototypePath))) {
+    fail(`${identityPrototypePath} duplicates the family-owned output-prototype service`);
+  }
+  const identityPrototypeRoot = `${binaryArithmeticRuntimeRoot}/${identity}/output_prototype`;
+  if (fs.existsSync(path.join(repo, identityPrototypeRoot))) {
+    fail(`${identityPrototypeRoot} duplicates the family-owned output-prototype service`);
+  }
 }
-const plusRuntimeBoundaries = new Map([
+for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot)) {
+  if (/\b(?:broadcast_reps|extract_scalar_f64|gpu_scalar_value)\b/.test(text)) {
+    fail(`${sourcePath} restores an identity-local provider helper; use provider_support`);
+  }
+}
+const binaryArithmeticRuntimeBoundaries = new Map([
   [`${binaryArithmeticRuntimeRoot}/mod.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/output_prototype/mod.rs`, 96],
+  [`${binaryArithmeticRuntimeRoot}/output_prototype/analysis.rs`, 128],
+  [`${binaryArithmeticRuntimeRoot}/output_prototype/conversion.rs`, 128],
+  [`${binaryArithmeticRuntimeRoot}/output_prototype/parse.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/output_prototype/placement.rs`, 160],
+  [`${binaryArithmeticRuntimeRoot}/provider_support.rs`, 160],
+  [`${binaryArithmeticRuntimeRoot}/minus/mod.rs`, 160],
+  [`${binaryArithmeticRuntimeRoot}/minus/host.rs`, 384],
+  [`${binaryArithmeticRuntimeRoot}/minus/provider.rs`, 192],
+  [`${binaryArithmeticRuntimeRoot}/minus/tests/mod.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/minus/tests/host.rs`, 448],
+  [`${binaryArithmeticRuntimeRoot}/minus/tests/provider.rs`, 320],
+  [`${binaryArithmeticRuntimeRoot}/minus/tests/wgpu.rs`, 128],
   [`${binaryArithmeticRuntimeRoot}/plus/mod.rs`, 160],
   [`${binaryArithmeticRuntimeRoot}/plus/host.rs`, 384],
   [`${binaryArithmeticRuntimeRoot}/plus/provider.rs`, 256],
-  [`${binaryArithmeticRuntimeRoot}/plus/output_prototype.rs`, 320],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/mod.rs`, 64],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/host.rs`, 448],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/provider.rs`, 256],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/wgpu.rs`, 256],
+  [`${binaryArithmeticRuntimeRoot}/times/mod.rs`, 160],
+  [`${binaryArithmeticRuntimeRoot}/times/host.rs`, 384],
+  [`${binaryArithmeticRuntimeRoot}/times/provider.rs`, 192],
+  [`${binaryArithmeticRuntimeRoot}/times/tests/mod.rs`, 64],
+  [`${binaryArithmeticRuntimeRoot}/times/tests/host.rs`, 448],
+  [`${binaryArithmeticRuntimeRoot}/times/tests/provider.rs`, 320],
+  [`${binaryArithmeticRuntimeRoot}/times/tests/wgpu.rs`, 128],
 ]);
-for (const [sourcePath, ceiling] of plusRuntimeBoundaries) {
+for (const [sourcePath, ceiling] of binaryArithmeticRuntimeBoundaries) {
   const text = read(sourcePath);
   const lines = text.split("\n").length;
   if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {

@@ -1,44 +1,44 @@
 use super::*;
 
 #[test]
-fn plus_descriptor_signatures_cover_core_forms() {
-    let labels: Vec<&str> = PLUS_DESCRIPTOR
+fn minus_descriptor_signatures_cover_core_forms() {
+    let labels: Vec<&str> = MINUS_DESCRIPTOR
         .signatures
         .iter()
         .map(|sig| sig.label)
         .collect();
-    assert!(labels.contains(&"C = plus(A, B)"));
-    assert!(labels.contains(&"C = plus(A, B, \"like\", prototype)"));
+    assert!(labels.contains(&"C = minus(A, B)"));
+    assert!(labels.contains(&"C = minus(A, B, \"like\", prototype)"));
 }
 
 #[test]
-fn plus_parser_error_has_stable_identifier() {
-    let err = plus_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+fn minus_parser_error_has_stable_identifier() {
+    let err = minus_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
         .expect_err("expected parser error");
-    assert_eq!(err.identifier(), PLUS_ERROR_INVALID_ARGUMENT.identifier);
+    assert_eq!(err.identifier(), MINUS_ERROR_INVALID_ARGUMENT.identifier);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_scalar_numbers() {
-    let result = plus_builtin(Value::Num(2.0), Value::Num(3.5), Vec::new()).expect("plus");
+fn minus_scalar_numbers() {
+    let result = minus_builtin(Value::Num(2.0), Value::Num(3.5), Vec::new()).expect("minus");
     match result {
-        Value::Num(v) => assert!((v - 5.5).abs() < EPS),
+        Value::Num(v) => assert!((v + 1.5).abs() < EPS),
         other => panic!("expected scalar result, got {other:?}"),
     }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_matrix_scalar() {
+fn minus_matrix_scalar() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    let result = plus_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("plus");
+    let result = minus_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("minus");
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![2, 2]);
             assert_eq!(
-                t.as_f64_slice().expect("double output"),
-                &[3.0, 4.0, 5.0, 6.0]
+                t.as_f64_slice().expect("double result"),
+                &[-1.0, 0.0, 1.0, 2.0]
             );
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -46,114 +46,120 @@ fn plus_matrix_scalar() {
 }
 
 #[test]
-fn plus_typed_sparse_uint64_uses_exact_sparse_route() {
+fn minus_like_complex_conversion_reads_typed_integer_storage_exactly() {
+    let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-2, 3]), vec![1, 2]).unwrap();
+
+    let result = block_on(super::real_to_complex(
+        super::OUTPUT_PROTOTYPE_CONTEXT,
+        Value::Tensor(tensor),
+    ))
+    .expect("complex conversion");
+
+    match result {
+        Value::ComplexTensor(out) => {
+            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.materialize_f64(), vec![(-2.0, 0.0), (3.0, 0.0)]);
+        }
+        other => panic!("expected complex tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn minus_typed_sparse_int64_uses_exact_sparse_route() {
     let lhs = SparseTensor::new_integer(
         2,
-        2,
-        vec![0, 1, 2],
+        1,
+        vec![0, 2],
         vec![0, 1],
-        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
     )
     .unwrap();
-    let rhs = SparseTensor::new_integer(
-        2,
-        2,
-        vec![0, 1, 2],
-        vec![1, 0],
-        IntegerStorage::U64(vec![7, 1]),
-    )
-    .unwrap();
-    let Value::SparseTensor(result) = plus_builtin(
+    let rhs =
+        SparseTensor::new_integer(2, 1, vec![0, 1], vec![0], IntegerStorage::I64(vec![1])).unwrap();
+    let Value::SparseTensor(result) = minus_builtin(
         Value::SparseTensor(lhs),
         Value::SparseTensor(rhs),
         Vec::new(),
     )
-    .expect("plus") else {
+    .expect("minus") else {
         panic!("expected typed sparse result");
     };
     assert_eq!(
         result.integer_storage(),
-        Some(&IntegerStorage::U64(vec![
-            9_007_199_254_740_993,
-            7,
-            1,
-            u64::MAX
-        ]))
+        Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))
     );
 }
 
 #[test]
-fn plus_dense_integer_arrays_preserve_exact_storage_without_mirror() {
-    let lhs = Tensor::new_integer(
-        IntegerStorage::U64(vec![u64::MAX, (1_u64 << 63) + 1]),
-        vec![2, 1],
-    )
-    .expect("lhs");
-    let rhs = Tensor::new_integer(IntegerStorage::U64(vec![1, 7, 2]), vec![1, 3]).expect("rhs");
+fn minus_dense_integer_arrays_preserve_exact_storage() {
+    let lhs = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
+        .expect("lhs");
+    let rhs =
+        Tensor::new_integer(IntegerStorage::I64(vec![1, -7, i64::MIN]), vec![1, 3]).expect("rhs");
 
     let result =
-        plus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("integer plus");
+        minus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("integer minus");
     let Value::Tensor(result) = result else {
         panic!("expected integer tensor");
     };
     assert_eq!(result.shape, vec![2, 3]);
     assert_eq!(
         result.integer_storage(),
-        Some(&IntegerStorage::U64(vec![
-            u64::MAX,
-            (1_u64 << 63) + 2,
-            u64::MAX,
-            (1_u64 << 63) + 8,
-            u64::MAX,
-            (1_u64 << 63) + 3
+        Some(&IntegerStorage::I64(vec![
+            i64::MIN,
+            i64::MAX - 1,
+            i64::MIN + 7,
+            i64::MAX,
+            0,
+            i64::MAX
         ]))
     );
 
     let scalar_tensor =
-        Tensor::new_integer(IntegerStorage::I16(vec![i16::MAX]), vec![1, 1]).expect("scalar");
+        Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("scalar");
     assert_eq!(
-        plus_builtin(Value::Tensor(scalar_tensor), Value::Num(1.0), Vec::new())
-            .expect("scalar plus"),
-        Value::Int(IntValue::I16(i16::MAX))
+        minus_builtin(Value::Tensor(scalar_tensor), Value::Num(1.0), Vec::new())
+            .expect("scalar minus"),
+        Value::Int(runmat_value::IntValue::U16(0))
     );
 }
 
 #[test]
-fn plus_float_arrays_preserve_native_single_class() {
-    let lhs = Tensor::from_f32(vec![1.25, -4.0], vec![1, 2]).unwrap();
+fn minus_float_arrays_preserve_native_single_class() {
+    let lhs = Tensor::from_f32(vec![3.25, -4.0], vec![1, 2]).unwrap();
     let rhs = Tensor::from_f32(vec![2.0, 0.5], vec![1, 2]).unwrap();
     let Value::Tensor(result) =
-        plus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+        minus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
     else {
         panic!("expected single tensor");
     };
     assert_eq!(
         result.into_numeric_storage().unwrap(),
-        NumericStorage::F32(vec![3.25, -3.5])
+        NumericStorage::F32(vec![1.25, -4.5])
     );
 
-    let lhs = Tensor::new(vec![0.1, 0.2], vec![1, 2]).unwrap();
+    let lhs = Tensor::new(vec![0.5, 0.2], vec![1, 2]).unwrap();
     let rhs = Tensor::from_f32(vec![0.2, 0.3], vec![1, 2]).unwrap();
     let Value::Tensor(result) =
-        plus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+        minus_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
     else {
         panic!("expected mixed floating tensor");
     };
     assert_eq!(
         result.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![
-            (0.1_f64 + f64::from(0.2_f32)) as f32,
-            (0.2_f64 + f64::from(0.3_f32)) as f32,
+            (0.5_f64 - f64::from(0.2_f32)) as f32,
+            (0.2_f64 - f64::from(0.3_f32)) as f32,
         ])
     );
 }
 
 #[test]
-fn plus_complex_arrays_preserve_native_single_class() {
+fn minus_complex_arrays_preserve_native_single_class() {
     let lhs = ComplexTensor::from_f32(vec![(1.25, -2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
     let rhs = Tensor::new(vec![0.5, 1.0], vec![1, 2]).unwrap();
     let Value::ComplexTensor(result) =
-        plus_builtin(Value::ComplexTensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
+        minus_builtin(Value::ComplexTensor(lhs), Value::Tensor(rhs), Vec::new()).unwrap()
     else {
         panic!("expected complex single tensor");
     };
@@ -164,24 +170,24 @@ fn plus_complex_arrays_preserve_native_single_class() {
             .copied()
             .map(<(f32, f32)>::from)
             .collect::<Vec<_>>()),
-        Some(vec![(1.75_f32, -2.0_f32), (4.0_f32, 4.0_f32)])
+        Some(vec![(0.75_f32, -2.0_f32), (2.0_f32, 4.0_f32)])
     );
 }
 
 #[test]
-fn plus_mixed_complex_floating_inputs_return_single_without_scalar_collapse() {
+fn minus_mixed_complex_floating_inputs_preserve_order_and_single_class() {
     let single = ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
     let double = ComplexTensor::new(vec![(3.0, -1.0)], vec![1, 1]).unwrap();
-    for (lhs, rhs) in [
-        (single.clone(), double.clone()),
-        (double.clone(), single.clone()),
+    for (lhs, rhs, expected) in [
+        (single.clone(), double.clone(), (-2.0, 3.0)),
+        (double.clone(), single.clone(), (2.0, -3.0)),
     ] {
-        let result = plus_builtin(
+        let result = minus_builtin(
             Value::ComplexTensor(lhs),
             Value::ComplexTensor(rhs),
             Vec::new(),
         )
-        .expect("complex plus");
+        .expect("complex minus");
         let Value::ComplexTensor(result) = result else {
             panic!("expected one-element complex single tensor");
         };
@@ -191,21 +197,21 @@ fn plus_mixed_complex_floating_inputs_return_single_without_scalar_collapse() {
                 .copied()
                 .map(<(f32, f32)>::from)
                 .collect::<Vec<_>>()),
-            Some(vec![(4.0, 1.0)])
+            Some(vec![expected])
         );
     }
 }
 
 #[test]
-fn plus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
+fn minus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
     let real = Tensor::new(vec![0.5, 1.0], vec![1, 2]).unwrap();
     let complex = ComplexTensor::from_f32(vec![(1.25, -2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
-    let result = plus_builtin(
+    let result = minus_builtin(
         Value::Tensor(real),
         Value::ComplexTensor(complex),
         Vec::new(),
     )
-    .expect("real-complex plus");
+    .expect("real-complex minus");
     let Value::ComplexTensor(result) = result else {
         panic!("expected complex single tensor");
     };
@@ -215,16 +221,16 @@ fn plus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
             .copied()
             .map(<(f32, f32)>::from)
             .collect::<Vec<_>>()),
-        Some(vec![(1.75, -2.0), (4.0, 4.0)])
+        Some(vec![(-0.75, 2.0), (-2.0, -4.0)])
     );
     let lhs = ComplexTensor::from_f32(Vec::new(), vec![0, 2]).unwrap();
     let rhs = ComplexTensor::new(Vec::new(), vec![0, 2]).unwrap();
-    let result = plus_builtin(
+    let result = minus_builtin(
         Value::ComplexTensor(lhs),
         Value::ComplexTensor(rhs),
         Vec::new(),
     )
-    .expect("empty complex plus");
+    .expect("empty complex minus");
     let Value::ComplexTensor(result) = result else {
         panic!("expected empty complex single tensor");
     };
@@ -233,7 +239,7 @@ fn plus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
 }
 
 #[test]
-fn plus_like_complex_conversion_preserves_single_storage() {
+fn minus_like_complex_conversion_preserves_single_storage() {
     let tensor = Tensor::from_f32(vec![2.0, 3.0], vec![2, 1]).unwrap();
     let result = block_on(super::real_to_complex(
         super::OUTPUT_PROTOTYPE_CONTEXT,
@@ -254,7 +260,7 @@ fn plus_like_complex_conversion_preserves_single_storage() {
 }
 
 #[test]
-fn plus_rejects_real_integer_with_floating_complex() {
+fn minus_rejects_real_integer_with_floating_complex() {
     let integer = Value::Tensor(
         Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 63) + 1, u64::MAX]),
@@ -268,7 +274,7 @@ fn plus_rejects_real_integer_with_floating_complex() {
         (integer.clone(), complex.clone()),
         (complex.clone(), integer.clone()),
     ] {
-        let error = plus_builtin(lhs, rhs, Vec::new()).unwrap_err();
+        let error = minus_builtin(lhs, rhs, Vec::new()).unwrap_err();
         assert!(error
             .message()
             .contains("complex integer arithmetic is not supported"));
@@ -277,16 +283,19 @@ fn plus_rejects_real_integer_with_floating_complex() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_row_column_broadcast() {
+fn minus_row_column_broadcast() {
     let column = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let row = Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap();
-    let result = plus_builtin(Value::Tensor(column), Value::Tensor(row), Vec::new())
-        .expect("broadcast plus");
+    let result = minus_builtin(Value::Tensor(column), Value::Tensor(row), Vec::new())
+        .expect("broadcast minus");
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![3, 3]);
-            let expected = vec![11.0, 12.0, 13.0, 21.0, 22.0, 23.0, 31.0, 32.0, 33.0];
-            assert_eq!(t.as_f64_slice().expect("double output"), expected);
+            let expected = vec![
+                -9.0, -8.0, -7.0, // column-first order
+                -19.0, -18.0, -17.0, -29.0, -28.0, -27.0,
+            ];
+            assert_eq!(t.as_f64_slice().expect("double result"), expected);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
@@ -294,19 +303,19 @@ fn plus_row_column_broadcast() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_complex_inputs() {
+fn minus_complex_inputs() {
     let lhs = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2]).unwrap();
     let rhs = ComplexTensor::new(vec![(2.0, -1.0), (-1.0, 1.0)], vec![1, 2]).unwrap();
-    let result = plus_builtin(
+    let result = minus_builtin(
         Value::ComplexTensor(lhs),
         Value::ComplexTensor(rhs),
         Vec::new(),
     )
-    .expect("complex plus");
+    .expect("complex minus");
     match result {
         Value::ComplexTensor(t) => {
             assert_eq!(t.shape, vec![1, 2]);
-            let expected = [(3.0, 1.0), (2.0, -3.0)];
+            let expected = [(-1.0, 3.0), (4.0, -5.0)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
             }
@@ -317,15 +326,15 @@ fn plus_complex_inputs() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_char_input() {
-    let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
+fn minus_char_input() {
+    let chars = CharArray::new("DEF".chars().collect(), 1, 3).unwrap();
     let result =
-        plus_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("char plus");
+        minus_builtin(Value::CharArray(chars), Value::Num(1.0), Vec::new()).expect("char minus");
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape, vec![1, 3]);
             assert_eq!(
-                t.as_f64_slice().expect("double output"),
+                t.as_f64_slice().expect("double result"),
                 &[67.0, 68.0, 69.0]
             );
         }
@@ -335,10 +344,10 @@ fn plus_char_input() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_logical_input_promotes_to_double() {
+fn minus_logical_input_promotes_to_double() {
     let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
     let tensor = Tensor::new(vec![2.0, 2.0, 3.0, 3.0], vec![2, 2]).unwrap();
-    let result = plus_builtin(
+    let result = minus_builtin(
         Value::LogicalArray(logical),
         Value::Tensor(tensor),
         Vec::new(),
@@ -347,8 +356,8 @@ fn plus_logical_input_promotes_to_double() {
     match result {
         Value::Tensor(t) => {
             assert_eq!(
-                t.as_f64_slice().expect("double output"),
-                &[3.0, 2.0, 4.0, 3.0]
+                t.as_f64_slice().expect("double result"),
+                &[-1.0, -2.0, -2.0, -3.0]
             );
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -357,20 +366,12 @@ fn plus_logical_input_promotes_to_double() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn plus_dimension_mismatch_errors() {
+fn minus_dimension_mismatch_errors() {
     let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-    let err = plus_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
+    let err = minus_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).unwrap_err();
     assert!(
-        err.message().contains("plus"),
+        err.message().contains("minus"),
         "unexpected error message: {err}"
     );
-}
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn plus_same_class_integer_inputs_preserve_class() {
-    let lhs = Value::Int(IntValue::I32(3));
-    let rhs = Value::Int(IntValue::I32(5));
-    let result = plus_builtin(lhs, rhs, Vec::new()).expect("plus");
-    assert_eq!(result, Value::Int(IntValue::I32(8)));
 }

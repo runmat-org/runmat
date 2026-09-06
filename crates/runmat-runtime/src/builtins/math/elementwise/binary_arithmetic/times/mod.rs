@@ -1,11 +1,12 @@
-//! MATLAB-compatible `plus` builtin with GPU-aware semantics for RunMat.
+//! MATLAB-compatible `times` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
-use runmat_builtins::PLUS_DESCRIPTOR;
+use runmat_builtins::TIMES_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PLUS_CATALOG_ENTRY, PLUS_ERROR_INTERNAL, PLUS_ERROR_INVALID_ARGUMENT,
-    PLUS_ERROR_INVALID_INPUT, PLUS_ERROR_SIZE_MISMATCH, PLUS_LIKE_EXTENSION,
+    BuiltinErrorDescriptor, TIMES_CATALOG_ENTRY, TIMES_ERROR_INTERNAL,
+    TIMES_ERROR_INVALID_ARGUMENT, TIMES_ERROR_INVALID_INPUT, TIMES_ERROR_SIZE_MISMATCH,
+    TIMES_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
@@ -27,19 +28,19 @@ use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(
-    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::plus"
+    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::times"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "plus",
+    name: "times",
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[
         ProviderHook::Binary {
-            name: "elem_add",
+            name: "elem_mul",
             commutative: true,
         },
-        ProviderHook::Custom("scalar_add"),
+        ProviderHook::Custom("scalar_mul"),
     ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
@@ -48,31 +49,33 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Uses elem_add for shape-compatible gpuArrays, including complex-interleaved handles, attempts provider-side implicit expansion with repmat, and uses scalar_add when one operand is a real scalar; falls back to host execution for unsupported operand kinds.",
+        "Uses elem_mul for shape-compatible gpuArrays, including complex-interleaved handles, attempts provider-side implicit expansion with repmat, and uses scalar_mul when one operand is a real scalar; falls back to host execution for unsupported operand kinds.",
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::plus"
+    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::times"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "plus",
+    name: "times",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
-            let lhs = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            let lhs = ctx
+                .inputs
+                .first()
+                .ok_or(FusionError::MissingInput(0))?;
             let rhs = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("({lhs} + {rhs})"))
+            Ok(format!("({lhs} * {rhs})"))
         },
     }),
     reduction: None,
     emits_nan: false,
-    notes:
-        "Fusion emits a plain sum; providers can override with specialised kernels when desirable.",
+    notes: "Fusion emits a plain product; providers can override with specialised kernels when desirable.",
 };
 
-const BUILTIN_NAME: &str = "plus";
+const BUILTIN_NAME: &str = "times";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -80,7 +83,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
-fn plus_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+fn times_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
@@ -88,7 +91,7 @@ fn plus_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     builder.build()
 }
 
-fn plus_error_with_detail(
+fn times_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
 ) -> RuntimeError {
@@ -101,11 +104,11 @@ fn plus_error_with_detail(
 }
 
 #[runtime_builtin(
-    name = "plus",
+    name = "times",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::plus"
+    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::times"
 )]
-async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
         || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
         || rest
@@ -117,13 +120,16 @@ async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
     let template = parse_output_template(OUTPUT_PROTOTYPE_CONTEXT, &rest)?;
     if matches!(template, OutputTemplate::Like(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(&PLUS_LIKE_EXTENSION, BUILTIN_NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TIMES_LIKE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => plus_gpu_pair(la, lb).await,
-        (Value::GpuTensor(la), rhs) => plus_gpu_host_left(la, rhs).await,
-        (lhs, Value::GpuTensor(rb)) => plus_gpu_host_right(lhs, rb).await,
-        (lhs, rhs) => plus_host(lhs, rhs),
+        (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb).await,
+        (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs).await,
+        (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb).await,
+        (lhs, rhs) => Ok(times_host(lhs, rhs)?),
     }?;
     apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
 }
@@ -135,16 +141,16 @@ use super::output_prototype::{
 };
 
 const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext {
-    identity: PLUS_CATALOG_ENTRY.identity,
-    invalid_argument: &PLUS_ERROR_INVALID_ARGUMENT,
-    invalid_input: &PLUS_ERROR_INVALID_INPUT,
+    identity: TIMES_CATALOG_ENTRY.identity,
+    invalid_argument: &TIMES_ERROR_INVALID_ARGUMENT,
+    invalid_input: &TIMES_ERROR_INVALID_INPUT,
 };
 
 mod provider;
-use provider::{plus_gpu_host_left, plus_gpu_host_right, plus_gpu_pair};
+use provider::{times_gpu_host_left, times_gpu_host_right, times_gpu_pair};
 
 mod host;
-use host::{is_real_integer_operand, plus_host};
+pub(crate) use host::times_host;
 
 #[cfg(test)]
 mod tests;
