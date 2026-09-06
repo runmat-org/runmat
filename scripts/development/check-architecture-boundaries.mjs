@@ -490,6 +490,31 @@ for (const [sourcePath, ceiling] of [
     );
   }
 }
+for (const [sourcePath, ceiling] of [
+  ["crates/runmat-builtins/src/catalog/contract.rs", 96],
+  ["crates/runmat-builtins/src/catalog/contract/acceleration.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/aggregate.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/array.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/introspection.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/io.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/logical.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/math.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/parallel.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/stats.rs", 192],
+]) {
+  const lines = read(sourcePath).split("\n").length;
+  if (lines > ceiling) {
+    fail(
+      `${sourcePath} exceeds its typed contract-vocabulary boundary ` +
+      `(found ${lines} lines; maximum ${ceiling}); split rules by domain rather than growing the catalog root`
+    );
+  }
+}
+if (/pub enum (?:Io|Logical|Math|Array|Parallel|Stats)InferenceRule/.test(
+  read("crates/runmat-builtins/src/catalog/contract.rs"),
+)) {
+  fail("catalog/contract.rs must compose domain-owned rule vocabularies rather than accumulating domain policy");
+}
 if (fs.existsSync(path.join(repo, "crates/runmat-runtime/src/builtins/array/grouping/legacy.rs"))) {
   fail("array/grouping/legacy.rs must not return after the final identity migration");
 }
@@ -1489,6 +1514,53 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 192,
   testLineCeiling: 192,
 });
+enforceMigratedBuiltinFamily({
+  name: "temporary-path family",
+  roots: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/temporary_path",
+  ],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/inference.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/temporary_path/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/temporary_path/tempdir/mod.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/temporary_path/tempname/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/io/repl_fs/tempdir.rs",
+    "crates/runmat-runtime/src/builtins/io/repl_fs/tempname.rs",
+    "docs/builtins/reference/tempdir.json",
+    "docs/builtins/reference/tempname.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/tempdir.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/tempname.json",
+  ],
+  leafLineCeiling: 192,
+  testLineCeiling: 192,
+});
+for (const sourcePath of [
+  "crates/runmat-builtins/src/catalog/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/inference.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/registry.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/mod.rs",
+  "crates/runmat-builtins/src/catalog/entries/io/repl_fs/temporary_path/inference.rs",
+]) {
+  const source = read(sourcePath);
+  if (/"(?:tempdir|tempname)"/.test(source)) {
+    fail(`${sourcePath} must dispatch temporary-path behavior through typed rules and entries`);
+  }
+}
+if (/\bpub fn (?:tempdir|tempname)_type\b/.test(
+  read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"),
+)) {
+  fail("legacy runtime type resolvers must not reclaim temporary-path inference authority");
+}
+if (/"(?:tempdir|tempname)"\s*(?:\||=>)/.test(
+  read("crates/runmat-builtins/src/semantics.rs"),
+)) {
+  fail("legacy name-selected semantics must not reclaim temporary-path authority");
+}
 for (const sourcePath of [
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/mod.rs",
   "crates/runmat-builtins/src/catalog/entries/io/repl_fs/environment/inference.rs",

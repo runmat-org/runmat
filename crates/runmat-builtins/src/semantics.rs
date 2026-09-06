@@ -272,13 +272,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         },
 
         "jsondecode" | "jsonencode" | "fullfile" => pure(BuiltinSemanticKind::General),
-        "tempname" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_filesystem().with_random(),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Filesystem,
-            ..pure(BuiltinSemanticKind::Filesystem)
-        },
-
         "feval" | "call_method" | "subsref" | "subsasgn" | "notify" | "fzero" | "fsolve"
         | "ode45" | "ode23" | "ode15s" => host_callback(),
         "addlistener" | "new_handle_object" => BuiltinSemantics {
@@ -340,12 +333,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
             purity: BuiltinPurity::DeterministicReadOnly,
             semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
-        "tempdir" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::General,
             ..BuiltinSemantics::unknown()
         },
         "eval" | "evalin" => BuiltinSemantics {
