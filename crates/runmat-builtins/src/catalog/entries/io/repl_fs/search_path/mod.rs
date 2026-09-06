@@ -13,5 +13,6 @@ pub(super) fn infer(
         SearchPathInferenceRule::QueryOrReplace => super::path::inference::infer(request, entry),
         SearchPathInferenceRule::Add => super::addpath::inference::infer(request, entry),
         SearchPathInferenceRule::Remove => super::rmpath::inference::infer(request, entry),
+        SearchPathInferenceRule::Generate => super::genpath::inference::infer(request, entry),
     }
 }

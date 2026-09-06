@@ -12,9 +12,9 @@ pub(super) async fn plan(request: super::arguments::Request) -> crate::BuiltinRe
 
     for raw in request.directories {
         let normalized = normalize_directory(&raw).await?;
-        let key = super::super::path_mutation::segments::identity(&normalized);
+        let key = super::super::path_list::identity(&normalized);
         if seen.insert(key.clone()) {
-            existing.retain(|entry| super::super::path_mutation::segments::identity(entry) != key);
+            existing.retain(|entry| super::super::path_list::identity(entry) != key);
             additions.push(normalized);
         }
     }
@@ -23,7 +23,7 @@ pub(super) async fn plan(request: super::arguments::Request) -> crate::BuiltinRe
         super::arguments::Position::Begin => additions.into_iter().chain(existing).collect(),
         super::arguments::Position::End => existing.into_iter().chain(additions).collect(),
     };
-    Ok(super::super::path_mutation::segments::join(&segments))
+    Ok(super::super::path_list::join(&segments))
 }
 
 async fn normalize_directory(raw: &str) -> crate::BuiltinResult<String> {

@@ -33,7 +33,7 @@ pub(super) fn parse(tokens: Vec<String>) -> crate::BuiltinResult<Request> {
                 set_position(&mut position, &mut position_set, Position::End)?
             }
             Some(OptionToken::Frozen) => {}
-            None => directories.extend(super::super::path_mutation::segments::split(token)),
+            None => directories.extend(super::super::path_list::split(token)),
         }
     }
 

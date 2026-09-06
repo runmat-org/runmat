@@ -5,6 +5,7 @@ pub(in crate::catalog::entries::io::repl_fs) enum Policy {
     PathReplacement,
     AddFolders,
     RemoveFolders,
+    Generate,
 }
 
 pub(in crate::catalog::entries::io::repl_fs) fn supports(
@@ -13,18 +14,18 @@ pub(in crate::catalog::entries::io::repl_fs) fn supports(
 ) -> bool {
     match &argument.kind {
         ValueKindFact::Character => match policy {
-            Policy::PathReplacement => is_character_row(&argument.shape),
+            Policy::PathReplacement | Policy::Generate => is_character_row(&argument.shape),
             Policy::AddFolders | Policy::RemoveFolders => is_character_container(&argument.shape),
         },
         ValueKindFact::String => {
-            !matches!(policy, Policy::PathReplacement)
+            !matches!(policy, Policy::PathReplacement | Policy::Generate)
                 || argument
                     .shape
                     .element_count()
                     .is_none_or(|count| count == 1)
         }
         ValueKindFact::Cell(cell) => {
-            if matches!(policy, Policy::PathReplacement) {
+            if matches!(policy, Policy::PathReplacement | Policy::Generate) {
                 false
             } else if cell.elements_complete {
                 cell.elements.iter().all(|value| supports(value, policy))

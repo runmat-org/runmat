@@ -36,9 +36,9 @@ fn accepts_path_lists_string_arrays_character_rows_and_cells() {
         canonical(second.path()),
         canonical(third.path()),
     ];
-    crate::builtins::common::path_state::set_path_string(
-        &super::super::super::path_mutation::segments::join(&paths),
-    );
+    crate::builtins::common::path_state::set_path_string(&super::super::super::path_list::join(
+        &paths,
+    ));
     let list = format!(
         "{}{}{}",
         paths[0],
