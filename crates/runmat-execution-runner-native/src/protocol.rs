@@ -51,6 +51,7 @@ pub enum WorkerProcessMessage {
 pub struct StoredProgram {
     pub recipe: runmat_execution_artifact::ProgramBuildRecipe,
     pub artifact: runmat_execution_artifact::ProgramArtifact,
+    pub function: usize,
 }
 
 #[cfg(test)]

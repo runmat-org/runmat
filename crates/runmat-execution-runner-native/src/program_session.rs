@@ -79,7 +79,14 @@ impl NativeProgramSession {
         let completions = self.driver.submit_tasks(
             tasks
                 .into_iter()
-                .map(|(program, submission)| (submission, program.recipe, program.artifact))
+                .map(|(program, submission)| {
+                    (
+                        submission,
+                        program.recipe,
+                        program.artifact,
+                        program.function,
+                    )
+                })
                 .collect(),
         )?;
         Ok(completions

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal, Signal,
     SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
-    SignalInterpolation, SignalPrecision, SignalProvenance, SignalRepresentation,
+    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
     SignalSamplingPolicy, SignalShape,
 };
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
@@ -11,6 +11,8 @@ use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValuePayload
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_types::ProgramFunctionId;
+
+use crate::materialize_signal_for_solver;
 
 use super::*;
 
@@ -254,4 +256,52 @@ fn declared_single_precision_is_canonicalized_at_that_precision() {
         panic!("expected real realization")
     };
     assert_eq!(f64::from_bits(values[0]), f64::from(input as f32));
+}
+
+#[test]
+fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
+    let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);
+    let admitted = admitted();
+    let chunks = plan_signal_generator_chunks(
+        &authored,
+        &admitted,
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 16,
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap();
+    let outputs = vec![output(
+        &chunks[0],
+        dense_f64(vec![5, 1], &[10.0, 20.0, 30.0, 40.0, 50.0]),
+    )];
+    let realization =
+        canonicalize_signal_generator_outputs(&authored, &admitted, None, &chunks, &outputs)
+            .unwrap();
+    let materialized = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
+    let PhysicalSignal::Force(signal) = materialized else {
+        panic!("expected force signal")
+    };
+    let SignalRepresentation::Tabulated(table) = signal.representation else {
+        panic!("solver input must be a typed table")
+    };
+    assert_eq!(
+        table.axis,
+        runmat_analysis_core::SignalAxis::TimeSeconds(vec![0.0, 0.25, 0.5, 0.75, 1.0])
+    );
+    assert!(matches!(
+        &table.values[2],
+        SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(value))
+            if value.newtons == 30.0
+    ));
+    assert!(matches!(signal.provenance, SignalProvenance::Generated(_)));
+
+    let mut substituted = admitted.clone();
+    substituted.materialization_identity = SignalMaterializationIdentity::new(
+        digest("different-signal"),
+        None,
+        digest("sampling"),
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(materialize_signal_for_solver(&authored, &substituted, &realization).is_err());
 }

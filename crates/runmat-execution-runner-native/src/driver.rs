@@ -215,6 +215,7 @@ impl LocalDriver {
             },
             recipe,
             artifact,
+            function,
         )
     }
 
@@ -223,8 +224,9 @@ impl LocalDriver {
         submission: TaskSubmission,
         recipe: ProgramBuildRecipe,
         artifact: ProgramArtifact,
+        function: usize,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
-        self.submit_tasks(vec![(submission, recipe, artifact)])?
+        self.submit_tasks(vec![(submission, recipe, artifact, function)])?
             .pop()
             .ok_or_else(|| {
                 NativeExecutionError::Protocol("local task admission returned no completion".into())
@@ -233,7 +235,7 @@ impl LocalDriver {
 
     pub(crate) fn submit_tasks(
         self: &Arc<Self>,
-        tasks: Vec<(TaskSubmission, ProgramBuildRecipe, ProgramArtifact)>,
+        tasks: Vec<(TaskSubmission, ProgramBuildRecipe, ProgramArtifact, usize)>,
     ) -> NativeExecutionResult<Vec<Arc<TaskCompletion>>> {
         if tasks.is_empty() {
             return Err(NativeExecutionError::Protocol(
@@ -241,7 +243,7 @@ impl LocalDriver {
             ));
         }
         let mut registrations = Vec::with_capacity(tasks.len());
-        for (submission, recipe, artifact) in tasks {
+        for (submission, recipe, artifact, function) in tasks {
             artifact.validate_against(&recipe).map_err(|error| {
                 NativeExecutionError::Protocol(format!(
                     "local program artifact failed validation: {error}"
@@ -256,8 +258,12 @@ impl LocalDriver {
                     "local task submission differs from its session or program artifact".into(),
                 ));
             }
-            let stored = serde_json::to_vec(&StoredProgram { recipe, artifact })
-                .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+            let stored = serde_json::to_vec(&StoredProgram {
+                recipe,
+                artifact,
+                function,
+            })
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
             self.artifacts.put(artifact_id, &stored)?;
             registrations.push((
                 submission.request.id,

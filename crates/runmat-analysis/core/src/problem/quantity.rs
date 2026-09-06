@@ -4,6 +4,11 @@ pub trait FiniteQuantity {
     fn is_finite(&self) -> bool;
 }
 
+/// A scalar physical quantity expressed in the canonical unit named by its concrete type.
+pub trait CanonicalQuantity: FiniteQuantity + Copy {
+    fn from_canonical_value(value: f64) -> Self;
+}
+
 macro_rules! scalar_quantity {
     ($name:ident, $field:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -25,6 +30,12 @@ macro_rules! scalar_quantity {
         impl FiniteQuantity for $name {
             fn is_finite(&self) -> bool {
                 self.$field.is_finite()
+            }
+        }
+
+        impl CanonicalQuantity for $name {
+            fn from_canonical_value(value: f64) -> Self {
+                Self::new(value)
             }
         }
     };

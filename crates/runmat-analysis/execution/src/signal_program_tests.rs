@@ -185,6 +185,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
         ),
     )
     .unwrap();
+    assert_eq!(first.request.callable.qualified_name, "loads.pulse");
     let second = build_signal_generator_task_submission(
         &admitted,
         &prepared.chunks[0],

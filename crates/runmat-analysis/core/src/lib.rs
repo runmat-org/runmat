@@ -73,13 +73,13 @@ pub use problem::materials::{
 pub use problem::model::{AnalysisModel, AnalysisModelId};
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
-    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ComplexPhase, Damping,
-    Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity, ElectricCurrent,
-    ElectricCurrentDensity, ElectricPotential, Force, Frequency, FrictionCoefficient, HeatFlux,
-    HeatGenerationDensity, HeatTransferCoefficient, Length, MagneticVectorPotential, MassDensity,
-    MassFlowRate, Moment, Position, Pressure, Rotation, SpecificAcousticImpedance, Stiffness,
-    Temperature, TemperatureDifference, ThermalContactResistance, Traction, Translation,
-    TurbulenceIntensity, Velocity,
+    Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, CanonicalQuantity,
+    ComplexPhase, Damping, Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity,
+    ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, Frequency,
+    FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
+    MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure, Rotation,
+    SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference,
+    ThermalContactResistance, Traction, Translation, TurbulenceIntensity, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::region_resolution::{

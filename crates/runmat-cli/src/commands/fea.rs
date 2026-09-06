@@ -19,6 +19,7 @@ use crate::AlreadyReportedCliError;
 pub(super) mod callables;
 mod portable;
 pub(crate) mod remote;
+mod signal_materialization;
 
 pub async fn execute_fea_path(
     path: PathBuf,
@@ -43,7 +44,7 @@ pub async fn execute_fea_path(
     let context = OperationContext::new(None, None);
 
     match document {
-        FeaResolvedDocument::Study(spec) => {
+        FeaResolvedDocument::Study(mut spec) => {
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
@@ -67,6 +68,8 @@ pub async fn execute_fea_path(
             }
             let envelope = match execution {
                 ExecutionTarget::Local => {
+                    signal_materialization::materialize_study(&path, &mut spec, cli, config)
+                        .await?;
                     let executor = portable::LocalProcessStructuralExecutor::new(&spec, config)?;
                     Some(
                         runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
@@ -87,7 +90,7 @@ pub async fn execute_fea_path(
                 }
             }
         }
-        FeaResolvedDocument::Sweep(spec) => {
+        FeaResolvedDocument::Sweep(mut spec) => {
             if !json {
                 let styles = presentation::stderr();
                 eprintln!(
@@ -103,7 +106,11 @@ pub async fn execute_fea_path(
                 );
             }
             let envelope = match execution {
-                ExecutionTarget::Local => Some(execute_local_sweep(&spec, context, config)?),
+                ExecutionTarget::Local => {
+                    signal_materialization::materialize_sweep(&path, &mut spec, cli, config)
+                        .await?;
+                    Some(execute_local_sweep(&spec, context, config)?)
+                }
                 ExecutionTarget::Remote(target) => {
                     remote::execute_sweep(&path, spec.clone(), context, target, cli, config, json)
                         .await?

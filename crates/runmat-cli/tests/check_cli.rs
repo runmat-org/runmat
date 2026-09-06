@@ -7,7 +7,16 @@ use tempfile::TempDir;
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
     command.current_dir(temp.path()).args(args);
-    command.env_remove("RUNMAT_CONFIG");
+    command
+        .env_remove("RUNMAT_CONFIG")
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            temp.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        );
     command.output().expect("run runmat check")
 }
 
@@ -75,7 +84,7 @@ fn canonical_fea_documentation_examples_check_cleanly() {
 }
 
 #[test]
-fn fea_check_resolves_and_statically_admits_a_named_project_signal_generator() {
+fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     let temp = TempDir::new().unwrap();
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     fs::create_dir_all(temp.path().join("src/+loads")).unwrap();
@@ -113,6 +122,35 @@ fn fea_check_resolves_and_statically_admits_a_named_project_signal_generator() {
     );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["validation"]["valid"], true);
+
+    let output = runmat(&temp, &["run", "study.fea", "--json"]);
+    assert!(
+        output.status.success(),
+        "callable-backed study failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["study_id"], "canonical_box_static");
+    let objects = fs::read_dir(temp.path().join("artifacts/generated-signals/objects"))
+        .unwrap()
+        .count();
+    assert!(objects >= 2, "expected a signal manifest and data chunk");
+
+    let repeated = runmat(&temp, &["run", "study.fea", "--json"]);
+    assert!(
+        repeated.status.success(),
+        "repeated callable-backed study failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(
+        fs::read_dir(temp.path().join("artifacts/generated-signals/objects"))
+            .unwrap()
+            .count(),
+        objects,
+        "repeated materialization must reuse the content-addressed object inventory"
+    );
 }
 
 #[test]

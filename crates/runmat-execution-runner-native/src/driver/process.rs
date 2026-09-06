@@ -29,12 +29,7 @@ pub(super) fn execute_attempt(
         | runmat_execution_artifact::ExecutableForm::TestAttemptV1
         | runmat_execution_artifact::ExecutableForm::MeshingWorkload
         | runmat_execution_artifact::ExecutableForm::AnalysisWorkload => 0,
-        _ => request
-            .task
-            .callable
-            .qualified_name
-            .parse::<usize>()
-            .map_err(|error| format!("invalid callable identity: {error}"))?,
+        _ => stored.function,
     };
     let worker_request = WorkerRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,

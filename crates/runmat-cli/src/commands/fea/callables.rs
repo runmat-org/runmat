@@ -21,7 +21,7 @@ pub(super) struct CompiledSignalGenerator {
 }
 
 impl CompiledSignalGenerator {
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         self.executable.validate().with_context(|| {
             format!(
                 "validate portable executable for FEA signal `{}`",
