@@ -1,11 +1,9 @@
 use crate::BuiltinCatalogEntry;
-use runmat_types::{
-    CallInference, CallRequest, NumericDomain, ShapeFact, StorageFact, ValueFact, ValueKindFact,
-};
+use runmat_types::{CallInference, CallRequest};
 
-use super::super::{argument_error, finish_fixed};
+use crate::catalog::inference::{argument_error, finish_fixed};
 
-pub(in crate::catalog::inference) fn infer(
+pub(in crate::catalog::entries::io::repl_fs) fn infer(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
@@ -18,7 +16,10 @@ pub(in crate::catalog::inference) fn infer(
         ));
     }
     for (index, argument) in request.arguments.iter().take(2).enumerate() {
-        if !is_path_text(argument) {
+        if !super::super::search_path::input::supports(
+            argument,
+            super::super::search_path::input::Policy::PathReplacement,
+        ) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-PATH-TEXT",
                 "path expects a character row, string scalar, or numeric character-code row",
@@ -26,42 +27,20 @@ pub(in crate::catalog::inference) fn infer(
             ));
         }
     }
-    let output = ValueFact::proven(
-        ValueKindFact::Character,
-        ShapeFact::from(vec![Some(1), None]),
-        StorageFact::Dense,
-    );
-    finish_fixed(entry, request, output, diagnostics)
-}
-
-fn is_path_text(argument: &ValueFact) -> bool {
-    match &argument.kind {
-        ValueKindFact::Character => is_known_row(&argument.shape),
-        ValueKindFact::String => argument
-            .shape
-            .element_count()
-            .is_none_or(|count| count == 1),
-        ValueKindFact::Numeric(numeric) => {
-            numeric.domain != NumericDomain::Complex
-                && argument.storage != StorageFact::Sparse
-                && is_known_row(&argument.shape)
-        }
-        ValueKindFact::Unknown => true,
-        _ => false,
-    }
-}
-
-fn is_known_row(shape: &ShapeFact) -> bool {
-    shape
-        .known_dims()
-        .is_none_or(|dims| dims.len() <= 2 && dims.first().is_none_or(|rows| *rows == Some(1)))
+    finish_fixed(
+        entry,
+        request,
+        super::super::search_path::result::character_row(),
+        diagnostics,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_types::{
-        LiteralContext, NumericClass, NumericFact, OutputSelection, RequestedOutputCount,
+        LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
     };
 
     fn request(arguments: Vec<ValueFact>) -> CallRequest {

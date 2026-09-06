@@ -1,4 +1,5 @@
 mod documentation;
+pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
@@ -125,7 +126,7 @@ pub const PATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Io(IoInferenceRule::ReplFs(
-            IoReplFsInferenceRule::SearchPath,
+            IoReplFsInferenceRule::SearchPath(SearchPathInferenceRule::QueryOrReplace),
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,

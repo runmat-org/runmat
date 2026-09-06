@@ -1,4 +1,5 @@
 mod documentation;
+pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};

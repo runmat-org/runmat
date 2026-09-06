@@ -1,9 +1,9 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, NumericClass, NumericDomain, ShapeFact};
 
-use super::super::{argument_error, finish_fixed, numeric_kind};
+use crate::catalog::inference::{argument_error, finish_fixed, numeric_kind};
 
-pub(in crate::catalog::inference) fn infer(
+pub(in crate::catalog::entries::io) fn infer(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
