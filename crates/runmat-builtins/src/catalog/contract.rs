@@ -42,7 +42,16 @@ pub enum IoConsoleInferenceRule {
 pub enum IoReplFsInferenceRule {
     ChangeDirectory,
     CurrentDirectory,
+    Environment(EnvironmentInferenceRule),
     SearchPath(SearchPathInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum EnvironmentInferenceRule {
+    Read,
+    Exists,
+    Set,
+    Remove,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

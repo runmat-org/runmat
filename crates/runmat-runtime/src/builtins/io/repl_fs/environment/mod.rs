@@ -1,0 +1,10 @@
+mod dictionary;
+mod error;
+pub(crate) mod getenv;
+pub(crate) mod isenv;
+mod mutation;
+mod names;
+mod output;
+pub(crate) mod setenv;
+pub(crate) mod unsetenv;
+mod values;

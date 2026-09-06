@@ -68,9 +68,18 @@ pub(crate) fn finish_fixed(
     entry: &BuiltinCatalogEntry,
     request: &CallRequest,
     output: ValueFact,
+    diagnostics: Vec<InferenceDiagnostic>,
+) -> CallInference {
+    finish_fixed_outputs(entry, request, vec![output], diagnostics)
+}
+
+pub(crate) fn finish_fixed_outputs(
+    entry: &BuiltinCatalogEntry,
+    request: &CallRequest,
+    outputs: Vec<ValueFact>,
     mut diagnostics: Vec<InferenceDiagnostic>,
 ) -> CallInference {
-    let mut contract = CallContract::fixed(vec![output]);
+    let mut contract = CallContract::fixed(outputs);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut inference = infer_call(&contract, request);

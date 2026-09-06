@@ -177,7 +177,10 @@ pub enum ConcatKind {
 }
 
 pub fn builtin_semantics_for(function: &BuiltinFunction) -> BuiltinSemantics {
-    builtin_semantics_for_name(function.name).unwrap_or_else(|| derive_semantics(function))
+    crate::builtin_catalog_entry_by_name(function.name)
+        .map(crate::BuiltinCatalogEntry::legacy_semantics)
+        .or_else(|| builtin_semantics_for_name(function.name))
+        .unwrap_or_else(|| derive_semantics(function))
 }
 
 pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
@@ -269,19 +272,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         },
 
         "jsondecode" | "jsonencode" | "fullfile" => pure(BuiltinSemanticKind::General),
-        "getenv" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::General,
-            ..pure(BuiltinSemanticKind::General)
-        },
-        "setenv" => BuiltinSemantics {
-            effects: BuiltinEffects::none().with_environment(),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::General,
-            ..pure(BuiltinSemanticKind::General)
-        },
         "tempname" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_random(),
             purity: BuiltinPurity::Impure,

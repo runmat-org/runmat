@@ -3,9 +3,14 @@ use log::info;
 #[cfg(target_arch = "wasm32")]
 use std::sync::Once;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(runmat_generating_wasm_registry)))]
 pub(crate) mod generated {
     include!("generated_wasm_registry.rs");
+}
+
+#[cfg(all(target_arch = "wasm32", runmat_generating_wasm_registry))]
+pub(crate) mod generated {
+    include!(env!("RUNMAT_WASM_REGISTRY_OUT"));
 }
 
 #[cfg(target_arch = "wasm32")]
