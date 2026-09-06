@@ -6,7 +6,6 @@ mod aggregate_semantics;
 mod array;
 mod distributed;
 mod introspection_semantics;
-mod io;
 mod logical;
 mod math;
 mod math_degree_trigonometric;

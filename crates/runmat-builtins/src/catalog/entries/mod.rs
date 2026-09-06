@@ -25,7 +25,7 @@ mod acceleration;
 mod aggregate;
 mod array;
 mod introspection;
-mod io;
+pub(in crate::catalog) mod io;
 mod logical;
 mod math;
 mod parallel;

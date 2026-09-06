@@ -1,4 +1,5 @@
 mod documentation;
+pub(in crate::catalog::entries::io::repl_fs) mod inference;
 
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinBindingDeclaration, BuiltinCatalogEntry,

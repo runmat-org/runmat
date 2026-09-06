@@ -17,6 +17,7 @@ pub mod movefile;
 pub mod open;
 pub mod opentoline;
 pub mod path;
+mod path_mutation;
 pub mod pcode;
 pub mod pwd;
 pub mod rmdir;

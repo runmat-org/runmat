@@ -209,10 +209,6 @@ pub fn write_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
 
-pub fn addpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
-}
-
 pub fn copyfile_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
@@ -304,10 +300,6 @@ pub fn movefile_type(args: &[Type], ctx: &ResolveContext) -> Type {
 
 pub fn rmdir_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
-}
-
-pub fn rmpath_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    string_type(args, ctx)
 }
 
 pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -547,7 +539,6 @@ mod tests {
     );
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
-    assert_resolver!(addpath_type_resolver, addpath_type, &[], Type::String);
     assert_resolver!(copyfile_type_resolver, copyfile_type, &[], Type::Num);
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
     assert_resolver!(
@@ -582,7 +573,6 @@ mod tests {
     assert_resolver!(mkdir_type_resolver, mkdir_type, &[], Type::Num);
     assert_resolver!(movefile_type_resolver, movefile_type, &[], Type::Num);
     assert_resolver!(rmdir_type_resolver, rmdir_type, &[], Type::Num);
-    assert_resolver!(rmpath_type_resolver, rmpath_type, &[], Type::String);
     assert_resolver!(savepath_type_resolver, savepath_type, &[], Type::Num);
     assert_resolver!(setenv_type_resolver, setenv_type, &[], Type::Num);
     assert_resolver!(tempdir_type_resolver, tempdir_type, &[], Type::String);

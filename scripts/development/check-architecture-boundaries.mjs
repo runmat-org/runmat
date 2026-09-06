@@ -211,7 +211,7 @@ if (catalogEntriesRootLines > 80) {
 if (/::(?:ENTRIES|ENTRY_GROUPS)\b/.test(catalogEntriesRoot)) {
   fail(`${catalogEntriesRootPath} must register domains, not family or identity entry slices`);
 }
-const declaredCatalogDomains = [...catalogEntriesRoot.matchAll(/^mod\s+([a-z][a-z0-9_]*)\s*;/gm)]
+const declaredCatalogDomains = [...catalogEntriesRoot.matchAll(/^(?:pub\(in\s+crate::catalog\)\s+)?mod\s+([a-z][a-z0-9_]*)\s*;/gm)]
   .map((match) => match[1])
   .sort();
 const registeredCatalogDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_entries\(entries\);$/gm)]
@@ -1269,10 +1269,9 @@ enforceMigratedBuiltinFamily({
   name: "clear-console identity",
   roots: [
     "crates/runmat-builtins/src/catalog/entries/io/console/clc",
-    "crates/runmat-builtins/src/catalog/inference/io",
   ],
   compositionFiles: [
-    "crates/runmat-builtins/src/catalog/inference/io/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/io/console/mod.rs",
   ],
   obsoletePaths: [
     "docs/builtins/reference/clc.json",
@@ -1322,7 +1321,6 @@ enforceMigratedBuiltinFamily({
   name: "search-path query and replacement identity",
   roots: [
     "crates/runmat-builtins/src/catalog/entries/io/repl_fs/path",
-    "crates/runmat-builtins/src/catalog/inference/io",
     "crates/runmat-runtime/src/builtins/io/repl_fs/path",
   ],
   compositionFiles: [
@@ -1339,8 +1337,10 @@ enforceMigratedBuiltinFamily({
 
 for (const [sourcePath, ceiling] of new Map([
   ["crates/runmat-builtins/src/catalog/inference/routing/io/mod.rs", 32],
-  ["crates/runmat-builtins/src/catalog/inference/routing/io/console.rs", 32],
-  ["crates/runmat-builtins/src/catalog/inference/routing/io/repl_fs.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/console/mod.rs", 32],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/mod.rs", 40],
+  ["crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path/mod.rs", 32],
 ])) {
   const lines = read(sourcePath).split("\n").length;
   if (lines > ceiling) {
@@ -1355,6 +1355,17 @@ const ioRouting = rustSources("crates/runmat-builtins/src/catalog/inference/rout
   .join("\n");
 if (/IoInferenceRule::(?:ClearConsole|ChangeDirectory|CurrentDirectory|SearchPath)\b/.test(ioRouting)) {
   fail("IO inference routing must use typed domain subrules instead of a growing flat builtin list");
+}
+if (rustSources("crates/runmat-builtins/src/catalog/inference/io").length > 0) {
+  fail("IO inference belongs beside its catalog entries; the secondary inference tree must not return");
+}
+for (const obsolete of [
+  "crates/runmat-builtins/src/catalog/inference/routing/io/console.rs",
+  "crates/runmat-builtins/src/catalog/inference/routing/io/repl_fs.rs",
+]) {
+  if (fs.existsSync(path.join(repo, obsolete))) {
+    fail(`${obsolete} duplicates the domain-owned IO inference router`);
+  }
 }
 
 const cdRuntimePath = "crates/runmat-runtime/src/builtins/io/repl_fs/cd/mod.rs";
@@ -1380,6 +1391,35 @@ if (/"path"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) 
 }
 if (/\bpub fn path_type\b/.test(read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs"))) {
   fail("legacy runtime type resolver must not reclaim path inference authority");
+}
+
+for (const identity of ["addpath", "rmpath"]) {
+  enforceMigratedBuiltinFamily({
+    name: `${identity} search-path mutation identity`,
+    roots: [
+      `crates/runmat-builtins/src/catalog/entries/io/repl_fs/${identity}`,
+      "crates/runmat-builtins/src/catalog/entries/io/repl_fs/search_path",
+      `crates/runmat-runtime/src/builtins/io/repl_fs/${identity}`,
+    ],
+    compositionFiles: [
+      `crates/runmat-builtins/src/catalog/entries/io/repl_fs/${identity}/mod.rs`,
+      `crates/runmat-runtime/src/builtins/io/repl_fs/${identity}/mod.rs`,
+    ],
+    obsoletePaths: [
+      `crates/runmat-runtime/src/builtins/io/repl_fs/${identity}.rs`,
+      `docs/builtins/reference/${identity}.json`,
+      `crates/runmat-runtime/src/builtins/builtins-json/${identity}.json`,
+    ],
+    leafLineCeiling: 192,
+    testLineCeiling: 192,
+  });
+}
+const legacyIoResolvers = read("crates/runmat-runtime/src/builtins/io/type_resolvers.rs");
+if (/\bpub fn (?:addpath|rmpath)_type\b/.test(legacyIoResolvers)) {
+  fail("legacy runtime type resolvers must not reclaim addpath or rmpath inference authority");
+}
+if (/"(?:addpath|rmpath)"\s*(?:\||=>)/.test(read("crates/runmat-builtins/src/semantics.rs"))) {
+  fail("legacy name-selected semantics must not reclaim addpath or rmpath authority");
 }
 
 if (/\b(?:category|summary|keywords|descriptor|type_resolver)\s*=/.test(
