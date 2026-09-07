@@ -1,9 +1,13 @@
 mod contract;
 mod documentation;
 
+#[cfg(test)]
+mod inference_tests;
+
 use crate::*;
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
+pub(super) use contract::INFERENCE_POLICY;
 pub use contract::*;
 
 const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];

@@ -2175,8 +2175,32 @@ enforceMigratedBuiltinFamily({
     "crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/mod.rs",
     "crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/inference/mod.rs",
   ],
-  obsoletePaths: [],
+  obsoletePaths: [
+    "docs/builtins/reference/ldivide.json",
+    "docs/builtins/reference/power.json",
+    "docs/builtins/reference/rdivide.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/ldivide.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/power.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/rdivide.json",
+  ],
 });
+const catalogInferenceFacade = read("crates/runmat-builtins/src/catalog/inference.rs");
+if (catalogInferenceFacade.split("\n").length > 64) {
+  fail("catalog inference must remain a bounded domain router, not a builtin semantic owner");
+}
+if (/\bmatch\b|\bBuiltinInferenceRule::/.test(catalogInferenceFacade)) {
+  fail("catalog inference facade must delegate to typed domain routing without owning rule dispatch");
+}
+const binaryArithmeticCatalogInferenceRoot =
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/inference";
+for (const { path: sourcePath, text } of rustSources(binaryArithmeticCatalogInferenceRoot)) {
+  if (/\bBinaryArithmeticInferenceRule\b/.test(text)) {
+    fail(`${sourcePath} selects builtin identity inside shared inference; route typed policy from the family catalog`);
+  }
+  if (/"(?:plus|minus|times|rdivide|ldivide|power)"/.test(text)) {
+    fail(`${sourcePath} embeds a builtin identity inside shared inference; keep identity data with its catalog entry`);
+  }
+}
 const binaryArithmeticRuntimeRoot =
   "crates/runmat-runtime/src/builtins/math/elementwise/binary_arithmetic";
 const binaryArithmeticRuntimeComposition = read(`${binaryArithmeticRuntimeRoot}/mod.rs`);
@@ -2186,14 +2210,27 @@ if (binaryArithmeticRuntimeComposition.split("\n").length > 64) {
 if (fs.existsSync(path.join(repo, `${binaryArithmeticRuntimeRoot}/output_prototype.rs`))) {
   fail("binary-arithmetic output-prototype service must remain split by domain role");
 }
-const binaryArithmeticProviderSupport = read(
-  `${binaryArithmeticRuntimeRoot}/provider_support.rs`
+if (fs.existsSync(path.join(repo, `${binaryArithmeticRuntimeRoot}/provider_support.rs`))) {
+  fail("binary-arithmetic provider support must remain a role-oriented module tree");
+}
+const binaryArithmeticProviderSupportFacade = read(
+  `${binaryArithmeticRuntimeRoot}/provider_support/mod.rs`
 );
+if (binaryArithmeticProviderSupportFacade.split("\n").length > 64) {
+  fail("binary-arithmetic provider support facade must remain a bounded module router");
+}
+const gpuHelpers = read("crates/runmat-runtime/src/builtins/common/gpu_helpers.rs");
+const exactIntegerScalarUpload = gpuHelpers.match(
+  /pub fn upload_exact_integer_scalar_like[\s\S]*?\npub fn resident_gpu_value/
+)?.[0];
 if (
-  binaryArithmeticProviderSupport.split("\n").length > 160 ||
-  Buffer.byteLength(binaryArithmeticProviderSupport, "utf8") > 16 * 1024
+  !exactIntegerScalarUpload ||
+  !/anyhow::Result<Option<GpuTensorHandle>>/.test(exactIntegerScalarUpload)
 ) {
-  fail("binary-arithmetic provider support exceeds its bounded family role");
+  fail("exact integer scalar upload must distinguish inapplicable input from provider failure");
+}
+if (/\.ok\(\)/.test(exactIntegerScalarUpload)) {
+  fail("exact integer scalar upload must not discard operational provider failures");
 }
 for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot)) {
   if (/\b(?:BuiltinDescriptor|BuiltinIntegerCapabilityDescriptor)\s*=/.test(text)) {
@@ -2202,8 +2239,23 @@ for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot
   if (/match\s+[^\n{]*(?:builtin_)?name|(?:builtin_)?name\s*(?:==|!=)/.test(text)) {
     fail(`${sourcePath} selects binary-arithmetic semantics from an identity string`);
   }
+  const isProviderImplementation =
+    !sourcePath.includes("/tests/") &&
+    (sourcePath.endsWith("/provider.rs") || sourcePath.includes("/provider/"));
+  if (
+    isProviderImplementation &&
+    (/\.await\.ok\(\)/.test(text) || /if\s+let\s+Ok\([^)]*\)\s*=\s*provider\./.test(text))
+  ) {
+    fail(`${sourcePath} silently discards provider failures; distinguish typed unsupported hooks from operational errors`);
+  }
 }
-for (const identity of ["minus", "plus", "times"]) {
+for (const identity of ["ldivide", "minus", "plus", "power", "rdivide", "times"]) {
+  const catalogIdentityRoot =
+    `crates/runmat-builtins/src/catalog/entries/math/elementwise/binary_arithmetic/${identity}`;
+  const catalogContract = read(`${catalogIdentityRoot}/contract.rs`);
+  if (!/\bINFERENCE_POLICY\b/.test(catalogContract)) {
+    fail(`${catalogIdentityRoot}/contract.rs must own its typed inference policy`);
+  }
   const obsoleteFlatPath = `crates/runmat-runtime/src/builtins/math/elementwise/${identity}.rs`;
   if (fs.existsSync(path.join(repo, obsoleteFlatPath))) {
     fail(`${obsoleteFlatPath} is obsolete flat binary-arithmetic layout debt`);
@@ -2222,39 +2274,23 @@ for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot
     fail(`${sourcePath} restores an identity-local provider helper; use provider_support`);
   }
 }
-const binaryArithmeticRuntimeBoundaries = new Map([
-  [`${binaryArithmeticRuntimeRoot}/mod.rs`, 64],
-  [`${binaryArithmeticRuntimeRoot}/output_prototype/mod.rs`, 96],
-  [`${binaryArithmeticRuntimeRoot}/output_prototype/analysis.rs`, 128],
-  [`${binaryArithmeticRuntimeRoot}/output_prototype/conversion.rs`, 128],
-  [`${binaryArithmeticRuntimeRoot}/output_prototype/parse.rs`, 64],
-  [`${binaryArithmeticRuntimeRoot}/output_prototype/placement.rs`, 160],
-  [`${binaryArithmeticRuntimeRoot}/provider_support.rs`, 160],
-  [`${binaryArithmeticRuntimeRoot}/minus/mod.rs`, 160],
+const binaryArithmeticLegacyBoundaryOverrides = new Map([
   [`${binaryArithmeticRuntimeRoot}/minus/host.rs`, 384],
-  [`${binaryArithmeticRuntimeRoot}/minus/provider.rs`, 192],
-  [`${binaryArithmeticRuntimeRoot}/minus/tests/mod.rs`, 64],
   [`${binaryArithmeticRuntimeRoot}/minus/tests/host.rs`, 448],
   [`${binaryArithmeticRuntimeRoot}/minus/tests/provider.rs`, 320],
-  [`${binaryArithmeticRuntimeRoot}/minus/tests/wgpu.rs`, 128],
-  [`${binaryArithmeticRuntimeRoot}/plus/mod.rs`, 160],
   [`${binaryArithmeticRuntimeRoot}/plus/host.rs`, 384],
-  [`${binaryArithmeticRuntimeRoot}/plus/provider.rs`, 256],
-  [`${binaryArithmeticRuntimeRoot}/plus/tests/mod.rs`, 64],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/host.rs`, 448],
   [`${binaryArithmeticRuntimeRoot}/plus/tests/provider.rs`, 256],
-  [`${binaryArithmeticRuntimeRoot}/plus/tests/wgpu.rs`, 256],
-  [`${binaryArithmeticRuntimeRoot}/times/mod.rs`, 160],
   [`${binaryArithmeticRuntimeRoot}/times/host.rs`, 384],
-  [`${binaryArithmeticRuntimeRoot}/times/provider.rs`, 192],
-  [`${binaryArithmeticRuntimeRoot}/times/tests/mod.rs`, 64],
   [`${binaryArithmeticRuntimeRoot}/times/tests/host.rs`, 448],
   [`${binaryArithmeticRuntimeRoot}/times/tests/provider.rs`, 320],
-  [`${binaryArithmeticRuntimeRoot}/times/tests/wgpu.rs`, 128],
 ]);
-for (const [sourcePath, ceiling] of binaryArithmeticRuntimeBoundaries) {
-  const text = read(sourcePath);
+for (const { path: sourcePath, text } of rustSources(binaryArithmeticRuntimeRoot)) {
   const lines = text.split("\n").length;
+  const isFamilyComposition = sourcePath === `${binaryArithmeticRuntimeRoot}/mod.rs`;
+  const isTestComposition = sourcePath.endsWith("/tests/mod.rs");
+  const ceiling = binaryArithmeticLegacyBoundaryOverrides.get(sourcePath)
+    ?? (isFamilyComposition || isTestComposition ? 64 : 224);
   if (lines > ceiling || Buffer.byteLength(text, "utf8") > 24 * 1024) {
     fail(
       `${sourcePath} exceeds its binary-arithmetic role boundary ` +

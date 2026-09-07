@@ -11,10 +11,10 @@ pub(super) enum PrototypeClass {
     Complex,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum DevicePreference {
     Host,
-    Gpu,
+    LikeGpu(runmat_accelerate_api::GpuTensorHandle),
 }
 
 pub(super) struct LikeAnalysis {
@@ -28,8 +28,8 @@ pub(super) async fn analyse(
     prototype: &Value,
 ) -> BuiltinResult<LikeAnalysis> {
     match prototype {
-        Value::GpuTensor(_) => Ok(LikeAnalysis {
-            device: DevicePreference::Gpu,
+        Value::GpuTensor(handle) => Ok(LikeAnalysis {
+            device: DevicePreference::LikeGpu(handle.clone()),
             class: PrototypeClass::Real,
         }),
         Value::Tensor(_)

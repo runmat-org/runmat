@@ -1,6 +1,9 @@
 use super::super::contract::{INPUT_A, INPUT_B, INTEGER_INPUTS, LIKE, OUTPUT, PROTOTYPE};
 use crate::*;
 
+pub(in crate::catalog::entries::math::elementwise::binary_arithmetic) const INFERENCE_POLICY:
+    super::super::inference::BinaryArithmeticInferencePolicy = super::super::inference::REAL_RESULT;
+
 const SIGNATURES: &[BuiltinSignatureDescriptor] = &[
     BuiltinSignatureDescriptor {
         label: "C = times(A, B)",

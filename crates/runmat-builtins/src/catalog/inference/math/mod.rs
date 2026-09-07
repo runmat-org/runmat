@@ -10,6 +10,7 @@ pub(super) mod gamma_functions;
 pub(super) mod heaviside;
 pub(super) mod hypotenuse;
 pub(super) mod integer_division;
+pub(super) mod inverse;
 pub(super) mod logarithms;
 pub(super) mod magnitude_phase_sign;
 pub(super) mod numeric_conversion;
