@@ -68,6 +68,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::NumericComponent(rule) => {
             super::super::math::complex_components::infer(request, entry, rule)
         }
+        MathInferenceRule::Rescale => {
+            crate::catalog::entries::math::elementwise::rescale::infer(request, entry)
+        }
         MathInferenceRule::Typecast => {
             crate::catalog::entries::math::elementwise::typecast::infer(request, entry)
         }
