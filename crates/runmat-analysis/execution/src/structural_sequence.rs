@@ -10,6 +10,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
 use runmat_meshing_core::SolverMeshArtifact;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     import_semantic_state_completion, import_structural_linear_completion,
@@ -21,7 +22,8 @@ use crate::{
 
 /// Stable semantic node names used to bind generic scheduler dependencies to an authored
 /// structural sequence. They identify meaning, not placement or an execution attempt.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StructuralSequenceNode {
     Solve(ProcedureStepId),
     PublishState {
@@ -76,6 +78,7 @@ impl PreparedStructuralStateWave {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralSequenceStep {
     pub step_id: ProcedureStepId,
     pub host: AnalysisHostWorkload,
@@ -84,6 +87,7 @@ pub struct CompletedStructuralSequenceStep {
     pub objects: PreparedAnalysisObjects,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralSequenceState {
     pub producer_step: ProcedureStepId,
     pub state_id: StateId,
@@ -91,9 +95,118 @@ pub struct CompletedStructuralSequenceState {
     pub objects: PreparedAnalysisObjects,
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralSequence {
     pub steps: Vec<CompletedStructuralSequenceStep>,
     pub states: Vec<CompletedStructuralSequenceState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralSequenceResultClosure {
+    pub node: StructuralSequenceNode,
+    pub response: ProgramExecutionResponse,
+}
+
+impl CompletedStructuralSequence {
+    pub fn result_closures(
+        &self,
+        access: &ArtifactAccess,
+    ) -> AnalysisBridgeResult<Vec<StructuralSequenceResultClosure>> {
+        let steps = self.steps.iter().map(|step| {
+            result_closure(
+                StructuralSequenceNode::Solve(step.step_id.clone()),
+                &step.objects,
+                access,
+            )
+        });
+        let states = self.states.iter().map(|state| {
+            result_closure(
+                StructuralSequenceNode::PublishState {
+                    producer_step: state.producer_step.clone(),
+                    state_id: state.state_id.clone(),
+                },
+                &state.objects,
+                access,
+            )
+        });
+        steps.chain(states).collect()
+    }
+}
+
+fn result_closure(
+    node: StructuralSequenceNode,
+    objects: &PreparedAnalysisObjects,
+    access: &ArtifactAccess,
+) -> AnalysisBridgeResult<StructuralSequenceResultClosure> {
+    let references =
+        objects.references(access, runmat_execution::value::ValueRefKind::ResultObject)?;
+    let root = references.first().cloned().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("sequence result closure contains no root object".into())
+    })?;
+    Ok(StructuralSequenceResultClosure {
+        node,
+        response: ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
+                root,
+            ))],
+            result_objects: references,
+        },
+    })
+}
+
+pub fn import_structural_sequence_completion(
+    source: &impl CacheImport,
+    preparation: StructuralSequencePreparation,
+    closures: Vec<StructuralSequenceResultClosure>,
+) -> AnalysisBridgeResult<CompletedStructuralSequence> {
+    let mut responses = BTreeMap::new();
+    for closure in closures {
+        if responses.insert(closure.node, closure.response).is_some() {
+            return Err(AnalysisBridgeError::Invalid(
+                "structural sequence closure contains a duplicate node".into(),
+            ));
+        }
+    }
+    let mut coordinator = StructuralSequenceCoordinator::new(preparation)?;
+    while !coordinator.is_complete() {
+        let solve_wave = coordinator.prepare_next_solve_wave()?;
+        let solve_responses = take_wave_responses(
+            solve_wave.tasks.iter().map(|task| &task.node),
+            &mut responses,
+        )?;
+        let state_wave = coordinator.complete_solve_wave(source, solve_wave, solve_responses)?;
+        let state_responses = take_wave_responses(
+            state_wave.tasks.iter().map(|task| &task.node),
+            &mut responses,
+        )?;
+        coordinator.complete_state_wave(source, state_wave, state_responses)?;
+    }
+    if !responses.is_empty() {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural sequence closure contains an unauthored node".into(),
+        ));
+    }
+    coordinator.finish()
+}
+
+fn take_wave_responses<'a>(
+    nodes: impl IntoIterator<Item = &'a StructuralSequenceNode>,
+    responses: &mut BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+) -> AnalysisBridgeResult<BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>> {
+    nodes
+        .into_iter()
+        .map(|node| {
+            responses
+                .remove(node)
+                .map(|response| (node.clone(), response))
+                .ok_or_else(|| {
+                    AnalysisBridgeError::Invalid(format!(
+                        "structural sequence closure is missing node {node:?}"
+                    ))
+                })
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -121,49 +234,9 @@ pub struct StructuralSequenceCoordinator {
 
 impl StructuralSequenceCoordinator {
     pub fn new(preparation: StructuralSequencePreparation) -> AnalysisBridgeResult<Self> {
-        let model = preparation
-            .workloads
-            .values()
-            .next()
-            .ok_or_else(|| {
-                AnalysisBridgeError::Invalid(
-                    "structural sequence preparation has no step workloads".into(),
-                )
-            })?
-            .model
-            .clone();
+        let model = validated_structural_sequence_model(&preparation.workloads)?;
         let sequence = validate_model_sequence(&model)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        let expected_steps = sequence
-            .sequence()
-            .steps
-            .iter()
-            .map(|step| step.step_id.clone())
-            .collect::<BTreeSet<_>>();
-        if preparation
-            .workloads
-            .keys()
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            != expected_steps
-        {
-            return Err(AnalysisBridgeError::Invalid(
-                "structural sequence workloads do not exactly cover the authored steps".into(),
-            ));
-        }
-        for (step_id, workload) in &preparation.workloads {
-            workload.validate_sequence_template()?;
-            if workload.model != model || workload.step_id != *step_id {
-                return Err(AnalysisBridgeError::Identity(
-                    "structural sequence workload differs from its authored step or model",
-                ));
-            }
-            if workload.initial_guess_transition.is_some() {
-                return Err(AnalysisBridgeError::Invalid(
-                    "sequence preparation does not accept a prebound state transition".into(),
-                ));
-            }
-        }
         preparation
             .mesh
             .validate()
@@ -534,4 +607,52 @@ impl StructuralSequenceCoordinator {
             })
             .collect()
     }
+}
+
+pub fn validate_structural_sequence_workloads(
+    workloads: &BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
+) -> AnalysisBridgeResult<()> {
+    validated_structural_sequence_model(workloads).map(|_| ())
+}
+
+fn validated_structural_sequence_model(
+    workloads: &BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
+) -> AnalysisBridgeResult<runmat_analysis_core::AnalysisModel> {
+    let model = workloads
+        .values()
+        .next()
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid(
+                "structural sequence preparation has no step workloads".into(),
+            )
+        })?
+        .model
+        .clone();
+    let sequence = validate_model_sequence(&model)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_steps = sequence
+        .sequence()
+        .steps
+        .iter()
+        .map(|step| step.step_id.clone())
+        .collect::<BTreeSet<_>>();
+    if workloads.keys().cloned().collect::<BTreeSet<_>>() != expected_steps {
+        return Err(AnalysisBridgeError::Invalid(
+            "structural sequence workloads do not exactly cover the authored steps".into(),
+        ));
+    }
+    for (step_id, workload) in workloads {
+        workload.validate_sequence_template()?;
+        if workload.model != model || workload.step_id != *step_id {
+            return Err(AnalysisBridgeError::Identity(
+                "structural sequence workload differs from its authored step or model",
+            ));
+        }
+        if workload.initial_guess_transition.is_some() {
+            return Err(AnalysisBridgeError::Invalid(
+                "sequence preparation does not accept a prebound state transition".into(),
+            ));
+        }
+    }
+    Ok(model)
 }

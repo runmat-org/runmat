@@ -1,15 +1,12 @@
 //! Driver-owned whole-study composition for exact CAD and structural-static analysis.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use runmat_analysis_execution::{
-    build_analysis_task_submission, import_structural_linear_result, AnalysisExecutionContext,
-};
+use runmat_analysis_execution::StructuralSequencePreparation;
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
-use runmat_execution::identity::ArtifactId;
+use runmat_execution::state::TaskState;
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::ValuePayload;
 use runmat_execution::Digest;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
@@ -17,7 +14,7 @@ use runmat_execution_transport_native::control::ResourceRequest as AllocationRes
 
 use super::exact_meshing::RemoteExactMeshingComposition;
 use super::pool_execution::RemotePoolExecutionOutcome;
-use super::pool_tasks::{execution_failure_outcome, packaged, task_failure_outcome};
+use super::pool_tasks::{execution_failure_outcome, packaged};
 use super::RemotePoolDriver;
 use crate::{BoundaryRegionResolution, NativeExecutionError, NativeExecutionResult};
 
@@ -131,68 +128,43 @@ pub(super) async fn execute_with_completed_meshing(
         ObjectInventoryLimits::default(),
     )?;
 
-    let mut workload = decoded.workload_template.clone();
-    let completed_signals = match super::signal_materialization::apply_to_workload(
-        &mut workload,
-        &decoded.signal_materializations,
-        signal_outcomes,
-    ) {
-        Ok(completed) => completed,
-        Err(terminal) => return Ok(signal_composition(terminal)),
-    };
-    if let Err(error) = resolve_workload_boundary_aliases(&mut workload, &resolution) {
-        return Ok(RemoteExactStructuralStudyComposition::Failed(error));
+    let unresolved_workloads_digest =
+        crate::exact_structural_study_root::structural_workload_inventory_digest(
+            &decoded.workloads,
+        )?;
+    let mut workloads = decoded.workloads.clone();
+    let mut completed_signals = None;
+    for workload in workloads.values_mut() {
+        let completed_for_step = match super::signal_materialization::apply_to_workload(
+            workload,
+            &decoded.signal_materializations,
+            signal_outcomes,
+        ) {
+            Ok(completed) => completed,
+            Err(terminal) => return Ok(signal_composition(terminal)),
+        };
+        completed_signals.get_or_insert(completed_for_step);
+        if let Err(error) = resolve_workload_boundary_aliases(workload, &resolution) {
+            return Ok(RemoteExactStructuralStudyComposition::Failed(error));
+        }
     }
-    let unresolved_workload_digest = Digest::sha256(
-        &decoded
-            .workload_template
-            .canonical_bytes()
-            .map_err(protocol)?,
-    );
-    let prepared = crate::exact_structural_study_root::prepare_structural_study_analysis_program(
-        decoded.authored_study_digest,
-        decoded.frozen_project_digest,
-        request.recipe.program_revision.clone(),
-        decoded.artifact_access.clone(),
-        workload,
-        completed.result.artifact.clone(),
-    )
-    .map_err(protocol)?;
-    for object in &prepared.program.objects {
-        pool.register_execution_object(object.reference.clone(), object.bytes.clone())?;
-    }
-    let roots = prepared
-        .program
-        .request
-        .arguments
-        .iter()
-        .map(|argument| match argument {
-            ValuePayload::Object(reference) => Ok(reference.as_ref().clone()),
-            ValuePayload::Inline(_) => Err(protocol("analysis inputs must be externalized")),
-        })
-        .collect::<NativeExecutionResult<Vec<_>>>()?;
-    let mut task_resources = super::pool_resources::task_resources(resources)?;
-    task_resources.required_capabilities = prepared
-        .host
-        .workload
-        .generic_capabilities()
-        .map_err(protocol)?;
-    let submission = build_analysis_task_submission(
-        &prepared.host,
-        roots,
-        Vec::new(),
-        BTreeSet::new(),
-        AnalysisExecutionContext {
-            scope_id: pool.scope_id(),
-            pool_id: pool.pool_id(),
-            program_artifact_id: ArtifactId::derive(&[prepared
-                .program
-                .request
-                .artifact
-                .id
-                .0
-                .bytes()]),
-            resources: task_resources,
+    let completed_signals = completed_signals
+        .ok_or_else(|| protocol("remote structural sequence contains no workload"))?;
+    let sequence = match crate::execute_structural_sequence_remotely(
+        Arc::clone(&pool),
+        StructuralSequencePreparation {
+            authored_study_digest: decoded.authored_study_digest,
+            frozen_project_digest: decoded.frozen_project_digest,
+            program_revision: request.recipe.program_revision.clone(),
+            artifact_access: decoded.artifact_access.clone(),
+            workloads,
+            mesh: completed.result.artifact.clone(),
+            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: Default::default(),
+        },
+        crate::StructuralSequenceExecutionPolicy {
+            resources: super::pool_resources::task_resources(resources)?,
             retry: RetryPolicy::ExplicitlyIdempotent {
                 max_attempts: runmat_analysis_execution::DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
             },
@@ -202,27 +174,11 @@ pub(super) async fn execute_with_completed_meshing(
             priority: 0,
         },
     )
-    .map_err(protocol)?;
-    let task_id = submission.request.id;
-    let completion = pool.submit(submission, prepared.program.request.clone())?;
-    let success = match completion.wait().await {
-        Ok(success) => success,
-        Err(message) => return task_failure_outcome(pool, task_id, message).map(composition),
+    .await
+    {
+        Ok(sequence) => sequence,
+        Err(error) => return Ok(sequence_error_composition(&pool, error.to_string())),
     };
-    let analysis_response = ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: success.outputs,
-        result_objects: success.result_objects,
-    };
-    if let Err(error) = import_structural_linear_result(
-        pool.as_ref(),
-        analysis_response.clone(),
-        &prepared,
-        ObjectInventoryLimits::default(),
-    ) {
-        return Ok(RemoteExactStructuralStudyComposition::Failed(
-            error.to_string(),
-        ));
-    }
     let (response, objects) =
         crate::exact_structural_study_root::package_exact_structural_study_result(
             request,
@@ -230,13 +186,35 @@ pub(super) async fn execute_with_completed_meshing(
             &completed.result,
             &boundary_objects,
             &completed_signals,
-            &analysis_response,
-            unresolved_workload_digest,
+            &sequence,
+            unresolved_workloads_digest,
         )?;
     for object in objects {
         pool.register_execution_object(object.reference, object.bytes)?;
     }
     Ok(RemoteExactStructuralStudyComposition::Completed(response))
+}
+
+fn sequence_error_composition(
+    pool: &RemotePoolDriver,
+    message: String,
+) -> RemoteExactStructuralStudyComposition {
+    let snapshot = pool.snapshot();
+    if snapshot
+        .tasks
+        .values()
+        .any(|task| task.state == TaskState::Indeterminate)
+    {
+        RemoteExactStructuralStudyComposition::Indeterminate(message)
+    } else if snapshot
+        .tasks
+        .values()
+        .any(|task| task.state == TaskState::Cancelled)
+    {
+        RemoteExactStructuralStudyComposition::Cancelled
+    } else {
+        RemoteExactStructuralStudyComposition::Failed(message)
+    }
 }
 
 fn signal_composition(

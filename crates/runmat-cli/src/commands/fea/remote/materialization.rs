@@ -43,7 +43,7 @@ pub(crate) fn materialize_remote_outputs(
         &expectation,
         ObjectInventoryLimits::default(),
     )?;
-    let numerical = sequence_result(&study, &result)?;
+    let numerical = sequence_result(&result)?;
     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
         study,
         runmat_runtime::meshing::MeshingExecutionOutput {
@@ -114,7 +114,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
                     format!("{run_id}_study_{}", entry.study_index),
                 )
                 .map_err(anyhow::Error::msg)?;
-                let numerical = sequence_result(&intent, &result)?;
+                let numerical = sequence_result(&result)?;
                 let envelope =
                     runmat_runtime::analysis::analysis_complete_structural_study_intent_op(
                         intent,
@@ -178,7 +178,7 @@ fn result_expectation(
         authored_study_digest: study.authored_study_digest(),
         frozen_project_digest: Some(*revision.graph_digest()),
         geometry_source_digest: study.geometry_source_digest(),
-        workload_template: single_workload(study)?,
+        workloads: study.workloads(),
         signal_materializations: signal_materializations.to_vec(),
         expected_meshing_request: authored_meshing_request(study)?,
     };
@@ -186,34 +186,27 @@ fn result_expectation(
     Ok(expectation)
 }
 
-fn single_workload(
-    study: &PreparedStructuralStudyIntent,
-) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkload> {
-    let workloads = study.workloads();
-    if workloads.len() != 1 {
-        anyhow::bail!(
-            "remote exact-study materialization requires one procedure step until the sequence root is enabled"
-        );
-    }
-    workloads
-        .into_values()
-        .next()
-        .context("remote structural study contains no workload")
-}
-
 fn sequence_result(
-    study: &PreparedStructuralStudyIntent,
     result: &runmat_execution_runner_native::ExactStructuralStudyResult,
 ) -> Result<StructuralStudySequenceNumericalResult> {
-    let workload = single_workload(study)?;
     Ok(StructuralStudySequenceNumericalResult {
-        frozen_project_digest: None,
-        steps: vec![StructuralStudyStepNumericalResult {
-            step_id: workload.step_id,
-            solver_result_identity: result.solver_result_identity,
-            result: result.analysis.run.clone(),
-        }],
-        states: Vec::new(),
+        frozen_project_digest: result.frozen_project_digest,
+        steps: result
+            .sequence
+            .steps
+            .iter()
+            .map(|step| StructuralStudyStepNumericalResult {
+                step_id: step.step_id.clone(),
+                solver_result_identity: step.result_identity,
+                result: step.result.run.clone(),
+            })
+            .collect(),
+        states: result
+            .sequence
+            .states
+            .iter()
+            .map(|state| state.state.clone())
+            .collect(),
     })
 }
 

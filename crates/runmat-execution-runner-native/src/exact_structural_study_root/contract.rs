@@ -2,14 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, PreparedSignalGeneratorChunk,
-    PreparedSignalGeneratorProgram, PreparedSignalMaterialization, PreparedStructuralLinearProgram,
+    PreparedSignalGeneratorProgram, PreparedSignalMaterialization,
 };
 use runmat_analysis_fea::execution::StructuralLinearWorkload;
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{Digest, OutputContract, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
-use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
@@ -34,7 +33,7 @@ struct ExactStructuralStudyRootRequest {
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
     geometry_source_digest: Digest,
-    workload_template: StructuralLinearWorkload,
+    workloads: BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     signal_materializations: Vec<ExactSignalMaterializationRequest>,
     exact_meshing: ProgramExecutionDescriptor,
     exact_argument_count: u32,
@@ -42,7 +41,8 @@ struct ExactStructuralStudyRootRequest {
 
 impl ExactStructuralStudyRootRequest {
     fn validate(&self) -> NativeExecutionResult<()> {
-        self.workload_template.validate().map_err(protocol)?;
+        runmat_analysis_execution::validate_structural_sequence_workloads(&self.workloads)
+            .map_err(protocol)?;
         self.exact_meshing.validate().map_err(protocol)?;
         let prepared_signals = self
             .signal_materializations
@@ -50,7 +50,7 @@ impl ExactStructuralStudyRootRequest {
             .map(ExactSignalMaterializationRequest::to_prepared)
             .collect::<NativeExecutionResult<Vec<_>>>()?;
         validate_signal_inventory(
-            &self.workload_template,
+            &self.workloads,
             &prepared_signals,
             &self.exact_meshing.recipe.program_revision,
         )?;
@@ -144,7 +144,7 @@ pub struct ExactStructuralStudyRootPreparation {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
-    pub workload_template: StructuralLinearWorkload,
+    pub workloads: BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     pub signal_materializations: Vec<PreparedSignalMaterialization>,
     pub exact_meshing: PreparedExactMeshingRoot,
 }
@@ -216,7 +216,7 @@ impl PreparedExactStructuralStudyRoot {
             authored_study_digest: self.root.authored_study_digest,
             frozen_project_digest: self.root.frozen_project_digest,
             geometry_source_digest: self.root.geometry_source_digest,
-            workload_template: self.root.workload_template.clone(),
+            workloads: self.root.workloads.clone(),
             signal_materializations: self.signal_expectations.clone(),
             expected_meshing_request: self.expected_meshing_request.clone(),
         }
@@ -232,7 +232,7 @@ pub struct DecodedExactStructuralStudyRoot {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
-    pub workload_template: StructuralLinearWorkload,
+    pub workloads: BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     pub signal_materializations: Vec<PreparedSignalMaterialization>,
     pub exact_meshing: ProgramExecutionRequest,
     pub meshing_request: MeshingRequest,
@@ -248,7 +248,7 @@ pub fn prepare_exact_structural_study_root(
         authored_study_digest,
         frozen_project_digest,
         geometry_source_digest,
-        workload_template,
+        workloads,
         signal_materializations,
         exact_meshing,
     } = preparation;
@@ -256,11 +256,7 @@ pub fn prepare_exact_structural_study_root(
     let exact_request = exact_meshing.request().clone();
     let expected_meshing_request = exact_meshing.meshing_request().clone();
     let exact_programs = exact_meshing.required_programs()?;
-    validate_signal_inventory(
-        &workload_template,
-        &signal_materializations,
-        &program_revision,
-    )?;
+    validate_signal_inventory(&workloads, &signal_materializations, &program_revision)?;
     let signal_expectations = signal_materializations
         .iter()
         .map(PreparedSignalMaterialization::expectation)
@@ -283,7 +279,7 @@ pub fn prepare_exact_structural_study_root(
         authored_study_digest,
         frozen_project_digest,
         geometry_source_digest,
-        workload_template,
+        workloads,
         signal_materializations: signal_materializations
             .iter()
             .map(ExactSignalMaterializationRequest::from_prepared)
@@ -428,7 +424,7 @@ pub fn decode_exact_structural_study_root(
         authored_study_digest: root.authored_study_digest,
         frozen_project_digest: root.frozen_project_digest,
         geometry_source_digest: root.geometry_source_digest,
-        workload_template: root.workload_template,
+        workloads: root.workloads,
         signal_materializations,
         exact_meshing,
         meshing_request: decoded_exact.request.meshing_request,
@@ -437,11 +433,16 @@ pub fn decode_exact_structural_study_root(
 }
 
 fn validate_signal_inventory(
-    workload: &StructuralLinearWorkload,
+    workloads: &BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     materializations: &[PreparedSignalMaterialization],
     program_revision: &ProgramRevision,
 ) -> NativeExecutionResult<()> {
-    let authored = workload
+    runmat_analysis_execution::validate_structural_sequence_workloads(workloads)
+        .map_err(protocol)?;
+    let authored = workloads
+        .values()
+        .next()
+        .ok_or_else(|| protocol("structural sequence has no workload"))?
         .model
         .signals
         .iter()
@@ -471,29 +472,19 @@ fn validate_signal_inventory(
     Ok(())
 }
 
-pub(crate) fn prepare_structural_study_analysis_program(
-    authored_study_digest: Digest,
-    frozen_project_digest: Option<Digest>,
-    program_revision: ProgramRevision,
-    artifact_access: ArtifactAccess,
-    workload: StructuralLinearWorkload,
-    mesh: runmat_meshing_core::SolverMeshArtifact,
-) -> NativeExecutionResult<PreparedStructuralLinearProgram> {
-    runmat_analysis_execution::prepare_structural_linear_program(
-        runmat_analysis_execution::StructuralLinearProgramPreparation {
-            authored_study_digest,
-            frozen_project_digest,
-            program_revision,
-            artifact_access,
-            workload,
-            mesh,
-            initial_guess: None,
-            chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
-            inventory_limits: ObjectInventoryLimits::default(),
-            required_capabilities: BTreeSet::new(),
-        },
+pub(crate) fn structural_workload_inventory_digest(
+    workloads: &BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
+) -> NativeExecutionResult<Digest> {
+    runmat_analysis_execution::validate_structural_sequence_workloads(workloads)
+        .map_err(protocol)?;
+    let bytes = encode_contract(
+        ROOT_PREFIX,
+        "exact-structural-study-workloads",
+        workloads,
+        CONTRACT_LIMITS,
     )
-    .map_err(protocol)
+    .map_err(protocol)?;
+    Ok(Digest::sha256(bytes))
 }
 
 fn descriptor(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {

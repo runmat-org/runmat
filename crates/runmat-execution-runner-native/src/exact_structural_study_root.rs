@@ -9,7 +9,7 @@ mod publication;
 
 pub(crate) use boundary::prepare_boundary_resolution_objects;
 pub use boundary::BoundaryRegionResolution;
-pub(crate) use contract::prepare_structural_study_analysis_program;
+pub(crate) use contract::structural_workload_inventory_digest;
 pub use contract::{
     decode_exact_structural_study_root, prepare_exact_structural_study_root,
     DecodedExactStructuralStudyRoot, ExactStructuralStudyRootPreparation,

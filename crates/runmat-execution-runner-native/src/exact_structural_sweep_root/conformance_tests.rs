@@ -107,7 +107,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: first_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workload_template: workload.clone(),
+        workloads: independent_structural_workloads(&workload),
         signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
@@ -118,7 +118,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: second_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workload_template: workload.clone(),
+        workloads: std::collections::BTreeMap::from([(workload.step_id.clone(), workload.clone())]),
         signal_materializations: vec![signal_materialization.clone()],
         exact_meshing: exact_meshing.clone(),
     })
@@ -133,7 +133,10 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         authored_study_digest: invalid_study_digest,
         frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
         geometry_source_digest: source_digest,
-        workload_template: invalid_workload,
+        workloads: std::collections::BTreeMap::from([(
+            invalid_workload.step_id.clone(),
+            invalid_workload,
+        )]),
         signal_materializations: vec![signal_materialization],
         exact_meshing,
     })
@@ -305,7 +308,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             pool.snapshot()
                 .tasks
                 .values()
-                .filter(|task| task.submission.request.callable.qualified_name == "pulse")
+                .filter(|task| task.submission.request.callable.qualified_name == "loads.pulse")
                 .count(),
             1,
             "identical signal materializations must execute once across a sweep"
@@ -390,6 +393,12 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         let ExactStructuralSweepTerminal::Succeeded(result) = first.terminal else {
             panic!("first remote structural sweep entry did not succeed")
         };
+        assert_eq!(result.sequence.steps.len(), 2);
+        assert_eq!(result.sequence.states.len(), 2);
+        assert_eq!(
+            result.sequence.steps[1].step_id.as_str(),
+            "step_static_second"
+        );
         let second = entries.next().unwrap();
         let ExactStructuralSweepTerminal::Succeeded(second_result) = second.terminal else {
             panic!(
@@ -398,7 +407,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             )
         };
         assert_eq!(
-            second_result.analysis.run.identity.family(),
+            second_result.sequence.steps[0].result.run.identity.family(),
             runmat_analysis_core::PhysicsFamily::Structural
         );
         let invalid = entries.next().unwrap();
@@ -413,10 +422,11 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             .evidence
             .validate(&result.mesh.artifact)
             .unwrap();
-        result.analysis.validate().unwrap();
-        assert!(!result.analysis.run.fields_are_empty());
-        let displacement = result
-            .analysis
+        let analysis = &result.sequence.steps[0].result;
+        let resolved_workload = result.resolved_workloads.values().next().unwrap();
+        analysis.validate().unwrap();
+        assert!(!analysis.run.fields_are_empty());
+        let displacement = analysis
             .run
             .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
             .expect("remote structural result must contain displacement");
@@ -425,15 +435,14 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             vec![result.mesh.artifact.topology.nodes.len(), 3]
         );
         assert_eq!(
-            result.analysis.run.identity.family(),
+            analysis.run.identity.family(),
             runmat_analysis_core::PhysicsFamily::Structural
         );
         assert_eq!(
-            result.analysis.run.identity.procedure(),
+            analysis.run.identity.procedure(),
             runmat_analysis_core::AnalysisProcedure::Static
         );
-        assert!(result
-            .resolved_workload
+        assert!(resolved_workload
             .model
             .signals
             .iter()
@@ -445,16 +454,14 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         let constrained_face = &result.boundary_resolution.aliases["face_000001"];
         let loaded_face = &result.boundary_resolution.aliases["face_000002"];
         assert_eq!(
-            result.resolved_workload.model.constraints[0]
+            resolved_workload.model.constraints[0]
                 .target()
                 .unwrap()
                 .region_id,
             constrained_face.analysis_selection_id().unwrap()
         );
         let runmat_analysis_core::ExcitationTarget::Region(load_target) =
-            &result.resolved_workload.model.excitations[0]
-                .excitation()
-                .target
+            &resolved_workload.model.excitations[0].excitation().target
         else {
             panic!("remote structural fixture must retain its region excitation")
         };
@@ -492,6 +499,34 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     server_result.unwrap();
 }
 
+fn independent_structural_workloads(
+    template: &StructuralLinearWorkload,
+) -> std::collections::BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload> {
+    let first = template
+        .model
+        .sequence
+        .steps
+        .first()
+        .expect("structural fixture must contain a procedure step")
+        .clone();
+    let second = runmat_analysis_core::ProcedureStep::structural_static("step_static_second");
+    let mut model = template.model.clone();
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "two-independent-static-steps",
+        vec![first.clone(), second.clone()],
+    );
+    let mut first_workload = template.clone();
+    first_workload.model = model.clone();
+    first_workload.step_id = first.step_id.clone();
+    let mut second_workload = template.clone();
+    second_workload.model = model;
+    second_workload.step_id = second.step_id.clone();
+    std::collections::BTreeMap::from([
+        (first.step_id, first_workload),
+        (second.step_id, second_workload),
+    ])
+}
+
 async fn generated_box_workload(
     project: &runmat_package::FrozenProject,
     revision: ProgramRevision,
@@ -508,7 +543,7 @@ async fn generated_box_workload(
         panic!("cantilever fixture signal must be force")
     };
     force.representation = SignalRepresentation::Generator(SignalGenerator {
-        qualified_function: "pulse".into(),
+        qualified_function: "loads.pulse".into(),
         arguments: vec![runmat_analysis_core::GeneratorArgument::Real(-1_000.0)],
         domain: GeneratorDomain::TimeSeconds,
         sampling: SignalSamplingPolicy::Uniform {
@@ -520,6 +555,7 @@ async fn generated_box_workload(
         extrapolation: SignalExtrapolation::Reject,
         effects: GeneratorEffectPolicy::Pure,
     });
+    force.evidence.sample_count = 0;
     let authored = signal.clone();
 
     let symbols = runmat_package::source_symbols_from_frozen(project, &source_path);
@@ -560,7 +596,7 @@ async fn generated_box_workload(
         revision,
         BundleCallable {
             owner_identity,
-            qualified_name: "pulse".into(),
+            qualified_name: "loads.pulse".into(),
             source_digest: Digest::sha256(source_text),
         },
         executable_source_digest,

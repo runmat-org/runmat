@@ -58,10 +58,11 @@ pub use structural::{
     StructuralLinearProgramPreparation,
 };
 pub use structural_sequence::{
+    import_structural_sequence_completion, validate_structural_sequence_workloads,
     CompletedStructuralSequence, CompletedStructuralSequenceState, CompletedStructuralSequenceStep,
     PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
     PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
-    StructuralSequencePreparation,
+    StructuralSequencePreparation, StructuralSequenceResultClosure,
 };
 pub use task::{
     build_analysis_task_submission, AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,

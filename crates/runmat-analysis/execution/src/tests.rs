@@ -1196,8 +1196,8 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         frozen_project_digest: Some(digest("branch-project")),
         program_revision: revision(),
         artifact_access: access(),
-        workloads,
-        mesh,
+        workloads: workloads.clone(),
+        mesh: mesh.clone(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -1391,4 +1391,41 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         completed.steps[1].result.run.fields,
         completed.steps[2].result.run.fields
     );
+    let closures = completed.result_closures(&access()).unwrap();
+    let imported = import_structural_sequence_completion(
+        &store,
+        StructuralSequencePreparation {
+            authored_study_digest: digest("branch-study"),
+            frozen_project_digest: Some(digest("branch-project")),
+            program_revision: revision(),
+            artifact_access: access(),
+            workloads: workloads.clone(),
+            mesh: mesh.clone(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        },
+        closures.clone(),
+    )
+    .unwrap();
+    assert_eq!(imported, completed);
+
+    let mut incomplete = closures;
+    incomplete.pop();
+    assert!(import_structural_sequence_completion(
+        &store,
+        StructuralSequencePreparation {
+            authored_study_digest: digest("branch-study"),
+            frozen_project_digest: Some(digest("branch-project")),
+            program_revision: revision(),
+            artifact_access: access(),
+            workloads,
+            mesh,
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        },
+        incomplete,
+    )
+    .is_err());
 }

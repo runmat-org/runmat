@@ -442,10 +442,6 @@ impl SequencePool for RemoteSequencePool {
                 Ok(success) => responses.push(success_response(success)),
                 Err(message) => {
                     if !deadline_exceeded {
-                        if failure.is_none() {
-                            self.pool.cancel(CancellationReason::ParentScope)?;
-                            cancellation_started = Some(Instant::now());
-                        }
                         failure.get_or_insert(message);
                     }
                     responses.push(ProgramExecutionResponse::Failure {

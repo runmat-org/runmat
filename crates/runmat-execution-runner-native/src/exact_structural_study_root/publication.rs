@@ -1,10 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_execution::PreparedStructuralLinearProgram;
-use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, SolverResultIdentity, StructuralLinearWorkload,
-    StructuralLinearWorkloadResult,
+use runmat_analysis_execution::{
+    CompletedStructuralSequence, StructuralSequencePreparation, StructuralSequenceResultClosure,
 };
+use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, StructuralLinearWorkload};
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{Digest, ProgramRevision};
@@ -19,7 +18,7 @@ use runmat_meshing_execution::ExactMeshingDagRunResult;
 use serde::{Deserialize, Serialize};
 
 use super::boundary::BoundaryRegionResolution;
-use super::contract::{prepare_structural_study_analysis_program, DecodedExactStructuralStudyRoot};
+use super::contract::{structural_workload_inventory_digest, DecodedExactStructuralStudyRoot};
 use super::{
     protocol, read, CONTRACT_LIMITS, PUBLICATION_DOMAIN, PUBLICATION_MEDIA_TYPE,
     PUBLICATION_PREFIX, PUBLICATION_VALUE_SCHEMA,
@@ -32,7 +31,7 @@ struct ExactStructuralStudyPublication {
     schema_version: u16,
     program_revision: ProgramRevision,
     authored_study_digest: Digest,
-    unresolved_workload_digest: Digest,
+    unresolved_workloads_digest: Digest,
     meshing_request_digest: Digest,
     meshing_root: ValueRef,
     meshing_objects: Vec<ValueRef>,
@@ -40,7 +39,7 @@ struct ExactStructuralStudyPublication {
     boundary_objects: Vec<ValueRef>,
     signal_roots: Vec<ValueRef>,
     signal_objects: Vec<ValueRef>,
-    analysis_root: ValueRef,
+    analysis_closures: Vec<StructuralSequenceResultClosure>,
     analysis_objects: Vec<ValueRef>,
 }
 
@@ -48,7 +47,7 @@ impl ExactStructuralStudyPublication {
     fn validate(&self, access: &ArtifactAccess) -> NativeExecutionResult<()> {
         if self.schema_version != 1
             || self.authored_study_digest.bytes() == &[0; 32]
-            || self.unresolved_workload_digest.bytes() == &[0; 32]
+            || self.unresolved_workloads_digest.bytes() == &[0; 32]
             || self.meshing_request_digest.bytes() == &[0; 32]
             || self.meshing_objects.is_empty()
             || self.boundary_objects.is_empty()
@@ -80,7 +79,6 @@ impl ExactStructuralStudyPublication {
         for (root, inventory) in [
             (&self.meshing_root, &self.meshing_objects),
             (&self.boundary_root, &self.boundary_objects),
-            (&self.analysis_root, &self.analysis_objects),
         ] {
             if !inventory.contains(root) {
                 return Err(protocol(
@@ -89,7 +87,54 @@ impl ExactStructuralStudyPublication {
             }
             reference_inventory(inventory)?;
         }
+        let mut nodes = BTreeSet::new();
+        for closure in &self.analysis_closures {
+            if !nodes.insert(closure.node.clone()) {
+                return Err(protocol(
+                    "study publication contains a duplicate sequence node",
+                ));
+            }
+            let ProgramExecutionResponse::ExternalizedSuccess {
+                outputs,
+                result_objects,
+            } = &closure.response
+            else {
+                return Err(protocol(
+                    "study publication contains a non-successful sequence closure",
+                ));
+            };
+            let [ValuePayload::Object(root)] = outputs.as_slice() else {
+                return Err(protocol("sequence result closure has an invalid root"));
+            };
+            if !result_objects.contains(root)
+                || result_objects
+                    .iter()
+                    .any(|reference| !self.analysis_objects.contains(reference))
+            {
+                return Err(protocol(
+                    "sequence result closure differs from its analysis inventory",
+                ));
+            }
+            reference_inventory(result_objects)?;
+        }
+        let closure_objects = self
+            .analysis_closures
+            .iter()
+            .flat_map(|closure| match &closure.response {
+                ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => {
+                    result_objects.clone()
+                }
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let closure_objects = unique_references(closure_objects)?;
+        if reference_inventory(&closure_objects)? != reference_inventory(&self.analysis_objects)? {
+            return Err(protocol(
+                "analysis inventory contains unreferenced or missing sequence objects",
+            ));
+        }
         reference_inventory(&self.signal_objects)?;
+        reference_inventory(&self.analysis_objects)?;
         Ok(())
     }
 
@@ -119,11 +164,12 @@ impl ExactStructuralStudyPublication {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactStructuralStudyResult {
+    pub frozen_project_digest: Option<Digest>,
     pub mesh: ExactMeshingDagRunResult,
     pub boundary_resolution: BoundaryRegionResolution,
-    pub resolved_workload: StructuralLinearWorkload,
-    pub solver_result_identity: SolverResultIdentity,
-    pub analysis: StructuralLinearWorkloadResult,
+    pub resolved_workloads:
+        BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
+    pub sequence: CompletedStructuralSequence,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,7 +179,7 @@ pub struct ExactStructuralStudyResultExpectation {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub geometry_source_digest: Digest,
-    pub workload_template: StructuralLinearWorkload,
+    pub workloads: BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     pub signal_materializations: Vec<runmat_analysis_execution::SignalMaterializationExpectation>,
     pub expected_meshing_request: MeshingRequest,
 }
@@ -141,10 +187,14 @@ pub struct ExactStructuralStudyResultExpectation {
 impl ExactStructuralStudyResultExpectation {
     pub fn validate(&self) -> NativeExecutionResult<()> {
         self.artifact_access.validate().map_err(protocol)?;
-        self.workload_template.validate().map_err(protocol)?;
+        runmat_analysis_execution::validate_structural_sequence_workloads(&self.workloads)
+            .map_err(protocol)?;
         self.expected_meshing_request.validate().map_err(protocol)?;
         let authored_signals = self
-            .workload_template
+            .workloads
+            .values()
+            .next()
+            .ok_or_else(|| protocol("whole-study expectation has no workload"))?
             .model
             .signals
             .iter()
@@ -186,21 +236,9 @@ pub(crate) fn package_exact_structural_study_result(
     meshing: &ExactMeshingDagRunResult,
     boundary: &runmat_analysis_execution::PreparedAnalysisObjects,
     signals: &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
-    analysis_response: &ProgramExecutionResponse,
-    unresolved_workload_digest: Digest,
+    sequence: &CompletedStructuralSequence,
+    unresolved_workloads_digest: Digest,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: analysis_outputs,
-        result_objects: analysis_objects,
-    } = analysis_response
-    else {
-        return Err(protocol(
-            "structural analysis did not produce a result closure",
-        ));
-    };
-    let [ValuePayload::Object(analysis_root)] = analysis_outputs.as_slice() else {
-        return Err(protocol("structural analysis result root is invalid"));
-    };
     let boundary_objects = boundary
         .references(&decoded.artifact_access, ValueRefKind::ResultObject)
         .map_err(protocol)?;
@@ -227,11 +265,25 @@ pub(crate) fn package_exact_structural_study_result(
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let signal_objects = unique_references(signal_closures.into_iter().flatten())?;
+    let analysis_closures = sequence
+        .result_closures(&decoded.artifact_access)
+        .map_err(protocol)?;
+    let analysis_objects =
+        unique_references(
+            analysis_closures
+                .iter()
+                .flat_map(|closure| match &closure.response {
+                    ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } => {
+                        result_objects.clone()
+                    }
+                    _ => Vec::new(),
+                }),
+        )?;
     let publication = ExactStructuralStudyPublication {
         schema_version: 1,
         program_revision: request.recipe.program_revision.clone(),
         authored_study_digest: decoded.authored_study_digest,
-        unresolved_workload_digest,
+        unresolved_workloads_digest,
         meshing_request_digest: Digest::from_bytes(
             *decoded
                 .meshing_request
@@ -245,7 +297,7 @@ pub(crate) fn package_exact_structural_study_result(
         boundary_objects: boundary_objects.clone(),
         signal_roots,
         signal_objects: signal_objects.clone(),
-        analysis_root: (**analysis_root).clone(),
+        analysis_closures,
         analysis_objects: analysis_objects.clone(),
     };
     let mut new_objects = boundary
@@ -279,7 +331,7 @@ pub(crate) fn package_exact_structural_study_result(
         .iter()
         .chain(&boundary_objects)
         .chain(&signal_objects)
-        .chain(analysis_objects)
+        .chain(&analysis_objects)
         .chain(std::iter::once(&publication_root))
     {
         if inventory.insert(reference.id, reference.clone()).is_some()
@@ -341,13 +393,8 @@ pub fn import_exact_structural_study_result(
     if publication.authored_study_digest != expected.authored_study_digest {
         return Err(protocol("whole-study authored study identity changed"));
     }
-    let expected_workload_digest = Digest::sha256(
-        &expected
-            .workload_template
-            .canonical_bytes()
-            .map_err(protocol)?,
-    );
-    if publication.unresolved_workload_digest != expected_workload_digest {
+    let expected_workloads_digest = structural_workload_inventory_digest(&expected.workloads)?;
+    if publication.unresolved_workloads_digest != expected_workloads_digest {
         return Err(protocol("whole-study workload identity changed"));
     }
     let expected_meshing_request_digest = Digest::from_bytes(
@@ -493,53 +540,57 @@ pub fn import_exact_structural_study_result(
     let aliases =
         runmat_analysis_core::BoundaryRegionAliases::new(boundary_resolution.aliases.clone())
             .map_err(protocol)?;
-    let mut resolved_workload = expected.workload_template.clone();
-    resolved_workload.model.signals = resolved_workload
-        .model
-        .signals
-        .iter()
-        .map(|signal| {
-            materialized_signals
-                .get(signal.signal_id())
-                .cloned()
-                .unwrap_or_else(|| signal.clone())
-        })
-        .collect();
-    if resolved_workload
-        .model
-        .signals
-        .iter()
-        .any(|signal| signal.generator().is_some())
-    {
-        return Err(protocol(
-            "whole-study result retained an unmaterialized signal generator",
-        ));
+    let mut resolved_workloads = expected.workloads.clone();
+    for workload in resolved_workloads.values_mut() {
+        workload.model.signals = workload
+            .model
+            .signals
+            .iter()
+            .map(|signal| {
+                materialized_signals
+                    .get(signal.signal_id())
+                    .cloned()
+                    .unwrap_or_else(|| signal.clone())
+            })
+            .collect();
+        if workload
+            .model
+            .signals
+            .iter()
+            .any(|signal| signal.generator().is_some())
+        {
+            return Err(protocol(
+                "whole-study result retained an unmaterialized signal generator",
+            ));
+        }
+        workload.model =
+            runmat_analysis_core::resolve_boundary_region_aliases(&workload.model, &aliases)
+                .map_err(protocol)?;
     }
-    resolved_workload.model =
-        runmat_analysis_core::resolve_boundary_region_aliases(&resolved_workload.model, &aliases)
-            .map_err(protocol)?;
-    let analysis_prepared = prepare_analysis_program_for_import(
-        expected,
-        resolved_workload.clone(),
-        mesh.artifact.clone(),
-    )?;
-    let analysis_response = ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: vec![ValuePayload::Object(Box::new(publication.analysis_root))],
-        result_objects: publication.analysis_objects,
-    };
-    let analysis = runmat_analysis_execution::import_structural_linear_completion(
+    runmat_analysis_execution::validate_structural_sequence_workloads(&resolved_workloads)
+        .map_err(protocol)?;
+    let sequence = runmat_analysis_execution::import_structural_sequence_completion(
         source,
-        analysis_response,
-        &analysis_prepared,
-        limits,
+        StructuralSequencePreparation {
+            authored_study_digest: expected.authored_study_digest,
+            frozen_project_digest: expected.frozen_project_digest,
+            program_revision: expected.program_revision.clone(),
+            artifact_access: expected.artifact_access.clone(),
+            workloads: resolved_workloads.clone(),
+            mesh: mesh.artifact.clone(),
+            chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
+            inventory_limits: limits,
+            required_capabilities: BTreeSet::new(),
+        },
+        publication.analysis_closures,
     )
     .map_err(protocol)?;
     Ok(ExactStructuralStudyResult {
+        frozen_project_digest: expected.frozen_project_digest,
         mesh,
         boundary_resolution,
-        resolved_workload,
-        solver_result_identity: analysis.identity,
-        analysis: analysis.result,
+        resolved_workloads,
+        sequence,
     })
 }
 
@@ -575,21 +626,6 @@ fn unique_references(
         }
     }
     Ok(inventory.into_values().collect())
-}
-
-fn prepare_analysis_program_for_import(
-    expected: &ExactStructuralStudyResultExpectation,
-    workload: StructuralLinearWorkload,
-    mesh: runmat_meshing_core::SolverMeshArtifact,
-) -> NativeExecutionResult<PreparedStructuralLinearProgram> {
-    prepare_structural_study_analysis_program(
-        expected.authored_study_digest,
-        expected.frozen_project_digest,
-        expected.program_revision.clone(),
-        expected.artifact_access.clone(),
-        workload,
-        mesh,
-    )
 }
 
 #[cfg(test)]

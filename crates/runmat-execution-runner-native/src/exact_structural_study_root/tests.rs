@@ -52,6 +52,12 @@ fn workload() -> StructuralLinearWorkload {
     }
 }
 
+fn workloads(
+) -> std::collections::BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload> {
+    let workload = workload();
+    std::collections::BTreeMap::from([(workload.step_id.clone(), workload)])
+}
+
 pub(crate) fn prepared(
     authority: &str,
     expected_source: Digest,
@@ -91,7 +97,7 @@ pub(crate) fn prepared(
         authored_study_digest,
         frozen_project_digest: Some(Digest::sha256(b"project")),
         geometry_source_digest: expected_source,
-        workload_template: workload(),
+        workloads: workloads(),
         signal_materializations: Vec::new(),
         exact_meshing,
     })
@@ -124,7 +130,7 @@ fn whole_study_root_is_path_free_and_reuses_fixed_programs() {
     first.write_to(&mut store).unwrap();
     let decoded = decode_exact_structural_study_root(first.request(), &store).unwrap();
     assert_eq!(decoded.geometry_source_digest, source_digest);
-    assert_eq!(decoded.workload_template, workload());
+    assert_eq!(decoded.workloads, workloads());
     assert_eq!(decoded.artifact_access, access("run-a"));
 }
 
