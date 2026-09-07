@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use runmat_execution::identity::ValueId;
-use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{
     LogicalObject, ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
@@ -77,13 +76,12 @@ pub fn prepare_analysis_program(
             || prepared.manifest.payload_digest != contract.payload_digest
             || prepared.root.digest != contract.manifest_digest
             || prepared.root.encoded_length != contract.manifest_encoded_length
-            || contract.reference_kind != ValueRefKind::DriverObject
         {
             return Err(AnalysisBridgeError::Identity(
                 "analysis object closure differs from the workload input contract",
             ));
         }
-        let references = prepared.references(&host.artifact_access, ValueRefKind::DriverObject)?;
+        let references = prepared.references(&host.artifact_access, contract.reference_kind)?;
         let root = references
             .first()
             .cloned()

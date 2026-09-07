@@ -35,6 +35,12 @@ pub struct PreparedSemanticStatePublication {
     pub inputs: Vec<PreparedAnalysisObjects>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportedSemanticState {
+    pub state: CanonicalSemanticState,
+    pub objects: PreparedAnalysisObjects,
+}
+
 pub fn prepare_semantic_state_publication(
     preparation: SemanticStatePublicationPreparation,
 ) -> AnalysisBridgeResult<PreparedSemanticStatePublication> {
@@ -72,18 +78,25 @@ pub fn prepare_semantic_state_publication(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let inputs = vec![request_objects, preparation.source_result];
+    let inputs = vec![
+        (request_objects, ValueRefKind::DriverObject),
+        (preparation.source_result, ValueRefKind::ResultObject),
+    ];
     let workload_inputs = inputs
         .iter()
-        .map(|input| AnalysisWorkloadInput {
+        .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
             logical_identity: input.manifest.logical_identity,
             payload_digest: input.manifest.payload_digest,
             manifest_digest: input.root.digest,
             manifest_encoded_length: input.root.encoded_length,
-            reference_kind: ValueRefKind::DriverObject,
+            reference_kind: *reference_kind,
         })
         .collect();
+    let inputs = inputs
+        .into_iter()
+        .map(|(input, _)| input)
+        .collect::<Vec<_>>();
     let required_capabilities = BTreeSet::from([AnalysisCapabilityRequirement::Host {
         abi: ANALYSIS_HOST_ABI.into(),
     }]);
@@ -112,6 +125,15 @@ pub fn import_semantic_state(
     prepared: &PreparedSemanticStatePublication,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<CanonicalSemanticState> {
+    Ok(import_semantic_state_completion(source, response, prepared, limits)?.state)
+}
+
+pub fn import_semantic_state_completion(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    prepared: &PreparedSemanticStatePublication,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<ImportedSemanticState> {
     response.validate_against(&prepared.program.request)?;
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
@@ -161,5 +183,8 @@ pub fn import_semantic_state(
             "published semantic state differs from its admitted request",
         ));
     }
-    Ok(state)
+    Ok(ImportedSemanticState {
+        state,
+        objects: imported,
+    })
 }

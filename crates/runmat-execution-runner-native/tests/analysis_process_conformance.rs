@@ -6,7 +6,7 @@ use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
     build_analysis_task_submission, import_analysis_objects, prepare_structural_linear_program,
     AnalysisExecutionContext, AnalysisHostWorkload, PreparedAnalysisProgram,
-    StructuralLinearProgramPreparation,
+    StructuralLinearProgramPreparation, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -29,10 +29,11 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
-    execute_analysis_program_request, run_remote_worker_quic, NativeAnalysisHostLimits,
+    execute_analysis_program_request, execute_structural_sequence_locally,
+    execute_structural_sequence_remotely, run_remote_worker_quic, NativeAnalysisHostLimits,
     NativeAnalysisKernel, NativeExecutionConfig, NativeProgramSession, NativeProgramTask,
     QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig,
-    RemoteWorkerQuicRequest,
+    RemoteWorkerQuicRequest, StructuralSequenceExecutionPolicy,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -138,6 +139,43 @@ async fn parent() {
         .diagnostics
         .iter()
         .all(|diagnostic| !diagnostic.message.contains("artifact_path")));
+
+    let mut sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
+    sequence_config.executable = std::env::current_exe().unwrap();
+    sequence_config.worker_arguments = vec!["--child".into()];
+    sequence_config.max_workers = 2;
+    sequence_config.store_root = directory.path().join("native-analysis-sequence");
+    let sequence = execute_structural_sequence_locally(
+        sequence_config,
+        sequence_preparation(revision(), "local-analysis-sequence"),
+        sequence_policy(),
+    )
+    .await
+    .unwrap();
+    assert_sequence(&sequence);
+
+    let mut cancelled_sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
+    cancelled_sequence_config.executable = std::env::current_exe().unwrap();
+    cancelled_sequence_config.worker_arguments = vec!["--child".into()];
+    cancelled_sequence_config.max_workers = 2;
+    cancelled_sequence_config.store_root = directory.path().join("cancelled-analysis-sequence");
+    let mut cancellation_policy = sequence_policy();
+    cancellation_policy.resources.max_wall_millis = 1;
+    let cancellation = execute_structural_sequence_locally(
+        cancelled_sequence_config,
+        sequence_preparation(revision(), "cancelled-analysis-sequence"),
+        cancellation_policy,
+    )
+    .await;
+    let Err(cancellation) = cancellation else {
+        panic!("one-millisecond structural sequence unexpectedly completed");
+    };
+    assert!(
+        cancellation
+            .to_string()
+            .contains("exceeded its wall-time limit after reaching quiescence"),
+        "unexpected structural sequence cancellation error: {cancellation}"
+    );
 
     remote_conformance(process_payload).await;
     durable_conformance(inline_payload).await;
@@ -264,7 +302,7 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
         digest("remote-authored-study-second"),
     );
     let second_request = second_program.request.clone();
-    let bundle = ExecutionBundleBuilder::native(&project, revision)
+    let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
         .with_compiled_package_closure()
         .with_materialized_program(
@@ -280,45 +318,86 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(vec!["runmat.execution".into()]).unwrap();
     let certificate_der = cert.der().to_vec();
-    let listener = QuicOverlayListener::bind(
+    let signing_key_der = signing_key.serialize_der();
+    let first_listener = QuicOverlayListener::bind(
         SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
         vec![certificate_der.clone()],
-        signing_key.serialize_der(),
+        signing_key_der.clone(),
         FrameLimits::default(),
     )
     .unwrap();
-    let authority = listener.local_addr().unwrap();
+    let second_listener = QuicOverlayListener::bind(
+        SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+        vec![certificate_der.clone()],
+        signing_key_der,
+        FrameLimits::default(),
+    )
+    .unwrap();
+    let first_authority = first_listener.local_addr().unwrap();
+    let second_authority = second_listener.local_addr().unwrap();
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-analysis-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"remote-analysis-pool"]);
-    let worker = WorkerSpec {
-        id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker"]),
+    let first_worker = WorkerSpec {
+        id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-a"]),
+        pool_id,
+        resources: inventory(),
+    };
+    let second_worker = WorkerSpec {
+        id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-b"]),
         pool_id,
         resources: inventory(),
     };
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([29; 32]).unwrap();
-    let server = run_remote_worker_quic(RemoteWorkerQuicRequest {
-        listener,
+    let first_server = run_remote_worker_quic(RemoteWorkerQuicRequest {
+        listener: first_listener,
         run_identity: "remote-analysis".into(),
-        worker: worker.clone(),
+        worker: first_worker.clone(),
         driver_fence: 41,
         session_id: [31; 16],
         run_key: run_key.clone(),
         limits: FrameLimits::default(),
     });
+    let second_server = run_remote_worker_quic(RemoteWorkerQuicRequest {
+        listener: second_listener,
+        run_identity: "remote-analysis".into(),
+        worker: second_worker.clone(),
+        driver_fence: 41,
+        session_id: [32; 16],
+        run_key: run_key.clone(),
+        limits: FrameLimits::default(),
+    });
     let client = async {
-        let channel = QuicRemoteWorkerChannel::connect(
+        let first_channel = QuicRemoteWorkerChannel::connect(
             RemoteWorkerChannelConfig {
                 run_identity: "remote-analysis".into(),
-                node_identity: "remote-analysis-node".into(),
-                worker,
+                node_identity: "remote-analysis-node-a".into(),
+                worker: first_worker,
                 driver_fence: 41,
                 session_id: [31; 16],
+                run_key: run_key.clone(),
+                limits: FrameLimits::default(),
+            },
+            &PinnedQuicEndpoint {
+                authority: first_authority,
+                server_name: "runmat.execution".into(),
+                certificate_der: certificate_der.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        let second_channel = QuicRemoteWorkerChannel::connect(
+            RemoteWorkerChannelConfig {
+                run_identity: "remote-analysis".into(),
+                node_identity: "remote-analysis-node-b".into(),
+                worker: second_worker,
+                driver_fence: 41,
+                session_id: [32; 16],
                 run_key,
                 limits: FrameLimits::default(),
             },
             &PinnedQuicEndpoint {
-                authority,
+                authority: second_authority,
                 server_name: "runmat.execution".into(),
                 certificate_der,
             },
@@ -329,17 +408,18 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
             scope_id,
             PoolSpec {
                 id: pool_id,
-                min_workers: 1,
-                max_workers: 1,
-                max_in_flight: 1,
-                resource_limit: inventory(),
+                min_workers: 2,
+                max_workers: 2,
+                max_in_flight: 2,
+                resource_limit: scaled_inventory(2),
             },
             41,
             bundle_bytes,
             "remote-analysis",
         )
         .unwrap();
-        pool.add_worker(channel.clone()).await.unwrap();
+        pool.add_worker(first_channel.clone()).await.unwrap();
+        pool.add_worker(second_channel.clone()).await.unwrap();
         for object in &program.objects {
             pool.register_execution_object(object.reference.clone(), object.bytes.clone())
                 .unwrap();
@@ -391,10 +471,20 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
             import_result(&result_store, &second_success.outputs, &second_host),
             expected_payload
         );
-        channel.drain().await.unwrap();
+        let sequence = execute_structural_sequence_remotely(
+            pool,
+            sequence_preparation(revision.clone(), "remote-analysis"),
+            sequence_policy(),
+        )
+        .await
+        .unwrap();
+        assert_sequence(&sequence);
+        first_channel.drain().await.unwrap();
+        second_channel.drain().await.unwrap();
     };
-    let (server, ()) = tokio::join!(server, client);
-    server.unwrap();
+    let (first_server, second_server, ()) = tokio::join!(first_server, second_server, client);
+    first_server.unwrap();
+    second_server.unwrap();
 }
 
 fn import_result(
@@ -484,6 +574,147 @@ fn fixture_for_study(
     (prepared.host, prepared.program, prepared.inputs)
 }
 
+fn sequence_preparation(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+) -> StructuralSequencePreparation {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut root = model.sequence.steps[0].clone();
+    root.step_id = runmat_analysis_core::ProcedureStepId("preload".into());
+    root.state_outputs[0].persistence = runmat_analysis_core::StatePersistence::Canonical;
+    let state_id = root.state_outputs[0].state_id.clone();
+    let branch = |step_id: &str| {
+        let mut step = root.clone();
+        step.step_id = runmat_analysis_core::ProcedureStepId(step_id.into());
+        step.state_inputs = vec![runmat_analysis_core::StateInput {
+            input_id: format!("{step_id}-initial-guess"),
+            required_kind: runmat_analysis_core::StateKind::StructuralPrimary,
+            source: runmat_analysis_core::StateSource::Upstream {
+                producer_step: root.step_id.clone(),
+                state_id: state_id.clone(),
+            },
+            use_as: runmat_analysis_core::StateUse::InitialGuess,
+            conflict: runmat_analysis_core::InitialStateConflictPolicy::Reject,
+        }];
+        step
+    };
+    let right = branch("right");
+    let left = branch("left");
+    let transition =
+        |consumer: &runmat_analysis_core::ProcedureStepId| runmat_analysis_core::StateTransition {
+            transition_id: runmat_analysis_core::TransitionId(format!(
+                "preload-to-{}",
+                consumer.as_str()
+            )),
+            producer_step: root.step_id.clone(),
+            consumer_step: consumer.clone(),
+            state_id: state_id.clone(),
+            method: runmat_analysis_core::StateTransitionMethod::InitialGuessOnly,
+            topology: runmat_analysis_core::TopologyTransitionPolicy::RequireIdentical,
+            reference: runmat_analysis_core::ReferenceStatePolicy::Preserve,
+        };
+    model.sequence = runmat_analysis_core::AnalysisSequence {
+        sequence_id: "process-preload-branches".into(),
+        steps: vec![root.clone(), right.clone(), left.clone()],
+        dependencies: vec![
+            runmat_analysis_core::SequenceDependency {
+                predecessor: root.step_id.clone(),
+                successor: right.step_id.clone(),
+                reason: runmat_analysis_core::SequenceDependencyReason::StateTransfer,
+            },
+            runmat_analysis_core::SequenceDependency {
+                predecessor: root.step_id.clone(),
+                successor: left.step_id.clone(),
+                reason: runmat_analysis_core::SequenceDependencyReason::StateTransfer,
+            },
+        ],
+        transitions: vec![transition(&right.step_id), transition(&left.step_id)],
+        branches: vec![runmat_analysis_core::SequenceBranch {
+            branch_id: runmat_analysis_core::SequenceBranchId("post-preload".into()),
+            producer_step: root.step_id.clone(),
+            state_ids: vec![state_id],
+            consumer_steps: vec![right.step_id.clone(), left.step_id.clone()],
+        }],
+    };
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        model,
+        step_id: root.step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: None,
+        electro_thermal_context: None,
+        initial_guess_transition: None,
+    };
+    let mesh = solver_mesh(&workload);
+    StructuralSequencePreparation {
+        authored_study_digest: digest("process-sequence-study"),
+        frozen_project_digest: None,
+        program_revision: revision,
+        artifact_access: ArtifactAccess {
+            authorization_scope: authorization_scope.into(),
+            encryption_context: digest("process-sequence-encryption"),
+        },
+        workload_template: workload,
+        mesh,
+        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    }
+}
+
+fn sequence_policy() -> StructuralSequenceExecutionPolicy {
+    StructuralSequenceExecutionPolicy {
+        resources: ResourceRequest {
+            cpu_millicores: 1_000,
+            memory_bytes: 256 * 1024 * 1024,
+            scratch_bytes: 256 * 1024 * 1024,
+            max_wall_millis: 60_000,
+            max_artifact_bytes: 64 * 1024 * 1024,
+            max_egress_bytes: 64 * 1024 * 1024,
+            max_relay_bytes: 64 * 1024 * 1024,
+            accelerators: Vec::new(),
+            required_capabilities: capabilities(),
+        },
+        retry: RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    }
+}
+
+fn assert_sequence(sequence: &runmat_analysis_execution::CompletedStructuralSequence) {
+    assert_eq!(
+        sequence
+            .steps
+            .iter()
+            .map(|step| step.step_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["preload", "right", "left"]
+    );
+    assert_eq!(sequence.states.len(), 3);
+    assert_eq!(
+        sequence.steps[1].result.run.fields,
+        sequence.steps[2].result.run.fields
+    );
+    assert!(sequence.steps[1..].iter().all(|step| {
+        step.result.run.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "FEA_CONVERGENCE" && diagnostic.message.contains("iterations=0 ")
+        })
+    }));
+    assert_eq!(
+        sequence
+            .steps
+            .iter()
+            .map(|step| step.objects.manifest.logical_identity)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        3
+    );
+}
+
 fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverMeshArtifact {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -526,6 +757,14 @@ fn inventory() -> ResourceInventory {
         accelerators: Vec::new(),
         capabilities: capabilities(),
     }
+}
+
+fn scaled_inventory(worker_count: u32) -> ResourceInventory {
+    let mut inventory = inventory();
+    inventory.cpu_millicores *= worker_count;
+    inventory.memory_bytes *= u64::from(worker_count);
+    inventory.scratch_bytes *= u64::from(worker_count);
+    inventory
 }
 
 fn analysis_submission(

@@ -1013,3 +1013,315 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .is_err());
 }
+
+#[test]
+fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branches() {
+    use runmat_analysis_core::{
+        InitialStateConflictPolicy, ReferenceStatePolicy, SequenceBranch, SequenceBranchId,
+        StateCompleteness, StateInput, StatePersistence, StateSource, StateTransition,
+        StateTransitionMethod, StateUse, TopologyTransitionPolicy, TransitionId,
+    };
+    use runmat_analysis_fea::execution::{
+        StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    };
+    use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+    use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
+    use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
+    use runmat_analysis_fea::{
+        run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
+    };
+    use runmat_meshing_core::{
+        ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
+    };
+
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut root = model.sequence.steps[0].clone();
+    root.step_id = ProcedureStepId("preload".into());
+    root.state_outputs[0].completeness = StateCompleteness::Complete;
+    root.state_outputs[0].persistence = StatePersistence::Canonical;
+    let state_id = root.state_outputs[0].state_id.clone();
+    let branch_step = |step_id: &str| {
+        let mut step = root.clone();
+        step.step_id = ProcedureStepId(step_id.into());
+        step.state_inputs = vec![StateInput {
+            input_id: format!("{step_id}-initial-guess"),
+            required_kind: runmat_analysis_core::StateKind::StructuralPrimary,
+            source: StateSource::Upstream {
+                producer_step: root.step_id.clone(),
+                state_id: state_id.clone(),
+            },
+            use_as: StateUse::InitialGuess,
+            conflict: InitialStateConflictPolicy::Reject,
+        }];
+        step
+    };
+    let left = branch_step("left");
+    let right = branch_step("right");
+    let transition = |consumer: &ProcedureStepId| StateTransition {
+        transition_id: TransitionId(format!("preload-to-{}", consumer.as_str())),
+        producer_step: root.step_id.clone(),
+        consumer_step: consumer.clone(),
+        state_id: state_id.clone(),
+        method: StateTransitionMethod::InitialGuessOnly,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    };
+    model.sequence = AnalysisSequence {
+        sequence_id: "preload-branches".into(),
+        steps: vec![root.clone(), right.clone(), left.clone()],
+        dependencies: vec![
+            SequenceDependency {
+                predecessor: root.step_id.clone(),
+                successor: right.step_id.clone(),
+                reason: SequenceDependencyReason::StateTransfer,
+            },
+            SequenceDependency {
+                predecessor: root.step_id.clone(),
+                successor: left.step_id.clone(),
+                reason: SequenceDependencyReason::StateTransfer,
+            },
+        ],
+        transitions: vec![transition(&right.step_id), transition(&left.step_id)],
+        branches: vec![SequenceBranch {
+            branch_id: SequenceBranchId("post-preload".into()),
+            producer_step: root.step_id.clone(),
+            state_ids: vec![state_id.clone()],
+            consumer_steps: vec![right.step_id.clone(), left.step_id.clone()],
+        }],
+    };
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: root.step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: None,
+        electro_thermal_context: None,
+        initial_guess_transition: None,
+    };
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
+        face.provenance.push(PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    let assignment = workload.model.material_assignments.first().unwrap();
+    let region = PersistentEntityId {
+        kind: PersistentEntityKind::Region,
+        source_topology_id: assignment.region_id.clone(),
+        assembly_path: vec!["root".into()],
+    };
+    mesh.topology.volume_elements[0].region_id = region.clone();
+    mesh.topology.regions[0].region_id = region;
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+
+    let raw = run_linear_static_with_options(
+        &workload.solver_model().unwrap(),
+        workload.backend,
+        LinearStaticSolveOptions {
+            formulation_requirement: workload.formulation_requirement,
+            preconditioner_kind: workload.preconditioner,
+            algebra_backend_kind: workload.algebra_backend,
+            solver_mesh_artifact_path: None,
+            solver_mesh: Some(mesh.clone()),
+            require_solver_mesh_for_solid: true,
+            thermo_mechanical_context: None,
+            electro_thermal_context: None,
+            initial_displacement: None,
+        },
+    )
+    .unwrap();
+    let encoded = StructuralLinearWorkloadResult {
+        schema_version: 1,
+        run: raw,
+    }
+    .canonical_bytes()
+    .unwrap();
+    let mut coordinator = StructuralSequenceCoordinator::new(StructuralSequencePreparation {
+        authored_study_digest: digest("branch-study"),
+        frozen_project_digest: Some(digest("branch-project")),
+        program_revision: revision(),
+        artifact_access: access(),
+        workload_template: workload,
+        mesh,
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_eq!(coordinator.sequence().parallel_levels().len(), 2);
+
+    let mut store = MemoryObjects::default();
+    let first = coordinator.prepare_next_solve_wave().unwrap();
+    assert_eq!(first.tasks.len(), 1);
+    assert!(first.tasks[0].dependencies.is_empty());
+    let mut solve_responses = BTreeMap::new();
+    for task in &first.tasks {
+        task.prepared.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &task.prepared.program.request,
+            &mut store,
+            &StructuralResultKernel(encoded.clone()),
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        solve_responses.insert(
+            task.node.clone(),
+            AnalysisHostResponse::completed(&task.prepared.host, &completed)
+                .unwrap()
+                .program_response(),
+        );
+    }
+    let state_wave = coordinator
+        .complete_solve_wave(&store, first, solve_responses)
+        .unwrap();
+    assert_eq!(state_wave.tasks.len(), 1);
+    assert_eq!(
+        state_wave.tasks[0]
+            .prepared
+            .host
+            .workload
+            .inputs
+            .iter()
+            .map(|input| input.reference_kind)
+            .collect::<Vec<_>>(),
+        vec![ValueRefKind::DriverObject, ValueRefKind::ResultObject]
+    );
+    let root_state_node = StructuralSequenceNode::PublishState {
+        producer_step: root.step_id.clone(),
+        state_id: state_id.clone(),
+    };
+    assert_eq!(state_wave.tasks[0].node, root_state_node);
+    let mut state_responses = BTreeMap::new();
+    for task in &state_wave.tasks {
+        task.prepared.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &task.prepared.program.request,
+            &mut store,
+            &StateProjectionKernel,
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        state_responses.insert(
+            task.node.clone(),
+            AnalysisHostResponse::completed(&task.prepared.host, &completed)
+                .unwrap()
+                .program_response(),
+        );
+    }
+    coordinator
+        .complete_state_wave(&store, state_wave, state_responses)
+        .unwrap();
+
+    let branches = coordinator.prepare_next_solve_wave().unwrap();
+    assert_eq!(
+        branches
+            .tasks
+            .iter()
+            .map(|task| match &task.node {
+                StructuralSequenceNode::Solve(step) => step.as_str(),
+                StructuralSequenceNode::PublishState { .. } => unreachable!(),
+            })
+            .collect::<Vec<_>>(),
+        vec!["left", "right"]
+    );
+    assert!(branches
+        .tasks
+        .iter()
+        .all(|task| task.dependencies == vec![root_state_node.clone()]));
+    assert!(branches.tasks.iter().all(|task| {
+        task.prepared
+            .host
+            .workload
+            .inputs
+            .iter()
+            .map(|input| input.reference_kind)
+            .collect::<Vec<_>>()
+            == vec![
+                ValueRefKind::DriverObject,
+                ValueRefKind::DriverObject,
+                ValueRefKind::ResultObject,
+            ]
+    }));
+    let branch_source_states = branches
+        .tasks
+        .iter()
+        .map(|task| {
+            StructuralLinearWorkload::from_canonical_bytes(&task.prepared.inputs[0].payload())
+                .unwrap()
+                .initial_guess_transition
+                .unwrap()
+                .source_state
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(branch_source_states.len(), 1);
+
+    let mut branch_responses = BTreeMap::new();
+    for task in &branches.tasks {
+        task.prepared.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &task.prepared.program.request,
+            &mut store,
+            &StructuralResultKernel(encoded.clone()),
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        branch_responses.insert(
+            task.node.clone(),
+            AnalysisHostResponse::completed(&task.prepared.host, &completed)
+                .unwrap()
+                .program_response(),
+        );
+    }
+    let branch_states = coordinator
+        .complete_solve_wave(&store, branches, branch_responses)
+        .unwrap();
+    assert_eq!(branch_states.tasks.len(), 2);
+    let mut branch_state_responses = BTreeMap::new();
+    for task in &branch_states.tasks {
+        task.prepared.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &task.prepared.program.request,
+            &mut store,
+            &StateProjectionKernel,
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        branch_state_responses.insert(
+            task.node.clone(),
+            AnalysisHostResponse::completed(&task.prepared.host, &completed)
+                .unwrap()
+                .program_response(),
+        );
+    }
+    coordinator
+        .complete_state_wave(&store, branch_states, branch_state_responses)
+        .unwrap();
+    assert!(coordinator.is_complete());
+    let completed = coordinator.finish().unwrap();
+    assert_eq!(
+        completed
+            .steps
+            .iter()
+            .map(|step| step.step_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["preload", "right", "left"]
+    );
+    assert_eq!(completed.states.len(), 3);
+    assert_eq!(
+        completed.steps[1].result.run.fields,
+        completed.steps[2].result.run.fields
+    );
+}

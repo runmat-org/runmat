@@ -46,6 +46,12 @@ pub struct PreparedStructuralLinearProgram {
     pub inputs: Vec<PreparedAnalysisObjects>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportedStructuralLinearResult {
+    pub result: StructuralLinearWorkloadResult,
+    pub objects: PreparedAnalysisObjects,
+}
+
 /// Resolves one authored sequence step against an optional completed upstream state before
 /// preparing its immutable solver task. Scheduling and placement cannot enter this projection.
 pub fn prepare_structural_sequence_step(
@@ -255,21 +261,28 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let mut inputs = vec![invocation, mesh];
+    let mut inputs = vec![
+        (invocation, ValueRefKind::DriverObject),
+        (mesh, ValueRefKind::DriverObject),
+    ];
     if let Some(initial_guess) = preparation.initial_guess {
-        inputs.push(initial_guess);
+        inputs.push((initial_guess, ValueRefKind::ResultObject));
     }
     let workload_inputs = inputs
         .iter()
-        .map(|input| AnalysisWorkloadInput {
+        .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
             logical_identity: input.manifest.logical_identity,
             payload_digest: input.manifest.payload_digest,
             manifest_digest: input.root.digest,
             manifest_encoded_length: input.root.encoded_length,
-            reference_kind: ValueRefKind::DriverObject,
+            reference_kind: *reference_kind,
         })
         .collect();
+    let inputs = inputs
+        .into_iter()
+        .map(|(input, _)| input)
+        .collect::<Vec<_>>();
     let mut required_capabilities = preparation.required_capabilities;
     required_capabilities.insert(AnalysisCapabilityRequirement::Host {
         abi: ANALYSIS_HOST_ABI.into(),
@@ -298,6 +311,15 @@ pub fn import_structural_linear_result(
     prepared: &PreparedStructuralLinearProgram,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<StructuralLinearWorkloadResult> {
+    Ok(import_structural_linear_completion(source, response, prepared, limits)?.result)
+}
+
+pub fn import_structural_linear_completion(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    prepared: &PreparedStructuralLinearProgram,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<ImportedStructuralLinearResult> {
     response.validate_against(&prepared.program.request)?;
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
@@ -337,7 +359,10 @@ pub fn import_structural_linear_result(
     }
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
     validate_result_semantics(&prepared.inputs[0], &result)?;
-    Ok(result)
+    Ok(ImportedStructuralLinearResult {
+        result,
+        objects: imported,
+    })
 }
 
 struct StructuralIdentities {

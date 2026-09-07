@@ -12,6 +12,7 @@ mod signal_materialization;
 mod signal_program;
 mod state_publication;
 mod structural;
+mod structural_sequence;
 mod task;
 mod transport;
 mod workload;
@@ -47,13 +48,20 @@ pub use signal_program::{
     SIGNAL_GENERATOR_TARGET_PROFILE,
 };
 pub use state_publication::{
-    import_semantic_state, prepare_semantic_state_publication, PreparedSemanticStatePublication,
-    SemanticStatePublicationPreparation,
+    import_semantic_state, import_semantic_state_completion, prepare_semantic_state_publication,
+    ImportedSemanticState, PreparedSemanticStatePublication, SemanticStatePublicationPreparation,
 };
 pub use structural::{
-    import_structural_linear_result, prepare_structural_linear_program,
-    prepare_structural_sequence_step, PreparedStructuralLinearProgram,
+    import_structural_linear_completion, import_structural_linear_result,
+    prepare_structural_linear_program, prepare_structural_sequence_step,
+    ImportedStructuralLinearResult, PreparedStructuralLinearProgram,
     StructuralLinearProgramPreparation,
+};
+pub use structural_sequence::{
+    CompletedStructuralSequence, CompletedStructuralSequenceState, CompletedStructuralSequenceStep,
+    PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
+    PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
+    StructuralSequencePreparation,
 };
 pub use task::{
     build_analysis_task_submission, AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
