@@ -292,17 +292,8 @@ fn study_failure(
 
 fn run_entry(run: AnalysisStudyRunData) -> AnalysisStudySweepRunEntry {
     AnalysisStudySweepRunEntry {
-        study_id: run.study_id,
-        procedure_step: run.procedure_step,
-        execution: run.execution,
-        identity: run.identity,
-        run_id: run.run_id,
-        run_status: run.run_status,
-        numerically_acceptable: run.numerically_acceptable,
-        production_publishable: run.production_publishable,
-        production_publication_reasons: run.production_publication_reasons,
-        run_operation: run.run_operation,
-        run_op_version: run.run_op_version,
+        study_id: run.study_id.clone(),
+        result: Box::new(run),
     }
 }
 

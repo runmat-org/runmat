@@ -95,6 +95,68 @@ mod topology_identity;
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
+fn test_solver_result_identity(
+    label: &str,
+) -> runmat_analysis_fea::execution::SolverResultIdentity {
+    serde_json::from_value(
+        serde_json::to_value(runmat_execution::Digest::sha256(label.as_bytes())).unwrap(),
+    )
+    .unwrap()
+}
+
+fn test_structural_sequence_result(
+    spec: &AnalysisStudySpec,
+    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    result: runmat_analysis_fea::FeaRunResult,
+) -> StructuralStudySequenceNumericalResult {
+    let study = runmat_analysis_fea::execution::StudyIdentity::new(
+        analysis_study_content_digest(spec),
+        None,
+    )
+    .unwrap();
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_authored(
+        study,
+        &workload.model.sequence,
+    )
+    .unwrap();
+    let step = workload.procedure_step().unwrap();
+    let producer =
+        runmat_analysis_fea::execution::StepIdentity::from_authored(sequence, step).unwrap();
+    let solver_result_identity = test_solver_result_identity("prepared-study-result");
+    let fields = result
+        .fields
+        .iter()
+        .filter(|field| !field.is_empty() && field.as_host_f64().is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    let states = step
+        .state_outputs
+        .iter()
+        .map(|declaration| {
+            CanonicalSemanticState::new(CanonicalSemanticStateInput {
+                producer,
+                declaration: declaration.clone(),
+                topology_digest: runmat_execution::Digest::from_bytes(
+                    *mesh.canonical_digest.bytes(),
+                ),
+                source_result: solver_result_identity,
+                fields: fields.clone(),
+            })
+            .unwrap()
+        })
+        .collect();
+    StructuralStudySequenceNumericalResult {
+        frozen_project_digest: None,
+        steps: vec![StructuralStudyStepNumericalResult {
+            step_id: workload.step_id.clone(),
+            solver_result_identity,
+            result,
+        }],
+        states,
+    }
+}
+
 fn fixed_constraint(
     id: impl Into<String>,
     region: impl Into<String>,
@@ -1958,10 +2020,17 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert_eq!(envelope.op_version, "fea.plan_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
-    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
-    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
+    assert_eq!(envelope.data.steps.len(), 1);
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_linear_static/v1"
+    );
     assert!(matches!(
-        envelope.data.execution.solver_options,
+        envelope.data.steps[0].execution.solver_options,
         AnalysisSolverOptions::StructuralLinear(_)
     ));
     assert_eq!(
@@ -1981,6 +2050,9 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
 #[test]
 fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
     let _guard = analysis_test_guard();
+    let root = temp_artifact_root("plan-electromagnetic-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
     let mut spec = sample_electromagnetic_study_spec();
     spec.execution.steps[0].solver_options =
         AnalysisSolverOptions::ElectromagneticPotential(AnalysisElectromagneticRunOptions {
@@ -1992,12 +2064,19 @@ fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
     let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
         .expect("electromagnetic study plan should succeed");
 
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
     assert_eq!(
-        envelope.data.execution.solver_options,
+        envelope.data.steps[0].run_operation,
+        "fea.run_electromagnetic"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_electromagnetic/v1"
+    );
+    assert_eq!(
+        envelope.data.steps[0].execution.solver_options,
         spec.execution.steps[0].solver_options
     );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -2040,16 +2119,16 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
         .plan_entries
         .iter()
         .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Structural
-                && entry.procedure_step.procedure == AnalysisProcedure::Static
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::Static
         ));
     assert!(envelope
         .data
         .plan_entries
         .iter()
         .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Electromagnetic
-                && entry.procedure_step.procedure == AnalysisProcedure::HarmonicResponse
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Electromagnetic
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::HarmonicResponse
         ));
     assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
@@ -2076,6 +2155,9 @@ fn analysis_plan_study_sweep_rejects_empty_study_set() {
 #[test]
 fn analysis_plan_study_sweep_can_continue_on_study_failure() {
     let _guard = analysis_test_guard();
+    let root = temp_artifact_root("plan-study-sweep-continue-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
     let mut invalid = sample_linear_static_study_spec();
     invalid.study_id = "   ".to_string();
     let spec = AnalysisStudySweepSpec {
@@ -2097,6 +2179,7 @@ fn analysis_plan_study_sweep_can_continue_on_study_failure() {
         envelope.data.failure_entries[0].error_code,
         "RM.FEA.PLAN_STUDY.INVALID_SPEC"
     );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -2127,20 +2210,29 @@ fn analysis_run_study_executes_linear_static_path() {
         AnalysisModelTemplate::LinearStaticStructural
     );
     assert_eq!(
-        envelope.data.procedure_step.family,
+        envelope.data.steps[0].procedure_step.family,
         PhysicsFamily::Structural
     );
     assert_eq!(
-        envelope.data.procedure_step.procedure,
+        envelope.data.steps[0].procedure_step.procedure,
         AnalysisProcedure::Static
     );
-    assert_eq!(envelope.data.execution.backend, ComputeBackend::Cpu);
+    assert_eq!(
+        envelope.data.steps[0].execution.backend,
+        ComputeBackend::Cpu
+    );
     assert!(matches!(
-        envelope.data.execution.solver_options,
+        envelope.data.steps[0].execution.solver_options,
         AnalysisSolverOptions::StructuralLinear(_)
     ));
-    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
-    assert_eq!(envelope.data.run_op_version, "fea.run_linear_static/v1");
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_linear_static/v1"
+    );
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
@@ -2150,16 +2242,16 @@ fn analysis_run_study_executes_linear_static_path() {
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
-    assert!(envelope.data.run_id.starts_with("run_"));
+    assert!(envelope.data.steps[0].run_id.starts_with("run_"));
     assert!(Path::new(&envelope.data.evidence_artifact_path)
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("run-") && name.ends_with(".json")));
+        .is_some_and(|name| name.starts_with("sequence-run-") && name.ends_with(".json")));
 
-    let persisted = storage::load_run_result(&envelope.data.run_id)
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
-    assert_eq!(persisted.run_id, envelope.data.run_id);
+    assert_eq!(persisted.run_id, envelope.data.steps[0].run_id);
     assert_eq!(persisted.run_status, envelope.data.run_status);
     assert_eq!(
         persisted.numerically_acceptable,
@@ -2170,8 +2262,11 @@ fn analysis_run_study_executes_linear_static_path() {
         envelope.data.solver_convergence
     );
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
-    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
-    assert_eq!(persisted.provenance, envelope.data.provenance);
+    assert_eq!(
+        persisted.quality_reasons,
+        envelope.data.steps[0].quality_reasons
+    );
+    assert_eq!(persisted.provenance, envelope.data.steps[0].provenance);
     let solver_mesh_artifact_path = envelope
         .data
         .solver_mesh_artifact_path
@@ -2293,16 +2388,78 @@ fn portable_structural_study_reenters_shared_runtime_persistence() {
 
     assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
     assert_eq!(envelope.operation, "fea.run_study");
-    let persisted = storage::load_run_result(&envelope.data.run_id)
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("portable run load should succeed")
         .expect("portable run should be persisted");
-    assert_eq!(persisted.run.identity, envelope.data.identity);
+    assert_eq!(persisted.run.identity, envelope.data.steps[0].identity);
     assert_eq!(persisted.run_status, envelope.data.run_status);
     assert_eq!(
         persisted.production_publishable,
         envelope.data.production_publishable
     );
     assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn portable_structural_study_executes_every_independent_step_in_authored_order() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("portable-multi-step-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("portable-multi-step-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let first = ProcedureStep::structural_static("step_static_first");
+    let second = ProcedureStep::structural_static("step_static_second");
+    let mut model = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        OperationContext::new(None, None),
+    )
+    .expect("structural model creation should succeed")
+    .data;
+    model.sequence = AnalysisSequence::from_steps(
+        "sequence_two_independent_static_steps",
+        vec![first.clone(), second.clone()],
+    );
+    spec.model = Some(model);
+    spec.execution = AnalysisExecutionPlan::for_sequence_with_requirement(
+        &AnalysisSequence::from_steps(
+            "sequence_two_independent_static_steps",
+            vec![first.clone(), second.clone()],
+        ),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+    )
+    .expect("two-step execution plan should be valid");
+    let executor = CanonicalStructuralExecutor {
+        calls: AtomicU64::new(0),
+    };
+
+    let envelope = analysis_run_study_with_structural_executor_op(
+        &spec,
+        OperationContext::new(None, None),
+        &executor,
+    )
+    .expect("independent structural sequence should succeed");
+
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 2);
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert_eq!(envelope.data.steps[0].procedure_step.step_id, first.step_id);
+    assert_eq!(
+        envelope.data.steps[1].procedure_step.step_id,
+        second.step_id
+    );
+    assert_ne!(envelope.data.steps[0].run_id, envelope.data.steps[1].run_id);
+    for step in &envelope.data.steps {
+        assert!(storage::load_run_result(&step.run_id)
+            .expect("step run load should succeed")
+            .is_some());
+    }
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_dir_all(&solver_mesh_root);
 }
@@ -2330,9 +2487,12 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
         calls: AtomicU64::new(0),
     };
 
+    let workload = prepared.workloads().into_values().next().unwrap();
     let numerical_result = executor
-        .execute(prepared.workload(), prepared.solver_mesh())
+        .execute(&workload, prepared.solver_mesh())
         .expect("prepared numerical solve should succeed");
+    let numerical_result =
+        test_structural_sequence_result(&spec, &workload, prepared.solver_mesh(), numerical_result);
     let envelope = analysis_complete_structural_study_op(prepared, Ok(numerical_result))
         .expect("prepared structural study completion should succeed");
 
@@ -2340,8 +2500,11 @@ fn prepared_structural_study_completes_without_reinterpreting_the_study() {
     assert_eq!(envelope.trace_id.as_deref(), Some("trace-prepared"));
     assert_eq!(envelope.request_id.as_deref(), Some("request-prepared"));
     assert_eq!(envelope.data.study_id, spec.study_id);
-    assert_eq!(envelope.data.run_operation, "fea.run_linear_static");
-    assert!(storage::load_run_result(&envelope.data.run_id)
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_linear_static"
+    );
+    assert!(storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("prepared run lookup should succeed")
         .is_some());
     assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
@@ -2412,12 +2575,15 @@ fn analysis_run_study_honors_typed_electromagnetic_solver_options() {
     assert_eq!(envelope.operation, "fea.run_study");
     assert_eq!(envelope.op_version, "fea.run_study/v1");
     assert_eq!(
-        envelope.data.procedure_step.family,
+        envelope.data.steps[0].procedure_step.family,
         PhysicsFamily::Electromagnetic
     );
-    assert_eq!(envelope.data.execution.backend, ComputeBackend::Cpu);
+    assert_eq!(
+        envelope.data.steps[0].execution.backend,
+        ComputeBackend::Cpu
+    );
     let AnalysisSolverOptions::ElectromagneticPotential(resolved_options) =
-        &envelope.data.execution.solver_options
+        &envelope.data.steps[0].execution.solver_options
     else {
         panic!("electromagnetic study should return resolved options")
     };
@@ -2446,10 +2612,16 @@ fn analysis_run_study_honors_typed_electromagnetic_solver_options() {
         resolved_options.harmonic_max_iterations,
         requested_options.harmonic_max_iterations
     );
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_electromagnetic"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_electromagnetic/v1"
+    );
 
-    let persisted = storage::load_run_result(&envelope.data.run_id)
+    let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("run load should succeed")
         .expect("run should be persisted");
     let em_payload = persisted
@@ -2472,8 +2644,11 @@ fn analysis_run_study_honors_typed_electromagnetic_solver_options() {
         envelope.data.solver_convergence
     );
     assert_eq!(persisted.result_quality, envelope.data.result_quality);
-    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
-    assert_eq!(persisted.provenance, envelope.data.provenance);
+    assert_eq!(
+        persisted.quality_reasons,
+        envelope.data.steps[0].quality_reasons
+    );
+    assert_eq!(persisted.provenance, envelope.data.steps[0].provenance);
 }
 
 #[test]
@@ -2486,16 +2661,22 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
         .expect("electromagnetic study run should succeed");
 
     assert_eq!(
-        envelope.data.procedure_step.family,
+        envelope.data.steps[0].procedure_step.family,
         PhysicsFamily::Electromagnetic
     );
     let expected_options = AnalysisElectromagneticRunOptions::default();
     assert_eq!(
-        envelope.data.execution.solver_options,
+        envelope.data.steps[0].execution.solver_options,
         AnalysisSolverOptions::ElectromagneticPotential(expected_options)
     );
-    assert_eq!(envelope.data.run_operation, "fea.run_electromagnetic");
-    assert_eq!(envelope.data.run_op_version, "fea.run_electromagnetic/v1");
+    assert_eq!(
+        envelope.data.steps[0].run_operation,
+        "fea.run_electromagnetic"
+    );
+    assert_eq!(
+        envelope.data.steps[0].run_op_version,
+        "fea.run_electromagnetic/v1"
+    );
 }
 
 #[test]
@@ -2536,22 +2717,22 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
         .run_entries
         .iter()
         .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Structural
-                && entry.procedure_step.procedure == AnalysisProcedure::Static
+            |entry| entry.result.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.result.steps[0].procedure_step.procedure == AnalysisProcedure::Static
         ));
     assert!(envelope
         .data
         .run_entries
         .iter()
-        .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Electromagnetic
-                && entry.procedure_step.procedure == AnalysisProcedure::HarmonicResponse
-        ));
+        .any(|entry| entry.result.steps[0].procedure_step.family
+            == PhysicsFamily::Electromagnetic
+            && entry.result.steps[0].procedure_step.procedure
+                == AnalysisProcedure::HarmonicResponse));
     assert!(envelope
         .data
         .run_entries
         .iter()
-        .all(|entry| entry.run_id.starts_with("run_")));
+        .all(|entry| entry.result.steps[0].run_id.starts_with("run_")));
     assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
@@ -9103,7 +9284,7 @@ fn analysis_results_include_electromagnetic_fields_for_em_runs() {
         .expect("electromagnetic study should run");
 
     let results = analysis_results_by_run_id_op(
-        &run.data.run_id,
+        &run.data.steps[0].run_id,
         AnalysisResultsQuery::default(),
         OperationContext::new(None, None),
     )
@@ -9181,7 +9362,7 @@ fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
 
     let figure = analysis_generate_study_run_mesh_figure(
         &spec,
-        &run.data.run_id,
+        &run.data.steps[0].run_id,
         AnalysisFigureGenerationOptions {
             mesh_source: AnalysisFigureMeshSource::Solver,
             ..AnalysisFigureGenerationOptions::default()
@@ -9189,7 +9370,7 @@ fn analysis_generate_study_run_mesh_figure_uses_solver_topology_for_em_run() {
     )
     .expect("study mesh figure should be generated");
 
-    assert_solver_topology_mesh(&figure, &run.data.run_id);
+    assert_solver_topology_mesh(&figure, &run.data.steps[0].run_id);
     let _ = fs::remove_dir_all(solver_mesh_root);
 }
 

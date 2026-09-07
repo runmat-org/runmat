@@ -1,8 +1,10 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
     FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace,
+    StateCompleteness, StateId, StateKind, StatePersistence,
 };
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
+use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, StateIdentity};
 use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
 };
@@ -2376,29 +2378,28 @@ pub struct AnalysisStudyIssue {
 pub struct AnalysisStudyPlanData {
     pub study_id: String,
     pub model_id: String,
-    pub procedure_step: ProcedureStep,
-    pub execution: AnalysisExecutionStep,
+    pub sequence_id: String,
+    pub steps: Vec<AnalysisStudyPlanStepData>,
     pub operation_sequence: Vec<String>,
-    pub run_operation: String,
-    pub run_op_version: String,
     pub study_fingerprint: String,
     pub evidence_artifact_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyRunData {
-    pub study_id: String,
-    pub model_id: String,
-    pub model_template: AnalysisModelTemplate,
+pub struct AnalysisStudyPlanStepData {
+    pub ordinal: usize,
+    pub procedure_step: ProcedureStep,
+    pub execution: AnalysisExecutionStep,
+    pub run_operation: String,
+    pub run_op_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyStepRunData {
+    pub ordinal: usize,
     pub procedure_step: ProcedureStep,
     pub execution: AnalysisExecutionStep,
     pub identity: AnalysisRunIdentity,
-    #[serde(default)]
-    pub solver_mesh_artifact_path: Option<String>,
-    #[serde(default)]
-    pub meshing_evidence_artifact_path: Option<String>,
-    pub study_fingerprint: String,
-    pub operation_sequence: Vec<String>,
     pub run_operation: String,
     pub run_op_version: String,
     pub run_id: String,
@@ -2411,6 +2412,42 @@ pub struct AnalysisStudyRunData {
     pub quality_reasons: Vec<QualityReason>,
     pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
+    pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyStatePublicationData {
+    pub producer_step: ProcedureStepId,
+    pub state_id: StateId,
+    pub kind: StateKind,
+    pub completeness: StateCompleteness,
+    pub persistence: StatePersistence,
+    pub identity: StateIdentity,
+    pub content_digest: runmat_execution::Digest,
+    pub topology_digest: runmat_execution::Digest,
+    pub source_result: SolverResultIdentity,
+    pub artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyRunData {
+    pub study_id: String,
+    pub model_id: String,
+    pub model_template: AnalysisModelTemplate,
+    pub sequence_identity: SequenceIdentity,
+    pub steps: Vec<AnalysisStudyStepRunData>,
+    pub states: Vec<AnalysisStudyStatePublicationData>,
+    #[serde(default)]
+    pub solver_mesh_artifact_path: Option<String>,
+    #[serde(default)]
+    pub meshing_evidence_artifact_path: Option<String>,
+    pub study_fingerprint: String,
+    pub operation_sequence: Vec<String>,
+    pub run_status: RunStatus,
+    pub numerically_acceptable: bool,
+    pub production_publishable: bool,
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
     pub evidence_artifact_path: String,
 }
 
@@ -2444,11 +2481,9 @@ pub struct AnalysisStudySweepValidateData {
 pub struct AnalysisStudySweepPlanEntry {
     pub study_id: String,
     pub model_id: String,
-    pub procedure_step: ProcedureStep,
-    pub execution: AnalysisExecutionStep,
+    pub sequence_id: String,
+    pub steps: Vec<AnalysisStudyPlanStepData>,
     pub operation_sequence: Vec<String>,
-    pub run_operation: String,
-    pub run_op_version: String,
     pub study_fingerprint: String,
 }
 
@@ -2467,16 +2502,7 @@ pub struct AnalysisStudySweepPlanData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySweepRunEntry {
     pub study_id: String,
-    pub procedure_step: ProcedureStep,
-    pub execution: AnalysisExecutionStep,
-    pub identity: AnalysisRunIdentity,
-    pub run_id: String,
-    pub run_status: RunStatus,
-    pub numerically_acceptable: bool,
-    pub production_publishable: bool,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
-    pub run_operation: String,
-    pub run_op_version: String,
+    pub result: Box<AnalysisStudyRunData>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

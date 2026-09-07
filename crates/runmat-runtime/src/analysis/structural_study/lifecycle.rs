@@ -1,19 +1,21 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_fea::FeaRunResult;
-
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
 
-use super::publication::{complete_study_run, PreparedStudyCompletion};
-use super::{PreparedStructuralStudyIntent, StructuralStudyCompletionIdentity};
+use super::publication::{complete_study_run, CompletedStudyStep, PreparedStudyCompletion};
+use super::{
+    PreparedStructuralStudyIntent, PreparedStructuralStudyIntentStep,
+    StructuralStudyCompletionIdentity,
+};
 use crate::analysis::{
     analysis_admit_linear_static_run_with_id, analysis_study_content_digest, meshing,
-    persist_linear_static_run, prepare_linear_static_workload_template, prepare_study_semantics,
+    prepare_linear_static_workload_template, prepare_study_semantics,
     study_fingerprint_from_digest, AnalysisSolverOptions, AnalysisStudyRunData, AnalysisStudySpec,
-    PreparedStructuralLinearRun, ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
+    PreparedStructuralLinearRun, StructuralStudySequenceNumericalResult,
+    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 /// Resolves and validates structural study semantics without running meshing or loading a solver
@@ -24,31 +26,50 @@ pub fn analysis_prepare_structural_study_intent_op(
     context: OperationContext,
 ) -> Result<PreparedStructuralStudyIntent, OperationErrorEnvelope> {
     let study = prepare_study_semantics(spec, context)?;
-    let AnalysisSolverOptions::StructuralLinear(mut options) =
-        study.authored_execution.solver_options.clone()
-    else {
-        return Err(operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
+    let mut steps = Vec::with_capacity(study.steps.len());
+    for step in &study.steps {
+        let AnalysisSolverOptions::StructuralLinear(mut options) =
+            step.authored_execution.solver_options.clone()
+        else {
+            return Err(operation_error(
+                ANALYSIS_RUN_STUDY_OPERATION,
+                ANALYSIS_RUN_STUDY_OP_VERSION,
+                &study.context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RUN_STUDY.PORTABLE_FAMILY_UNSUPPORTED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "portable structural study preparation requires structural-linear procedure steps",
+                BTreeMap::from([
+                    ("study_id".to_string(), study.spec.study_id.clone()),
+                    (
+                        "step_id".to_string(),
+                        step.procedure_step.step_id.as_str().to_string(),
+                    ),
+                ]),
+            ));
+        };
+        options.solver_mesh_artifact_path = None;
+        let workload = prepare_linear_static_workload_template(
+            &study.model,
+            &step.procedure_step.step_id,
+            step.authored_execution.backend,
+            step.authored_execution.requirement,
+            &options,
             &study.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.PORTABLE_FAMILY_UNSUPPORTED",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "portable study preparation currently requires a structural-linear procedure step",
-            BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
-        ));
-    };
-    options.solver_mesh_artifact_path = None;
-    let workload_template = prepare_linear_static_workload_template(
-        &study.model,
-        study.authored_execution.backend,
-        study.authored_execution.requirement,
-        &options,
-        &study.context,
-    )?;
+        )?;
+        let mut authored_execution = step.authored_execution.clone();
+        authored_execution.solver_options =
+            AnalysisSolverOptions::StructuralLinear(options.clone());
+        steps.push(PreparedStructuralStudyIntentStep {
+            authored_execution,
+            procedure_step: step.procedure_step.clone(),
+            workload,
+            options,
+        });
+    }
     let geometry_source_digest =
         crate::meshing::parse_source_sha256(&study.spec.geometry.source.sha256)
             .map(runmat_execution::Digest::from_bytes)
@@ -67,8 +88,6 @@ pub fn analysis_prepare_structural_study_intent_op(
                     BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
                 )
             })?;
-    let mut authored_execution = study.authored_execution;
-    authored_execution.solver_options = AnalysisSolverOptions::StructuralLinear(options.clone());
     let mut intent = PreparedStructuralStudyIntent {
         study_id: study.spec.study_id.clone(),
         model_template: study.spec.create_model_intent.template,
@@ -99,11 +118,8 @@ pub fn analysis_prepare_structural_study_intent_op(
         authored_study_digest: analysis_study_content_digest(spec),
         intent_digest: runmat_execution::Digest::from_bytes([0_u8; 32]),
         model: study.model,
-        authored_execution,
-        procedure_step: study.procedure_step,
+        steps,
         operation_sequence: study.operation_sequence,
-        workload_template,
-        options,
     };
     intent.intent_digest = intent.semantic_digest().map_err(|message| {
         operation_error(
@@ -152,7 +168,7 @@ pub fn analysis_prepare_structural_study_intent_op(
 pub fn analysis_complete_structural_study_intent_op(
     intent: PreparedStructuralStudyIntent,
     meshing_output: crate::meshing::MeshingExecutionOutput,
-    result: FeaRunResult,
+    result: StructuralStudySequenceNumericalResult,
     completion_identity: StructuralStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     intent.validate().map_err(|message| {
@@ -216,33 +232,6 @@ pub fn analysis_complete_structural_study_intent_op(
                 )
             },
         )?;
-    let mut workload = intent.workload_template.clone();
-    workload.model = resolved_model.clone();
-    workload.validate().map_err(|error| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &intent.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.INVALID_BOUND_WORKLOAD",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Fatal,
-            },
-            error.to_string(),
-            BTreeMap::from([("study_id".to_string(), intent.study_id.clone())]),
-        )
-    })?;
-    let mut options = intent.options.clone();
-    let prepared_linear = PreparedStructuralLinearRun {
-        workload,
-        solver_mesh: Some(meshing_output.artifact.clone()),
-        options: options.clone(),
-        context: intent.context.clone(),
-    };
-    let assigned_run_id = completion_identity.local_run_id(intent.authored_study_digest);
-    let run =
-        analysis_admit_linear_static_run_with_id(prepared_linear, result, Some(&assigned_run_id))?;
     let persisted_mesh = meshing::persist_mesh_output(&meshing_output).map_err(|message| {
         intent_completion_error(
             &intent,
@@ -252,25 +241,91 @@ pub fn analysis_complete_structural_study_intent_op(
             message,
         )
     })?;
-    options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
-    let mut authored_execution = intent.authored_execution;
-    authored_execution.solver_options = AnalysisSolverOptions::StructuralLinear(options.clone());
-    persist_linear_static_run(&intent.context, &run.data)?;
+    let mut numerical_by_step = BTreeMap::new();
+    for step in result.steps {
+        if numerical_by_step
+            .insert(step.step_id.clone(), step)
+            .is_some()
+        {
+            return Err(intent_completion_error(
+                &intent,
+                "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                "remote sequence contains a duplicate procedure-step result",
+            ));
+        }
+    }
+    let mut completion_steps = Vec::with_capacity(intent.steps.len());
+    let mut authored_steps = Vec::with_capacity(intent.steps.len());
+    for step in intent.steps.clone() {
+        let numerical = numerical_by_step
+            .remove(&step.procedure_step.step_id)
+            .ok_or_else(|| {
+                intent_completion_error(
+                    &intent,
+                    "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+                    OperationErrorType::Contract,
+                    OperationErrorSeverity::Fatal,
+                    "remote sequence omitted an authored procedure-step result",
+                )
+            })?;
+        let mut workload = step.workload;
+        workload.model = resolved_model.clone();
+        let mut options = step.options;
+        options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
+        let prepared_linear = PreparedStructuralLinearRun {
+            workload,
+            solver_mesh: Some(meshing_output.artifact.clone()),
+            options: options.clone(),
+            context: intent.context.clone(),
+        };
+        let assigned_run_id = completion_identity
+            .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+        let run = analysis_admit_linear_static_run_with_id(
+            prepared_linear,
+            numerical.result,
+            Some(&assigned_run_id),
+        )?;
+        let mut authored_execution = step.authored_execution;
+        authored_execution.solver_options =
+            AnalysisSolverOptions::StructuralLinear(options.clone());
+        authored_steps.push(super::PreparedStudyStep {
+            authored_execution,
+            procedure_step: step.procedure_step.clone(),
+        });
+        completion_steps.push(CompletedStudyStep {
+            step_id: step.procedure_step.step_id,
+            solver_result_identity: numerical.solver_result_identity,
+            run,
+            resolved_solver_options: AnalysisSolverOptions::StructuralLinear(options),
+        });
+    }
+    if !numerical_by_step.is_empty() {
+        return Err(intent_completion_error(
+            &intent,
+            "RM.FEA.RUN_STUDY.STEP_INVENTORY_MISMATCH",
+            OperationErrorType::Contract,
+            OperationErrorSeverity::Fatal,
+            "remote sequence returned an unauthored procedure-step result",
+        ));
+    }
     complete_study_run(
         PreparedStudyCompletion {
             context: intent.context,
             study_id: intent.study_id,
             model_template: intent.model_template,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
+            authored_study_digest: intent.authored_study_digest,
             model: resolved_model,
-            authored_execution,
-            procedure_step: intent.procedure_step,
+            steps: authored_steps,
             operation_sequence: intent.operation_sequence,
             solver_mesh_artifact_path: persisted_mesh.artifact_path,
             meshing_evidence_artifact_path: persisted_mesh.evidence_path,
         },
-        run,
-        AnalysisSolverOptions::StructuralLinear(options),
+        completion_steps,
+        result.states,
+        result.frozen_project_digest,
     )
 }
 

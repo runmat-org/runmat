@@ -679,11 +679,14 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(plan.op_version, "fea.plan_study/v1");
     assert!(plan.data.study_fingerprint.starts_with("sha256:"));
     assert!(matches!(
-        plan.data.execution.solver_options,
+        plan.data.steps[0].execution.solver_options,
         AnalysisSolverOptions::StructuralLinear(_)
     ));
-    assert_eq!(plan.data.run_operation, "fea.run_linear_static");
-    assert_eq!(plan.data.run_op_version, "fea.run_linear_static/v1");
+    assert_eq!(plan.data.steps[0].run_operation, "fea.run_linear_static");
+    assert_eq!(
+        plan.data.steps[0].run_op_version,
+        "fea.run_linear_static/v1"
+    );
     assert!(PathBuf::from(&plan.data.evidence_artifact_path).exists());
 
     let run = analysis_run_study_op(
@@ -695,24 +698,33 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(run.op_version, "fea.run_study/v1");
     assert_eq!(run.data.study_fingerprint, plan.data.study_fingerprint);
     assert!(matches!(
-        run.data.execution.solver_options,
+        run.data.steps[0].execution.solver_options,
         AnalysisSolverOptions::StructuralLinear(_)
     ));
-    assert_eq!(run.data.run_operation, "fea.run_linear_static");
-    assert_eq!(run.data.run_op_version, "fea.run_linear_static/v1");
+    assert_eq!(run.data.steps[0].run_operation, "fea.run_linear_static");
+    assert_eq!(run.data.steps[0].run_op_version, "fea.run_linear_static/v1");
     assert_eq!(run.data.solver_convergence, QualityGate::Pass);
     assert_eq!(run.data.result_quality, QualityGate::Pass);
-    assert_eq!(run.data.identity.family(), PhysicsFamily::Structural);
-    assert_eq!(run.data.identity.procedure(), AnalysisProcedure::Static);
+    assert_eq!(
+        run.data.steps[0].identity.family(),
+        PhysicsFamily::Structural
+    );
+    assert_eq!(
+        run.data.steps[0].identity.procedure(),
+        AnalysisProcedure::Static
+    );
     assert!(run.data.numerically_acceptable);
     assert!(!run.data.production_publishable);
-    assert_eq!(run.data.quality_reasons.len(), 0);
-    assert_eq!(run.data.production_publication_reasons.len(), 1);
+    assert_eq!(run.data.steps[0].quality_reasons.len(), 0);
+    assert_eq!(run.data.steps[0].production_publication_reasons.len(), 1);
     assert_eq!(
-        run.data.production_publication_reasons[0].code,
+        run.data.steps[0].production_publication_reasons[0].code,
         ProductionPublicationReasonCode::FormulationNotProductionQualified
     );
-    assert_eq!(run.data.provenance.requested_backend, ComputeBackend::Cpu);
+    assert_eq!(
+        run.data.steps[0].provenance.requested_backend,
+        ComputeBackend::Cpu
+    );
     assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
 
     drop(env_guard);
@@ -780,9 +792,9 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
     assert!(envelope.data.failure_entries.is_empty());
     assert_eq!(envelope.data.run_entries.len(), 2);
     assert!(envelope.data.run_entries.iter().all(|entry| {
-        entry.run_id.starts_with("run_")
+        entry.result.steps[0].run_id.starts_with("run_")
             && matches!(
-                entry.procedure_step.family,
+                entry.result.steps[0].procedure_step.family,
                 PhysicsFamily::Structural | PhysicsFamily::Electromagnetic
             )
     }));
@@ -1012,16 +1024,16 @@ fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
         .plan_entries
         .iter()
         .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Structural
-                && entry.procedure_step.procedure == AnalysisProcedure::Static
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Structural
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::Static
         ));
     assert!(envelope
         .data
         .plan_entries
         .iter()
         .any(
-            |entry| entry.procedure_step.family == PhysicsFamily::Electromagnetic
-                && entry.procedure_step.procedure == AnalysisProcedure::HarmonicResponse
+            |entry| entry.steps[0].procedure_step.family == PhysicsFamily::Electromagnetic
+                && entry.steps[0].procedure_step.procedure == AnalysisProcedure::HarmonicResponse
         ));
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
 

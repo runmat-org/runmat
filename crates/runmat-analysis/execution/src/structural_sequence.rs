@@ -79,6 +79,7 @@ impl PreparedStructuralStateWave {
 pub struct CompletedStructuralSequenceStep {
     pub step_id: ProcedureStepId,
     pub host: AnalysisHostWorkload,
+    pub result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
     pub result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub objects: PreparedAnalysisObjects,
 }
@@ -351,6 +352,7 @@ impl StructuralSequenceCoordinator {
             completed_steps.push(CompletedStructuralSequenceStep {
                 step_id: step_id.clone(),
                 host: task.prepared.host,
+                result_identity: imported.identity,
                 result: imported.result,
                 objects: imported.objects,
             });

@@ -603,18 +603,7 @@ fn print_study_check_summary(
         styles.success("OK"),
         styles.identifier(&plan.study_id)
     );
-    println!(
-        "  {} {:?} / {:?} / {:?}",
-        styles.label("procedure:"),
-        plan.procedure_step.family,
-        plan.procedure_step.procedure,
-        plan.procedure_step.solution_space
-    );
-    println!(
-        "  {} {:?}",
-        styles.label("backend:"),
-        plan.execution.backend
-    );
+    println!("  {} {}", styles.label("steps:"), plan.steps.len());
     println!(
         "  {} {}",
         styles.label("model:"),
@@ -626,12 +615,18 @@ fn print_study_check_summary(
         styles.success("passed"),
         validation.issues.len()
     );
-    println!(
-        "  {} {} ({})",
-        styles.label("run op:"),
-        styles.identifier(&plan.run_operation),
-        plan.run_op_version
-    );
+    for step in &plan.steps {
+        println!(
+            "  step {}: {:?} / {:?} / {:?} on {:?} -> {} ({})",
+            styles.identifier(step.procedure_step.step_id.as_str()),
+            step.procedure_step.family,
+            step.procedure_step.procedure,
+            step.procedure_step.solution_space,
+            step.execution.backend,
+            styles.identifier(&step.run_operation),
+            step.run_op_version
+        );
+    }
     println!(
         "  {} {}",
         styles.label("evidence:"),
@@ -678,10 +673,7 @@ fn print_sweep_check_summary(
     );
     println!("  evidence: {}", plan.evidence_artifact_path);
     for entry in &plan.plan_entries {
-        println!(
-            "  {}: {} ({})",
-            entry.study_id, entry.run_operation, entry.run_op_version
-        );
+        println!("  {}: {} steps", entry.study_id, entry.steps.len());
     }
 }
 

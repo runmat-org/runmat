@@ -1,4 +1,4 @@
-use runmat_analysis_core::AnalysisModel;
+use runmat_analysis_core::{AnalysisModel, AnalysisSequence, ProcedureStep, RestartPolicy};
 
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 
@@ -14,11 +14,13 @@ use super::{
 
 pub(super) fn execute_study_step(
     model: &AnalysisModel,
+    procedure_step: &ProcedureStep,
     execution: &AnalysisExecutionStep,
     solver_mesh_artifact_path: Option<&str>,
     context: &OperationContext,
     structural_executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
+    let model = solver_model(model, procedure_step);
     match &execution.solver_options {
         AnalysisSolverOptions::StructuralLinear(authored_options) => {
             let mut options = authored_options.clone();
@@ -27,7 +29,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_linear_static_with_executor(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -43,7 +45,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_modal_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -54,7 +56,7 @@ pub(super) fn execute_study_step(
         AnalysisSolverOptions::AcousticHelmholtz(authored_options) => {
             let options = authored_options.clone();
             let run = analysis_run_acoustic_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -69,7 +71,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_thermal_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -84,7 +86,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_transient_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -99,7 +101,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_cfd_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -114,7 +116,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_cht_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -129,7 +131,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_fsi_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -147,7 +149,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_nonlinear_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -162,7 +164,7 @@ pub(super) fn execute_study_step(
                 solver_mesh_artifact_path,
             );
             let run = analysis_run_electromagnetic_with_options_op(
-                model,
+                &model,
                 execution.backend,
                 execution.requirement,
                 options.clone(),
@@ -174,6 +176,18 @@ pub(super) fn execute_study_step(
             ))
         }
     }
+}
+
+fn solver_model(model: &AnalysisModel, authored_step: &ProcedureStep) -> AnalysisModel {
+    let mut step = authored_step.clone();
+    step.state_inputs.clear();
+    step.restart = RestartPolicy::Fresh;
+    let mut projected = model.clone();
+    projected.sequence = AnalysisSequence::from_steps(
+        format!("{}.solver-projection", model.sequence.sequence_id),
+        vec![step],
+    );
+    projected
 }
 
 fn attach_solver_mesh_artifact_path(target: &mut Option<String>, resolved: Option<&str>) {

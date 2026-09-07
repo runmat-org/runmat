@@ -28,16 +28,14 @@ fn structural_study_intent_is_path_free_and_does_not_require_a_mesh() {
         OperationContext::new(Some("trace-intent".into()), Some("request-intent".into())),
     )
     .expect("pre-mesh intent preparation must not load a solver mesh");
-    assert!(intent
-        .workload_template()
+    let workload = only_workload(&intent);
+    assert!(workload
         .model
         .sequence
         .steps
-        .contains(intent.procedure_step()));
-    assert_eq!(
-        intent.execution().backend,
-        intent.workload_template().backend
-    );
+        .iter()
+        .any(|step| step.step_id == workload.step_id));
+    assert_eq!(spec.execution.steps[0].backend, workload.backend);
     assert_eq!(intent.meshing_contacts().len(), 1);
     assert_eq!(
         intent.meshing_contacts()[0].side_a_face_selectors,
@@ -64,7 +62,7 @@ fn structural_study_intent_is_path_free_and_does_not_require_a_mesh() {
         intent.authored_study_digest()
     );
     assert_eq!(restored.model(), intent.model());
-    assert_eq!(restored.workload_template(), intent.workload_template());
+    assert_eq!(restored.workloads(), intent.workloads());
 }
 
 #[test]
@@ -95,7 +93,7 @@ fn structural_study_intent_identity_is_independent_of_local_paths() {
         second.authored_study_digest()
     );
     assert_eq!(first.authored_study_digest(), authored_study_digest);
-    assert_eq!(first.workload_template(), second.workload_template());
+    assert_eq!(first.workloads(), second.workloads());
 }
 
 #[test]
@@ -157,9 +155,11 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
     let executor = CanonicalStructuralExecutor {
         calls: AtomicU64::new(0),
     };
+    let workload = only_workload(&intent);
     let numerical_result = executor
-        .execute(intent.workload_template(), &meshing_output.artifact)
+        .execute(&workload, &meshing_output.artifact)
         .expect("portable structural solve should succeed");
+    let numerical_result = sequence_result(&intent, &meshing_output.artifact, numerical_result);
     let retry_intent = intent.clone();
     let retry_mesh = meshing_output.clone();
     let retry_result = numerical_result.clone();
@@ -186,7 +186,7 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(retried.data, envelope.data);
     assert_eq!(storage::list_run_results().unwrap().len(), 1);
-    let stored = storage::load_run_result(&envelope.data.run_id)
+    let stored = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("completed remote run lookup should succeed")
         .expect("completed remote run must be stored");
     let mut conflicting = stored.clone();
@@ -243,9 +243,11 @@ fn structural_study_intent_completion_rejects_a_different_geometry_source() {
     let executor = CanonicalStructuralExecutor {
         calls: AtomicU64::new(0),
     };
+    let workload = only_workload(&intent);
     let numerical_result = executor
-        .execute(intent.workload_template(), &meshing_output.artifact)
+        .execute(&workload, &meshing_output.artifact)
         .expect("portable structural solve should succeed");
+    let numerical_result = sequence_result(&intent, &meshing_output.artifact, numerical_result);
 
     let error = analysis_complete_structural_study_intent_op(
         intent,
@@ -278,9 +280,11 @@ fn structural_study_intent_completion_rejects_a_different_meshing_request() {
     let executor = CanonicalStructuralExecutor {
         calls: AtomicU64::new(0),
     };
+    let workload = only_workload(&intent);
     let numerical_result = executor
-        .execute(intent.workload_template(), &meshing_output.artifact)
+        .execute(&workload, &meshing_output.artifact)
         .expect("portable structural solve should succeed");
+    let numerical_result = sequence_result(&intent, &meshing_output.artifact, numerical_result);
 
     let error = analysis_complete_structural_study_intent_op(
         intent,
@@ -331,4 +335,65 @@ fn digest_hex(digest: StableDigest) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn only_workload(
+    intent: &PreparedStructuralStudyIntent,
+) -> runmat_analysis_fea::execution::StructuralLinearWorkload {
+    let workloads = intent.workloads();
+    assert_eq!(workloads.len(), 1);
+    workloads.into_values().next().unwrap()
+}
+
+fn sequence_result(
+    intent: &PreparedStructuralStudyIntent,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    result: runmat_analysis_fea::FeaRunResult,
+) -> StructuralStudySequenceNumericalResult {
+    let workload = only_workload(intent);
+    let study =
+        runmat_analysis_fea::execution::StudyIdentity::new(intent.authored_study_digest(), None)
+            .unwrap();
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_authored(
+        study,
+        &workload.model.sequence,
+    )
+    .unwrap();
+    let step = workload.procedure_step().unwrap();
+    let producer =
+        runmat_analysis_fea::execution::StepIdentity::from_authored(sequence, step).unwrap();
+    let solver_result_identity = test_solver_result_identity("intent-result");
+    let fields = result
+        .fields
+        .iter()
+        .filter(|field| !field.is_empty() && field.as_host_f64().is_some())
+        .cloned()
+        .collect::<Vec<_>>();
+    let states = step
+        .state_outputs
+        .iter()
+        .map(|declaration| {
+            runmat_analysis_fea::execution::CanonicalSemanticState::new(
+                runmat_analysis_fea::execution::CanonicalSemanticStateInput {
+                    producer,
+                    declaration: declaration.clone(),
+                    topology_digest: runmat_execution::Digest::from_bytes(
+                        *mesh.canonical_digest.bytes(),
+                    ),
+                    source_result: solver_result_identity,
+                    fields: fields.clone(),
+                },
+            )
+            .unwrap()
+        })
+        .collect();
+    StructuralStudySequenceNumericalResult {
+        frozen_project_digest: None,
+        steps: vec![StructuralStudyStepNumericalResult {
+            step_id: workload.step_id.clone(),
+            solver_result_identity,
+            result,
+        }],
+        states,
+    }
 }

@@ -418,6 +418,14 @@ impl SolverResultIdentity {
     ) -> AnalysisExecutionResult<Self> {
         Self::derive("solver-result", &(workload, content_digest))
     }
+
+    /// Identifies an in-process solver result when no portable scheduler workload exists.
+    pub fn from_step_result(
+        step: StepIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("in-process-solver-result", &(step, content_digest))
+    }
 }
 
 impl PublicationIdentity {

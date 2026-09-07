@@ -1,4 +1,6 @@
-use runmat_analysis_core::{AnalysisModel, ProcedureStep};
+use std::collections::BTreeMap;
+
+use runmat_analysis_core::{AnalysisModel, ProcedureStep, ProcedureStepId};
 use runmat_analysis_fea::execution::StructuralLinearWorkload;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -20,7 +22,7 @@ pub use lifecycle::{
 pub(super) use publication::run_evidence_stage;
 pub(super) use publication::{
     complete_study_run, persist_immutable_study_evidence, study_completion_from_prepared,
-    study_evidence_root,
+    study_evidence_root, CompletedStudyStep,
 };
 
 pub const STRUCTURAL_STUDY_INTENT_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -46,12 +48,17 @@ impl StructuralStudyCompletionIdentity {
         Ok(Self(server_run_id))
     }
 
-    pub(super) fn local_run_id(&self, authored_study_digest: runmat_execution::Digest) -> String {
+    pub(super) fn local_run_id(
+        &self,
+        authored_study_digest: runmat_execution::Digest,
+        step_id: &ProcedureStepId,
+    ) -> String {
         let digest = runmat_execution::Digest::sha256(
             [
                 b"runmat-remote-structural-study-completion/v1\0".as_slice(),
                 self.0.as_bytes(),
                 authored_study_digest.bytes(),
+                step_id.as_str().as_bytes(),
             ]
             .concat(),
         );
@@ -63,24 +70,29 @@ impl StructuralStudyCompletionIdentity {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct PreparedStudyRun {
+pub(super) struct PreparedStudySequence {
     pub(super) spec: AnalysisStudySpec,
     pub(super) context: OperationContext,
     pub(super) study_fingerprint: String,
     pub(super) model: AnalysisModel,
-    pub(super) authored_execution: AnalysisExecutionStep,
-    pub(super) procedure_step: ProcedureStep,
+    pub(super) steps: Vec<PreparedStudyStep>,
     pub(super) operation_sequence: Vec<String>,
     pub(super) solver_mesh_artifact_path: Option<String>,
     pub(super) meshing_evidence_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PreparedStudyStep {
+    pub(super) authored_execution: AnalysisExecutionStep,
+    pub(super) procedure_step: ProcedureStep,
 }
 
 /// A structural study whose authored model, topology targets, mesh, and numerical request have
 /// been resolved. It is safe to retain this value while its path-free worker payload is placed.
 #[derive(Debug, Clone)]
 pub struct PreparedStructuralStudy {
-    pub(super) study: PreparedStudyRun,
-    pub(super) linear: PreparedStructuralLinearRun,
+    pub(super) study: PreparedStudySequence,
+    pub(super) linears: BTreeMap<ProcedureStepId, PreparedStructuralLinearRun>,
 }
 
 /// Validated structural study semantics before geometry is meshed.
@@ -102,10 +114,16 @@ pub struct PreparedStructuralStudyIntent {
     pub(super) authored_study_digest: runmat_execution::Digest,
     pub(super) intent_digest: runmat_execution::Digest,
     pub(super) model: AnalysisModel,
+    pub(super) steps: Vec<PreparedStructuralStudyIntentStep>,
+    pub(super) operation_sequence: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PreparedStructuralStudyIntentStep {
     pub(super) authored_execution: AnalysisExecutionStep,
     pub(super) procedure_step: ProcedureStep,
-    pub(super) operation_sequence: Vec<String>,
-    pub(super) workload_template: StructuralLinearWorkload,
+    pub(super) workload: StructuralLinearWorkload,
     pub(super) options: AnalysisRunOptions,
 }
 
@@ -130,11 +148,8 @@ struct StructuralStudyIntentContinuation {
     authored_study_digest: runmat_execution::Digest,
     intent_digest: runmat_execution::Digest,
     model: AnalysisModel,
-    authored_execution: AnalysisExecutionStep,
-    procedure_step: ProcedureStep,
+    steps: Vec<PreparedStructuralStudyIntentStep>,
     operation_sequence: Vec<String>,
-    workload_template: StructuralLinearWorkload,
-    options: AnalysisRunOptions,
 }
 
 impl PreparedStructuralStudyIntent {
@@ -158,20 +173,11 @@ impl PreparedStructuralStudyIntent {
         &self.model
     }
 
-    pub fn procedure_step(&self) -> &ProcedureStep {
-        &self.procedure_step
-    }
-
-    pub fn execution(&self) -> &AnalysisExecutionStep {
-        &self.authored_execution
-    }
-
-    pub fn workload_template(&self) -> &StructuralLinearWorkload {
-        &self.workload_template
-    }
-
-    pub fn run_options(&self) -> &AnalysisRunOptions {
-        &self.options
+    pub fn workloads(&self) -> BTreeMap<ProcedureStepId, StructuralLinearWorkload> {
+        self.steps
+            .iter()
+            .map(|step| (step.procedure_step.step_id.clone(), step.workload.clone()))
+            .collect()
     }
 
     pub fn operation_sequence(&self) -> &[String] {
@@ -213,11 +219,8 @@ impl PreparedStructuralStudyIntent {
             authored_study_digest: self.authored_study_digest,
             intent_digest: self.intent_digest,
             model: self.model.clone(),
-            authored_execution: self.authored_execution.clone(),
-            procedure_step: self.procedure_step.clone(),
+            steps: self.steps.clone(),
             operation_sequence: self.operation_sequence.clone(),
-            workload_template: self.workload_template.clone(),
-            options: self.options.clone(),
         })
         .map_err(|error| error.to_string())?;
         if bytes.len() > STRUCTURAL_STUDY_INTENT_MAX_BYTES {
@@ -247,11 +250,8 @@ impl PreparedStructuralStudyIntent {
             authored_study_digest: continuation.authored_study_digest,
             intent_digest: continuation.intent_digest,
             model: continuation.model,
-            authored_execution: continuation.authored_execution,
-            procedure_step: continuation.procedure_step,
+            steps: continuation.steps,
             operation_sequence: continuation.operation_sequence,
-            workload_template: continuation.workload_template,
-            options: continuation.options,
         };
         intent.validate()?;
         Ok(intent)
@@ -261,8 +261,6 @@ impl PreparedStructuralStudyIntent {
         if self.study_id.trim().is_empty()
             || self.geometry_source_digest.bytes() == &[0_u8; 32]
             || self.authored_study_digest.bytes() == &[0_u8; 32]
-            || self.options.solver_mesh_artifact_path.is_some()
-            || self.workload_template.model != self.model
             || self.meshing_request
                 != resolve_intent_meshing_request(
                     self.geometry_units,
@@ -271,26 +269,39 @@ impl PreparedStructuralStudyIntent {
             || self.meshing_contacts
                 != super::meshing::meshing_contact_definitions_for_model(&self.model)
                     .collect::<Vec<_>>()
-            || self.workload_template.backend != self.authored_execution.backend
-            || self.workload_template.formulation_requirement != self.authored_execution.requirement
-            || self.authored_execution.step_id != self.procedure_step.step_id
-            || self.workload_template.model.sequence.steps.as_slice()
-                != std::slice::from_ref(&self.procedure_step)
         {
             return Err("structural study intent semantics are inconsistent".into());
         }
-        let AnalysisSolverOptions::StructuralLinear(mut expected_options) =
-            self.authored_execution.solver_options.clone()
-        else {
-            return Err("structural study intent is not structural-linear".into());
-        };
-        expected_options.solver_mesh_artifact_path = None;
-        if self.options != expected_options {
-            return Err("structural study intent options differ from authored execution".into());
+        if self.steps.len() != self.model.sequence.steps.len() {
+            return Err("structural study intent does not cover every sequence step".into());
         }
-        self.workload_template
-            .validate()
-            .map_err(|error| error.to_string())?;
+        for (index, step) in self.steps.iter().enumerate() {
+            let authored = self
+                .model
+                .sequence
+                .steps
+                .get(index)
+                .ok_or_else(|| "structural study intent step order is invalid".to_string())?;
+            let AnalysisSolverOptions::StructuralLinear(mut expected_options) =
+                step.authored_execution.solver_options.clone()
+            else {
+                return Err("structural study intent is not structural-linear".into());
+            };
+            expected_options.solver_mesh_artifact_path = None;
+            if step.procedure_step != *authored
+                || step.authored_execution.step_id != authored.step_id
+                || step.workload.model != self.model
+                || step.workload.step_id != authored.step_id
+                || step.workload.backend != step.authored_execution.backend
+                || step.workload.formulation_requirement != step.authored_execution.requirement
+                || step.options != expected_options
+            {
+                return Err("structural study intent step semantics are inconsistent".into());
+            }
+            step.workload
+                .validate_sequence_template()
+                .map_err(|error| error.to_string())?;
+        }
         let semantic_digest = self.semantic_digest()?;
         if self.intent_digest != semantic_digest {
             return Err("structural study intent digest differs from its identity".into());
@@ -308,11 +319,8 @@ impl PreparedStructuralStudyIntent {
             &self.meshing_request,
             &self.meshing_contacts,
             &self.model,
-            &self.authored_execution,
-            &self.procedure_step,
+            &self.steps,
             &self.operation_sequence,
-            &self.workload_template,
-            &self.options,
         ))
         .map_err(|error| error.to_string())?;
         Ok(runmat_execution::Digest::sha256(&bytes))
@@ -346,12 +354,18 @@ pub(super) fn resolve_intent_meshing_request(
 }
 
 impl PreparedStructuralStudy {
-    pub fn workload(&self) -> &StructuralLinearWorkload {
-        self.linear.workload()
+    pub fn workloads(&self) -> BTreeMap<ProcedureStepId, StructuralLinearWorkload> {
+        self.linears
+            .iter()
+            .map(|(step_id, linear)| (step_id.clone(), linear.workload.clone()))
+            .collect()
     }
 
     pub fn solver_mesh(&self) -> &SolverMeshArtifact {
-        self.linear
+        self.linears
+            .values()
+            .next()
+            .expect("prepared structural studies contain at least one sequence step")
             .solver_mesh()
             .expect("prepared structural studies always contain a canonical solver mesh")
     }

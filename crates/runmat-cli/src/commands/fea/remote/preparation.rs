@@ -40,7 +40,7 @@ pub(super) fn prepare_study_source(
         .to_owned();
     let intent = analysis_prepare_structural_study_intent_op(spec, context)
         .map_err(super::super::report_operation_error)?;
-    validate_remote_study_backend(intent.workload_template().backend)?;
+    validate_remote_study_backend(single_workload(&intent)?.backend)?;
     let geometry_bytes = std::fs::read(&geometry_path)
         .with_context(|| format!("read FEA geometry {}", geometry_path.display()))?;
     if Digest::sha256(&geometry_bytes) != intent.geometry_source_digest() {
@@ -127,11 +127,26 @@ pub(super) fn prepare_root(
             authored_study_digest: study.authored_study_digest(),
             frozen_project_digest: Some(*revision.graph_digest()),
             geometry_source_digest: study.geometry_source_digest(),
-            workload_template: study.workload_template().clone(),
+            workload_template: single_workload(study)?.clone(),
             signal_materializations,
             exact_meshing,
         },
     )?)
+}
+
+fn single_workload(
+    study: &PreparedStructuralStudyIntent,
+) -> Result<runmat_analysis_fea::execution::StructuralLinearWorkload> {
+    let workloads = study.workloads();
+    if workloads.len() != 1 {
+        anyhow::bail!(
+            "remote exact-study packaging requires one procedure step until the sequence root is enabled"
+        );
+    }
+    workloads
+        .into_values()
+        .next()
+        .context("remote structural study contains no workload")
 }
 
 pub(super) fn prepare_remote_execution(

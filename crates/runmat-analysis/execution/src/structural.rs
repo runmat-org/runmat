@@ -48,6 +48,7 @@ pub struct PreparedStructuralLinearProgram {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedStructuralLinearResult {
+    pub identity: SolverResultIdentity,
     pub result: StructuralLinearWorkloadResult,
     pub objects: PreparedAnalysisObjects,
 }
@@ -360,6 +361,7 @@ pub fn import_structural_linear_completion(
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
     validate_result_semantics(&prepared.inputs[0], &result)?;
     Ok(ImportedStructuralLinearResult {
+        identity: expected_result,
         result,
         objects: imported,
     })

@@ -70,12 +70,13 @@ pub async fn execute_fea_path(
                 ExecutionTarget::Local => {
                     signal_materialization::materialize_study(&path, &mut spec, cli, config)
                         .await?;
-                    let executor = portable::LocalProcessStructuralExecutor::new(&spec, config)?;
+                    let prepared = analysis_prepare_structural_study_op(&spec, context.clone())
+                        .map_err(report_operation_error)?;
+                    let numerical =
+                        portable::execute_structural_study(&spec, &prepared, config).await;
                     Some(
-                        runmat_runtime::analysis::analysis_run_study_with_structural_executor_op(
-                            &spec, context, &executor,
-                        )
-                        .map_err(report_operation_error)?,
+                        analysis_complete_structural_study_op(prepared, numerical)
+                            .map_err(report_operation_error)?,
                     )
                 }
                 ExecutionTarget::Remote(target) => {
@@ -109,7 +110,7 @@ pub async fn execute_fea_path(
                 ExecutionTarget::Local => {
                     signal_materialization::materialize_sweep(&path, &mut spec, cli, config)
                         .await?;
-                    Some(execute_local_sweep(&spec, context, config)?)
+                    Some(execute_local_sweep(&spec, context, config).await?)
                 }
                 ExecutionTarget::Remote(target) => {
                     remote::execute_sweep(&path, spec.clone(), context, target, cli, config, json)
@@ -130,7 +131,7 @@ pub async fn execute_fea_path(
     Ok(())
 }
 
-fn execute_local_sweep(
+async fn execute_local_sweep(
     spec: &AnalysisStudySweepSpec,
     context: OperationContext,
     config: &RunMatRuntimeConfig,
@@ -178,6 +179,7 @@ fn execute_local_sweep(
                 })
                 .collect::<Result<Vec<_>>>()?;
             portable::execute_structural_sweep(&placement_entries, config, spec.fail_fast)
+                .await
                 .unwrap_or_else(|error| {
                     placement_entries
                         .iter()
@@ -233,23 +235,7 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         styles.success("FEA run complete"),
         styles.identifier(&data.study_id)
     );
-    println!(
-        "  {} {}",
-        styles.label("run id:"),
-        styles.identifier(&data.run_id)
-    );
-    println!(
-        "  {} {:?} / {:?} / {:?}",
-        styles.label("procedure:"),
-        data.procedure_step.family,
-        data.procedure_step.procedure,
-        data.procedure_step.solution_space
-    );
-    println!(
-        "  {} {:?}",
-        styles.label("backend:"),
-        data.execution.backend
-    );
+    println!("  {} {}", styles.label("steps:"), data.steps.len());
     println!("  {} {:?}", styles.label("status:"), data.run_status);
     println!(
         "  {} {}",
@@ -272,28 +258,29 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         styles.label("evidence:"),
         styles.path(&data.evidence_artifact_path)
     );
-    println!(
-        "  {} {}",
-        styles.label("results:"),
-        styles.help(format!("fea.results(\"{}\")", data.run_id))
-    );
-    if !data.quality_reasons.is_empty() {
-        println!("  quality reasons:");
-        for reason in &data.quality_reasons {
-            println!("    {:?}: {}", reason.code, reason.detail);
+    for step in &data.steps {
+        println!(
+            "  step {}: {:?} / {:?} / {:?} on {:?}",
+            styles.identifier(step.procedure_step.step_id.as_str()),
+            step.procedure_step.family,
+            step.procedure_step.procedure,
+            step.procedure_step.solution_space,
+            step.execution.backend
+        );
+        println!("    run id: {}", styles.identifier(&step.run_id));
+        println!(
+            "    results: {}",
+            styles.help(format!("fea.results(\"{}\")", step.run_id))
+        );
+        for reason in &step.quality_reasons {
+            println!("    quality {:?}: {}", reason.code, reason.detail);
         }
-    }
-    if !data.production_publication_reasons.is_empty() {
-        println!("  production publication reasons:");
-        for reason in &data.production_publication_reasons {
-            println!("    {:?}: {}", reason.code, reason.detail);
+        for reason in &step.production_publication_reasons {
+            println!("    publication {:?}: {}", reason.code, reason.detail);
         }
     }
     if verbose {
-        println!(
-            "  operation: {} ({})",
-            data.run_operation, data.run_op_version
-        );
+        println!("  sequence identity: {:?}", data.sequence_identity);
         println!("  study fingerprint: {}", data.study_fingerprint);
         println!("  operations:");
         for operation in &data.operation_sequence {
@@ -321,12 +308,12 @@ pub(crate) fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         println!("  runs:");
         for entry in &data.run_entries {
             println!(
-                "    {}  {}  {:?}  numerically acceptable: {}  production publishable: {}",
+                "    {}  {} steps  {:?}  numerically acceptable: {}  production publishable: {}",
                 entry.study_id,
-                entry.run_id,
-                entry.run_status,
-                entry.numerically_acceptable,
-                entry.production_publishable
+                entry.result.steps.len(),
+                entry.result.run_status,
+                entry.result.numerically_acceptable,
+                entry.result.production_publishable
             );
         }
     }

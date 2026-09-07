@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_execution::PreparedStructuralLinearProgram;
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    AnalysisNumericalObjectKind, SolverResultIdentity, StructuralLinearWorkload,
+    StructuralLinearWorkloadResult,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
@@ -121,6 +122,7 @@ pub struct ExactStructuralStudyResult {
     pub mesh: ExactMeshingDagRunResult,
     pub boundary_resolution: BoundaryRegionResolution,
     pub resolved_workload: StructuralLinearWorkload,
+    pub solver_result_identity: SolverResultIdentity,
     pub analysis: StructuralLinearWorkloadResult,
 }
 
@@ -525,7 +527,7 @@ pub fn import_exact_structural_study_result(
         outputs: vec![ValuePayload::Object(Box::new(publication.analysis_root))],
         result_objects: publication.analysis_objects,
     };
-    let analysis = runmat_analysis_execution::import_structural_linear_result(
+    let analysis = runmat_analysis_execution::import_structural_linear_completion(
         source,
         analysis_response,
         &analysis_prepared,
@@ -536,7 +538,8 @@ pub fn import_exact_structural_study_result(
         mesh,
         boundary_resolution,
         resolved_workload,
-        analysis,
+        solver_result_identity: analysis.identity,
+        analysis: analysis.result,
     })
 }
 
