@@ -2235,6 +2235,42 @@ enforceMigratedBuiltinFamily({
   leafLineCeiling: 256,
 });
 enforceMigratedBuiltinFamily({
+  name: "rescale catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/math/elementwise/rescale"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/rescale/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/rescale/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/rescale.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/rescale.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "rescale runtime",
+  roots: ["crates/runmat-runtime/src/builtins/math/elementwise/rescale"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/rescale/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/rescale/compute/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/rescale/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/rescale.rs",
+  ],
+});
+const rescaleCatalogRouter = read(
+  "crates/runmat-builtins/src/catalog/entries/math/elementwise/rescale/inference/mod.rs"
+);
+if (/\b(?:rescale|inputmin|inputmax)\b/i.test(rescaleCatalogRouter)) {
+  fail("rescale inference composition must delegate responsibilities without identity or option policy");
+}
+const rescaleRuntimeRoot = read(
+  "crates/runmat-runtime/src/builtins/math/elementwise/rescale/mod.rs"
+);
+if (/match\s+[^\n{]*(?:name|class).*\{/.test(rescaleRuntimeRoot)) {
+  fail("rescale runtime composition must not select behavior with names or class strings");
+}
+enforceMigratedBuiltinFamily({
   name: "typecast catalog",
   roots: ["crates/runmat-builtins/src/catalog/entries/math/elementwise/typecast"],
   compositionFiles: [

@@ -31,6 +31,7 @@ pub enum MathInferenceRule {
     NumericConversion(runmat_types::NumericClass),
     NumericConversionWithLike(runmat_types::NumericClass),
     NumericComponent(NumericComponentRule),
+    Rescale,
     Typecast,
     Rounding(RoundingFunction),
     Remainder(RemainderFunction),

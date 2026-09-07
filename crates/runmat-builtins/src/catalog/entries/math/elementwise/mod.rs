@@ -12,6 +12,7 @@ mod magnitude_phase_sign;
 mod numeric_conversions;
 mod numeric_limits;
 mod powers_of_two;
+pub(in crate::catalog) mod rescale;
 mod roots;
 mod support;
 pub(in crate::catalog) mod typecast;
@@ -30,6 +31,11 @@ pub use magnitude_phase_sign::*;
 pub use numeric_conversions::*;
 pub use numeric_limits::*;
 pub use powers_of_two::*;
+pub use rescale::{
+    RESCALE_CATALOG_ENTRY, RESCALE_DESCRIPTOR, RESCALE_ERROR_INTERNAL,
+    RESCALE_ERROR_INVALID_ARGUMENT, RESCALE_ERROR_INVALID_INPUT, RESCALE_ERROR_SIZE_MISMATCH,
+    RESCALE_INTEGER_CAPABILITIES,
+};
 pub use roots::*;
 pub use typecast::{
     TYPECAST_CATALOG_ENTRY, TYPECAST_DESCRIPTOR, TYPECAST_ERROR_GPU_UNSUPPORTED,
@@ -53,5 +59,6 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     numeric_limits::ENTRIES,
     powers_of_two::ENTRIES,
     roots::ENTRIES,
+    rescale::ENTRIES,
     typecast::ENTRIES,
 ];
