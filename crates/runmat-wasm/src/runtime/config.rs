@@ -122,6 +122,21 @@ pub(crate) fn error_namespace_for_compat(mode: CompatMode) -> &'static str {
     }
 }
 
+pub(crate) fn request_error_namespace(
+    compatibility: Option<CompatMode>,
+    explicit_namespace: Option<&str>,
+) -> Option<String> {
+    explicit_namespace
+        .map(str::trim)
+        .filter(|namespace| !namespace.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            compatibility
+                .map(error_namespace_for_compat)
+                .map(str::to_string)
+        })
+}
+
 pub(crate) fn apply_plotting_overrides(opts: &InitOptions) {
     if let Some(points) = opts.scatter_target_points {
         set_scatter_target_points(points);
@@ -207,5 +222,18 @@ mod compatibility_tests {
             SessionConfig::from_options(&runmat).error_namespace,
             "RunMat"
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn request_namespace_tracks_a_compatibility_override_unless_explicit() {
+        assert_eq!(
+            request_error_namespace(Some(CompatMode::Matlab), None).as_deref(),
+            Some("MATLAB")
+        );
+        assert_eq!(
+            request_error_namespace(Some(CompatMode::Matlab), Some("Acme")).as_deref(),
+            Some("Acme")
+        );
+        assert_eq!(request_error_namespace(None, None), None);
     }
 }

@@ -16,6 +16,9 @@ pub(in crate::catalog::inference) fn infer(
                 rule, request, entry,
             )
         }
+        MathInferenceRule::MatrixArithmetic(rule) => {
+            crate::catalog::entries::math::infer_matrix_arithmetic(rule, request, entry)
+        }
         MathInferenceRule::Bitwise(rule) => {
             super::super::math::bitwise::infer(rule, request, entry)
         }

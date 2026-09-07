@@ -22,9 +22,13 @@ function resolveNativeBinary(repository) {
         if (!existsSync(binary)) throw new Error(`RUNMAT_EXAMPLE_NATIVE_BINARY does not exist: ${binary}`);
         return binary;
     }
-    execFileSync("cargo", ["build", "--quiet", "-p", "runmat"], {
+    execFileSync("cargo", ["build", "--quiet", "-p", "runmat", "--no-default-features"], {
         cwd: repository,
-        env: { ...process.env, CARGO_INCREMENTAL: process.env.CARGO_INCREMENTAL ?? "0" },
+        env: {
+            ...process.env,
+            CARGO_INCREMENTAL: process.env.CARGO_INCREMENTAL ?? "0",
+            CARGO_PROFILE_DEV_DEBUG: process.env.CARGO_PROFILE_DEV_DEBUG ?? "0"
+        },
         stdio: "inherit"
     });
     const metadata = JSON.parse(execFileSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {

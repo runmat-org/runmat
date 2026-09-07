@@ -1127,6 +1127,28 @@ pub fn resident_gpu_value(mut handle: GpuTensorHandle) -> Value {
     Value::GpuTensor(handle)
 }
 
+/// Propagate explicit device intent through a provider operation.
+///
+/// Provider-created handles begin with automatic provenance. Runtime operations
+/// must promote the result to explicit provenance whenever any resident input
+/// came from an explicit `gpuArray` boundary; otherwise introspection and
+/// fallback policy would incorrectly treat a user-owned device value as an
+/// internal optimization.
+pub(crate) fn propagate_output_provenance<'a>(
+    output: &mut GpuTensorHandle,
+    inputs: impl IntoIterator<Item = &'a GpuTensorHandle>,
+) {
+    let provenance = if inputs
+        .into_iter()
+        .any(runmat_accelerate_api::handle_is_explicit)
+    {
+        runmat_accelerate_api::GpuHandleProvenance::Explicit
+    } else {
+        runmat_accelerate_api::GpuHandleProvenance::Automatic
+    };
+    runmat_accelerate_api::set_handle_provenance(output, provenance);
+}
+
 /// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that
 /// predicates like `islogical` can inspect the handle without downloading it.
 pub fn logical_gpu_value(handle: GpuTensorHandle) -> Value {

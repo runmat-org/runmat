@@ -19,7 +19,9 @@ use runmat_value::{
 };
 
 use crate::builtins::common::tensor;
-use crate::builtins::math::linalg::ops::{mldivide::mldivide_eval, mrdivide::mrdivide_eval};
+use crate::builtins::math::linalg::ops::matrix_arithmetic::{
+    mldivide::mldivide_eval, mrdivide::mrdivide_eval,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER};
 
 const NAME: &str = "decomposition";

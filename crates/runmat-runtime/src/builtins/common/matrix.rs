@@ -56,7 +56,7 @@ pub async fn value_matmul(
     a: &runmat_value::Value,
     b: &runmat_value::Value,
 ) -> BuiltinResult<runmat_value::Value> {
-    crate::builtins::math::linalg::ops::mtimes::mtimes_eval(a, b).await
+    crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::mtimes_eval(a, b).await
 }
 
 fn complex_matrix_mul(
@@ -73,25 +73,65 @@ pub fn matrix_scalar_mul(a: &Tensor, scalar: f64) -> Tensor {
 
 /// Matrix power: C = A^n (for positive integer n)
 /// This computes A * A * ... * A (n times) via repeated multiplication
-pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatrixPowerError {
+    NonSquare { rows: usize, columns: usize },
+    NegativeExponent,
+    IdentitySizeOverflow,
+    StorageClassChanged { left: String, right: String },
+    Storage(String),
+}
+
+impl std::fmt::Display for MatrixPowerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonSquare { rows, columns } => {
+                write!(
+                    formatter,
+                    "Matrix must be square for matrix power: {rows}x{columns}"
+                )
+            }
+            Self::NegativeExponent => {
+                formatter.write_str("Negative matrix powers not supported yet")
+            }
+            Self::IdentitySizeOverflow => {
+                formatter.write_str("matrix power identity size overflow")
+            }
+            Self::StorageClassChanged { left, right } => {
+                write!(
+                    formatter,
+                    "matrix power storage class changed from {left} to {right}"
+                )
+            }
+            Self::Storage(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for MatrixPowerError {}
+
+pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, MatrixPowerError> {
     if a.rows() != a.cols() {
-        return Err(format!(
-            "Matrix must be square for matrix power: {}x{}",
-            a.rows(),
-            a.cols()
-        ));
+        return Err(MatrixPowerError::NonSquare {
+            rows: a.rows(),
+            columns: a.cols(),
+        });
     }
 
     if n < 0 {
-        return Err("Negative matrix powers not supported yet".to_string());
+        return Err(MatrixPowerError::NegativeExponent);
     }
 
     let mut result = numeric_identity(a.numeric_dtype(), a.rows())?;
     if n == 0 {
-        return Tensor::from_numeric_storage(result, a.shape.clone());
+        return Tensor::from_numeric_storage(result, a.shape.clone())
+            .map_err(MatrixPowerError::Storage);
     }
 
-    let mut base = a.clone().into_numeric_storage()?;
+    let mut base = a
+        .clone()
+        .into_numeric_storage()
+        .map_err(MatrixPowerError::Storage)?;
     let mut exp = n as u32;
 
     while exp > 0 {
@@ -104,13 +144,13 @@ pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, String> {
         }
     }
 
-    Tensor::from_numeric_storage(result, a.shape.clone())
+    Tensor::from_numeric_storage(result, a.shape.clone()).map_err(MatrixPowerError::Storage)
 }
 
-fn numeric_identity(dtype: NumericDType, size: usize) -> Result<NumericStorage, String> {
+fn numeric_identity(dtype: NumericDType, size: usize) -> Result<NumericStorage, MatrixPowerError> {
     let len = size
         .checked_mul(size)
-        .ok_or_else(|| "matrix power identity size overflow".to_string())?;
+        .ok_or(MatrixPowerError::IdentitySizeOverflow)?;
     let mut storage = NumericStorage::zeros(dtype, len);
     let one = match dtype {
         NumericDType::F64 => NumericScalar::F64(1.0),
@@ -125,7 +165,9 @@ fn numeric_identity(dtype: NumericDType, size: usize) -> Result<NumericStorage, 
         NumericDType::U64 => NumericScalar::U64(1),
     };
     for index in 0..size {
-        storage.set_value(index + index * size, one)?;
+        storage
+            .set_value(index + index * size, one)
+            .map_err(MatrixPowerError::Storage)?;
     }
     Ok(storage)
 }
@@ -158,7 +200,7 @@ fn numeric_square_matmul(
     lhs: NumericStorage,
     rhs: &NumericStorage,
     size: usize,
-) -> Result<NumericStorage, String> {
+) -> Result<NumericStorage, MatrixPowerError> {
     macro_rules! floating {
         ($lhs:expr, $rhs:expr, $variant:ident, $zero:expr) => {
             Ok(NumericStorage::$variant(typed_square_matmul(
@@ -208,11 +250,10 @@ fn numeric_square_matmul(
         (NumericStorage::U64(lhs), NumericStorage::U64(rhs)) => {
             integer!(&lhs, rhs, U64, 0_u64)
         }
-        (lhs, rhs) => Err(format!(
-            "matrix power storage class changed from {} to {}",
-            lhs.class_name(),
-            rhs.class_name()
-        )),
+        (lhs, rhs) => Err(MatrixPowerError::StorageClassChanged {
+            left: lhs.class_name().to_string(),
+            right: rhs.class_name().to_string(),
+        }),
     }
 }
 
@@ -221,15 +262,15 @@ fn numeric_square_matmul(
 pub fn complex_matrix_power(
     a: &runmat_value::ComplexTensor,
     n: i32,
-) -> Result<runmat_value::ComplexTensor, String> {
+) -> Result<runmat_value::ComplexTensor, MatrixPowerError> {
     if a.rows != a.cols {
-        return Err(format!(
-            "Matrix must be square for matrix power: {}x{}",
-            a.rows, a.cols
-        ));
+        return Err(MatrixPowerError::NonSquare {
+            rows: a.rows,
+            columns: a.cols,
+        });
     }
     if n < 0 {
-        return Err("Negative matrix powers not supported yet".to_string());
+        return Err(MatrixPowerError::NegativeExponent);
     }
     if n == 0 {
         return Ok(complex_matrix_eye(a.rows));
@@ -242,9 +283,9 @@ pub fn complex_matrix_power(
     let mut exp = n as u32;
     while exp > 0 {
         if exp % 2 == 1 {
-            result = complex_matrix_mul(&result, &base)?;
+            result = complex_matrix_mul(&result, &base).map_err(MatrixPowerError::Storage)?;
         }
-        base = complex_matrix_mul(&base, &base)?;
+        base = complex_matrix_mul(&base, &base).map_err(MatrixPowerError::Storage)?;
         exp /= 2;
     }
     Ok(result)

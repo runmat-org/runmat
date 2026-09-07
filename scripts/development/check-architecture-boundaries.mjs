@@ -498,7 +498,10 @@ for (const [sourcePath, ceiling] of [
   ["crates/runmat-builtins/src/catalog/contract/introspection.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/io.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/logical.rs", 192],
-  ["crates/runmat-builtins/src/catalog/contract/math.rs", 192],
+  ["crates/runmat-builtins/src/catalog/contract/math/mod.rs", 96],
+  ["crates/runmat-builtins/src/catalog/contract/math/arithmetic.rs", 96],
+  ["crates/runmat-builtins/src/catalog/contract/math/elementary.rs", 128],
+  ["crates/runmat-builtins/src/catalog/contract/math/specialized.rs", 128],
   ["crates/runmat-builtins/src/catalog/contract/parallel.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/stats.rs", 192],
 ]) {
@@ -509,6 +512,9 @@ for (const [sourcePath, ceiling] of [
       `(found ${lines} lines; maximum ${ceiling}); split rules by domain rather than growing the catalog root`
     );
   }
+}
+if (fs.existsSync(path.join(repo, "crates/runmat-builtins/src/catalog/contract/math.rs"))) {
+  fail("catalog math contract vocabulary must remain split into bounded domain-role modules");
 }
 if (/pub enum (?:Io|Logical|Math|Array|Parallel|Stats)InferenceRule/.test(
   read("crates/runmat-builtins/src/catalog/contract.rs"),
@@ -2184,6 +2190,75 @@ enforceMigratedBuiltinFamily({
     "crates/runmat-runtime/src/builtins/builtins-json/rdivide.json",
   ],
 });
+enforceMigratedBuiltinFamily({
+  name: "matrix-arithmetic catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/mldivide/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/mpower/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/mrdivide/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/mtimes/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/mldivide.json",
+    "docs/builtins/reference/mpower.json",
+    "docs/builtins/reference/mrdivide.json",
+    "docs/builtins/reference/mtimes.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/mldivide.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/mpower.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/mrdivide.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/mtimes.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "matrix-arithmetic runtime",
+  roots: ["crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mldivide/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mpower/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mrdivide/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mtimes/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/solve/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/solve/host/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/solve/provider/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mldivide/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mpower/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mrdivide/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/mtimes/tests.rs",
+    "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic/solve/host.rs",
+  ],
+  testLineCeiling: 224,
+  leafLineCeiling: 256,
+});
+const linearAlgebraOpsRoot = read(
+  "crates/runmat-runtime/src/builtins/math/linalg/ops/mod.rs"
+);
+if (/\#\s*\[\s*path\s*=\s*"matrix_arithmetic\//.test(linearAlgebraOpsRoot)) {
+  fail("matrix arithmetic must use its real Rust module hierarchy, not path-based flat aliases");
+}
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/math/linalg/ops/matrix_arithmetic"
+)) {
+  if (/Err\s*\(\s*_\s*\)\s*=>\s*(?:Ok\s*\()?\s*None\b/.test(text)) {
+    fail(`${sourcePath} silently treats an unclassified provider failure as unsupported`);
+  }
+}
+const matrixArithmeticTypeResolvers = read(
+  "crates/runmat-runtime/src/builtins/math/linalg/type_resolvers.rs"
+);
+if (/\b(?:matmul_type|left_divide_type|right_divide_type)\b/.test(matrixArithmeticTypeResolvers)) {
+  fail("matrix-arithmetic static semantics must remain catalog-owned after cutover");
+}
+const matrixArithmeticCatalogInference = read(
+  "crates/runmat-builtins/src/catalog/entries/math/linalg/matrix_arithmetic/inference.rs"
+);
+if (/"(?:mldivide|mpower|mrdivide|mtimes)"/.test(matrixArithmeticCatalogInference)) {
+  fail("matrix-arithmetic inference must dispatch from its closed typed rule, not builtin identity strings");
+}
 const catalogInferenceFacade = read("crates/runmat-builtins/src/catalog/inference.rs");
 if (catalogInferenceFacade.split("\n").length > 64) {
   fail("catalog inference must remain a bounded domain router, not a builtin semantic owner");

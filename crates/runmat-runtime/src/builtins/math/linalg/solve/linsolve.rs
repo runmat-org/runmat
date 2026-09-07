@@ -28,7 +28,7 @@ use crate::builtins::common::{
     tensor,
 };
 use crate::builtins::math::elementwise::complex_components::conjugate_integer_imaginary_storage;
-use crate::builtins::math::linalg::type_resolvers::left_divide_type;
+use crate::builtins::math::linalg::type_resolvers::linsolve_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
@@ -300,7 +300,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Solve A * X = B with structural hints such as LT, UT, POSDEF, or TRANSA.",
     keywords = "linsolve,linear system,triangular,gpu",
     accel = "linsolve",
-    type_resolver(left_divide_type),
+    type_resolver(linsolve_type),
     descriptor(crate::builtins::math::linalg::solve::linsolve::LINSOLVE_DESCRIPTOR),
     extensions(LINSOLVE_EXTENSIONS),
     integer_capabilities(crate::builtins::math::linalg::solve::linsolve::INTEGER_CAPABILITIES),
@@ -1475,7 +1475,7 @@ pub(crate) mod tests {
 
     #[test]
     fn linsolve_type_uses_rhs_columns() {
-        let out = left_divide_type(
+        let out = linsolve_type(
             &[
                 Type::Tensor {
                     shape: Some(vec![Some(2), Some(2)]),

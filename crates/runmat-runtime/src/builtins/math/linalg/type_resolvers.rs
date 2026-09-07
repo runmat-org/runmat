@@ -2,10 +2,8 @@ use runmat_builtins::Type;
 
 use crate::builtins::math::reduction::type_resolvers::reduce_first_nonsingleton;
 use crate::builtins::math::type_resolvers::numeric_unary_type;
+use runmat_builtins::shape_rules::left_divide_output_type;
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
-use runmat_builtins::shape_rules::{
-    left_divide_output_type, matmul_output_type, right_divide_output_type,
-};
 use runmat_builtins::ResolveContext;
 
 pub fn numeric_scalar_type(args: &[Type], _context: &ResolveContext) -> Type {
@@ -120,35 +118,11 @@ pub fn page_transpose_type(args: &[Type], context: &ResolveContext) -> Type {
     transpose_type(args, context)
 }
 
-pub fn matmul_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let lhs = args.get(0);
-    let rhs = args.get(1);
-    match (lhs, rhs) {
-        (Some(left), Some(right)) => matmul_output_type(left, right),
-        (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single), ctx)
-        }
-        (None, None) => Type::Unknown,
-    }
-}
-
-pub fn left_divide_type(args: &[Type], ctx: &ResolveContext) -> Type {
+pub fn linsolve_type(args: &[Type], ctx: &ResolveContext) -> Type {
     let lhs = args.get(0);
     let rhs = args.get(1);
     match (lhs, rhs) {
         (Some(left), Some(right)) => left_divide_output_type(left, right),
-        (Some(single), None) | (None, Some(single)) => {
-            numeric_unary_type(std::slice::from_ref(single), ctx)
-        }
-        (None, None) => Type::Unknown,
-    }
-}
-
-pub fn right_divide_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let lhs = args.get(0);
-    let rhs = args.get(1);
-    match (lhs, rhs) {
-        (Some(left), Some(right)) => right_divide_output_type(left, right),
         (Some(single), None) | (None, Some(single)) => {
             numeric_unary_type(std::slice::from_ref(single), ctx)
         }
@@ -415,38 +389,6 @@ mod tests {
             out,
             Type::Tensor {
                 shape: Some(vec![Some(3), Some(2), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn matmul_shape_infers_rows_and_cols() {
-        let lhs = Type::Tensor {
-            shape: Some(vec![Some(2), Some(3)]),
-        };
-        let rhs = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
-        };
-        let out = matmul_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn right_divide_scalar_by_matrix_returns_matrix_shape() {
-        let lhs = Type::Num;
-        let rhs = Type::Tensor {
-            shape: Some(vec![Some(2), Some(2)]),
-        };
-        let out = right_divide_type(&[lhs, rhs], &ResolveContext::new(Vec::new()));
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(2)])
             }
         );
     }
