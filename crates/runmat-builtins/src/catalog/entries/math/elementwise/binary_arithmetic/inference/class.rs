@@ -1,10 +1,10 @@
-use crate::BinaryArithmeticInferenceRule;
+use super::policy::{BinaryArithmeticInferencePolicy, RealResultDomain};
 use runmat_types::{
     DynamicReason, NumericClass, NumericDomain, NumericFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn result(
-    operation: BinaryArithmeticInferenceRule,
+    policy: BinaryArithmeticInferencePolicy,
     left: &ValueFact,
     right: &ValueFact,
 ) -> Result<ValueKindFact, DynamicReason> {
@@ -18,7 +18,7 @@ pub(super) fn result(
     let left_numeric = arithmetic_input(left)?;
     let right_numeric = arithmetic_input(right)?;
     let class = output_class(left_numeric.class, right_numeric.class, left, right)?;
-    let domain = output_domain(operation, left_numeric.domain, right_numeric.domain)?;
+    let domain = output_domain(policy, left_numeric.domain, right_numeric.domain)?;
     Ok(ValueKindFact::Numeric(NumericFact { class, domain }))
 }
 
@@ -53,15 +53,15 @@ fn output_class(
 }
 
 fn output_domain(
-    operation: BinaryArithmeticInferenceRule,
+    policy: BinaryArithmeticInferencePolicy,
     left: NumericDomain,
     right: NumericDomain,
 ) -> Result<NumericDomain, DynamicReason> {
     if left == NumericDomain::Complex || right == NumericDomain::Complex {
         return Ok(NumericDomain::Complex);
     }
-    if operation == BinaryArithmeticInferenceRule::Power {
-        return Err(DynamicReason::RuntimeValue);
+    match policy.real_result_domain {
+        RealResultDomain::Real => Ok(NumericDomain::Real),
+        RealResultDomain::RuntimeDependent => Err(DynamicReason::RuntimeValue),
     }
-    Ok(NumericDomain::Real)
 }

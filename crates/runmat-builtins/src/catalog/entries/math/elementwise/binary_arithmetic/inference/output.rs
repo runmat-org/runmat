@@ -1,13 +1,13 @@
-use super::{admission::AdmittedCall, class};
+use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy};
 use crate::catalog::inference::{argument_error, finish_fixed, preserved_binary_residency};
-use crate::{BinaryArithmeticInferenceRule, BuiltinCatalogEntry};
+use crate::BuiltinCatalogEntry;
 use runmat_types::{
     broadcast_shape, CallInference, CallRequest, DynamicReason, NumericDomain, ResidencyFact,
     ShapeFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(
-    operation: BinaryArithmeticInferenceRule,
+    policy: BinaryArithmeticInferencePolicy,
     admitted: AdmittedCall<'_>,
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -26,7 +26,7 @@ pub(super) fn infer(
         }
     };
     output.residency = preserved_binary_residency(&left.residency, &right.residency);
-    match class::result(operation, left, right) {
+    match class::result(policy, left, right) {
         Ok(kind) => output.kind = kind,
         Err(DynamicReason::UnsupportedRepresentation) => {
             diagnostics.push(argument_error(

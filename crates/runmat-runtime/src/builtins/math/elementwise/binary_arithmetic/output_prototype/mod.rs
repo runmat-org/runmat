@@ -58,11 +58,12 @@ pub(super) async fn apply_output_template(
             let analysis = analysis::analyse(context, prototype).await?;
             match analysis.class {
                 analysis::PrototypeClass::Real => {
-                    placement::ensure(context, value, analysis.device).await
+                    placement::ensure(context, value, &analysis.device).await
                 }
                 analysis::PrototypeClass::Complex => {
                     let host_value =
-                        placement::ensure(context, value, analysis::DevicePreference::Host).await?;
+                        placement::ensure(context, value, &analysis::DevicePreference::Host)
+                            .await?;
                     conversion::real_to_complex(context, host_value).await
                 }
             }

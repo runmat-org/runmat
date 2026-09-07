@@ -1059,17 +1059,20 @@ pub fn restore_class_preserving_value(
 }
 
 /// Upload a finite integral scalar in the native integer class of `prototype`.
-/// Returns `None` when preserving MATLAB's typed-integer scalar semantics would
-/// require the host extended-precision path instead.
+/// Returns `None` when preserving typed-integer scalar semantics would require
+/// the host extended-precision path instead. Provider failures remain errors so
+/// callers cannot mistake an unavailable device for an inapplicable fast path.
 pub fn upload_exact_integer_scalar_like(
     provider: &dyn AccelProvider,
     prototype: &GpuTensorHandle,
     scalar: f64,
-) -> Option<GpuTensorHandle> {
+) -> anyhow::Result<Option<GpuTensorHandle>> {
     if !scalar.is_finite() || scalar.fract() != 0.0 {
-        return None;
+        return Ok(None);
     }
-    let element_type = runmat_accelerate_api::handle_integer_type(prototype)?;
+    let Some(element_type) = runmat_accelerate_api::handle_integer_type(prototype) else {
+        return Ok(None);
+    };
     let shape = [1usize, 1usize];
     macro_rules! upload {
         ($value:expr, $variant:ident) => {{
@@ -1080,7 +1083,7 @@ pub fn upload_exact_integer_scalar_like(
                     shape: &shape,
                     storage: GpuTensorStorage::Real,
                 })
-                .ok()
+                .map(Some)
         }};
     }
     match element_type {
@@ -1110,7 +1113,7 @@ pub fn upload_exact_integer_scalar_like(
         IntegerElementType::U64 if (0.0..18_446_744_073_709_551_616.0).contains(&scalar) => {
             upload!(scalar as u64, U64)
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -1436,6 +1439,49 @@ mod preserving_download_tests {
 
     struct MalformedUploadProvider;
 
+    struct FailingNumericUploadProvider;
+
+    impl runmat_accelerate_api::AccelProvider for FailingNumericUploadProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("unused")
+        }
+
+        fn upload_numeric(
+            &self,
+            _host: &runmat_accelerate_api::HostNumericTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("device unavailable")
+        }
+
+        fn download<'a>(
+            &'a self,
+            _handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { anyhow::bail!("unused") })
+        }
+
+        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "failing numeric upload test provider".into()
+        }
+    }
+
+    #[test]
+    fn exact_integer_scalar_upload_preserves_operational_provider_failures() {
+        let prototype = GpuTensorHandle::new(vec![1, 1], 0, u64::MAX - 11)
+            .with_numeric_descriptor(NumericElementType::I64, GpuTensorStorage::Real);
+        let error =
+            upload_exact_integer_scalar_like(&FailingNumericUploadProvider, &prototype, 7.0)
+                .expect_err("provider failure must not become an inapplicable fast path");
+        assert!(error.to_string().contains("device unavailable"));
+    }
+
     impl runmat_accelerate_api::AccelProvider for MalformedUploadProvider {
         fn upload(
             &self,
@@ -1737,8 +1783,10 @@ mod tests {
             })
             .expect("upload uint64 prototype");
         let signed_scalar = upload_exact_integer_scalar_like(provider, &signed, -7.0)
+            .expect("integer scalar upload operation")
             .expect("representable int64 scalar");
         let unsigned_scalar = upload_exact_integer_scalar_like(provider, &unsigned, 7.0)
+            .expect("integer scalar upload operation")
             .expect("representable uint64 scalar");
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&signed_scalar),
@@ -1760,8 +1808,12 @@ mod tests {
                 .data,
             HostIntegerDataOwned::U64(vec![7])
         );
-        assert!(upload_exact_integer_scalar_like(provider, &signed, 1.5).is_none());
-        assert!(upload_exact_integer_scalar_like(provider, &unsigned, -1.0).is_none());
+        assert!(upload_exact_integer_scalar_like(provider, &signed, 1.5)
+            .expect("nonintegral scalar admission")
+            .is_none());
+        assert!(upload_exact_integer_scalar_like(provider, &unsigned, -1.0)
+            .expect("negative unsigned scalar admission")
+            .is_none());
         for handle in [&signed, &unsigned, &signed_scalar, &unsigned_scalar] {
             provider.free(handle).expect("free integer scalar handle");
         }

@@ -1758,6 +1758,21 @@ fn elementwise_binary_broadcast_data(
     Ok((out, shape, GpuTensorStorage::ComplexInterleaved))
 }
 
+fn require_non_integer_elementwise_inputs(
+    operation: &'static str,
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> Result<()> {
+    if runmat_accelerate_api::handle_integer_type(left).is_some()
+        || runmat_accelerate_api::handle_integer_type(right).is_some()
+    {
+        return Err(runmat_accelerate_api::unsupported_provider_operation(
+            format!("{operation}: native integer inputs are not supported by this provider"),
+        ));
+    }
+    Ok(())
+}
+
 fn elementwise_pow_broadcast_data(
     context: &str,
     lhs: &[f64],
@@ -5488,6 +5503,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            require_non_integer_elementwise_inputs("elem_add", a, b)?;
             let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
@@ -5521,6 +5537,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            require_non_integer_elementwise_inputs("elem_mul", a, b)?;
             let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
@@ -5554,6 +5571,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            require_non_integer_elementwise_inputs("elem_sub", a, b)?;
             let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
@@ -5587,6 +5605,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            require_non_integer_elementwise_inputs("elem_div", a, b)?;
             let (out, shape, storage) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard
@@ -5620,6 +5639,7 @@ impl AccelProvider for InProcessProvider {
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            require_non_integer_elementwise_inputs("elem_pow", a, b)?;
             let (out, shape) = {
                 let guard = registry().lock().unwrap();
                 let abuf = guard

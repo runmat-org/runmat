@@ -92,10 +92,10 @@ pub(in crate::catalog::inference) fn infer(
             )
         }
         MathInferenceRule::InverseTrigonometric(function) => {
-            super::super::math_inverse::infer_inverse_trigonometric(request, entry, function)
+            super::super::math::inverse::infer_inverse_trigonometric(request, entry, function)
         }
         MathInferenceRule::InverseHyperbolic(function) => {
-            super::super::math_inverse::infer_inverse_hyperbolic(request, entry, function)
+            super::super::math::inverse::infer_inverse_hyperbolic(request, entry, function)
         }
     }
 }
