@@ -27,8 +27,8 @@ import {
   FEA_DIAGNOSTICS_SCHEMA_VERSION,
   FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT,
   FEA_FIELD_DEFAULT_PAGE_SIZE,
-  FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND,
-  FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION,
+  FEA_FIELD_BINDINGS_ARTIFACT_KIND,
+  FEA_FIELD_BINDINGS_SCHEMA_VERSION,
   FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
   FEA_RUN_DATASET_KIND,
   FEA_RUN_DATASET_SCHEMA_VERSION,
@@ -73,12 +73,12 @@ describe("FEA study document contracts", () => {
 
   it("exports Rust-generated analysis artifact constants", () => {
     expect(FEA_RUN_DATASET_SCHEMA_VERSION).toBe(1);
-    expect(FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION).toBe(1);
+    expect(FEA_FIELD_BINDINGS_SCHEMA_VERSION).toBe(1);
     expect(FEA_DIAGNOSTICS_SCHEMA_VERSION).toBe(1);
     expect(FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION).toBe(1);
     expect(FEA_RUN_DATASET_KIND).toBe("finite_element_run_dataset");
     expect(FEA_DATASET_ARTIFACT_KIND).toBe("finite_element_dataset");
-    expect(FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND).toBe("finite_element_field_descriptors");
+    expect(FEA_FIELD_BINDINGS_ARTIFACT_KIND).toBe("finite_element_field_bindings");
     expect(FEA_DIAGNOSTICS_ARTIFACT_KIND).toBe("finite_element_diagnostics");
     expect(FEA_ARTIFACT_MANIFEST_KIND).toBe("finite_element_artifact_manifest");
     expect(FEA_FIELD_DEFAULT_PAGE_SIZE).toBe(4096);

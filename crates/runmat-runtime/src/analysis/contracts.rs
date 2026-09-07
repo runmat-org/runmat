@@ -1213,12 +1213,12 @@ pub enum AnalysisFieldLocation {
 pub const ANALYSIS_FIELD_DEFAULT_PAGE_SIZE: usize = 4096;
 pub const ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT: usize = 256;
 pub const ANALYSIS_RUN_DATASET_SCHEMA_VERSION: u32 = 1;
-pub const ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION: u32 = 1;
+pub const ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION: u32 = 1;
 pub const ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 pub const ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ANALYSIS_RUN_DATASET_KIND: &str = "finite_element_run_dataset";
 pub const ANALYSIS_DATASET_ARTIFACT_KIND: &str = "finite_element_dataset";
-pub const ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND: &str = "finite_element_field_descriptors";
+pub const ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND: &str = "finite_element_field_bindings";
 pub const ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND: &str = "finite_element_diagnostics";
 pub const ANALYSIS_ARTIFACT_MANIFEST_KIND: &str = "finite_element_artifact_manifest";
 
@@ -1264,7 +1264,7 @@ pub struct AnalysisDocumentRunResult {
     pub run: JsonValue,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<JsonValue>,
-    pub field_descriptors: Vec<AnalysisFieldDescriptor>,
+    pub field_bindings: Vec<AnalysisFieldBinding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_summary: Option<JsonValue>,
     pub figure_handles: Vec<u32>,
@@ -1272,6 +1272,14 @@ pub struct AnalysisDocumentRunResult {
     pub artifact_manifest: Option<JsonValue>,
     pub diagnostics: Vec<JsonValue>,
     pub progress_events: Vec<FeaProgressEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisFieldBinding {
+    pub step_id: ProcedureStepId,
+    pub run_id: String,
+    pub descriptor: AnalysisFieldDescriptor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1319,7 +1327,7 @@ pub struct AnalysisRunDatasetFieldPagingPolicy {
 pub struct AnalysisRunDatasetPayload {
     pub schema_version: u32,
     pub kind: String,
-    pub run_id: String,
+    pub session_id: String,
     pub doc_path: String,
     pub study: AnalysisRunDatasetStudyRef,
     #[serde(default)]
@@ -1336,7 +1344,7 @@ pub struct AnalysisRunDatasetPayload {
     pub available_output_summary: Option<String>,
     pub run: JsonValue,
     pub result_summary: JsonValue,
-    pub fields: Vec<AnalysisFieldDescriptor>,
+    pub field_bindings: Vec<AnalysisFieldBinding>,
     pub field_paging: AnalysisRunDatasetFieldPagingPolicy,
     pub diagnostics: Vec<JsonValue>,
     pub artifact_manifest: JsonValue,
@@ -1344,10 +1352,9 @@ pub struct AnalysisRunDatasetPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AnalysisFieldDescriptorsArtifactPayload {
+pub struct AnalysisFieldBindingsArtifactPayload {
     pub schema_version: u32,
-    pub run_id: String,
-    pub fields: Vec<AnalysisFieldDescriptor>,
+    pub bindings: Vec<AnalysisFieldBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

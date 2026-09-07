@@ -42,7 +42,7 @@ pub fn analysis_trends_op(
     query: AnalysisTrendsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisTrendsData>, OperationErrorEnvelope> {
-    let runs = storage::list_run_results().map_err(|err| {
+    let runs = storage::list_run_metadata().map_err(|err| {
         operation_error(
             ANALYSIS_TRENDS_OPERATION,
             ANALYSIS_TRENDS_OP_VERSION,

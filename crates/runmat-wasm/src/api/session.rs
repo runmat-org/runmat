@@ -636,32 +636,55 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
             .map_err(operation_error_message)?
             .data;
             ensure_runtime_not_cancelled("FEA run")?;
-            let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
-                &run.run_id,
-                runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
-                runmat_runtime::operations::OperationContext::new(None, None),
-            )
-            .ok()
-            .map(|envelope| envelope.data);
-            let field_descriptors = results
-                .as_ref()
-                .map(field_descriptors_for_results)
-                .unwrap_or_default();
-            let result_summary = results
-                .as_ref()
-                .map(|data| serde_json::to_value(&data.summary))
-                .transpose()
-                .map_err(|err| err.to_string())?;
-            let (figure_handles, diagnostics) = generated_fea_figure_handles(&study, &run.run_id)?;
+            let mut step_results = Vec::with_capacity(run.steps.len());
+            let mut field_bindings = Vec::new();
+            let mut figure_handles = Vec::new();
+            let mut diagnostics = Vec::new();
+            for (index, step) in run.steps.iter().enumerate() {
+                let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
+                    &step.run_id,
+                    runmat_runtime::analysis::AnalysisResultsQuery::metadata_only(),
+                    runmat_runtime::operations::OperationContext::new(None, None),
+                )
+                .map_err(operation_error_message)?
+                .data;
+                field_bindings.extend(results.field_descriptors.iter().cloned().map(
+                    |descriptor| runmat_runtime::analysis::AnalysisFieldBinding {
+                        step_id: step.procedure_step.step_id.clone(),
+                        run_id: step.run_id.clone(),
+                        descriptor,
+                    },
+                ));
+                let include_history = index + 1 == run.steps.len();
+                let generated = runmat_runtime::analysis::analysis_generate_study_run_figures(
+                    &study,
+                    &step.run_id,
+                    runmat_runtime::analysis::AnalysisFigureGenerationOptions {
+                        include_comparison: include_history,
+                        include_trends: include_history,
+                        ..runmat_runtime::analysis::AnalysisFigureGenerationOptions::default()
+                    },
+                )?;
+                for figure in generated {
+                    figure_handles.push(runtime_import_figure(figure.figure).as_u32());
+                    diagnostics.extend(figure.warnings.into_iter().map(|message| {
+                        serde_json::json!({
+                            "code": "FEA_VISUALIZATION_WARNING",
+                            "severity": "warning",
+                            "message": message,
+                            "source": "runmat.fea.visualization",
+                        })
+                    }));
+                }
+                step_results.push((step, results));
+            }
+            let (results, result_summary) = serialize_study_result_views(&step_results)?;
             Ok(FeaRunPayload {
                 path,
                 document_kind: AnalysisDocumentKind::Study,
                 run: serde_json::to_value(run).map_err(|err| err.to_string())?,
-                results: results
-                    .map(serde_json::to_value)
-                    .transpose()
-                    .map_err(|err| err.to_string())?,
-                field_descriptors,
+                results,
+                field_bindings,
                 result_summary,
                 figure_handles,
                 artifact_manifest: None,
@@ -681,7 +704,7 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
                 document_kind: AnalysisDocumentKind::Sweep,
                 run: serde_json::to_value(run).map_err(|err| err.to_string())?,
                 results: None,
-                field_descriptors: Vec::new(),
+                field_bindings: Vec::new(),
                 result_summary: None,
                 figure_handles: Vec::new(),
                 artifact_manifest: None,
@@ -692,29 +715,35 @@ async fn run_fea_path(path: String) -> Result<FeaRunPayload, String> {
     }
 }
 
-fn generated_fea_figure_handles(
-    study: &runmat_runtime::analysis::AnalysisStudySpec,
-    run_id: &str,
-) -> Result<(Vec<u32>, Vec<JsonValue>), String> {
-    let generated = runmat_runtime::analysis::analysis_generate_study_run_figures(
-        study,
-        run_id,
-        runmat_runtime::analysis::AnalysisFigureGenerationOptions::default(),
-    )?;
-    let mut handles = Vec::with_capacity(generated.len());
-    let mut diagnostics = Vec::new();
-    for figure in generated {
-        handles.push(runtime_import_figure(figure.figure).as_u32());
-        diagnostics.extend(figure.warnings.into_iter().map(|message| {
-            serde_json::json!({
-                "code": "FEA_VISUALIZATION_WARNING",
-                "severity": "warning",
-                "message": message,
-                "source": "runmat.fea.visualization",
-            })
-        }));
+fn serialize_study_result_views(
+    step_results: &[(
+        &runmat_runtime::analysis::AnalysisStudyStepRunData,
+        runmat_runtime::analysis::AnalysisResultsData,
+    )],
+) -> Result<(Option<JsonValue>, Option<JsonValue>), String> {
+    match step_results {
+        [] => Ok((None, None)),
+        [(_, results)] => Ok((
+            Some(serde_json::to_value(results).map_err(|error| error.to_string())?),
+            Some(serde_json::to_value(&results.summary).map_err(|error| error.to_string())?),
+        )),
+        results => Ok((
+            Some(serde_json::json!({
+                "steps": results.iter().map(|(step, results)| serde_json::json!({
+                    "stepId": &step.procedure_step.step_id,
+                    "runId": &step.run_id,
+                    "results": results,
+                })).collect::<Vec<_>>()
+            })),
+            Some(serde_json::json!({
+                "steps": results.iter().map(|(step, results)| serde_json::json!({
+                    "stepId": &step.procedure_step.step_id,
+                    "runId": &step.run_id,
+                    "summary": &results.summary,
+                })).collect::<Vec<_>>()
+            })),
+        )),
     }
-    Ok((handles, diagnostics))
 }
 
 fn load_fea_field(
@@ -722,50 +751,14 @@ fn load_fea_field(
     field_id: String,
     options: FeaFieldRequestPayload,
 ) -> Result<FeaFieldPayload, String> {
-    let results = runmat_runtime::analysis::analysis_results_by_run_id_op(
+    runmat_runtime::analysis::analysis_field_page_by_run_id_op(
         &run_id,
-        runmat_runtime::analysis::AnalysisResultsQuery::field_values(field_id.clone()),
+        &field_id,
+        options,
         runmat_runtime::operations::OperationContext::new(None, None),
     )
     .map_err(|err| err.message)?
-    .data;
-    let descriptor = results
-        .field_descriptors
-        .iter()
-        .find(|descriptor| descriptor.field_id == field_id)
-        .ok_or_else(|| format!("FEA field descriptor not found for '{field_id}'"))?;
-    let field = results
-        .fields
-        .iter()
-        .find(|field| field.field_id == field_id)
-        .ok_or_else(|| format!("FEA field values not found for '{field_id}'"))?;
-    let total_count = descriptor.element_count;
-    let offset = options.offset.unwrap_or(0).min(total_count);
-    let limit = options.limit.unwrap_or(total_count.saturating_sub(offset));
-    let values = field.as_host_f64().unwrap_or(&[]);
-    let end = offset.saturating_add(limit).min(values.len());
-    let sliced_values = if offset < end {
-        values[offset..end].to_vec()
-    } else {
-        Vec::new()
-    };
-    let count = sliced_values.len();
-    Ok(FeaFieldPayload {
-        run_id,
-        field_id,
-        descriptor: descriptor.clone(),
-        values: sliced_values,
-        offset,
-        count,
-        total_count,
-        truncated: offset > 0 || count < total_count,
-    })
-}
-
-fn field_descriptors_for_results(
-    results: &runmat_runtime::analysis::AnalysisResultsData,
-) -> Vec<runmat_runtime::analysis::AnalysisFieldDescriptor> {
-    results.field_descriptors.clone()
+    .data
 }
 
 fn filename_for_display(path: &str) -> &str {

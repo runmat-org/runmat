@@ -252,10 +252,10 @@ pub use contracts::{
     AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisDiagnosticsArtifactPayload,
     AnalysisDocumentCheckResult, AnalysisDocumentKind, AnalysisDocumentRunResult,
     AnalysisElectromagneticRunOptions, AnalysisExecutionPlan, AnalysisExecutionStep,
-    AnalysisFieldDescriptor, AnalysisFieldDescriptorsArtifactPayload, AnalysisFieldKind,
-    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPagingDescriptor,
-    AnalysisFieldRequestOptions, AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
+    AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
+    AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
+    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldStorage,
+    AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
     AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
@@ -279,8 +279,8 @@ pub use contracts::{
     ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
     ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
-    ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND, ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION,
     ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
     ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
@@ -300,8 +300,8 @@ pub use figures::{
     AnalysisGeneratedFigureKind,
 };
 pub use operations::{
-    analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
-    analysis_trends_op,
+    analysis_field_page_by_run_id_op, analysis_results_by_run_id_op, analysis_results_compare_op,
+    analysis_results_op, analysis_trends_op,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;

@@ -2,12 +2,12 @@
 // Do not edit by hand.
 
 export const FEA_RUN_DATASET_SCHEMA_VERSION = 1 as const;
-export const FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION = 1 as const;
+export const FEA_FIELD_BINDINGS_SCHEMA_VERSION = 1 as const;
 export const FEA_DIAGNOSTICS_SCHEMA_VERSION = 1 as const;
 export const FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION = 1 as const;
 export const FEA_RUN_DATASET_KIND = "finite_element_run_dataset" as const;
 export const FEA_DATASET_ARTIFACT_KIND = "finite_element_dataset" as const;
-export const FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND = "finite_element_field_descriptors" as const;
+export const FEA_FIELD_BINDINGS_ARTIFACT_KIND = "finite_element_field_bindings" as const;
 export const FEA_DIAGNOSTICS_ARTIFACT_KIND = "finite_element_diagnostics" as const;
 export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as const;
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
@@ -312,12 +312,18 @@ export interface FeaRunResult {
   documentKind: FeaDocumentKind;
   run: unknown;
   results?: unknown;
-  fieldDescriptors: FeaFieldDescriptor[];
+  fieldBindings: FeaFieldBinding[];
   resultSummary?: unknown;
   figureHandles: number[];
   artifactManifest?: unknown;
   diagnostics: unknown[];
   progressEvents: FeaProgressEvent[];
+}
+
+export interface FeaFieldBinding {
+  stepId: string;
+  runId: string;
+  descriptor: FeaFieldDescriptor;
 }
 
 export interface FeaFieldRequestOptions {
@@ -351,7 +357,7 @@ export interface FeaRunDatasetFieldPagingPolicy {
 export interface FeaRunDatasetPayload {
   schemaVersion: number;
   kind: string;
-  runId: string;
+  sessionId: string;
   docPath: string;
   study: FeaRunDatasetStudyRef;
   modelTemplate?: FeaModelTemplate;
@@ -360,16 +366,15 @@ export interface FeaRunDatasetPayload {
   availableOutputSummary?: string;
   run: unknown;
   resultSummary: unknown;
-  fields: FeaFieldDescriptor[];
+  fieldBindings: FeaFieldBinding[];
   fieldPaging: FeaRunDatasetFieldPagingPolicy;
   diagnostics: unknown[];
   artifactManifest: unknown;
 }
 
-export interface FeaFieldDescriptorsArtifactPayload {
+export interface FeaFieldBindingsArtifactPayload {
   schemaVersion: number;
-  runId: string;
-  fields: FeaFieldDescriptor[];
+  bindings: FeaFieldBinding[];
 }
 
 export interface FeaDiagnosticsArtifactPayload {

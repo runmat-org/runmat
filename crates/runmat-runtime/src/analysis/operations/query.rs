@@ -1,174 +1,127 @@
 use super::super::*;
 
+macro_rules! visit_analysis_result_fields {
+    ($run_result:expr, $as_ref:ident, [$($borrow:tt)*], $visit:expr) => {{
+        for field in $($borrow)* $run_result.run.fields {
+            $visit(field);
+        }
+        if let Some(modal) = $run_result.modal_results.$as_ref() {
+            for field in $($borrow)* modal.mode_shapes {
+                $visit(field);
+            }
+        }
+        if let Some(thermal) = $run_result.thermal_results.$as_ref() {
+            for fields in [
+                $($borrow)* thermal.temperature_snapshots,
+                $($borrow)* thermal.temperature_gradient_snapshots,
+                $($borrow)* thermal.heat_flux_snapshots,
+                $($borrow)* thermal.energy_storage_rate_snapshots,
+                $($borrow)* thermal.axis_boundary_heat_flux_summary_snapshots,
+            ] {
+                for field in fields {
+                    $visit(field);
+                }
+            }
+        }
+        if let Some(transient) = $run_result.transient_results.$as_ref() {
+            for fields in [
+                $($borrow)* transient.displacement_snapshots,
+                $($borrow)* transient.rotation_snapshots,
+                $($borrow)* transient.velocity_snapshots,
+                $($borrow)* transient.angular_velocity_snapshots,
+                $($borrow)* transient.acceleration_snapshots,
+                $($borrow)* transient.angular_acceleration_snapshots,
+                $($borrow)* transient.von_mises_snapshots,
+                $($borrow)* transient.kinetic_energy_snapshots,
+                $($borrow)* transient.strain_energy_snapshots,
+                $($borrow)* transient.residual_norm_snapshots,
+                $($borrow)* transient.thermo_mechanical_temperature_snapshots,
+                $($borrow)* transient.thermo_mechanical_thermal_strain_snapshots,
+                $($borrow)* transient.thermo_mechanical_thermal_stress_snapshots,
+                $($borrow)* transient.thermo_mechanical_displacement_snapshots,
+                $($borrow)* transient.thermo_mechanical_von_mises_snapshots,
+                $($borrow)* transient.thermo_mechanical_coupling_residual_snapshots,
+                $($borrow)* transient.electro_thermal_temperature_snapshots,
+                $($borrow)* transient.electro_thermal_thermal_residual_snapshots,
+            ] {
+                for field in fields {
+                    $visit(field);
+                }
+            }
+        }
+        if let Some(nonlinear) = $run_result.nonlinear_results.$as_ref() {
+            for fields in [
+                $($borrow)* nonlinear.displacement_snapshots,
+                $($borrow)* nonlinear.rotation_snapshots,
+                $($borrow)* nonlinear.von_mises_snapshots,
+                $($borrow)* nonlinear.plastic_strain_snapshots,
+                $($borrow)* nonlinear.equivalent_plastic_strain_snapshots,
+                $($borrow)* nonlinear.contact_pressure_snapshots,
+                $($borrow)* nonlinear.contact_gap_snapshots,
+                $($borrow)* nonlinear.load_factor_snapshots,
+                $($borrow)* nonlinear.residual_norm_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_temperature_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_thermal_strain_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_thermal_stress_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_displacement_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_von_mises_snapshots,
+                $($borrow)* nonlinear.thermo_mechanical_coupling_residual_snapshots,
+                $($borrow)* nonlinear.electro_thermal_temperature_snapshots,
+                $($borrow)* nonlinear.electro_thermal_thermal_residual_snapshots,
+            ] {
+                for field in fields {
+                    $visit(field);
+                }
+            }
+        }
+        if let Some(electromagnetic) = $run_result.electromagnetic_results.$as_ref() {
+            for field in [
+                $($borrow)* electromagnetic.vector_potential_real,
+                $($borrow)* electromagnetic.vector_potential_imag,
+                $($borrow)* electromagnetic.magnetic_flux_density_real,
+                $($borrow)* electromagnetic.magnetic_flux_density_imag,
+                $($borrow)* electromagnetic.magnetic_flux_density_magnitude,
+                $($borrow)* electromagnetic.magnetic_field_real,
+                $($borrow)* electromagnetic.magnetic_field_imag,
+                $($borrow)* electromagnetic.current_density_real,
+                $($borrow)* electromagnetic.current_density_imag,
+                $($borrow)* electromagnetic.electric_field_real,
+                $($borrow)* electromagnetic.electric_field_imag,
+                $($borrow)* electromagnetic.power_loss_density,
+                $($borrow)* electromagnetic.energy_density,
+                $($borrow)* electromagnetic.residual_real,
+                $($borrow)* electromagnetic.residual_imag,
+                $($borrow)* electromagnetic.electric_flux_density_real,
+                $($borrow)* electromagnetic.electric_flux_density_imag,
+                $($borrow)* electromagnetic.poynting_vector_real,
+                $($borrow)* electromagnetic.poynting_vector_imag,
+            ] {
+                $visit(field);
+            }
+        }
+    }};
+}
+
+pub(crate) fn visit_analysis_result_fields(
+    run_result: &AnalysisRunResult,
+    mut visit: impl FnMut(&AnalysisField),
+) {
+    visit_analysis_result_fields!(run_result, as_ref, [&], visit);
+}
+
+pub(crate) fn visit_analysis_result_fields_mut(
+    run_result: &mut AnalysisRunResult,
+    mut visit: impl FnMut(&mut AnalysisField),
+) {
+    visit_analysis_result_fields!(run_result, as_mut, [& mut], visit);
+}
+
 pub(crate) fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {
     let mut fields = Vec::new();
     let mut seen = HashSet::new();
-
-    for field in &run_result.run.fields {
+    visit_analysis_result_fields(run_result, |field| {
         push_analysis_result_field(&mut fields, &mut seen, field);
-    }
-
-    if let Some(modal) = run_result.modal_results.as_ref() {
-        for field in &modal.mode_shapes {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-    }
-
-    if let Some(thermal) = run_result.thermal_results.as_ref() {
-        for field in &thermal.temperature_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &thermal.temperature_gradient_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &thermal.heat_flux_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &thermal.energy_storage_rate_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &thermal.axis_boundary_heat_flux_summary_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-    }
-
-    if let Some(transient) = run_result.transient_results.as_ref() {
-        for field in &transient.displacement_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.rotation_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.velocity_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.angular_velocity_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.acceleration_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.angular_acceleration_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.von_mises_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.kinetic_energy_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.strain_energy_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.residual_norm_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_temperature_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_thermal_strain_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_thermal_stress_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_displacement_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_von_mises_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.thermo_mechanical_coupling_residual_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.electro_thermal_temperature_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &transient.electro_thermal_thermal_residual_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-    }
-
-    if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
-        for field in &nonlinear.displacement_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.rotation_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.von_mises_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.plastic_strain_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.equivalent_plastic_strain_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.contact_pressure_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.contact_gap_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.load_factor_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.residual_norm_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_temperature_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_thermal_strain_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_thermal_stress_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_displacement_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_von_mises_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.thermo_mechanical_coupling_residual_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.electro_thermal_temperature_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-        for field in &nonlinear.electro_thermal_thermal_residual_snapshots {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-    }
-
-    if let Some(electromagnetic) = run_result.electromagnetic_results.as_ref() {
-        for field in [
-            &electromagnetic.vector_potential_real,
-            &electromagnetic.vector_potential_imag,
-            &electromagnetic.magnetic_flux_density_real,
-            &electromagnetic.magnetic_flux_density_imag,
-            &electromagnetic.magnetic_flux_density_magnitude,
-            &electromagnetic.magnetic_field_real,
-            &electromagnetic.magnetic_field_imag,
-            &electromagnetic.current_density_real,
-            &electromagnetic.current_density_imag,
-            &electromagnetic.electric_field_real,
-            &electromagnetic.electric_field_imag,
-            &electromagnetic.power_loss_density,
-            &electromagnetic.energy_density,
-            &electromagnetic.residual_real,
-            &electromagnetic.residual_imag,
-            &electromagnetic.electric_flux_density_real,
-            &electromagnetic.electric_flux_density_imag,
-            &electromagnetic.poynting_vector_real,
-            &electromagnetic.poynting_vector_imag,
-        ] {
-            push_analysis_result_field(&mut fields, &mut seen, field);
-        }
-    }
-
+    });
     fields
 }
 
@@ -1406,7 +1359,12 @@ pub fn analysis_results_by_run_id_op(
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
-    let run_result = storage::load_run_result(run_id).map_err(|err| {
+    let run_result = if query.include_field_values {
+        storage::load_run_result(run_id)
+    } else {
+        storage::load_run_metadata(run_id)
+    }
+    .map_err(|err| {
         operation_error(
             ANALYSIS_RESULTS_OPERATION,
             ANALYSIS_RESULTS_OP_VERSION,
@@ -1438,5 +1396,79 @@ pub fn analysis_results_by_run_id_op(
         ));
     };
 
-    analysis_results_op(&run_result, query, context)
+    let mut envelope = analysis_results_op(&run_result, query, context)?;
+    for descriptor in &mut envelope.data.field_descriptors {
+        if descriptor.storage == AnalysisFieldStorage::HostF64 {
+            descriptor.storage_ref.kind = "chunked_field".to_string();
+        }
+    }
+    Ok(envelope)
+}
+
+pub fn analysis_field_page_by_run_id_op(
+    run_id: &str,
+    field_id: &str,
+    options: AnalysisFieldRequestOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisFieldPageResult>, OperationErrorEnvelope> {
+    let lookup = storage::load_field_page(run_id, field_id, options).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.FIELD_ARTIFACT_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load FEA field artifact: {err}"),
+            BTreeMap::from([
+                ("run_id".to_string(), run_id.to_string()),
+                ("field_id".to_string(), field_id.to_string()),
+            ]),
+        )
+    })?;
+    let page = match lookup {
+        storage::AnalysisFieldPageLookup::Page(page) => *page,
+        storage::AnalysisFieldPageLookup::RunNotFound => {
+            return Err(operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.RUN_NOT_FOUND",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("FEA run_id '{run_id}' was not found"),
+                BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+            ));
+        }
+        storage::AnalysisFieldPageLookup::FieldNotFound => {
+            return Err(operation_error(
+                ANALYSIS_RESULTS_OPERATION,
+                ANALYSIS_RESULTS_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESULTS.FIELD_NOT_FOUND",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("requested FEA field '{field_id}' was not produced by run"),
+                BTreeMap::from([
+                    ("run_id".to_string(), run_id.to_string()),
+                    ("requested_field".to_string(), field_id.to_string()),
+                ]),
+            ));
+        }
+    };
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RESULTS_OPERATION,
+        ANALYSIS_RESULTS_OP_VERSION,
+        &context,
+        page,
+    ))
 }

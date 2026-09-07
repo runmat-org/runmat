@@ -51,12 +51,12 @@ const generatedRoot = path.resolve(bindingsRoot, "src/generated");
 const outputPath = path.resolve(generatedRoot, "fea-study-document-contracts.ts");
 const analysisConstants = [
   ["ANALYSIS_RUN_DATASET_SCHEMA_VERSION", "FEA_RUN_DATASET_SCHEMA_VERSION"],
-  ["ANALYSIS_FIELD_DESCRIPTORS_SCHEMA_VERSION", "FEA_FIELD_DESCRIPTORS_SCHEMA_VERSION"],
+  ["ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION", "FEA_FIELD_BINDINGS_SCHEMA_VERSION"],
   ["ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION", "FEA_DIAGNOSTICS_SCHEMA_VERSION"],
   ["ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION", "FEA_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION"],
   ["ANALYSIS_RUN_DATASET_KIND", "FEA_RUN_DATASET_KIND"],
   ["ANALYSIS_DATASET_ARTIFACT_KIND", "FEA_DATASET_ARTIFACT_KIND"],
-  ["ANALYSIS_FIELD_DESCRIPTORS_ARTIFACT_KIND", "FEA_FIELD_DESCRIPTORS_ARTIFACT_KIND"],
+  ["ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND", "FEA_FIELD_BINDINGS_ARTIFACT_KIND"],
   ["ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND", "FEA_DIAGNOSTICS_ARTIFACT_KIND"],
   ["ANALYSIS_ARTIFACT_MANIFEST_KIND", "FEA_ARTIFACT_MANIFEST_KIND"],
   ["ANALYSIS_FIELD_DEFAULT_PAGE_SIZE", "FEA_FIELD_DEFAULT_PAGE_SIZE"],
@@ -80,12 +80,13 @@ const analysisStructTypes = [
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],
   ["AnalysisDocumentCheckResult", "FeaCheckResult", { renameAll: "camelCase" }],
   ["AnalysisDocumentRunResult", "FeaRunResult", { renameAll: "camelCase" }],
+  ["AnalysisFieldBinding", "FeaFieldBinding", { renameAll: "camelCase" }],
   ["AnalysisFieldRequestOptions", "FeaFieldRequestOptions", { renameAll: "camelCase" }],
   ["AnalysisFieldPageResult", "FeaFieldResult", { renameAll: "camelCase" }],
   ["AnalysisRunDatasetStudyRef", "FeaRunDatasetStudyRef", { renameAll: "camelCase" }],
   ["AnalysisRunDatasetFieldPagingPolicy", "FeaRunDatasetFieldPagingPolicy", { renameAll: "camelCase" }],
   ["AnalysisRunDatasetPayload", "FeaRunDatasetPayload", { renameAll: "camelCase" }],
-  ["AnalysisFieldDescriptorsArtifactPayload", "FeaFieldDescriptorsArtifactPayload", { renameAll: "camelCase" }],
+  ["AnalysisFieldBindingsArtifactPayload", "FeaFieldBindingsArtifactPayload", { renameAll: "camelCase" }],
   ["AnalysisDiagnosticsArtifactPayload", "FeaDiagnosticsArtifactPayload", { renameAll: "camelCase" }],
   ["AnalysisObjectArtifactMetadata", "FeaObjectArtifactMetadata", { renameAll: "camelCase" }],
   ["AnalysisFieldPagingDescriptor", "FeaFieldPagingDescriptor", { renameAll: "camelCase" }],
@@ -203,6 +204,8 @@ function rustTypeToTs(type) {
       return { type: "FeaAnalysisProcedure", nullable: false };
     case "ProcedureStep":
       return { type: "FeaProcedureStep", nullable: false };
+    case "ProcedureStepId":
+      return { type: "string", nullable: false };
     case "AnalysisRuntimeModelTemplateCatalogEntry":
       return { type: "FeaModelTemplateCatalogEntry", nullable: false };
     case "AnalysisRuntimeModelTemplateDefaultObservation":

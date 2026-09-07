@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,14 +7,24 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
+use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
+use runmat_analysis_fea::execution::{
+    chunk_numerical_payload, AnalysisNumericalObjectKind, AnalysisObjectManifest,
+    DEFAULT_ANALYSIS_CHUNK_BYTES,
+};
+use runmat_execution::Digest;
 use runmat_filesystem::{AtomicCreateResult, DirEntry, FsFileType, FsMetadata};
 use serde::{Deserialize, Serialize};
 
 use runmat_analysis_fea::AnalysisRunIdentity;
 
-use super::contracts::{AnalysisArtifactRecord, AnalysisRunResult};
+use super::contracts::{
+    AnalysisArtifactRecord, AnalysisFieldDescriptor, AnalysisFieldPageResult,
+    AnalysisFieldRequestOptions, AnalysisRunResult,
+};
 
-const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09";
+const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-chunked-fields";
+const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,11 +33,39 @@ struct PersistedRunArtifact {
     created_at: String,
     op_version: String,
     run: AnalysisRunResult,
+    fields: Vec<PersistedFieldArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedFieldArtifact {
+    field_id: String,
+    shape: Vec<usize>,
+    manifest: AnalysisObjectManifest,
+}
+
+struct PreparedRunArtifact {
+    persisted: PersistedRunArtifact,
+    chunks: HashMap<Digest, Vec<u8>>,
+}
+
+pub enum AnalysisFieldPageLookup {
+    RunNotFound,
+    FieldNotFound,
+    Page(Box<AnalysisFieldPageResult>),
 }
 
 pub trait AnalysisArtifactStore: Send + Sync {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String>;
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
+    fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
+    fn load_field_page(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        options: AnalysisFieldRequestOptions,
+    ) -> Result<AnalysisFieldPageLookup, String>;
+    fn list_run_metadata(&self) -> Result<Vec<AnalysisRunResult>, String>;
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String>;
 }
 
@@ -45,12 +83,14 @@ pub struct AnalysisArtifactRetentionConfig {
 
 pub struct InMemoryAnalysisArtifactStore {
     runs: RwLock<HashMap<String, PersistedRunArtifact>>,
+    chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
 }
 
 impl InMemoryAnalysisArtifactStore {
     pub fn new() -> Self {
         Self {
             runs: RwLock::new(HashMap::new()),
+            chunks: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -64,27 +104,35 @@ impl Default for InMemoryAnalysisArtifactStore {
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
+        let prepared = prepare_run_artifact(run, Utc::now().to_rfc3339())?;
         let mut guard = self
             .runs
             .write()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
         if let Some(existing) = guard.get(&run.run_id) {
             validate_persisted_run(existing, &run.run_id)?;
-            if existing.run != *run {
+            if !same_persisted_content(existing, &prepared.persisted) {
                 return Err("analysis run identity already contains different content".into());
             }
             return artifact_record(run, existing.created_at.clone());
         }
-        let created_at = Utc::now().to_rfc3339();
-        guard.insert(
-            run.run_id.clone(),
-            PersistedRunArtifact {
-                schema_version: ARTIFACT_SCHEMA_VERSION.into(),
-                created_at: created_at.clone(),
-                op_version: run_operation_version(run)?,
-                run: run.clone(),
-            },
-        );
+        let created_at = prepared.persisted.created_at.clone();
+        let mut chunks = self
+            .chunks
+            .write()
+            .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
+        for (digest, bytes) in prepared.chunks {
+            match chunks.get(&digest) {
+                Some(existing) if existing.as_ref() != bytes.as_slice() => {
+                    return Err("analysis field chunk digest collision".to_string());
+                }
+                Some(_) => {}
+                None => {
+                    chunks.insert(digest, Arc::from(bytes));
+                }
+            }
+        }
+        guard.insert(run.run_id.clone(), prepared.persisted);
         artifact_record(run, created_at)
     }
 
@@ -94,16 +142,77 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .runs
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-        guard
-            .get(run_id)
-            .map(|persisted| {
-                validate_persisted_run(persisted, run_id)?;
-                Ok(persisted.run.clone())
-            })
-            .transpose()
+        let Some(persisted) = guard.get(run_id) else {
+            return Ok(None);
+        };
+        validate_persisted_run(persisted, run_id)?;
+        let chunks = self
+            .chunks
+            .read()
+            .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
+        Ok(Some(materialize_run(persisted, |digest| {
+            Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+        })?))
+    }
+
+    fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
+        validate_run_id_token(run_id)?;
+        let guard = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        let Some(persisted) = guard.get(run_id) else {
+            return Ok(None);
+        };
+        validate_persisted_run(persisted, run_id)?;
+        Ok(Some(persisted.run.clone()))
+    }
+
+    fn load_field_page(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        options: AnalysisFieldRequestOptions,
+    ) -> Result<AnalysisFieldPageLookup, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        let Some(persisted) = runs.get(run_id) else {
+            return Ok(AnalysisFieldPageLookup::RunNotFound);
+        };
+        validate_persisted_run(persisted, run_id)?;
+        let chunks = self
+            .chunks
+            .read()
+            .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
+        field_page_from_artifact(persisted, field_id, options, |digest| {
+            Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+        })
     }
 
     fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
+        let guard = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        guard
+            .iter()
+            .map(|(run_id, persisted)| {
+                validate_persisted_run(persisted, run_id)?;
+                let chunks = self
+                    .chunks
+                    .read()
+                    .map_err(|_| "analysis field chunk store lock poisoned".to_string())?;
+                materialize_run(persisted, |digest| {
+                    Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+                })
+            })
+            .collect()
+    }
+
+    fn list_run_metadata(&self) -> Result<Vec<AnalysisRunResult>, String> {
         let guard = self
             .runs
             .read()
@@ -138,6 +247,80 @@ impl FilesystemAnalysisArtifactStore {
         ensure_owned_directory(&runs, "analysis artifact runs directory")?;
         Ok(())
     }
+
+    fn objects_directory(&self) -> PathBuf {
+        self.root.join("objects")
+    }
+
+    fn object_path(&self, digest: Digest) -> PathBuf {
+        self.objects_directory().join(digest_hex(digest))
+    }
+
+    fn ensure_objects_directory(&self) -> Result<(), String> {
+        ensure_owned_directory(
+            &self.objects_directory(),
+            "analysis artifact objects directory",
+        )
+    }
+
+    fn read_chunk(&self, digest: Digest) -> Result<Option<Vec<u8>>, String> {
+        let path = self.object_path(digest);
+        match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
+            Ok(metadata) => {
+                return Err(format!(
+                    "analysis field chunk must be a regular file, found {:?}",
+                    metadata.file_type()
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to inspect analysis field chunk: {error}")),
+        }
+        let bytes =
+            fs_read(path).map_err(|error| format!("failed to read field chunk: {error}"))?;
+        if Digest::sha256(&bytes) != digest {
+            return Err("analysis field chunk differs from its content address".to_string());
+        }
+        Ok(Some(bytes))
+    }
+
+    fn list_persisted_runs(&self) -> Result<Vec<PersistedRunArtifact>, String> {
+        let runs_dir = self.root.join("runs");
+        if !owned_directory_exists(&self.root, "analysis artifact root")?
+            || !owned_directory_exists(&runs_dir, "analysis artifact runs directory")?
+        {
+            return Ok(Vec::new());
+        }
+        let mut runs = Vec::new();
+        for entry in
+            fs_read_dir(&runs_dir).map_err(|error| format!("failed to scan artifacts: {error}"))?
+        {
+            let path = entry.path().to_path_buf();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                continue;
+            }
+            if entry.file_type() != FsFileType::File {
+                return Err(format!(
+                    "analysis run artifact must be a regular file: {}",
+                    path.display()
+                ));
+            }
+            let run_id = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or_else(|| {
+                    format!(
+                        "analysis run artifact filename is invalid: {}",
+                        path.display()
+                    )
+                })?;
+            validate_run_id_token(run_id)?;
+            let bytes =
+                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?;
+            runs.push(decode_persisted_run(&bytes, run_id)?);
+        }
+        Ok(runs)
+    }
 }
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
@@ -145,14 +328,20 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         validate_run_identity(run)?;
         let path = self.run_path(&run.run_id)?;
         self.ensure_runs_directory()?;
-        let op_version = run_operation_version(run)?;
-        let persisted = PersistedRunArtifact {
-            schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            op_version: op_version.clone(),
-            run: run.clone(),
-        };
-        let bytes = serde_json::to_vec_pretty(&persisted)
+        self.ensure_objects_directory()?;
+        let prepared = prepare_run_artifact(run, Utc::now().to_rfc3339())?;
+        for (digest, chunk) in &prepared.chunks {
+            match runmat_filesystem::atomic_create_new(self.object_path(*digest), chunk)
+                .map_err(|error| format!("failed to publish immutable field chunk: {error}"))?
+            {
+                AtomicCreateResult::Published { .. } => {}
+                AtomicCreateResult::Existing(existing) if existing == *chunk => {}
+                AtomicCreateResult::Existing(_) => {
+                    return Err("analysis field chunk digest collision".to_string());
+                }
+            }
+        }
+        let bytes = serde_json::to_vec_pretty(&prepared.persisted)
             .map_err(|err| format!("failed to encode run artifact: {err}"))?;
         match runmat_filesystem::atomic_create_new(&path, &bytes)
             .map_err(|error| format!("failed to publish immutable run artifact: {error}"))?
@@ -160,7 +349,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             AtomicCreateResult::Published { .. } => {}
             AtomicCreateResult::Existing(existing_bytes) => {
                 let existing = decode_persisted_run(&existing_bytes, &run.run_id)?;
-                if existing.run != *run {
+                if !same_persisted_content(&existing, &prepared.persisted) {
                     return Err("analysis run identity already contains different content".into());
                 }
                 return artifact_record(run, existing.created_at);
@@ -168,7 +357,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         }
         prune_filesystem_runs(&self.root)?;
 
-        artifact_record(run, persisted.created_at)
+        artifact_record(run, prepared.persisted.created_at)
     }
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
@@ -190,47 +379,80 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         }
         let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
+        let persisted = decode_persisted_run(&bytes, run_id)?;
+        Ok(Some(materialize_run(&persisted, |digest| {
+            self.read_chunk(digest)
+        })?))
+    }
+
+    fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
+        let path = self.run_path(run_id)?;
+        if !owned_directory_exists(&self.root, "analysis artifact root")?
+            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
+        {
+            return Ok(None);
+        }
+        match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
+            Ok(metadata) => {
+                return Err(format!(
+                    "analysis run artifact must be a regular file, found {:?}",
+                    metadata.file_type()
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
+        }
+        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
         Ok(Some(decode_persisted_run(&bytes, run_id)?.run))
     }
 
-    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
-        let runs_dir = self.root.join("runs");
+    fn load_field_page(
+        &self,
+        run_id: &str,
+        field_id: &str,
+        options: AnalysisFieldRequestOptions,
+    ) -> Result<AnalysisFieldPageLookup, String> {
+        let path = self.run_path(run_id)?;
         if !owned_directory_exists(&self.root, "analysis artifact root")?
-            || !owned_directory_exists(&runs_dir, "analysis artifact runs directory")?
+            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
         {
-            return Ok(Vec::new());
+            return Ok(AnalysisFieldPageLookup::RunNotFound);
         }
-        let mut runs = Vec::new();
-        for entry in
-            fs_read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))?
-        {
-            let path = entry.path().to_path_buf();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
+        let bytes = match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {
+                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?
             }
-            if entry.file_type() != FsFileType::File {
+            Ok(metadata) => {
                 return Err(format!(
-                    "analysis run artifact must be a regular file: {}",
-                    path.display()
+                    "analysis run artifact must be a regular file, found {:?}",
+                    metadata.file_type()
                 ));
             }
-            let run_id = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .ok_or_else(|| {
-                    format!(
-                        "analysis run artifact filename is invalid: {}",
-                        path.display()
-                    )
-                })?;
-            validate_run_id_token(run_id)?;
-            let bytes =
-                fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-            if let Ok(persisted) = decode_persisted_run(&bytes, run_id) {
-                runs.push(persisted.run);
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(AnalysisFieldPageLookup::RunNotFound);
             }
-        }
-        Ok(runs)
+            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
+        };
+        let persisted = decode_persisted_run(&bytes, run_id)?;
+        field_page_from_artifact(&persisted, field_id, options, |digest| {
+            self.read_chunk(digest)
+        })
+    }
+
+    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
+        self.list_persisted_runs()?
+            .into_iter()
+            .map(|persisted| materialize_run(&persisted, |digest| self.read_chunk(digest)))
+            .collect()
+    }
+
+    fn list_run_metadata(&self) -> Result<Vec<AnalysisRunResult>, String> {
+        Ok(self
+            .list_persisted_runs()?
+            .into_iter()
+            .map(|persisted| persisted.run)
+            .collect())
     }
 }
 
@@ -243,6 +465,372 @@ fn decode_persisted_run(
         .map_err(|error| format!("failed to parse run artifact: {error}"))?;
     validate_persisted_run(&persisted, expected_run_id)?;
     Ok(persisted)
+}
+
+fn prepare_run_artifact(
+    run: &AnalysisRunResult,
+    created_at: String,
+) -> Result<PreparedRunArtifact, String> {
+    let mut fields = BTreeMap::<String, PersistedFieldArtifact>::new();
+    let mut chunks = HashMap::new();
+    let mut seen_field_ids = HashSet::new();
+    let mut preparation_error = None;
+    super::operations::visit_analysis_result_fields(run, |field| {
+        if preparation_error.is_some() {
+            return;
+        }
+        if let Err(error) = validate_field_id(&field.field_id) {
+            preparation_error = Some(error);
+            return;
+        }
+        if !seen_field_ids.insert(field.field_id.clone()) {
+            preparation_error = Some(format!(
+                "analysis field ID `{}` appears more than once in one run",
+                field.field_id
+            ));
+            return;
+        }
+        let expected_count = match checked_element_count(&field.shape) {
+            Ok(count) => count,
+            Err(error) => {
+                preparation_error = Some(error);
+                return;
+            }
+        };
+        match &field.values {
+            AnalysisFieldValues::HostF64(values) => {
+                if values.len() != expected_count {
+                    preparation_error = Some(format!(
+                        "analysis field `{}` shape requires {expected_count} values but contains {}",
+                        field.field_id,
+                        values.len()
+                    ));
+                    return;
+                }
+                if values.is_empty() {
+                    return;
+                }
+                let payload = encode_field_values(values);
+                let payload_digest = Digest::sha256(&payload);
+                let logical_identity = field_logical_identity(field, payload_digest);
+                let chunked = match chunk_numerical_payload(
+                    AnalysisNumericalObjectKind::Field,
+                    logical_identity,
+                    &payload,
+                    DEFAULT_ANALYSIS_CHUNK_BYTES,
+                ) {
+                    Ok(chunked) => chunked,
+                    Err(error) => {
+                        preparation_error = Some(format!(
+                            "failed to chunk analysis field `{}`: {error}",
+                            field.field_id
+                        ));
+                        return;
+                    }
+                };
+                let artifact = PersistedFieldArtifact {
+                    field_id: field.field_id.clone(),
+                    shape: field.shape.clone(),
+                    manifest: chunked.manifest.clone(),
+                };
+                for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+                    match chunks.get(&descriptor.digest) {
+                        Some(existing) if existing != &bytes => {
+                            preparation_error =
+                                Some("analysis field chunk digest collision".to_string());
+                            return;
+                        }
+                        Some(_) => {}
+                        None => {
+                            chunks.insert(descriptor.digest, bytes);
+                        }
+                    }
+                }
+                fields.insert(field.field_id.clone(), artifact);
+            }
+            AnalysisFieldValues::DeviceRef(reference) => {
+                if reference.element_count != expected_count {
+                    preparation_error = Some(format!(
+                        "device field `{}` shape requires {expected_count} values but its reference declares {}",
+                        field.field_id, reference.element_count
+                    ));
+                }
+            }
+        }
+    });
+    if let Some(error) = preparation_error {
+        return Err(error);
+    }
+
+    let mut stripped_run = run.clone();
+    super::operations::visit_analysis_result_fields_mut(&mut stripped_run, |field| {
+        if let AnalysisFieldValues::HostF64(values) = &mut field.values {
+            if !values.is_empty() {
+                values.clear();
+            }
+        }
+    });
+    Ok(PreparedRunArtifact {
+        persisted: PersistedRunArtifact {
+            schema_version: ARTIFACT_SCHEMA_VERSION.to_string(),
+            created_at,
+            op_version: run_operation_version(run)?,
+            run: stripped_run,
+            fields: fields.into_values().collect(),
+        },
+        chunks,
+    })
+}
+
+fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
+    left.schema_version == right.schema_version
+        && left.op_version == right.op_version
+        && left.run == right.run
+        && left.fields == right.fields
+}
+
+fn materialize_run(
+    persisted: &PersistedRunArtifact,
+    mut read_chunk: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+) -> Result<AnalysisRunResult, String> {
+    let mut values = HashMap::with_capacity(persisted.fields.len());
+    for field in &persisted.fields {
+        let payload = read_field_payload(field, &mut read_chunk)?;
+        values.insert(
+            field.field_id.clone(),
+            (field.shape.clone(), decode_field_values(&payload)?),
+        );
+    }
+    let mut run = persisted.run.clone();
+    let mut hydration_error = None;
+    super::operations::visit_analysis_result_fields_mut(&mut run, |field| {
+        if hydration_error.is_some() {
+            return;
+        }
+        if let Some((stored_shape, stored_values)) = values.get(&field.field_id) {
+            if &field.shape != stored_shape {
+                hydration_error = Some(format!(
+                    "analysis field `{}` shape differs from its persisted manifest",
+                    field.field_id
+                ));
+                return;
+            }
+            field.values = AnalysisFieldValues::HostF64(stored_values.clone());
+        }
+    });
+    if let Some(error) = hydration_error {
+        return Err(error);
+    }
+    Ok(run)
+}
+
+fn read_field_payload(
+    field: &PersistedFieldArtifact,
+    read_chunk: &mut impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+) -> Result<Vec<u8>, String> {
+    let capacity = usize::try_from(field.manifest.encoded_length)
+        .map_err(|_| "analysis field byte length is not representable".to_string())?;
+    let mut payload = Vec::with_capacity(capacity);
+    for descriptor in &field.manifest.chunks {
+        let bytes = read_chunk(descriptor.digest)?.ok_or_else(|| {
+            format!(
+                "analysis field `{}` is missing chunk {}",
+                field.field_id, descriptor.ordinal
+            )
+        })?;
+        validate_chunk(descriptor, &bytes)?;
+        payload.extend_from_slice(&bytes);
+    }
+    if payload.len() as u64 != field.manifest.encoded_length
+        || Digest::sha256(&payload) != field.manifest.payload_digest
+    {
+        return Err(format!(
+            "analysis field `{}` payload differs from its manifest",
+            field.field_id
+        ));
+    }
+    Ok(payload)
+}
+
+fn field_page_from_artifact(
+    persisted: &PersistedRunArtifact,
+    field_id: &str,
+    options: AnalysisFieldRequestOptions,
+    mut read_chunk: impl FnMut(Digest) -> Result<Option<Vec<u8>>, String>,
+) -> Result<AnalysisFieldPageLookup, String> {
+    validate_field_id(field_id)?;
+    let Some(template) = find_result_field(&persisted.run, field_id) else {
+        return Ok(AnalysisFieldPageLookup::FieldNotFound);
+    };
+    let mut descriptor = AnalysisFieldDescriptor::from_field(&template);
+    if descriptor.storage == super::contracts::AnalysisFieldStorage::HostF64 {
+        descriptor.storage_ref.kind = "chunked_field".to_string();
+    }
+    let total_count = checked_element_count(&template.shape)?;
+    let offset = options.offset.unwrap_or(0).min(total_count);
+    let limit = options
+        .limit
+        .unwrap_or(super::contracts::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT)
+        .min(super::contracts::ANALYSIS_FIELD_DEFAULT_PAGE_SIZE);
+    let count = limit.min(total_count.saturating_sub(offset));
+    if count == 0 {
+        return Ok(AnalysisFieldPageLookup::Page(Box::new(
+            AnalysisFieldPageResult {
+                run_id: persisted.run.run_id.clone(),
+                field_id: field_id.to_string(),
+                descriptor,
+                values: Vec::new(),
+                offset,
+                count: 0,
+                total_count,
+                truncated: offset > 0 || total_count > 0,
+            },
+        )));
+    }
+    let Some(stored) = persisted
+        .fields
+        .iter()
+        .find(|field| field.field_id == field_id)
+    else {
+        return Err(format!(
+            "analysis field `{field_id}` is device-resident and has no materialized host artifact"
+        ));
+    };
+    let start_byte = offset
+        .checked_mul(std::mem::size_of::<f64>())
+        .ok_or_else(|| "analysis field page byte offset overflow".to_string())?;
+    let end_byte = offset
+        .checked_add(count)
+        .and_then(|end| end.checked_mul(std::mem::size_of::<f64>()))
+        .ok_or_else(|| "analysis field page byte end overflow".to_string())?;
+    let mut page = Vec::with_capacity(count * std::mem::size_of::<f64>());
+    let mut chunk_start = 0_usize;
+    for chunk in &stored.manifest.chunks {
+        let chunk_len = usize::try_from(chunk.encoded_length)
+            .map_err(|_| "analysis field chunk length is not representable".to_string())?;
+        let chunk_end = chunk_start
+            .checked_add(chunk_len)
+            .ok_or_else(|| "analysis field chunk range overflow".to_string())?;
+        let overlap_start = start_byte.max(chunk_start);
+        let overlap_end = end_byte.min(chunk_end);
+        if overlap_start < overlap_end {
+            let bytes = read_chunk(chunk.digest)?.ok_or_else(|| {
+                format!(
+                    "analysis field `{field_id}` is missing chunk {}",
+                    chunk.ordinal
+                )
+            })?;
+            validate_chunk(chunk, &bytes)?;
+            page.extend_from_slice(&bytes[overlap_start - chunk_start..overlap_end - chunk_start]);
+        }
+        chunk_start = chunk_end;
+        if chunk_start >= end_byte {
+            break;
+        }
+    }
+    let values = decode_field_values(&page)?;
+    if values.len() != count {
+        return Err(format!(
+            "analysis field `{field_id}` page is incomplete: expected {count} values, found {}",
+            values.len()
+        ));
+    }
+    Ok(AnalysisFieldPageLookup::Page(Box::new(
+        AnalysisFieldPageResult {
+            run_id: persisted.run.run_id.clone(),
+            field_id: field_id.to_string(),
+            descriptor,
+            values,
+            offset,
+            count,
+            total_count,
+            truncated: offset > 0 || offset.saturating_add(count) < total_count,
+        },
+    )))
+}
+
+fn validate_chunk(
+    descriptor: &runmat_analysis_fea::execution::AnalysisChunkDescriptor,
+    bytes: &[u8],
+) -> Result<(), String> {
+    if bytes.len() as u64 != descriptor.encoded_length || Digest::sha256(bytes) != descriptor.digest
+    {
+        return Err(format!(
+            "analysis field chunk {} differs from its manifest descriptor",
+            descriptor.ordinal
+        ));
+    }
+    Ok(())
+}
+
+fn find_result_field(run: &AnalysisRunResult, field_id: &str) -> Option<AnalysisField> {
+    let mut found = None;
+    super::operations::visit_analysis_result_fields(run, |field| {
+        if found.is_none() && field.field_id == field_id {
+            found = Some(field.clone());
+        }
+    });
+    found
+}
+
+fn encode_field_values(values: &[f64]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(std::mem::size_of_val(values));
+    for value in values {
+        bytes.extend_from_slice(&value.to_bits().to_le_bytes());
+    }
+    bytes
+}
+
+fn decode_field_values(bytes: &[u8]) -> Result<Vec<f64>, String> {
+    if !bytes.len().is_multiple_of(std::mem::size_of::<f64>()) {
+        return Err("analysis field payload is not an integral number of f64 values".to_string());
+    }
+    Ok(bytes
+        .chunks_exact(std::mem::size_of::<f64>())
+        .map(|chunk| {
+            let mut encoded = [0_u8; std::mem::size_of::<f64>()];
+            encoded.copy_from_slice(chunk);
+            f64::from_bits(u64::from_le_bytes(encoded))
+        })
+        .collect())
+}
+
+fn field_logical_identity(field: &AnalysisField, payload_digest: Digest) -> Digest {
+    let mut identity = Vec::with_capacity(
+        FIELD_IDENTITY_PREFIX.len() + field.field_id.len() + field.shape.len() * 8 + 48,
+    );
+    identity.extend_from_slice(FIELD_IDENTITY_PREFIX);
+    identity.extend_from_slice(&(field.field_id.len() as u64).to_le_bytes());
+    identity.extend_from_slice(field.field_id.as_bytes());
+    identity.extend_from_slice(&(field.shape.len() as u64).to_le_bytes());
+    for dimension in &field.shape {
+        identity.extend_from_slice(&(*dimension as u64).to_le_bytes());
+    }
+    identity.extend_from_slice(payload_digest.bytes());
+    Digest::sha256(identity)
+}
+
+fn checked_element_count(shape: &[usize]) -> Result<usize, String> {
+    shape.iter().try_fold(1_usize, |count, dimension| {
+        count
+            .checked_mul(*dimension)
+            .ok_or_else(|| "analysis field shape element count overflow".to_string())
+    })
+}
+
+fn validate_field_id(field_id: &str) -> Result<(), String> {
+    if field_id.is_empty() || field_id.len() > 512 || field_id.chars().any(char::is_control) {
+        return Err("analysis field ID must be 1-512 non-control characters".to_string());
+    }
+    Ok(())
+}
+
+fn digest_hex(digest: Digest) -> String {
+    digest
+        .bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn validate_persisted_run(
@@ -269,6 +857,80 @@ fn validate_persisted_run(
         ));
     }
     validate_run_identity(&persisted.run)?;
+    let mut expected_fields = BTreeMap::new();
+    let mut result_field_ids = HashSet::new();
+    let mut result_inventory_error = None;
+    super::operations::visit_analysis_result_fields(&persisted.run, |field| {
+        if result_inventory_error.is_some() {
+            return;
+        }
+        if let Err(error) = validate_field_id(&field.field_id) {
+            result_inventory_error = Some(error);
+            return;
+        }
+        if !result_field_ids.insert(field.field_id.clone()) {
+            result_inventory_error = Some(format!(
+                "analysis field `{}` appears more than once in the run",
+                field.field_id
+            ));
+            return;
+        }
+        match checked_element_count(&field.shape) {
+            Ok(element_count)
+                if matches!(field.values, AnalysisFieldValues::HostF64(_)) && element_count > 0 =>
+            {
+                expected_fields.insert(field.field_id.clone(), field.shape.clone());
+            }
+            Ok(_) => {}
+            Err(error) => result_inventory_error = Some(error),
+        }
+    });
+    if let Some(error) = result_inventory_error {
+        return Err(error);
+    }
+    let mut stored_fields = BTreeMap::new();
+    for field in &persisted.fields {
+        validate_field_id(&field.field_id)?;
+        field
+            .manifest
+            .validate()
+            .map_err(|error| format!("invalid field manifest for `{}`: {error}", field.field_id))?;
+        if field.manifest.kind != AnalysisNumericalObjectKind::Field {
+            return Err(format!(
+                "analysis field `{}` manifest has the wrong numerical object kind",
+                field.field_id
+            ));
+        }
+        let value_count = checked_element_count(&field.shape)?;
+        let expected_bytes = value_count
+            .checked_mul(std::mem::size_of::<f64>())
+            .ok_or_else(|| "analysis field byte length overflow".to_string())?;
+        if field.manifest.encoded_length != expected_bytes as u64
+            || field_logical_identity(
+                &AnalysisField::host_f64(&field.field_id, field.shape.clone(), Vec::new()),
+                field.manifest.payload_digest,
+            ) != field.manifest.logical_identity
+        {
+            return Err(format!(
+                "analysis field `{}` manifest is not bound to its field metadata",
+                field.field_id
+            ));
+        }
+        if stored_fields
+            .insert(field.field_id.clone(), field.shape.clone())
+            .is_some()
+        {
+            return Err(format!(
+                "analysis field `{}` appears more than once in the run manifest",
+                field.field_id
+            ));
+        }
+    }
+    if expected_fields != stored_fields {
+        return Err(
+            "analysis run field inventory differs from its persisted manifests".to_string(),
+        );
+    }
     Ok(())
 }
 
@@ -501,11 +1163,36 @@ pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String
     guard.load_run(run_id)
 }
 
+pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.load_run_metadata(run_id)
+}
+
+pub fn load_field_page(
+    run_id: &str,
+    field_id: &str,
+    options: AnalysisFieldRequestOptions,
+) -> Result<AnalysisFieldPageLookup, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.load_field_page(run_id, field_id, options)
+}
+
 pub fn list_run_results() -> Result<Vec<AnalysisRunResult>, String> {
     let guard = global_store()
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.list_runs()
+}
+
+pub fn list_run_metadata() -> Result<Vec<AnalysisRunResult>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.list_run_metadata()
 }
 
 pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(), String> {

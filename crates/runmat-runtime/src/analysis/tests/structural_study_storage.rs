@@ -79,6 +79,218 @@ fn study_evidence_rejects_a_valid_json_envelope_bound_to_the_wrong_stage() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn filesystem_run_fields_are_chunked_and_pages_read_only_intersecting_chunks() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("filesystem-chunked-field-pages");
+    let _ = fs::remove_dir_all(&root);
+    let generated = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = "run_chunked_field_pages".to_string();
+    let field = run.run.fields.first_mut().expect("linear result field");
+    let value_count = runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES
+        / std::mem::size_of::<f64>()
+        + 128;
+    let expected_values = (0..value_count)
+        .map(|index| index as f64 + 0.25)
+        .collect::<Vec<_>>();
+    field.shape = vec![value_count];
+    field.values = AnalysisFieldValues::HostF64(expected_values.clone());
+    let field_id = field.field_id.clone();
+    let mut expected_metadata = analysis_results_op(
+        &run,
+        AnalysisResultsQuery::metadata_only(),
+        OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    for descriptor in &mut expected_metadata.field_descriptors {
+        if descriptor.storage == AnalysisFieldStorage::HostF64 {
+            descriptor.storage_ref.kind = "chunked_field".to_string();
+        }
+    }
+
+    let store = storage::FilesystemAnalysisArtifactStore::new(root.clone());
+    storage::AnalysisArtifactStore::persist_run(&store, &run).unwrap();
+    assert_eq!(
+        storage::AnalysisArtifactStore::load_run(&store, &run.run_id)
+            .unwrap()
+            .unwrap(),
+        run
+    );
+
+    let artifact_path = root.join("runs/run_chunked_field_pages.json");
+    let artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(&artifact_path).unwrap()).unwrap();
+    assert_eq!(
+        artifact["run"]["run"]["fields"][0]["values"]["host_f64"],
+        serde_json::json!([])
+    );
+    let field_manifest = &artifact["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stored| stored["field_id"] == field_id)
+        .expect("stored field manifest")["manifest"];
+    assert_eq!(field_manifest["kind"], "field");
+    assert_eq!(field_manifest["chunks"].as_array().unwrap().len(), 2);
+
+    let default_page = match storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &field_id,
+        AnalysisFieldRequestOptions::default(),
+    )
+    .unwrap()
+    {
+        storage::AnalysisFieldPageLookup::Page(page) => *page,
+        _ => panic!("field page must exist"),
+    };
+    assert_eq!(
+        default_page.count,
+        super::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT
+    );
+    assert_eq!(
+        default_page.values,
+        expected_values[..super::ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT]
+    );
+
+    let capped_page = match storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &field_id,
+        AnalysisFieldRequestOptions {
+            offset: Some(32),
+            limit: Some(usize::MAX),
+        },
+    )
+    .unwrap()
+    {
+        storage::AnalysisFieldPageLookup::Page(page) => *page,
+        _ => panic!("field page must exist"),
+    };
+    assert_eq!(capped_page.count, super::ANALYSIS_FIELD_DEFAULT_PAGE_SIZE);
+
+    let first_digest = field_manifest["chunks"][0]["digest"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("sha256:")
+        .unwrap();
+    fs::write(root.join("objects").join(first_digest), b"corrupt").unwrap();
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .unwrap();
+    let metadata = analysis_results_by_run_id_op(
+        &run.run_id,
+        AnalysisResultsQuery::metadata_only(),
+        OperationContext::new(None, None),
+    )
+    .expect("metadata access must not read field chunks")
+    .data;
+    assert_eq!(metadata, expected_metadata);
+    assert!(metadata.fields.is_empty());
+    assert!(metadata
+        .field_descriptors
+        .iter()
+        .all(|descriptor| descriptor.storage_ref.kind == "chunked_field"));
+    analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 8 },
+        OperationContext::new(None, None),
+    )
+    .expect("trend metadata must not read field chunks");
+    assert!(storage::AnalysisArtifactStore::load_run(&store, &run.run_id).is_err());
+    let second_chunk_offset =
+        runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES / std::mem::size_of::<f64>();
+    let later_page = match storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &field_id,
+        AnalysisFieldRequestOptions {
+            offset: Some(second_chunk_offset),
+            limit: Some(16),
+        },
+    )
+    .unwrap()
+    {
+        storage::AnalysisFieldPageLookup::Page(page) => *page,
+        _ => panic!("field page must exist"),
+    };
+    assert_eq!(
+        later_page.values,
+        expected_values[second_chunk_offset..second_chunk_offset + 16]
+    );
+    let public_page = analysis_field_page_by_run_id_op(
+        &run.run_id,
+        &field_id,
+        AnalysisFieldRequestOptions {
+            offset: Some(second_chunk_offset),
+            limit: Some(16),
+        },
+        OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    assert_eq!(public_page, later_page);
+    assert_eq!(
+        analysis_field_page_by_run_id_op(
+            &run.run_id,
+            "missing.field",
+            AnalysisFieldRequestOptions::default(),
+            OperationContext::new(None, None),
+        )
+        .unwrap_err()
+        .error_code,
+        "RM.FEA.RESULTS.FIELD_NOT_FOUND"
+    );
+    assert!(storage::AnalysisArtifactStore::load_field_page(
+        &store,
+        &run.run_id,
+        &field_id,
+        AnalysisFieldRequestOptions {
+            offset: Some(0),
+            limit: Some(1),
+        },
+    )
+    .is_err());
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn run_storage_rejects_ambiguous_duplicate_field_ids() {
+    let _guard = analysis_test_guard();
+    let generated = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = "run_duplicate_field_ids".to_string();
+    run.run
+        .fields
+        .push(run.run.fields.first().expect("linear result field").clone());
+
+    let error = storage::AnalysisArtifactStore::persist_run(
+        &storage::InMemoryAnalysisArtifactStore::new(),
+        &run,
+    )
+    .unwrap_err();
+    assert!(error.contains("appears more than once"));
+}
+
 #[cfg(unix)]
 #[test]
 fn study_evidence_rejects_symlink_targets_and_owned_directories() {
