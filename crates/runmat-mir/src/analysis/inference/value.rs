@@ -142,18 +142,8 @@ pub(crate) fn infer_rvalue_outputs(
                     }
                 }
             }
-            let output_count = callable.outputs.len();
             let inference = runmat_types::infer_call(
-                &runmat_types::CallContract {
-                    outputs: callable.outputs,
-                    variadic_output: (callable.variadic_outputs || !callable.outputs_complete)
-                        .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
-                    maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
-                        .then_some(output_count),
-                    effects: Default::default(),
-                    capabilities: callable.capabilities,
-                    dynamic_reason: None,
-                },
+                &callable.call_contract(DynamicReason::RuntimeValue),
                 &runmat_types::CallRequest {
                     arguments: Vec::new(),
                     literals: Default::default(),

@@ -246,6 +246,12 @@ fn numeric_scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
     scalar(numeric_kind(class, domain))
 }
 
+/// Describe one host scalar read from numeric runtime storage without cloning
+/// or materializing the value that owns that storage.
+pub(crate) fn numeric_storage_scalar_fact(class: NumericDType, domain: NumericDomain) -> ValueFact {
+    numeric_scalar(dtype_class(class), domain)
+}
+
 fn numeric_kind(class: NumericClass, domain: NumericDomain) -> ValueKindFact {
     ValueKindFact::Numeric(NumericFact { class, domain })
 }

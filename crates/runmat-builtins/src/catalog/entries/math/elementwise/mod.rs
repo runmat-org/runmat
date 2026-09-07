@@ -1,4 +1,5 @@
 pub(in crate::catalog) mod binary_arithmetic;
+pub(in crate::catalog) mod bsxfun;
 mod complex_components;
 mod complex_construction;
 mod error_functions;
@@ -18,6 +19,11 @@ mod support;
 pub(in crate::catalog) mod typecast;
 
 pub use binary_arithmetic::*;
+pub use bsxfun::{
+    BSXFUN_CATALOG_ENTRY, BSXFUN_DESCRIPTOR, BSXFUN_ERROR_FUNCTION_ERROR, BSXFUN_ERROR_INTERNAL,
+    BSXFUN_ERROR_INVALID_FUNCTION, BSXFUN_ERROR_INVALID_INPUT, BSXFUN_ERROR_SIZE_MISMATCH,
+    BSXFUN_EXTENSIONS, BSXFUN_INTEGER_CAPABILITIES,
+};
 pub use complex_components::*;
 pub use complex_construction::*;
 pub use error_functions::*;
@@ -45,6 +51,7 @@ pub use typecast::{
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     binary_arithmetic::ENTRIES,
+    bsxfun::ENTRIES,
     complex_components::ENTRIES,
     complex_construction::ENTRIES,
     error_functions::ENTRIES,

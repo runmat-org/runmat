@@ -1,3 +1,4 @@
+mod callable;
 mod constant;
 mod contract;
 mod descriptor;
@@ -16,6 +17,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use callable::*;
 pub use constant::*;
 pub use contract::*;
 pub use descriptor::*;

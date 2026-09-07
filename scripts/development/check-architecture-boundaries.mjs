@@ -2247,6 +2247,42 @@ enforceMigratedBuiltinFamily({
   ],
 });
 enforceMigratedBuiltinFamily({
+  name: "bsxfun catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/math/elementwise/bsxfun"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/bsxfun/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/bsxfun.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/bsxfun.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "bsxfun runtime",
+  roots: ["crates/runmat-runtime/src/builtins/math/elementwise/bsxfun"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun.rs",
+  ],
+  testLineCeiling: 160,
+});
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun"
+)) {
+  if (
+    !sourcePath.includes("/tests/") &&
+    /"(?:plus|minus|times|rdivide|ldivide|power|gt|ge|lt|le|eq|ne)"/.test(text)
+  ) {
+    fail(`${sourcePath} derives callback semantics from a builtin identity string`);
+  }
+}
+const callableCatalogService = read("crates/runmat-builtins/src/catalog/callable.rs");
+if (/identity\.name\s*(?:==|!=)|match\s+[^\n{]*identity\.name/.test(callableCatalogService)) {
+  fail("catalog callable inference must dispatch through typed callable identity, not builtin names");
+}
+enforceMigratedBuiltinFamily({
   name: "rescale runtime",
   roots: ["crates/runmat-runtime/src/builtins/math/elementwise/rescale"],
   compositionFiles: [

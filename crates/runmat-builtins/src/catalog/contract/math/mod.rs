@@ -12,6 +12,7 @@ pub use specialized::*;
 pub enum MathInferenceRule {
     AngleConversion(AngleConversionInferenceRule),
     Atan2,
+    Bsxfun,
     BinaryArithmetic(BinaryArithmeticInferenceRule),
     MatrixArithmetic(MatrixArithmeticInferenceRule),
     Bitwise(BitwiseInferenceRule),
