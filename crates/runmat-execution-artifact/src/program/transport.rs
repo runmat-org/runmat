@@ -13,6 +13,8 @@ use crate::{ArtifactError, ArtifactResult};
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
+pub const EXTERNALIZED_VALUE_MEDIA_TYPE: &str = "application/vnd.runmat.value+json";
+pub const EXTERNALIZED_VALUE_SCHEMA: &str = "runmat-value-payload-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramExecutionObject {
@@ -21,10 +23,81 @@ pub struct ProgramExecutionObject {
 }
 
 impl ProgramExecutionObject {
+    pub fn externalized_value(
+        access: &crate::ArtifactAccess,
+        kind: ValueRefKind,
+        value: ValuePayload,
+    ) -> ArtifactResult<Self> {
+        access.validate()?;
+        value
+            .validate(ValueLimits::default())
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if !matches!(value, ValuePayload::Inline(_))
+            || !collect_references(std::slice::from_ref(&value)).is_empty()
+        {
+            return Err(ArtifactError::Invalid(
+                "externalized values must be closed inline value graphs".into(),
+            ));
+        }
+        let logical_digest = value
+            .logical_digest()
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        let bytes = serde_json::to_vec(&value)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        let reference = ValueRef {
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            id: access.value_id(logical_digest),
+            logical_digest,
+            encoded_length: bytes.len() as u64,
+            media_type: EXTERNALIZED_VALUE_MEDIA_TYPE.into(),
+            value_schema: EXTERNALIZED_VALUE_SCHEMA.into(),
+            encryption_context: access.encryption_context,
+            kind,
+            authorization_scope: access.authorization_scope.clone(),
+            resident_fence: None,
+        };
+        let object = Self { reference, bytes };
+        object.validate()?;
+        Ok(object)
+    }
+
+    pub fn is_externalized_value(&self) -> bool {
+        self.reference.media_type == EXTERNALIZED_VALUE_MEDIA_TYPE
+            && self.reference.value_schema == EXTERNALIZED_VALUE_SCHEMA
+    }
+
+    pub fn decode_externalized_value(&self) -> ArtifactResult<Option<ValuePayload>> {
+        if !self.is_externalized_value() {
+            return Ok(None);
+        }
+        let value: ValuePayload = serde_json::from_slice(&self.bytes)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        value
+            .validate(ValueLimits::default())
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        let canonical_bytes = serde_json::to_vec(&value)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if !matches!(value, ValuePayload::Inline(_))
+            || !collect_references(std::slice::from_ref(&value)).is_empty()
+            || canonical_bytes != self.bytes
+            || value
+                .logical_digest()
+                .map_err(|error| ArtifactError::Invalid(error.to_string()))?
+                != self.reference.logical_digest
+        {
+            return Err(ArtifactError::Identity(
+                "externalized value bytes differ from their logical identity".into(),
+            ));
+        }
+        Ok(Some(value))
+    }
+
     pub fn validate(&self) -> ArtifactResult<()> {
         ValuePayload::Object(Box::new(self.reference.clone()))
             .validate(ValueLimits::default())
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        let externalized_media = self.reference.media_type == EXTERNALIZED_VALUE_MEDIA_TYPE;
+        let externalized_schema = self.reference.value_schema == EXTERNALIZED_VALUE_SCHEMA;
         if !matches!(
             self.reference.kind,
             ValueRefKind::DriverObject | ValueRefKind::ResultObject
@@ -32,10 +105,26 @@ impl ProgramExecutionObject {
             || self.reference.encoded_length == 0
             || self.reference.encoded_length > MAX_PROGRAM_EXECUTION_OBJECT_BYTES
             || self.reference.encoded_length != self.bytes.len() as u64
-            || self.reference.logical_digest != runmat_execution::Digest::sha256(&self.bytes)
+            || externalized_media != externalized_schema
         {
             return Err(ArtifactError::Invalid(
                 "program object differs from its portable reference".into(),
+            ));
+        }
+        if externalized_media {
+            let access = crate::ArtifactAccess {
+                authorization_scope: self.reference.authorization_scope.clone(),
+                encryption_context: self.reference.encryption_context,
+            };
+            if self.reference.id != access.value_id(self.reference.logical_digest) {
+                return Err(ArtifactError::Identity(
+                    "externalized value reference differs from its access authority".into(),
+                ));
+            }
+            self.decode_externalized_value()?;
+        } else if self.reference.logical_digest != runmat_execution::Digest::sha256(&self.bytes) {
+            return Err(ArtifactError::Identity(
+                "program object bytes differ from their logical identity".into(),
             ));
         }
         Ok(())
@@ -287,6 +376,7 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
 mod tests {
     use runmat_execution::identity::ValueId;
     use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::value::InlineValue;
     use runmat_execution::Digest;
 
     use super::*;
@@ -311,6 +401,55 @@ mod tests {
         let mut reference = result_reference(bytes);
         reference.kind = ValueRefKind::DriverObject;
         reference
+    }
+
+    #[test]
+    fn externalized_values_bind_logical_value_identity_not_json_encoding_identity() {
+        let access = crate::ArtifactAccess {
+            authorization_scope: "test-scope".into(),
+            encryption_context: Digest::sha256(b"test-value-encryption"),
+        };
+        let value = ValuePayload::Inline(Box::new(InlineValue::Dense(
+            runmat_execution::value::DenseValue {
+                element_type: runmat_execution::value::ElementType::F64,
+                shape: vec![2, 1],
+                little_endian_data: [1.0_f64, 2.0]
+                    .into_iter()
+                    .flat_map(|item| item.to_bits().to_le_bytes())
+                    .collect(),
+            },
+        )));
+
+        let object = ProgramExecutionObject::externalized_value(
+            &access,
+            ValueRefKind::DriverObject,
+            value.clone(),
+        )
+        .unwrap();
+
+        assert_ne!(
+            Digest::sha256(&object.bytes),
+            object.reference.logical_digest
+        );
+        assert_eq!(object.decode_externalized_value().unwrap(), Some(value));
+        let rebound = ProgramExecutionObject::externalized_value(
+            &crate::ArtifactAccess {
+                authorization_scope: "other-scope".into(),
+                encryption_context: Digest::sha256(b"other-value-encryption"),
+            },
+            ValueRefKind::DriverObject,
+            object.decode_externalized_value().unwrap().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            rebound.reference.logical_digest,
+            object.reference.logical_digest
+        );
+        assert_ne!(rebound.reference.id, object.reference.id);
+        let mut substituted = object;
+        substituted.bytes.push(b' ');
+        substituted.reference.encoded_length += 1;
+        assert!(substituted.validate().is_err());
     }
 
     #[test]

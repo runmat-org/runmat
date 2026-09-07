@@ -209,9 +209,15 @@ pub(super) async fn run_remote_driver(
     let execution = async {
         if bootstrap.desired_worker_count == 0 {
             let objects = super::object_transfer::RemoteObjectStore::new()?;
+            let mut values = std::collections::HashMap::new();
             for object in input_objects {
-                objects.register(object)?;
+                if let Some(value) = object.decode_externalized_value().map_err(protocol)? {
+                    values.insert(object.reference.id, value);
+                } else {
+                    objects.register(object)?;
+                }
             }
+            let mut request = request;
             let response = if request.artifact.form
                 == runmat_execution_artifact::ExecutableForm::AnalysisWorkload
             {
@@ -223,15 +229,11 @@ pub(super) async fn run_remote_driver(
                     crate::NativeAnalysisHostLimits::default(),
                 )
             } else {
-                if !request.arguments.is_empty()
-                    && request.arguments.iter().any(|argument| {
-                        matches!(argument, runmat_execution::value::ValuePayload::Object(_))
-                    })
-                {
-                    return Err(protocol(
-                        "driver-local execution does not support this externalized workload",
-                    ));
-                }
+                request.arguments = request
+                    .arguments
+                    .iter()
+                    .map(|argument| super::value_transfer::materialize(argument, &values))
+                    .collect::<NativeExecutionResult<Vec<_>>>()?;
                 crate::execute_host_program_request_with_project(
                     request,
                     materialized_project

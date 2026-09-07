@@ -2,14 +2,14 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal, Signal,
-    SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
-    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalSamplingPolicy, SignalShape,
+    SignalApproximationEvidence, SignalArtifactDomain, SignalArtifactRef, SignalExtrapolation,
+    SignalGenerator, SignalId, SignalInterpolation, SignalOrdinate, SignalPrecision,
+    SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
 };
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
 use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValuePayload};
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
-use runmat_execution_artifact::BundleCallable;
+use runmat_execution_artifact::{ArtifactAccess, BundleCallable, ProgramExecutionObject};
 use runmat_types::ProgramFunctionId;
 
 use crate::materialize_signal_for_solver;
@@ -257,6 +257,68 @@ fn transported_chunk_plan_rejects_axis_and_authored_argument_tampering() {
     changed_argument[0].arguments[1] =
         ValuePayload::Inline(Box::new(InlineValue::F64Bits(3.0_f64.to_bits())));
     assert!(validate_signal_generator_chunks(&signal, &admitted, &changed_argument).is_err());
+}
+
+#[test]
+fn artifact_authority_does_not_change_logical_chunk_identity() {
+    let value = dense_f64(vec![2, 1], &[4.0, 8.0]);
+    let first = ProgramExecutionObject::externalized_value(
+        &ArtifactAccess {
+            authorization_scope: "run-a".into(),
+            encryption_context: digest("key-a"),
+        },
+        runmat_execution::value::ValueRefKind::DriverObject,
+        value.clone(),
+    )
+    .unwrap();
+    let second = ProgramExecutionObject::externalized_value(
+        &ArtifactAccess {
+            authorization_scope: "run-b".into(),
+            encryption_context: digest("key-b"),
+        },
+        runmat_execution::value::ValueRefKind::DriverObject,
+        value,
+    )
+    .unwrap();
+    let mut signal = signal(SignalShape::Scalar, SignalPrecision::Real64);
+    let generator = match &mut signal {
+        PhysicalSignal::Force(signal) => match &mut signal.representation {
+            SignalRepresentation::Generator(generator) => generator,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+    generator.arguments = vec![GeneratorArgument::Artifact(SignalArtifactRef {
+        artifact_id: "immutable-vector".into(),
+        content_digest: first.reference.logical_digest.to_string(),
+        schema: "runmat-value-payload-v1".into(),
+        domain: SignalArtifactDomain::Constant,
+        topology_digest: None,
+        sample_count: 1,
+    })];
+    generator.effects = GeneratorEffectPolicy::DeclaredImmutableArtifacts;
+
+    let first_chunks = plan_signal_generator_chunks(
+        &signal,
+        &admitted(),
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 16,
+        |_| Ok(ValuePayload::Object(Box::new(first.reference.clone()))),
+    )
+    .unwrap();
+    let second_chunks = plan_signal_generator_chunks(
+        &signal,
+        &admitted(),
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 16,
+        |_| Ok(ValuePayload::Object(Box::new(second.reference.clone()))),
+    )
+    .unwrap();
+
+    assert_ne!(first_chunks[0].arguments, second_chunks[0].arguments);
+    assert_eq!(first_chunks[0].identity, second_chunks[0].identity);
+    validate_signal_generator_chunks(&signal, &admitted(), &first_chunks).unwrap();
+    validate_signal_generator_chunks(&signal, &admitted(), &second_chunks).unwrap();
 }
 
 #[test]

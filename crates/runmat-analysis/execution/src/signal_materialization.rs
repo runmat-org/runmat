@@ -372,6 +372,10 @@ fn chunk_identity(
     sample_points: &[u64],
     arguments: &[ValuePayload],
 ) -> AnalysisBridgeResult<Digest> {
+    let logical_arguments = arguments
+        .iter()
+        .map(ValuePayload::logical_digest)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Digest::sha256(runmat_canonical_codec::encode_contract(
         CHUNK_IDENTITY_PREFIX,
         "signal-generator-chunk",
@@ -380,7 +384,7 @@ fn chunk_identity(
             ordinal,
             first_sample,
             sample_points,
-            arguments,
+            logical_arguments,
         ),
         runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64),
     )?))

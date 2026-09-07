@@ -23,7 +23,7 @@ mod relay_channel;
 mod result_objects;
 mod route;
 pub(crate) mod signal_materialization;
-mod value_transfer;
+pub(crate) mod value_transfer;
 mod worker_bundle;
 mod worker_entry;
 mod worker_env;

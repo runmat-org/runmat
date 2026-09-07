@@ -43,7 +43,7 @@ pub(super) fn collect_references(values: &[ValuePayload]) -> Vec<ValueRef> {
     references
 }
 
-pub(super) fn materialize(
+pub(crate) fn materialize(
     value: &ValuePayload,
     objects: &HashMap<ValueId, ValuePayload>,
 ) -> NativeExecutionResult<ValuePayload> {

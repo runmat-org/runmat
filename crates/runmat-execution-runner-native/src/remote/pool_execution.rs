@@ -82,7 +82,11 @@ pub(super) async fn execute(
         authority.run_id.clone(),
     )?;
     for object in input_objects {
-        pool.register_execution_object(object.reference, object.bytes)?;
+        if object.is_externalized_value() {
+            pool.register_value_object(object.reference, object.bytes)?;
+        } else {
+            pool.register_execution_object(object.reference, object.bytes)?;
+        }
     }
     let deadline = tokio::time::Instant::now() + WORKER_READY_TIMEOUT;
     let mut driver_ticks = tokio::time::interval(DRIVER_TICK_INTERVAL);
