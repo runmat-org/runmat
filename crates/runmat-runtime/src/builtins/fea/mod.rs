@@ -3810,7 +3810,7 @@ execution:
     #[test]
     fn fea_results_field_exposes_values_metadata_and_plot_context() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
-        let (run_value, _study) = synthetic_plot_run_value();
+        let (run_value, _study, run_id) = synthetic_plot_run_value();
 
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let Value::Object(results_object) = results.clone() else {
@@ -3819,7 +3819,7 @@ execution:
         assert_eq!(results_object.class_name, FEA_RESULTS_CLASS);
         assert_eq!(
             results_object.properties.get("run_id"),
-            Some(&Value::String("synthetic_plot_run".to_string()))
+            Some(&Value::String(run_id.clone()))
         );
         assert!(results_object
             .properties
@@ -3876,7 +3876,7 @@ execution:
             .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
         assert_eq!(
             field_object.properties.get("run_id"),
-            Some(&Value::String("synthetic_plot_run".to_string()))
+            Some(&Value::String(run_id))
         );
     }
 
@@ -3884,7 +3884,7 @@ execution:
     #[test]
     fn plot_and_mesh_overloads_return_figure_handles_for_fea_objects() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
-        let (run_value, _study) = synthetic_plot_run_value();
+        let (run_value, _study, _run_id) = synthetic_plot_run_value();
 
         let mesh_handle = block_on(crate::call_builtin_async(
             "mesh",
@@ -3913,7 +3913,7 @@ execution:
     #[test]
     fn mesh_request_defaults_to_solver_edges_and_accepts_cad_reference() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
-        let (run_value, _study) = synthetic_plot_run_value();
+        let (run_value, _study, _run_id) = synthetic_plot_run_value();
         let default = mesh_request_from_args(std::slice::from_ref(&run_value))
             .expect("default mesh request should parse");
         assert_eq!(
@@ -3940,7 +3940,7 @@ execution:
     #[test]
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
-        let (run_value, _study) = synthetic_plot_run_value();
+        let (run_value, _study, _run_id) = synthetic_plot_run_value();
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let field = block_on(fea_field_builtin(vec![
             results,
@@ -3991,7 +3991,7 @@ execution:
         assert!(usize_from_value(STUDY_NAME, &Value::Num(boundary)).is_err());
     }
 
-    fn synthetic_plot_run_value() -> (Value, Value) {
+    fn synthetic_plot_run_value() -> (Value, Value, String) {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
             .expect("geometry fixture should write");
@@ -4021,8 +4021,9 @@ execution:
         let study = block_on(fea_load_builtin(fea_path.to_string_lossy().to_string()))
             .expect("study should load");
         let identity = test_run_identity(runmat_analysis_core::AnalysisProcedure::Static);
+        let run_id = crate::analysis::storage::next_run_id();
         let run = crate::analysis::AnalysisRunResult {
-            run_id: "synthetic_plot_run".to_string(),
+            run_id: run_id.clone(),
             run: runmat_analysis_fea::FeaRunResult {
                 identity,
                 requested_backend: ComputeBackend::Cpu,
@@ -4086,14 +4087,13 @@ execution:
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
 
         let mut object = ObjectInstance::new(FEA_RUN_RESULT_CLASS.to_string());
-        object.properties.insert(
-            "run_id".to_string(),
-            Value::String("synthetic_plot_run".to_string()),
-        );
+        object
+            .properties
+            .insert("run_id".to_string(), Value::String(run_id.clone()));
         object
             .properties
             .insert(FEA_STUDY_CONTEXT_PROPERTY.to_string(), study.clone());
-        (Value::Object(object), study)
+        (Value::Object(object), study, run_id)
     }
 
     fn persist_synthetic_indexed_results() -> String {
@@ -4103,7 +4103,7 @@ execution:
                 AnalysisField::host_f64(format!("{prefix}.1"), vec![1], vec![20.0]),
             ]
         };
-        let run_id = "synthetic_indexed_results".to_string();
+        let run_id = crate::analysis::storage::next_run_id();
         let identity =
             test_run_identity(runmat_analysis_core::AnalysisProcedure::TransientResponse);
         let run = crate::analysis::AnalysisRunResult {

@@ -113,6 +113,7 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
 ];
 pub(super) const SWEEP_RUN_RESULT_FIELDS: &[&str] = &[
     "sweep_id",
+    "identity",
     "study_count",
     "success_count",
     "failed_count",

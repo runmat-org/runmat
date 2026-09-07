@@ -390,7 +390,6 @@ pub enum QualityReasonCode {
     MaterialAssignmentConflict,
     SolverNotConverged,
     SolverBackendFallback,
-    FieldPromotionFallback,
     FieldTopologyMismatch,
     SolidMeshNoVolumeElements,
     SolidMeshUnsupportedElementKind,
@@ -954,7 +953,6 @@ pub enum RunStatus {
 pub enum FallbackStage {
     Solver,
     Preconditioner,
-    FieldPublication,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -962,8 +960,6 @@ pub enum FallbackStage {
 pub enum FallbackReason {
     RequestedBackendUnavailable,
     RequestedPreconditionerUnavailable,
-    AcceleratorProviderUnavailable,
-    FieldUploadFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -973,10 +969,6 @@ pub struct FallbackEvent {
     pub reason: FallbackReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actual_preconditioner: Option<runmat_analysis_fea::SolverPreconditioner>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
 }
 
 impl FallbackEvent {
@@ -985,8 +977,6 @@ impl FallbackEvent {
             stage: FallbackStage::Solver,
             reason: FallbackReason::RequestedBackendUnavailable,
             actual_preconditioner: None,
-            subject: None,
-            detail: None,
         }
     }
 
@@ -995,38 +985,12 @@ impl FallbackEvent {
             stage: FallbackStage::Preconditioner,
             reason: FallbackReason::RequestedPreconditionerUnavailable,
             actual_preconditioner: Some(actual),
-            subject: None,
-            detail: None,
-        }
-    }
-
-    pub fn field_provider_unavailable(field_id: impl Into<String>) -> Self {
-        Self {
-            stage: FallbackStage::FieldPublication,
-            reason: FallbackReason::AcceleratorProviderUnavailable,
-            actual_preconditioner: None,
-            subject: Some(field_id.into()),
-            detail: None,
-        }
-    }
-
-    pub fn field_upload_failed(field_id: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self {
-            stage: FallbackStage::FieldPublication,
-            reason: FallbackReason::FieldUploadFailed,
-            actual_preconditioner: None,
-            subject: Some(field_id.into()),
-            detail: Some(detail.into()),
         }
     }
 
     pub fn is_solver_backend_fallback(&self) -> bool {
         self.stage == FallbackStage::Solver
             && self.reason == FallbackReason::RequestedBackendUnavailable
-    }
-
-    pub fn is_field_publication_fallback(&self) -> bool {
-        self.stage == FallbackStage::FieldPublication
     }
 }
 

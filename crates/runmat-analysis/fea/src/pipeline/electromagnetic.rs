@@ -1348,27 +1348,7 @@ pub fn run_electromagnetic_with_options(
         preconditioner: crate::contracts::SolverPreconditioner::BlockJacobi,
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
-        fields: vec![
-            vector_potential_real_field.clone(),
-            vector_potential_imag_field.clone(),
-            magnetic_flux_density_real_field.clone(),
-            magnetic_flux_density_imag_field.clone(),
-            magnetic_flux_density_magnitude_field.clone(),
-            magnetic_field_real_field.clone(),
-            magnetic_field_imag_field.clone(),
-            current_density_real_field.clone(),
-            current_density_imag_field.clone(),
-            electric_field_real_field.clone(),
-            electric_field_imag_field.clone(),
-            power_loss_density_field.clone(),
-            energy_density_field.clone(),
-            residual_real_field.clone(),
-            residual_imag_field.clone(),
-            electric_flux_density_real_field.clone(),
-            electric_flux_density_imag_field.clone(),
-            poynting_vector_real_field.clone(),
-            poynting_vector_imag_field.clone(),
-        ],
+        fields: Vec::new(),
     };
 
     emit_phase(

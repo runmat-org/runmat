@@ -212,7 +212,7 @@ Mode and transient snapshot selectors use the normal one-based RunMat scripting 
 
 `fea.trends` accepts only `WindowSize`, a positive exact structural scalar defaulting to 16. All eight integer classes and ordinary integral doubles are accepted; invalid and resident values reject before artifact-store access.
 
-The `fea.results` and `fea.trends` query paths are host-side and do not gather or execute stored device fields. `fea.run` may execute through the study's configured GPU solver. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
+The `fea.results` and `fea.trends` query paths read canonical host `double` result fields and never trigger device execution or an implicit transfer. `fea.run` may execute through the study's configured GPU solver; its backend, device-operator ratio, synchronization count, and fallback provenance remain separate from published field storage. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
 
 `fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Only `fea.RunResult` represents one run and therefore exposes `results`, `field`, and `plot`. `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
 

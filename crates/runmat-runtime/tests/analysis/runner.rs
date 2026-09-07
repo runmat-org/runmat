@@ -4235,29 +4235,13 @@ fn push_structural_shell_moment_threshold_assertions(
 fn validate_fallback_event_schema(event: &FallbackEvent) -> bool {
     match (event.stage, event.reason) {
         (FallbackStage::Solver, FallbackReason::RequestedBackendUnavailable) => {
-            event.subject.is_none() && event.actual_preconditioner.is_none()
+            event.actual_preconditioner.is_none()
         }
         (FallbackStage::Preconditioner, FallbackReason::RequestedPreconditionerUnavailable) => {
             event.actual_preconditioner.is_some()
-                && event.subject.is_none()
-                && event.detail.is_none()
-        }
-        (
-            FallbackStage::FieldPublication,
-            FallbackReason::AcceleratorProviderUnavailable | FallbackReason::FieldUploadFailed,
-        ) => {
-            event.actual_preconditioner.is_none()
-                && event.subject.as_deref().is_some_and(is_namespace_field_id)
         }
         _ => false,
     }
-}
-
-fn is_namespace_field_id(value: &str) -> bool {
-    value.contains('.')
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.')
 }
 
 fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
@@ -4532,7 +4516,7 @@ pub(super) fn run_fixture(
     let mut cpu_run_ms = None;
     let mut gpu_run_ms = None;
     let mut gpu_fallback_events = Vec::new();
-    let mut gpu_displacement_residency = None;
+    let mut published_primary_field_storage = None;
     let mut gpu_solver_host_sync_count = None;
     let mut gpu_solver_device_apply_k_ratio = None;
     let mut gpu_speedup_ratio = None;
@@ -4646,7 +4630,7 @@ pub(super) fn run_fixture(
                     cpu_run_ms,
                     gpu_run_ms,
                     gpu_fallback_events,
-                    gpu_displacement_residency,
+                    published_primary_field_storage,
                     gpu_solver_host_sync_count,
                     gpu_solver_device_apply_k_ratio,
                     gpu_speedup_ratio,
@@ -6999,7 +6983,7 @@ pub(super) fn run_fixture(
                     if let Some(primary_field) =
                         analysis_result_field(&gpu_envelope.data, &gpu_primary_field_id)
                     {
-                        gpu_displacement_residency = Some(match &primary_field.values {
+                        published_primary_field_storage = Some(match &primary_field.values {
                             AnalysisFieldValues::DeviceRef(_) => "device_ref".to_string(),
                             AnalysisFieldValues::HostF64(_) => "host_f64".to_string(),
                         });
@@ -10087,7 +10071,7 @@ pub(super) fn run_fixture(
                                 cpu_run_ms,
                                 gpu_run_ms,
                                 gpu_fallback_events,
-                                gpu_displacement_residency,
+                                published_primary_field_storage,
                                 gpu_solver_host_sync_count,
                                 gpu_solver_device_apply_k_ratio,
                                 gpu_speedup_ratio,
@@ -10474,26 +10458,16 @@ pub(super) fn run_fixture(
                         }
                     }
 
-                    if let Some(expectation) = spec.residency_expectation {
+                    if let Some(expectation) = spec.published_field_storage_expectation {
                         match expectation {
-                            ResidencyExpectation::DeviceRef => {
-                                if !matches!(
-                                    &gpu_results.data.fields[0].values,
-                                    AnalysisFieldValues::DeviceRef(_)
-                                ) {
-                                    failures.push(
-                                        "expected gpu displacement device_ref residency"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                            ResidencyExpectation::HostFallback => {
+                            PublishedFieldStorageExpectation::HostF64 => {
                                 if !matches!(
                                     &gpu_results.data.fields[0].values,
                                     AnalysisFieldValues::HostF64(_)
                                 ) {
                                     failures.push(
-                                        "expected gpu displacement host_f64 fallback".to_string(),
+                                        "expected authoritative host_f64 published field storage"
+                                            .to_string(),
                                     );
                                 }
                             }
@@ -10538,7 +10512,7 @@ pub(super) fn run_fixture(
                                     cpu_run_ms,
                                     gpu_run_ms,
                                     gpu_fallback_events,
-                                    gpu_displacement_residency,
+                                    published_primary_field_storage,
                                     gpu_solver_host_sync_count,
                                     gpu_solver_device_apply_k_ratio,
                                     gpu_speedup_ratio,
@@ -10701,7 +10675,7 @@ pub(super) fn run_fixture(
         cpu_run_ms,
         gpu_run_ms,
         gpu_fallback_events,
-        gpu_displacement_residency,
+        published_primary_field_storage,
         gpu_solver_host_sync_count,
         gpu_solver_device_apply_k_ratio,
         gpu_speedup_ratio,

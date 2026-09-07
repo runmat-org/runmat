@@ -554,6 +554,11 @@ fn prepare_run_artifact(
                         "device field `{}` shape requires {expected_count} values but its reference declares {}",
                         field.field_id, reference.element_count
                     ));
+                } else {
+                    preparation_error = Some(format!(
+                        "device field `{}` is a process-local reference; materialize it through typed runtime value admission before persistence",
+                        field.field_id
+                    ));
                 }
             }
         }

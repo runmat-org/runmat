@@ -291,6 +291,36 @@ fn run_storage_rejects_ambiguous_duplicate_field_ids() {
     assert!(error.contains("appears more than once"));
 }
 
+#[test]
+fn run_storage_rejects_process_local_device_field_references() {
+    let _guard = analysis_test_guard();
+    let generated = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = "run_device_field_reference".to_string();
+    let field = run.run.fields.first_mut().expect("linear result field");
+    let element_count = field.shape.iter().product();
+    field.values = AnalysisFieldValues::DeviceRef(runmat_analysis_core::DeviceFieldRef {
+        backend: "test".to_string(),
+        token: "process-local-token".to_string(),
+        element_count,
+    });
+
+    let error = storage::AnalysisArtifactStore::persist_run(
+        &storage::InMemoryAnalysisArtifactStore::new(),
+        &run,
+    )
+    .unwrap_err();
+    assert!(error.contains("process-local reference"));
+    assert!(error.contains("typed runtime value admission"));
+}
+
 #[cfg(unix)]
 #[test]
 fn study_evidence_rejects_symlink_targets_and_owned_directories() {

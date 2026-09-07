@@ -43,9 +43,8 @@ enum GpuMode {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ResidencyExpectation {
-    DeviceRef,
-    HostFallback,
+enum PublishedFieldStorageExpectation {
+    HostF64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,7 +63,7 @@ struct FixtureSpec {
     expected_numerically_acceptable: Option<bool>,
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
-    residency_expectation: Option<ResidencyExpectation>,
+    published_field_storage_expectation: Option<PublishedFieldStorageExpectation>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
     expected_solver_backend: Option<&'static str>,
@@ -90,7 +89,7 @@ struct FixtureManifestEntry {
     parity_tolerance_abs: Option<f64>,
     parity_tolerance_rel: Option<f64>,
     gpu_mode: Option<String>,
-    residency_expectation: Option<String>,
+    published_field_storage_expectation: Option<String>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
     expected_solver_backend: Option<String>,
@@ -148,7 +147,7 @@ struct FixtureRunRecord {
     cpu_run_ms: Option<f64>,
     gpu_run_ms: Option<f64>,
     gpu_fallback_events: Vec<FallbackEvent>,
-    gpu_displacement_residency: Option<String>,
+    published_primary_field_storage: Option<String>,
     gpu_solver_host_sync_count: Option<u32>,
     gpu_solver_device_apply_k_ratio: Option<f64>,
     gpu_speedup_ratio: Option<f64>,

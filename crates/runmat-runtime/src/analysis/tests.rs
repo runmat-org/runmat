@@ -3652,7 +3652,7 @@ fn gpu_run_without_provider_records_fallback_event() {
 }
 
 #[test]
-fn gpu_run_with_provider_emits_device_refs() {
+fn gpu_run_with_provider_keeps_authoritative_host_fields() {
     let _guard = analysis_test_guard();
     static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
 
@@ -3714,12 +3714,6 @@ fn gpu_run_with_provider_emits_device_refs() {
     )
     .expect("run should pass");
 
-    assert!(!envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback));
     assert!(matches!(
         envelope.data.provenance.solver_backend.as_str(),
         "runtime_tensor" | "cpu_reference"
@@ -3743,7 +3737,7 @@ fn gpu_run_with_provider_emits_device_refs() {
             .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
             .expect("structural displacement field should be present")
             .values,
-        AnalysisFieldValues::DeviceRef(_)
+        AnalysisFieldValues::HostF64(_)
     ));
     assert!(matches!(
         envelope
@@ -3752,7 +3746,7 @@ fn gpu_run_with_provider_emits_device_refs() {
             .field(FEA_FIELD_STRUCTURAL_VON_MISES)
             .expect("structural von Mises field should be present")
             .values,
-        AnalysisFieldValues::DeviceRef(_)
+        AnalysisFieldValues::HostF64(_)
     ));
 }
 

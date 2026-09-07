@@ -82,7 +82,6 @@ mod linear_static_result;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
-mod promotion;
 mod result_policy;
 mod solver_mesh_artifact;
 mod solver_mesh_flow_topology;
@@ -91,6 +90,7 @@ mod structural_study;
 mod study_execution;
 mod study_placement;
 mod study_sweep;
+pub mod value_admission;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use excitation_query::{
@@ -1267,11 +1267,8 @@ fn analysis_run_study_with_structural_executor(
         )
         .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
         for declaration in &step.procedure_step.state_outputs {
-            let state_fields = run
-                .data
-                .run
-                .fields
-                .iter()
+            let state_fields = collect_analysis_result_fields(&run.data)
+                .into_iter()
                 .filter(|field| match &field.values {
                     runmat_analysis_core::AnalysisFieldValues::HostF64(values) => {
                         !values.is_empty()
@@ -1284,7 +1281,6 @@ fn analysis_run_study_with_structural_executor(
                     }
                     runmat_analysis_core::AnalysisFieldValues::DeviceRef(_) => false,
                 })
-                .cloned()
                 .collect();
             states.push(
                 CanonicalSemanticState::new(CanonicalSemanticStateInput {
@@ -1940,9 +1936,8 @@ pub fn analysis_run_modal_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
 
-    let mut run = modal_run.run;
+    let run = modal_run.run;
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -2012,15 +2007,6 @@ pub fn analysis_run_modal_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -2359,7 +2345,6 @@ pub fn analysis_run_acoustic_with_options_op(
     )
     .unwrap_or(f64::INFINITY);
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -2399,15 +2384,6 @@ pub fn analysis_run_acoustic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -6071,7 +6047,6 @@ pub fn analysis_run_cfd_with_options_op(
             ),
         });
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -6163,15 +6138,6 @@ pub fn analysis_run_cfd_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -6747,7 +6713,6 @@ pub fn analysis_run_cht_with_options_op(
         });
 
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -6819,15 +6784,6 @@ pub fn analysis_run_cht_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -7369,7 +7325,6 @@ pub fn analysis_run_fsi_with_options_op(
         });
 
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -7414,15 +7369,6 @@ pub fn analysis_run_fsi_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -7590,9 +7536,8 @@ pub fn analysis_run_thermal_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Thermal, model, &context, err))?;
 
-    let mut run = thermal_run.run;
+    let run = thermal_run.run;
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -7939,9 +7884,8 @@ pub fn analysis_run_transient_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Transient, model, &context, err))?;
 
-    let mut run = transient_run.run;
+    let run = transient_run.run;
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -8144,15 +8088,6 @@ pub fn analysis_run_transient_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
     let numerically_acceptable = match options.quality_policy {
@@ -8570,9 +8505,8 @@ pub fn analysis_run_nonlinear_with_options_op(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Nonlinear, model, &context, err))?;
 
-    let mut run = nonlinear_run.run;
+    let run = nonlinear_run.run;
     let mut fallback_events = Vec::new();
-    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
         fallback_events.push(FallbackEvent::solver_backend());
     }
@@ -8808,15 +8742,6 @@ pub fn analysis_run_nonlinear_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 

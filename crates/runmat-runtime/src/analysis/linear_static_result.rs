@@ -39,12 +39,11 @@ pub(super) struct LinearStaticResultInput<'a> {
 
 pub(super) fn admit_linear_static_result(
     input: LinearStaticResultInput<'_>,
-    mut run: FeaRunResult,
+    run: FeaRunResult,
 ) -> Result<AnalysisRunResult, String> {
     validate_result(&input, &run)?;
 
     let mut fallback_events = Vec::new();
-    super::promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
     match input.options.preconditioner_mode {
         PreconditionerMode::Auto | PreconditionerMode::Jacobi => {}
         PreconditionerMode::Ilu => {
@@ -129,15 +128,6 @@ pub(super) fn admit_linear_static_result(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::FieldPromotionFallback,
-            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
     let numerically_acceptable = match input.options.quality_policy {

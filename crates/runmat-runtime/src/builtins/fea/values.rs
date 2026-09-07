@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
+use crate::analysis::value_admission::{
+    admit_borrowed_real64, AdmittedReal64Array, AnalysisValueAdmissionPolicy,
+};
 
 pub(super) const DISPLACEMENT_CLASS: &str = "fea.Displacement";
 pub(super) const ROTATION_CLASS: &str = "fea.Rotation";
@@ -931,22 +934,21 @@ pub(super) fn finite_numeric_scalar(
     value: &Value,
     label: &str,
 ) -> BuiltinResult<f64> {
-    let converted = match value {
-        Value::Num(value) => *value,
-        Value::Int(value) => integer_to_f64(value),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => numeric_to_f64(
-            tensor
-                .numeric_value_at(0)
-                .expect("validated scalar tensor storage"),
-        ),
-        _ => {
-            return Err(builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                format!("{label} must be a real numeric scalar"),
-            ))
-        }
-    };
+    if !matches!(value, Value::Num(_) | Value::Int(_))
+        && !matches!(value, Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor))
+    {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must be a real numeric scalar"),
+        ));
+    }
+    let admitted = admit_numeric_real64(
+        builtin,
+        value,
+        format!("{label} must be a real numeric scalar"),
+    )?;
+    let converted = admitted.values()[0];
     if !converted.is_finite() {
         return Err(builtin_error(
             builtin,
@@ -976,13 +978,14 @@ pub(super) fn finite_numeric_vector3(
             format!("{label} must be a 1-by-3 or 3-by-1 real numeric vector"),
         ));
     }
+    let admitted = admit_numeric_real64(
+        builtin,
+        value,
+        format!("{label} must be a 1-by-3 or 3-by-1 real numeric vector"),
+    )?;
     let mut result = [0.0; 3];
     for (index, target) in result.iter_mut().enumerate() {
-        *target = numeric_to_f64(
-            tensor
-                .numeric_value_at(index)
-                .expect("validated three-element tensor storage"),
-        );
+        *target = admitted.values()[index];
         if !target.is_finite() {
             return Err(builtin_error(
                 builtin,
@@ -1016,24 +1019,20 @@ pub(super) fn finite_numeric_vector(
             format!("{label} must be a nonempty real numeric row or column vector"),
         ));
     }
-    (0..tensor.shape[0] * tensor.shape[1])
-        .map(|index| {
-            let value = numeric_to_f64(
-                tensor
-                    .numeric_value_at(index)
-                    .expect("validated numeric vector storage"),
-            );
-            if value.is_finite() {
-                Ok(value)
-            } else {
-                Err(builtin_error(
-                    builtin,
-                    &ERROR_INPUT,
-                    format!("{label} must contain only finite values"),
-                ))
-            }
-        })
-        .collect()
+    let admitted = admit_numeric_real64(
+        builtin,
+        value,
+        format!("{label} must be a real numeric row or column vector"),
+    )?;
+    if admitted.values().iter().any(|value| !value.is_finite()) {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("{label} must contain only finite values"),
+        ));
+    }
+    let (values, _, _admission_receipt) = admitted.into_owned().into_parts();
+    Ok(values)
 }
 
 pub(super) fn finite_numeric_vector3_samples(
@@ -1065,6 +1064,11 @@ pub(super) fn finite_numeric_vector3_samples(
             format!("{label} must contain exactly {sample_count} three-component samples"),
         ));
     }
+    let admitted = admit_numeric_real64(
+        builtin,
+        value,
+        format!("{label} must be an N-by-3 or 3-by-N real numeric matrix"),
+    )?;
     (0..sample_count)
         .map(|sample| {
             let mut components = [0.0; 3];
@@ -1074,11 +1078,7 @@ pub(super) fn finite_numeric_vector3_samples(
                 } else {
                     component + sample * 3
                 };
-                *target = numeric_to_f64(
-                    tensor
-                        .numeric_value_at(index)
-                        .expect("validated three-component sample storage"),
-                );
+                *target = admitted.values()[index];
                 if !target.is_finite() {
                     return Err(builtin_error(
                         builtin,
@@ -1092,32 +1092,16 @@ pub(super) fn finite_numeric_vector3_samples(
         .collect()
 }
 
-fn integer_to_f64(value: &IntValue) -> f64 {
-    match value {
-        IntValue::I8(value) => f64::from(*value),
-        IntValue::I16(value) => f64::from(*value),
-        IntValue::I32(value) => f64::from(*value),
-        IntValue::I64(value) => *value as f64,
-        IntValue::U8(value) => f64::from(*value),
-        IntValue::U16(value) => f64::from(*value),
-        IntValue::U32(value) => f64::from(*value),
-        IntValue::U64(value) => *value as f64,
-    }
-}
-
-fn numeric_to_f64(value: NumericScalar) -> f64 {
-    match value {
-        NumericScalar::F64(value) => value,
-        NumericScalar::F32(value) => f64::from(value),
-        NumericScalar::I8(value) => f64::from(value),
-        NumericScalar::I16(value) => f64::from(value),
-        NumericScalar::I32(value) => f64::from(value),
-        NumericScalar::I64(value) => value as f64,
-        NumericScalar::U8(value) => f64::from(value),
-        NumericScalar::U16(value) => f64::from(value),
-        NumericScalar::U32(value) => f64::from(value),
-        NumericScalar::U64(value) => value as f64,
-    }
+fn admit_numeric_real64<'a>(
+    builtin: &'static str,
+    value: &'a Value,
+    invalid_message: String,
+) -> BuiltinResult<AdmittedReal64Array<'a>> {
+    admit_borrowed_real64(
+        value,
+        AnalysisValueAdmissionPolicy::explicit_host_conversion(),
+    )
+    .map_err(|_| builtin_error(builtin, &ERROR_INPUT, invalid_message))
 }
 
 #[cfg(test)]

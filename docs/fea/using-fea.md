@@ -228,7 +228,7 @@ peakStressPa = max(stress.values);
 
 The typed constructors and post-processing helpers do not intrinsically require native OCCT. They can consume an existing `geometry.Asset`, STL-backed or synthetic geometry, and persisted mesh/result artifacts without OCCT; only an earlier import of topology-bearing CAD such as STEP, IGES, or BREP may require the configured OCCT geometry backend.
 
-Argument decoding for `fea.run`, and artifact filtering for `fea.results` and `fea.trends`, is host-side. The solver invoked by `fea.run` is different: it may execute through the CPU or configured GPU backend selected by the study. Result queries return stored device references as metadata and do not gather or execute them.
+Argument decoding for `fea.run`, and artifact filtering for `fea.results` and `fea.trends`, is host-side. The solver invoked by `fea.run` is different: it may execute through the CPU or configured GPU backend selected by the study. Published result fields use canonical host `double` storage; solver backend, device-operator use, host synchronization, and fallback provenance report where the solve actually executed. Reading results does not trigger device work or an implicit transfer.
 
 The ordinary `mesh` function displays geometry and solver-mesh objects directly:
 

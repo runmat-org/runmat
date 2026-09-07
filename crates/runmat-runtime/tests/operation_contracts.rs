@@ -280,7 +280,6 @@ fn assert_fallback_event_schema(event: &FallbackEvent) {
     match event.stage {
         FallbackStage::Solver => {
             assert_eq!(event.reason, FallbackReason::RequestedBackendUnavailable);
-            assert!(event.subject.is_none());
         }
         FallbackStage::Preconditioner => {
             assert_eq!(
@@ -288,14 +287,6 @@ fn assert_fallback_event_schema(event: &FallbackEvent) {
                 FallbackReason::RequestedPreconditionerUnavailable
             );
             assert!(event.actual_preconditioner.is_some());
-            assert!(event.detail.is_none());
-        }
-        FallbackStage::FieldPublication => {
-            assert!(matches!(
-                event.reason,
-                FallbackReason::AcceleratorProviderUnavailable | FallbackReason::FieldUploadFailed
-            ));
-            assert!(event.subject.is_some());
         }
     }
 }
@@ -3115,7 +3106,7 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
 }
 
 #[test]
-fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
+fn analysis_run_gpu_with_provider_preserves_host_field_contract() {
     struct ContractTestProvider;
 
     impl runmat_accelerate_api::AccelProvider for ContractTestProvider {
@@ -3181,12 +3172,6 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
     )
     .expect("gpu run should succeed");
 
-    assert!(!envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(FallbackEvent::is_field_publication_fallback));
     if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
         assert!(envelope
             .data
@@ -3202,7 +3187,7 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
             .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
             .expect("structural displacement field should be present")
             .values,
-        AnalysisFieldValues::DeviceRef(_)
+        AnalysisFieldValues::HostF64(_)
     ));
     assert!(matches!(
         envelope
@@ -3211,12 +3196,12 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
             .field(FEA_FIELD_STRUCTURAL_VON_MISES)
             .expect("structural von Mises field should be present")
             .values,
-        AnalysisFieldValues::DeviceRef(_)
+        AnalysisFieldValues::HostF64(_)
     ));
 }
 
 #[test]
-fn analysis_run_gpu_upload_failure_records_fallback_contract() {
+fn analysis_run_gpu_upload_failure_keeps_authoritative_host_fields() {
     struct UploadFailProvider;
 
     impl runmat_accelerate_api::AccelProvider for UploadFailProvider {
@@ -3262,15 +3247,14 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
     )
     .expect("gpu run should still succeed with fallback");
 
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| {
-            event.reason == FallbackReason::FieldUploadFailed
-                && event.subject.as_deref() == Some(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-        }));
+    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(FallbackEvent::is_solver_backend_fallback));
+    }
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
     }
@@ -3344,7 +3328,7 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
 }
 
 #[test]
-fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
+fn balanced_and_strict_diverge_for_same_solver_backend_fallback() {
     struct UploadFailProvider;
 
     impl runmat_accelerate_api::AccelProvider for UploadFailProvider {
@@ -3422,12 +3406,12 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
     assert!(strict
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
 
     assert!(balanced.data.numerically_acceptable);
     assert_eq!(balanced.data.run_status, RunStatus::Completed);
@@ -3522,7 +3506,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
 
     assert_eq!(strict_results.data.run_status, RunStatus::Degraded);
     assert!(!strict_results.data.numerically_acceptable);
@@ -3531,7 +3515,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
 
     let balanced_by_id = analysis_results_by_run_id_op(
         &balanced_run.data.run_id,
@@ -3553,7 +3537,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
 
     assert_eq!(strict_by_id.data.run_status, RunStatus::Degraded);
     assert!(!strict_by_id.data.numerically_acceptable);
@@ -3562,5 +3546,5 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
         .data
         .quality_reasons
         .iter()
-        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+        .any(|reason| reason.code == QualityReasonCode::SolverBackendFallback));
 }
