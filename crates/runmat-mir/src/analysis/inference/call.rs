@@ -78,21 +78,7 @@ pub(crate) fn infer_mir_call(
 
     if let MirCallee::Dynamic(operand) = &call.callee {
         if let ValueKindFact::Callable(callable) = operand_fact(operand, facts, summaries).kind {
-            let output_count = callable.outputs.len();
-            return infer_call(
-                &CallContract {
-                    outputs: callable.outputs,
-                    variadic_output: (callable.variadic_outputs || !callable.outputs_complete)
-                        .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
-                    maximum_outputs: (callable.outputs_complete && !callable.variadic_outputs)
-                        .then_some(output_count),
-                    effects: Default::default(),
-                    capabilities: callable.capabilities,
-                    dynamic_reason: (!callable.outputs_complete || callable.variadic_outputs)
-                        .then_some(DynamicReason::RuntimeValue),
-                },
-                &request,
-            );
+            return runmat_builtins::infer_callable_call(&callable, &request);
         }
     }
 
