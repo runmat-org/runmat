@@ -58,7 +58,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         "[package]\nname = \"remote-exact-structural-study\"\n[sources]\nroots = [\"src\"]\n",
     )
     .unwrap();
-    let generator_source = "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = t * [0, 0, 0];\ny(:, 2) = magnitude;\nend\n";
+    let generator_source = "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (:,1) double\nend\ny = t * [0, 0, 0];\ny(:, 2) = magnitude(1);\nend\n";
     std::fs::write(project_root.path().join("src/pulse.m"), generator_source).unwrap();
     let project = runmat_package::build_frozen_project(
         &project_root.path().join("runmat.toml"),
@@ -96,6 +96,7 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         revision.clone(),
         project_root.path().join("src/pulse.m"),
         generator_source,
+        &access,
     )
     .await;
     let first_study_digest = Digest::sha256(b"box structural study A");
@@ -283,8 +284,13 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
         .unwrap();
         pool.add_worker(channel.clone()).await.unwrap();
         for object in prepared.transport_objects() {
-            pool.register_execution_object(object.reference, object.bytes)
-                .unwrap();
+            if object.is_externalized_value() {
+                pool.register_value_object(object.reference, object.bytes)
+                    .unwrap();
+            } else {
+                pool.register_execution_object(object.reference, object.bytes)
+                    .unwrap();
+            }
         }
 
         let outcome = tokio::time::timeout(
@@ -532,6 +538,7 @@ async fn generated_box_workload(
     revision: ProgramRevision,
     source_path: std::path::PathBuf,
     source_text: &str,
+    access: &ArtifactAccess,
 ) -> (StructuralLinearWorkload, PreparedSignalMaterialization) {
     let mut workload = box_structural_workload();
     let signal = workload
@@ -542,9 +549,31 @@ async fn generated_box_workload(
     let PhysicalSignal::Force(force) = signal else {
         panic!("cantilever fixture signal must be force")
     };
+    let immutable_value = runmat_execution::value::ValuePayload::Inline(Box::new(
+        runmat_execution::value::InlineValue::Dense(runmat_execution::value::DenseValue {
+            element_type: runmat_execution::value::ElementType::F64,
+            shape: vec![1, 1],
+            little_endian_data: (-1_000.0_f64).to_bits().to_le_bytes().to_vec(),
+        }),
+    ));
+    let immutable_object = runmat_execution_artifact::ProgramExecutionObject::externalized_value(
+        access,
+        runmat_execution::value::ValueRefKind::DriverObject,
+        immutable_value,
+    )
+    .unwrap();
     force.representation = SignalRepresentation::Generator(SignalGenerator {
         qualified_function: "loads.pulse".into(),
-        arguments: vec![runmat_analysis_core::GeneratorArgument::Real(-1_000.0)],
+        arguments: vec![runmat_analysis_core::GeneratorArgument::Artifact(
+            runmat_analysis_core::SignalArtifactRef {
+                artifact_id: "magnitude".into(),
+                content_digest: immutable_object.reference.logical_digest.to_string(),
+                schema: "runmat-value-payload-v1".into(),
+                domain: runmat_analysis_core::SignalArtifactDomain::Constant,
+                topology_digest: None,
+                sample_count: 1,
+            },
+        )],
         domain: GeneratorDomain::TimeSeconds,
         sampling: SignalSamplingPolicy::Uniform {
             start: 0.0,
@@ -553,7 +582,7 @@ async fn generated_box_workload(
         },
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::Reject,
-        effects: GeneratorEffectPolicy::Pure,
+        effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
     });
     force.evidence.sample_count = 0;
     let authored = signal.clone();
@@ -609,11 +638,21 @@ async fn generated_box_workload(
         &admitted,
         None,
         usize::try_from(ValueLimits::default().max_inline_bytes).unwrap(),
-        |_| panic!("no artifact argument expected"),
+        |_| {
+            Ok(runmat_execution::value::ValuePayload::Object(Box::new(
+                immutable_object.reference.clone(),
+            )))
+        },
     )
     .unwrap();
-    let prepared =
-        prepare_signal_materialization(authored, admitted, executable, chunks, Vec::new()).unwrap();
+    let prepared = prepare_signal_materialization(
+        authored,
+        admitted,
+        executable,
+        chunks,
+        vec![immutable_object],
+    )
+    .unwrap();
     (workload, prepared)
 }
 

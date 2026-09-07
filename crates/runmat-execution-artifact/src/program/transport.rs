@@ -66,6 +66,16 @@ impl ProgramExecutionObject {
             && self.reference.value_schema == EXTERNALIZED_VALUE_SCHEMA
     }
 
+    pub fn rebind_externalized_value(
+        &self,
+        access: &crate::ArtifactAccess,
+    ) -> ArtifactResult<Self> {
+        let value = self
+            .decode_externalized_value()?
+            .ok_or_else(|| ArtifactError::Invalid("program object is not a RunMat value".into()))?;
+        Self::externalized_value(access, self.reference.kind, value)
+    }
+
     pub fn decode_externalized_value(&self) -> ArtifactResult<Option<ValuePayload>> {
         if !self.is_externalized_value() {
             return Ok(None);
@@ -432,15 +442,12 @@ mod tests {
             object.reference.logical_digest
         );
         assert_eq!(object.decode_externalized_value().unwrap(), Some(value));
-        let rebound = ProgramExecutionObject::externalized_value(
-            &crate::ArtifactAccess {
+        let rebound = object
+            .rebind_externalized_value(&crate::ArtifactAccess {
                 authorization_scope: "other-scope".into(),
                 encryption_context: Digest::sha256(b"other-value-encryption"),
-            },
-            ValueRefKind::DriverObject,
-            object.decode_externalized_value().unwrap().unwrap(),
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert_eq!(
             rebound.reference.logical_digest,
             object.reference.logical_digest

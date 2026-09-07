@@ -3,13 +3,13 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::GeneratorProvenance;
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
 use runmat_execution::resource::{Capability, ResourceRequest};
-use runmat_execution::value::{InlineValue, ValuePayload};
+use runmat_execution::value::{InlineValue, ValuePayload, ValueRefKind};
 use runmat_execution::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
     ExecutableComponentRevisions, ExecutableIdentity, ExecutableUnitManifest, ProgramEnvironment,
     ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
-use runmat_execution_artifact::BundleCallable;
+use runmat_execution_artifact::{ArtifactAccess, BundleCallable, ProgramExecutionObject};
 use runmat_types::{
     CapabilitySet, InteropManifest, ParallelManifest, ProgramFunctionId,
     INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
@@ -127,12 +127,23 @@ fn chunks() -> Vec<SignalGeneratorChunk> {
     }]
 }
 
+fn external_input(scope: &str) -> ProgramExecutionObject {
+    ProgramExecutionObject::externalized_value(
+        &ArtifactAccess {
+            authorization_scope: scope.into(),
+            encryption_context: digest(&format!("{scope}-encryption")),
+        },
+        ValueRefKind::DriverObject,
+        ValuePayload::Inline(Box::new(InlineValue::F64Bits(17.0_f64.to_bits()))),
+    )
+    .unwrap()
+}
+
 #[test]
 fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let admitted = admitted();
     let prepared =
-        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), Vec::new())
-            .unwrap();
+        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
     assert_eq!(prepared.chunks[0].request.function, 3);
     assert_eq!(
@@ -146,8 +157,36 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
 
     let mut substituted = executable(&admitted);
     substituted.manifest.identity.source_digest = digest("different source");
+    assert!(prepare_signal_generator_program(&admitted, substituted, chunks(), &[]).is_err());
+}
+
+#[test]
+fn portable_program_requires_an_exact_immutable_input_inventory() {
+    let admitted = admitted();
+    let input = external_input("signal-run");
+    let mut referenced_chunks = chunks();
+    referenced_chunks[0].arguments = vec![ValuePayload::Object(Box::new(input.reference.clone()))];
+
+    assert!(prepare_signal_generator_program(
+        &admitted,
+        executable(&admitted),
+        referenced_chunks.clone(),
+        &[],
+    )
+    .is_err());
+
+    let prepared = prepare_signal_generator_program(
+        &admitted,
+        executable(&admitted),
+        referenced_chunks,
+        std::slice::from_ref(&input),
+    )
+    .unwrap();
+    assert_eq!(prepared.input_references, vec![input.reference.clone()]);
+
     assert!(
-        prepare_signal_generator_program(&admitted, substituted, chunks(), Vec::new()).is_err()
+        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[input],)
+            .is_err()
     );
 }
 
@@ -155,8 +194,7 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
 fn task_identity_is_logical_and_independent_of_pool_placement() {
     let admitted = admitted();
     let prepared =
-        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), Vec::new())
-            .unwrap();
+        prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     let context = |scope, pool| SignalGeneratorExecutionContext {
         scope_id: scope,
         pool_id: pool,

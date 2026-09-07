@@ -37,6 +37,7 @@ struct ExactStructuralStudyRootRequest {
     signal_materializations: Vec<ExactSignalMaterializationRequest>,
     exact_meshing: ProgramExecutionDescriptor,
     exact_argument_count: u32,
+    signal_argument_count: u32,
 }
 
 impl ExactStructuralStudyRootRequest {
@@ -54,6 +55,12 @@ impl ExactStructuralStudyRootRequest {
             &prepared_signals,
             &self.exact_meshing.recipe.program_revision,
         )?;
+        let signal_reference_count = prepared_signals
+            .iter()
+            .flat_map(|prepared| prepared.program.input_references.iter())
+            .map(|reference| reference.id)
+            .collect::<BTreeSet<_>>()
+            .len();
         if self.schema_version != 1
             || self.authored_study_digest.bytes() == &[0; 32]
             || self.geometry_source_digest.bytes() == &[0; 32]
@@ -61,6 +68,8 @@ impl ExactStructuralStudyRootRequest {
                 .frozen_project_digest
                 .is_some_and(|digest| digest.bytes() == &[0; 32])
             || self.exact_argument_count < 2
+            || usize::try_from(self.signal_argument_count).map_err(protocol)?
+                != signal_reference_count
             || self.exact_meshing.recipe.execution_mode != crate::EXACT_MESHING_ROOT_EXECUTION_MODE
             || self.exact_meshing.artifact.form != ExecutableForm::MeshingWorkload
             || self.exact_meshing.requested_outputs != 1
@@ -90,6 +99,7 @@ struct ExactSignalMaterializationRequest {
     admitted: runmat_analysis_execution::AdmittedSignalGenerator,
     descriptor: ProgramExecutionDescriptor,
     chunks: Vec<runmat_analysis_execution::SignalGeneratorChunk>,
+    input_references: Vec<ValueRef>,
 }
 
 impl ExactSignalMaterializationRequest {
@@ -105,6 +115,7 @@ impl ExactSignalMaterializationRequest {
                 .iter()
                 .map(|chunk| chunk.plan.clone())
                 .collect(),
+            input_references: prepared.program.input_references.clone(),
         })
     }
 
@@ -131,7 +142,9 @@ impl ExactSignalMaterializationRequest {
             program: PreparedSignalGeneratorProgram {
                 descriptor: self.descriptor.clone(),
                 chunks,
+                input_references: self.input_references.clone(),
             },
+            input_objects: Vec::new(),
         };
         prepared.validate().map_err(protocol)?;
         Ok(prepared)
@@ -159,6 +172,7 @@ pub struct RequiredStudyProgram {
 pub struct PreparedExactStructuralStudyRoot {
     request: ProgramExecutionRequest,
     objects: Vec<LogicalObject>,
+    input_value_objects: Vec<ProgramExecutionObject>,
     root: ExactStructuralStudyRootRequest,
     artifact_access: ArtifactAccess,
     required_programs: Vec<RequiredStudyProgram>,
@@ -189,6 +203,18 @@ impl PreparedExactStructuralStudyRoot {
             };
             object.validate().map_err(protocol)?;
             transported.push(object);
+        }
+        for object in &self.input_value_objects {
+            let reference = references
+                .get(&object.reference.logical_digest)
+                .ok_or_else(|| protocol("study root omits a signal input value reference"))?;
+            if reference != &object.reference {
+                return Err(protocol(
+                    "study root signal input value differs from its request reference",
+                ));
+            }
+            object.validate().map_err(protocol)?;
+            transported.push(object.clone());
         }
         if transported.len() != references.len() {
             return Err(protocol(
@@ -253,10 +279,31 @@ pub fn prepare_exact_structural_study_root(
         exact_meshing,
     } = preparation;
     artifact_access.validate().map_err(protocol)?;
+    let signal_materializations = signal_materializations
+        .into_iter()
+        .map(|materialization| materialization.rebind(&artifact_access).map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
     let exact_request = exact_meshing.request().clone();
     let expected_meshing_request = exact_meshing.meshing_request().clone();
     let exact_programs = exact_meshing.required_programs()?;
     validate_signal_inventory(&workloads, &signal_materializations, &program_revision)?;
+    let mut input_value_objects = BTreeMap::new();
+    for materialization in &signal_materializations {
+        materialization.validate_closed().map_err(protocol)?;
+        for object in &materialization.input_objects {
+            match input_value_objects.get(&object.reference.id) {
+                Some(existing) if existing != object => {
+                    return Err(protocol(
+                        "signal input value id collides with different immutable content",
+                    ))
+                }
+                Some(_) => {}
+                None => {
+                    input_value_objects.insert(object.reference.id, object.clone());
+                }
+            }
+        }
+    }
     let signal_expectations = signal_materializations
         .iter()
         .map(PreparedSignalMaterialization::expectation)
@@ -286,6 +333,7 @@ pub fn prepare_exact_structural_study_root(
             .collect::<NativeExecutionResult<Vec<_>>>()?,
         exact_meshing: descriptor(&exact_request),
         exact_argument_count: u32::try_from(exact_request.arguments.len()).map_err(protocol)?,
+        signal_argument_count: u32::try_from(input_value_objects.len()).map_err(protocol)?,
     };
     let root_object = LogicalObject::new(
         ObjectNamespace::InputValue,
@@ -319,6 +367,11 @@ pub fn prepare_exact_structural_study_root(
     .map_err(protocol)?;
     let mut arguments = vec![ValuePayload::Object(Box::new(root_reference))];
     arguments.extend(exact_request.arguments);
+    arguments.extend(
+        input_value_objects
+            .values()
+            .map(|object| ValuePayload::Object(Box::new(object.reference.clone()))),
+    );
     let request = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,
@@ -352,6 +405,7 @@ pub fn prepare_exact_structural_study_root(
     Ok(PreparedExactStructuralStudyRoot {
         request,
         objects,
+        input_value_objects: input_value_objects.into_values().collect(),
         root,
         artifact_access,
         required_programs,
@@ -374,7 +428,8 @@ pub fn decode_exact_structural_study_root(
     {
         return Err(protocol("program is not an exact structural study root"));
     }
-    let [ValuePayload::Object(root_reference), exact_arguments @ ..] = program.arguments.as_slice()
+    let [ValuePayload::Object(root_reference), component_arguments @ ..] =
+        program.arguments.as_slice()
     else {
         return Err(protocol("exact structural study root inputs are invalid"));
     };
@@ -392,13 +447,19 @@ pub fn decode_exact_structural_study_root(
         .map_err(protocol)?;
     let bytes = read(store, root_reference)?;
     let root = ExactStructuralStudyRootRequest::decode(&bytes)?;
-    if usize::try_from(root.exact_argument_count).map_err(protocol)? != exact_arguments.len()
+    let exact_argument_count = usize::try_from(root.exact_argument_count).map_err(protocol)?;
+    let signal_argument_count = usize::try_from(root.signal_argument_count).map_err(protocol)?;
+    let component_argument_count = exact_argument_count
+        .checked_add(signal_argument_count)
+        .ok_or_else(|| protocol("exact structural study root argument count overflows"))?;
+    if component_arguments.len() != component_argument_count
         || root.exact_meshing.recipe.program_revision != program.recipe.program_revision
     {
         return Err(protocol(
             "exact structural study root component contract differs from its request",
         ));
     }
+    let (exact_arguments, signal_arguments) = component_arguments.split_at(exact_argument_count);
     let exact_meshing = ProgramExecutionRequest {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: root.exact_meshing.recipe.clone(),
@@ -420,6 +481,23 @@ pub fn decode_exact_structural_study_root(
         .iter()
         .map(ExactSignalMaterializationRequest::to_prepared)
         .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let expected_signal_references = signal_materializations
+        .iter()
+        .flat_map(|prepared| prepared.program.input_references.iter())
+        .map(|reference| (reference.id, reference))
+        .collect::<BTreeMap<_, _>>();
+    let transported_signal_references = signal_arguments
+        .iter()
+        .map(|argument| match argument {
+            ValuePayload::Object(reference) => Ok((reference.id, reference.as_ref())),
+            ValuePayload::Inline(_) => Err(protocol("signal input value is not externalized")),
+        })
+        .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;
+    if expected_signal_references != transported_signal_references {
+        return Err(protocol(
+            "exact structural study signal references differ from its materialization plans",
+        ));
+    }
     Ok(DecodedExactStructuralStudyRoot {
         authored_study_digest: root.authored_study_digest,
         frozen_project_digest: root.frozen_project_digest,

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::ResourceRequest;
@@ -9,8 +9,9 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    ProgramExecutionInputs, ProgramExecutionObjectLocation, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
+    ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_runner::TaskSubmission;
 
@@ -26,6 +27,7 @@ pub const SIGNAL_GENERATOR_TARGET_PROFILE: &str = "portable-executable-unit-v3";
 pub struct PreparedSignalGeneratorProgram {
     pub descriptor: ProgramExecutionDescriptor,
     pub chunks: Vec<PreparedSignalGeneratorChunk>,
+    pub input_references: Vec<runmat_execution::value::ValueRef>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,6 +41,7 @@ pub struct PreparedSignalMaterialization {
     pub authored: runmat_analysis_core::PhysicalSignal,
     pub admitted: AdmittedSignalGenerator,
     pub program: PreparedSignalGeneratorProgram,
+    pub input_objects: Vec<ProgramExecutionObject>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -103,6 +106,12 @@ impl PreparedSignalMaterialization {
         }
         for chunk in &self.program.chunks {
             chunk.request.validate_for_portable_host()?;
+            ProgramExecutionInputs {
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                arguments: chunk.request.arguments.clone(),
+                objects: input_locations(&self.program.input_references),
+            }
+            .validate()?;
             if chunk.request.recipe != self.program.descriptor.recipe
                 || chunk.request.artifact != self.program.descriptor.artifact
                 || chunk.request.function != self.program.descriptor.function
@@ -115,6 +124,53 @@ impl PreparedSignalMaterialization {
             }
         }
         Ok(())
+    }
+
+    pub fn validate_closed(&self) -> AnalysisBridgeResult<()> {
+        self.validate()?;
+        if self.input_objects.len() != self.program.input_references.len() {
+            return Err(AnalysisBridgeError::Identity(
+                "signal input object closure differs from its reference inventory",
+            ));
+        }
+        for (object, reference) in self
+            .input_objects
+            .iter()
+            .zip(&self.program.input_references)
+        {
+            object.validate()?;
+            if &object.reference != reference || !object.is_externalized_value() {
+                return Err(AnalysisBridgeError::Identity(
+                    "signal input object differs from its immutable value reference",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn rebind(
+        mut self,
+        access: &runmat_execution_artifact::ArtifactAccess,
+    ) -> AnalysisBridgeResult<Self> {
+        let mut replacements = BTreeMap::new();
+        for object in &self.input_objects {
+            let rebound = object.rebind_externalized_value(access)?;
+            replacements.insert(object.reference.logical_digest, rebound);
+        }
+        for chunk in &mut self.program.chunks {
+            for argument in &mut chunk.plan.arguments {
+                rebind_value(argument, &replacements)?;
+            }
+            chunk.request.arguments = chunk.plan.arguments.clone();
+        }
+        self.input_objects = replacements.into_values().collect();
+        self.program.input_references = self
+            .input_objects
+            .iter()
+            .map(|object| object.reference.clone())
+            .collect();
+        self.validate_closed()?;
+        Ok(self)
     }
 
     pub fn expectation(&self) -> AnalysisBridgeResult<SignalMaterializationExpectation> {
@@ -142,7 +198,7 @@ pub fn prepare_signal_generator_program(
     admitted: &AdmittedSignalGenerator,
     executable: ExecutableUnitEnvelope,
     chunks: Vec<SignalGeneratorChunk>,
-    input_objects: Vec<ProgramExecutionObjectLocation>,
+    input_objects: &[ProgramExecutionObject],
 ) -> AnalysisBridgeResult<PreparedSignalGeneratorProgram> {
     executable.validate()?;
     let identity = &executable.manifest.identity;
@@ -198,20 +254,62 @@ pub fn prepare_signal_generator_program(
     };
     descriptor.validate_for_portable_host()?;
 
+    let mut input_references = input_objects
+        .iter()
+        .map(|object| {
+            object.validate()?;
+            if object.reference.kind != runmat_execution::value::ValueRefKind::DriverObject
+                || !object.is_externalized_value()
+            {
+                return Err(AnalysisBridgeError::Invalid(
+                    "signal generator inputs must be externalized immutable values".into(),
+                ));
+            }
+            Ok(object.reference.clone())
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    input_references.sort_by_key(|reference| reference.logical_digest);
+    input_references.dedup();
+    if input_references.len() != input_objects.len() {
+        return Err(AnalysisBridgeError::Invalid(
+            "signal generator input object inventory is duplicated".into(),
+        ));
+    }
+
     let chunks = chunks
         .into_iter()
         .map(|plan| {
             let inputs = ProgramExecutionInputs {
                 schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
                 arguments: plan.arguments.clone(),
-                objects: input_objects.clone(),
+                objects: input_locations(&input_references),
             };
             let request = ProgramExecutionRequest::from_parts(descriptor.clone(), inputs)?;
             request.validate_for_portable_host()?;
             Ok(PreparedSignalGeneratorChunk { plan, request })
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    Ok(PreparedSignalGeneratorProgram { descriptor, chunks })
+    let referenced_inputs = chunks
+        .iter()
+        .flat_map(|chunk| chunk.plan.arguments.iter())
+        .fold(BTreeSet::new(), |mut references, argument| {
+            collect_value_reference_ids(argument, &mut references);
+            references
+        });
+    let supplied_inputs = input_references
+        .iter()
+        .map(|reference| reference.id)
+        .collect::<BTreeSet<_>>();
+    if referenced_inputs != supplied_inputs {
+        return Err(AnalysisBridgeError::Invalid(
+            "signal generator input object inventory is not exact".into(),
+        ));
+    }
+    Ok(PreparedSignalGeneratorProgram {
+        descriptor,
+        chunks,
+        input_references,
+    })
 }
 
 pub fn prepare_signal_materialization(
@@ -219,16 +317,109 @@ pub fn prepare_signal_materialization(
     admitted: AdmittedSignalGenerator,
     executable: ExecutableUnitEnvelope,
     chunks: Vec<SignalGeneratorChunk>,
-    input_objects: Vec<ProgramExecutionObjectLocation>,
+    mut input_objects: Vec<ProgramExecutionObject>,
 ) -> AnalysisBridgeResult<PreparedSignalMaterialization> {
-    let program = prepare_signal_generator_program(&admitted, executable, chunks, input_objects)?;
+    input_objects.sort_by_key(|object| object.reference.logical_digest);
+    let program = prepare_signal_generator_program(&admitted, executable, chunks, &input_objects)?;
     let prepared = PreparedSignalMaterialization {
         authored,
         admitted,
         program,
+        input_objects,
     };
-    prepared.validate()?;
+    prepared.validate_closed()?;
     Ok(prepared)
+}
+
+fn input_locations(
+    references: &[runmat_execution::value::ValueRef],
+) -> Vec<ProgramExecutionObjectLocation> {
+    references
+        .iter()
+        .enumerate()
+        .map(|(index, reference)| ProgramExecutionObjectLocation {
+            reference: reference.clone(),
+            artifact_id: format!("signal-input-{index}"),
+        })
+        .collect()
+}
+
+fn collect_value_reference_ids(
+    value: &runmat_execution::value::ValuePayload,
+    references: &mut BTreeSet<runmat_execution::identity::ValueId>,
+) {
+    match value {
+        runmat_execution::value::ValuePayload::Object(reference) => {
+            references.insert(reference.id);
+        }
+        runmat_execution::value::ValuePayload::Inline(inline) => match inline.as_ref() {
+            runmat_execution::value::InlineValue::Cell { values, .. }
+            | runmat_execution::value::InlineValue::OutputList(values) => {
+                for value in values {
+                    collect_value_reference_ids(value, references);
+                }
+            }
+            runmat_execution::value::InlineValue::Struct(fields) => {
+                for field in fields {
+                    collect_value_reference_ids(&field.value, references);
+                }
+            }
+            runmat_execution::value::InlineValue::Symbolic(data)
+            | runmat_execution::value::InlineValue::ImmutableValueClass(data) => {
+                for field in &data.fields {
+                    collect_value_reference_ids(&field.value, references);
+                }
+            }
+            runmat_execution::value::InlineValue::Callable(callable) => {
+                for capture in &callable.captures {
+                    collect_value_reference_ids(capture, references);
+                }
+            }
+            _ => {}
+        },
+    }
+}
+
+fn rebind_value(
+    value: &mut runmat_execution::value::ValuePayload,
+    replacements: &BTreeMap<Digest, ProgramExecutionObject>,
+) -> AnalysisBridgeResult<()> {
+    match value {
+        runmat_execution::value::ValuePayload::Object(reference) => {
+            let replacement = replacements.get(&reference.logical_digest).ok_or(
+                AnalysisBridgeError::Identity(
+                    "signal argument references an absent immutable value object",
+                ),
+            )?;
+            **reference = replacement.reference.clone();
+        }
+        runmat_execution::value::ValuePayload::Inline(inline) => match inline.as_mut() {
+            runmat_execution::value::InlineValue::Cell { values, .. }
+            | runmat_execution::value::InlineValue::OutputList(values) => {
+                for value in values {
+                    rebind_value(value, replacements)?;
+                }
+            }
+            runmat_execution::value::InlineValue::Struct(fields) => {
+                for field in fields {
+                    rebind_value(&mut field.value, replacements)?;
+                }
+            }
+            runmat_execution::value::InlineValue::Symbolic(data)
+            | runmat_execution::value::InlineValue::ImmutableValueClass(data) => {
+                for field in &mut data.fields {
+                    rebind_value(&mut field.value, replacements)?;
+                }
+            }
+            runmat_execution::value::InlineValue::Callable(callable) => {
+                for capture in &mut callable.captures {
+                    rebind_value(capture, replacements)?;
+                }
+            }
+            _ => {}
+        },
+    }
+    Ok(())
 }
 
 pub fn build_signal_generator_task_submission(

@@ -135,6 +135,12 @@ async fn materialize_signals(
         .insert(Capability::ProcessIsolation);
     let maximum_parallel_tasks = native_config.max_workers as usize;
     let session = NativeProgramSession::new(native_config)?;
+    for materialization in unique.values() {
+        materialization.validate_closed()?;
+        for object in &materialization.input_objects {
+            session.register_value_object(object.clone())?;
+        }
+    }
     let resources = ResourceRequest {
         cpu_millicores: 1_000,
         memory_bytes: SIGNAL_TASK_MEMORY_BYTES,

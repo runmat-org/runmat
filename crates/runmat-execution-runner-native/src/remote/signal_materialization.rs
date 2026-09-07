@@ -47,6 +47,9 @@ pub(super) async fn execute(
     let mut unique = BTreeMap::new();
     for prepared in materializations {
         prepared.validate().map_err(protocol)?;
+        for object in &prepared.input_objects {
+            pool.register_value_object(object.reference.clone(), object.bytes.clone())?;
+        }
         let identity = prepared.admitted.materialization_identity;
         if let Some(existing) = unique.get(&identity) {
             if existing != &prepared {
