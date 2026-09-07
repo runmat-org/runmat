@@ -3,6 +3,7 @@
 pub mod adaptation;
 pub mod admission;
 pub mod assembly;
+pub mod constraints;
 pub mod contracts;
 pub mod diagnostics;
 pub(crate) mod excitation;
@@ -19,7 +20,10 @@ pub mod solve;
 pub use admission::AnalysisRunIdentity;
 pub use contracts::*;
 pub use pipeline::electromagnetic::{run_electromagnetic, run_electromagnetic_with_options};
-pub use pipeline::linear_static::{run_linear_static, run_linear_static_with_options};
+pub use pipeline::linear_static::{
+    run_linear_static, run_linear_static_with_options,
+    run_linear_static_with_prepared_constraint_plan,
+};
 pub use pipeline::modal::{run_modal, run_modal_with_options};
 pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
 pub use pipeline::thermal::{run_thermal, run_thermal_with_options};

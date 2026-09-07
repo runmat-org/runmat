@@ -1,0 +1,151 @@
+use runmat_analysis_core::{RegionTarget, StructuralRotationDof, StructuralTranslationDof};
+use runmat_execution::Digest;
+use runmat_meshing_core::{PersistentEntityId, StableDigest};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalStructuralDof {
+    Translation(StructuralTranslationDof),
+    Rotation(StructuralRotationDof),
+}
+
+impl CanonicalStructuralDof {
+    pub(super) const TRANSLATIONS: [Self; 3] = [
+        Self::Translation(StructuralTranslationDof::Ux),
+        Self::Translation(StructuralTranslationDof::Uy),
+        Self::Translation(StructuralTranslationDof::Uz),
+    ];
+}
+
+impl From<StructuralTranslationDof> for CanonicalStructuralDof {
+    fn from(value: StructuralTranslationDof) -> Self {
+        Self::Translation(value)
+    }
+}
+
+impl From<StructuralRotationDof> for CanonicalStructuralDof {
+    fn from(value: StructuralRotationDof) -> Self {
+        Self::Rotation(value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintEnforcement {
+    DirectElimination,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReactionRecovery {
+    UnconstrainedEquilibriumResidual,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedConstraintTarget {
+    pub authored: RegionTarget,
+    pub matched_entities: Vec<PersistentEntityId>,
+    pub matched_node_identities: Vec<StableDigest>,
+    pub selection_digest: Digest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintGroupEvidence {
+    pub constraint_id: String,
+    pub source_digest: Digest,
+    pub target: ResolvedConstraintTarget,
+    pub enforcement: ConstraintEnforcement,
+    pub row_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalStructuralConstraintRow {
+    pub identity: Digest,
+    pub constraint_id: String,
+    pub node_identity: StableDigest,
+    pub dof: CanonicalStructuralDof,
+    pub coefficient: f64,
+    pub right_hand_side: f64,
+    pub reaction_recovery: ReactionRecovery,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintPlanEvidence {
+    pub authored_constraint_count: usize,
+    pub active_row_count: usize,
+    pub redundant_row_count: usize,
+    pub conflicting_row_count: usize,
+    pub rank: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalStructuralConstraintPlan {
+    pub schema_version: u16,
+    pub topology_digest: StableDigest,
+    pub geometry_source_digest: StableDigest,
+    pub geometry_revision: u64,
+    pub persistent_mapping_version: u32,
+    pub authored_constraints_digest: Digest,
+    pub groups: Vec<ConstraintGroupEvidence>,
+    pub rows: Vec<CanonicalStructuralConstraintRow>,
+    pub evidence: ConstraintPlanEvidence,
+}
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum ConstraintPlanError {
+    #[error("constraint `{constraint_id}` uses unsupported kind `{kind}`")]
+    UnsupportedKind {
+        constraint_id: String,
+        kind: &'static str,
+    },
+    #[error("constraint `{constraint_id}` uses unsupported frame `{frame}`")]
+    UnsupportedFrame {
+        constraint_id: String,
+        frame: String,
+    },
+    #[error("constraint `{constraint_id}` targets unsupported topology: {reason}")]
+    UnsupportedTarget {
+        constraint_id: String,
+        reason: &'static str,
+    },
+    #[error(
+        "constraint `{constraint_id}` target `{region_id}` did not resolve to solver topology"
+    )]
+    EmptyTarget {
+        constraint_id: String,
+        region_id: String,
+    },
+    #[error("constraint `{constraint_id}` expected exactly one entity but resolved {actual}")]
+    Cardinality {
+        constraint_id: String,
+        actual: usize,
+    },
+    #[error("constraint id `{constraint_id}` is duplicated")]
+    DuplicateConstraintId { constraint_id: String },
+    #[error("constraint `{constraint_id}` prescribes an unavailable rotational DOF")]
+    UnavailableRotationalDof { constraint_id: String },
+    #[error("constraint `{constraint_id}` requires a study-constant prescribed value")]
+    ScheduledValue { constraint_id: String },
+    #[error("constraint `{constraint_id}` contains a non-finite prescribed value")]
+    NonFiniteValue { constraint_id: String },
+    #[error("constraints `{first_constraint_id}` and `{second_constraint_id}` prescribe conflicting values on the same solver DOF")]
+    ConflictingRow {
+        first_constraint_id: String,
+        second_constraint_id: String,
+    },
+    #[error("constraint plan topology does not match the solver mesh")]
+    TopologyMismatch,
+    #[error("constraint plan does not match the authored structural constraints")]
+    AuthoredConstraintsMismatch,
+    #[error("constraint plan is malformed: {0}")]
+    Invalid(String),
+    #[error("constraint plan encoding failed: {0}")]
+    Encoding(String),
+}

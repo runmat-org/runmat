@@ -1,4 +1,3 @@
-use runmat_analysis_core::{AnalysisModel, StructuralConstraintKind, StructuralTranslationDof};
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
@@ -7,17 +6,14 @@ use super::{
 };
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 
-pub(super) fn apply_solver_mesh_structural_regions(
-    model: &AnalysisModel,
+pub(super) fn apply_solver_mesh_structural_loads(
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
-    constrained: &mut [bool],
     rhs: &mut [f64],
     strict_region_mapping: bool,
 ) -> Result<Vec<WrenchLoweringSummary>, SolverMeshRegionMappingError> {
     rhs.fill(0.0);
-    constrained.fill(false);
 
     let mut wrench_lowering = Vec::new();
     for load in excitations.iter() {
@@ -104,60 +100,6 @@ pub(super) fn apply_solver_mesh_structural_regions(
         }
     }
 
-    for constraint in model
-        .constraints
-        .iter()
-        .filter_map(|value| value.structural())
-    {
-        let Some(target) = constraint.kind.target() else {
-            continue;
-        };
-        let target_nodes = solver_mesh_region_node_indices(mesh, &target.region_id);
-        if strict_region_mapping
-            && target_nodes.is_empty()
-            && matches!(
-                constraint.kind,
-                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
-            )
-        {
-            return Err(SolverMeshRegionMappingError::UnmappedConstraintRegion {
-                constraint_id: constraint.constraint_id.clone(),
-                region_id: target.region_id.clone(),
-                constraint_kind: match constraint.kind {
-                    StructuralConstraintKind::Fixed { .. } => "fixed",
-                    StructuralConstraintKind::Prescribed(_) => "prescribed",
-                    _ => "unsupported",
-                },
-            });
-        }
-        for node_index in target_nodes {
-            match &constraint.kind {
-                StructuralConstraintKind::Fixed { .. } => {
-                    for kind in [
-                        StructuralDofKind::Ux,
-                        StructuralDofKind::Uy,
-                        StructuralDofKind::Uz,
-                    ] {
-                        constrain_dof(layout, constrained, rhs, node_index, kind, 0.0);
-                    }
-                }
-                StructuralConstraintKind::Prescribed(values) => {
-                    for prescribed in &values.translations {
-                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
-                            continue;
-                        };
-                        let kind = match prescribed.dof {
-                            StructuralTranslationDof::Ux => StructuralDofKind::Ux,
-                            StructuralTranslationDof::Uy => StructuralDofKind::Uy,
-                            StructuralTranslationDof::Uz => StructuralDofKind::Uz,
-                        };
-                        constrain_dof(layout, constrained, rhs, node_index, kind, value.meters);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
     Ok(wrench_lowering)
 }
 
@@ -398,20 +340,6 @@ fn add_rhs(
 ) {
     if let Some(dof) = layout.index(node_index, kind) {
         rhs[dof] += value;
-    }
-}
-
-fn constrain_dof(
-    layout: &StructuralDofLayout,
-    constrained: &mut [bool],
-    rhs: &mut [f64],
-    node_index: usize,
-    kind: StructuralDofKind,
-    value: f64,
-) {
-    if let Some(dof) = layout.index(node_index, kind) {
-        constrained[dof] = true;
-        rhs[dof] = value;
     }
 }
 

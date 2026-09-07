@@ -3,7 +3,11 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::{assemble_structural_system, AssemblySummary, StructuralFormulationRequirement},
+    assembly::{
+        assemble_structural_system, assemble_structural_system_with_constraint_plan,
+        AssemblySummary, StructuralFormulationRequirement,
+    },
+    constraints::CanonicalStructuralConstraintPlan,
     contracts::{
         ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
@@ -40,6 +44,27 @@ pub fn run_linear_static_with_options(
     backend: ComputeBackend,
     options: LinearStaticSolveOptions,
 ) -> Result<FeaRunResult, FeaRunError> {
+    run_linear_static_with_constraint_plan(model, backend, options, None)
+}
+
+/// Executes a linear-static solve with a topology-resolved constraint plan supplied by the
+/// portable execution boundary. Inline callers use [`run_linear_static_with_options`], which
+/// compiles the same plan before assembly.
+pub fn run_linear_static_with_prepared_constraint_plan(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+) -> Result<FeaRunResult, FeaRunError> {
+    run_linear_static_with_constraint_plan(model, backend, options, Some(constraint_plan))
+}
+
+fn run_linear_static_with_constraint_plan(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+) -> Result<FeaRunResult, FeaRunError> {
     let execution_step = super::admission::require_structural(
         model,
         AnalysisProcedure::Static,
@@ -73,13 +98,27 @@ pub fn run_linear_static_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_structural_system(
-        model,
-        options.solver_mesh.clone(),
-        options.thermo_mechanical_context,
-        options.electro_thermal_context,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-    )
+    let summary = match constraint_plan {
+        Some(plan) => assemble_structural_system_with_constraint_plan(
+            model,
+            options.solver_mesh.clone().ok_or_else(|| {
+                FeaRunError::InvalidModel(
+                    "a prepared constraint plan requires its canonical solver mesh".into(),
+                )
+            })?,
+            options.thermo_mechanical_context.clone(),
+            options.electro_thermal_context.clone(),
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            plan,
+        ),
+        None => assemble_structural_system(
+            model,
+            options.solver_mesh.clone(),
+            options.thermo_mechanical_context.clone(),
+            options.electro_thermal_context.clone(),
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        ),
+    }
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     let identity = super::admission::admit_structural(
         &summary,

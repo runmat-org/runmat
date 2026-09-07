@@ -33,7 +33,7 @@ use self::{
     solver_solid::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
-    solver_solid_boundary::apply_solver_mesh_structural_regions,
+    solver_solid_boundary::apply_solver_mesh_structural_loads,
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_constraint_kind_name,
@@ -42,6 +42,9 @@ use self::{
 };
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
+use crate::constraints::{
+    CanonicalStructuralConstraintPlan, CanonicalStructuralDof, ConstraintPlanError,
+};
 use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::physics::coupling::thermo_mechanical;
@@ -99,6 +102,7 @@ pub struct AssemblySummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinearAssemblyError {
     ExcitationRealization(String),
+    ConstraintPlan(ConstraintPlanError),
     Structural(StructuralAssemblyError),
     SolidStiffness(SolverSolidAssemblyError),
     SolverMeshRegionMapping(SolverMeshRegionMappingError),
@@ -108,6 +112,9 @@ impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LinearAssemblyError::ExcitationRealization(err) => write!(f, "{err}"),
+            LinearAssemblyError::ConstraintPlan(err) => {
+                write!(f, "constraint planning failed: {err}")
+            }
             LinearAssemblyError::Structural(err) => write!(f, "{err}"),
             LinearAssemblyError::SolidStiffness(err) => {
                 write!(f, "solid stiffness assembly failed: {err:?}")
@@ -241,6 +248,11 @@ pub enum StructuralAssemblyError {
     UnsupportedScheduledConstraint {
         constraint_id: String,
     },
+    UnsupportedConstraintFrame {
+        constraint_id: String,
+        frame: String,
+    },
+    ConstraintPlanNodeAbsent,
 }
 
 impl fmt::Display for StructuralAssemblyError {
@@ -340,6 +352,17 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "structural assembly requires study-constant prescribed constraints: constraint_id={constraint_id}"
             ),
+            Self::UnsupportedConstraintFrame {
+                constraint_id,
+                frame,
+            } => write!(
+                f,
+                "structural constraint frame is not implemented by the selected formulation: constraint_id={constraint_id} frame={frame}"
+            ),
+            Self::ConstraintPlanNodeAbsent => write!(
+                f,
+                "canonical constraint plan references a node absent from the solver mesh"
+            ),
         }
     }
 }
@@ -360,11 +383,6 @@ pub enum SolverMeshRegionMappingError {
         region_id: String,
         load_kind: StructuralLoadKind,
     },
-    UnmappedConstraintRegion {
-        constraint_id: String,
-        region_id: String,
-        constraint_kind: &'static str,
-    },
 }
 
 impl fmt::Display for SolverMeshRegionMappingError {
@@ -377,14 +395,6 @@ impl fmt::Display for SolverMeshRegionMappingError {
             } => write!(
                 f,
                 "solver mesh load region did not resolve to persistent boundary provenance: load_id={load_id} region_id={region_id} load_kind={load_kind}"
-            ),
-            SolverMeshRegionMappingError::UnmappedConstraintRegion {
-                constraint_id,
-                region_id,
-                constraint_kind,
-            } => write!(
-                f,
-                "solver mesh constraint region did not resolve to persistent boundary provenance: constraint_id={constraint_id} region_id={region_id} constraint_kind={constraint_kind}"
             ),
         }
     }
@@ -492,6 +502,7 @@ pub(crate) fn assemble_linear_system(
         thermo_mechanical_context,
         electro_thermal_context,
         None,
+        None,
     )
 }
 
@@ -508,6 +519,25 @@ pub fn assemble_structural_system(
         thermo_mechanical_context,
         electro_thermal_context,
         Some(requirement),
+        None,
+    )
+}
+
+pub fn assemble_structural_system_with_constraint_plan(
+    model: &AnalysisModel,
+    solver_mesh: SolverMeshArtifact,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
+    requirement: StructuralFormulationRequirement,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_linear_system_impl(
+        model,
+        Some(solver_mesh),
+        thermo_mechanical_context,
+        electro_thermal_context,
+        Some(requirement),
+        Some(constraint_plan),
     )
 }
 
@@ -517,6 +547,7 @@ fn assemble_linear_system_impl(
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
     structural_requirement: Option<StructuralFormulationRequirement>,
+    supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     let excitations = realize_model_excitations(model)
         .map_err(|error| LinearAssemblyError::ExcitationRealization(error.to_string()))?;
@@ -534,6 +565,13 @@ fn assemble_linear_system_impl(
         ));
     }
     if structural_requirement.is_some() && solver_mesh.is_none() && explicit_element_count > 0 {
+        if supplied_constraint_plan.is_some() {
+            return Err(LinearAssemblyError::ConstraintPlan(
+                ConstraintPlanError::Invalid(
+                    "a solid constraint plan cannot be applied to explicit connectivity".into(),
+                ),
+            ));
+        }
         return assemble_explicit_structural_system(model, &excitations)
             .map_err(LinearAssemblyError::Structural);
     }
@@ -677,16 +715,33 @@ fn assemble_linear_system_impl(
     let mut structural_wrench_lowering = Vec::new();
     if structural_requirement.is_some() {
         if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
-            structural_wrench_lowering = apply_solver_mesh_structural_regions(
-                model,
+            structural_wrench_lowering = apply_solver_mesh_structural_loads(
                 &excitations,
                 mesh,
                 &structural_dof_layout,
-                &mut constrained,
                 &mut rhs,
                 true,
             )
             .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+            constrained.fill(false);
+            let compiled_plan;
+            let constraint_plan = if let Some(plan) = supplied_constraint_plan {
+                plan.validate_against(model, mesh)
+                    .map_err(LinearAssemblyError::ConstraintPlan)?;
+                plan
+            } else {
+                compiled_plan = CanonicalStructuralConstraintPlan::compile(model, mesh)
+                    .map_err(LinearAssemblyError::ConstraintPlan)?;
+                &compiled_plan
+            };
+            apply_solid_constraint_plan(
+                constraint_plan,
+                mesh,
+                &structural_dof_layout,
+                &mut constrained,
+                &mut rhs,
+            )
+            .map_err(LinearAssemblyError::Structural)?;
         }
     }
 
@@ -2012,6 +2067,54 @@ fn constrain_dof(
     }
 }
 
+fn apply_solid_constraint_plan(
+    plan: &CanonicalStructuralConstraintPlan,
+    mesh: &SolverMeshArtifact,
+    layout: &StructuralDofLayout,
+    constrained: &mut [bool],
+    rhs: &mut [f64],
+) -> Result<(), StructuralAssemblyError> {
+    let node_indices = mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.stable_identity, index))
+        .collect::<BTreeMap<_, _>>();
+    for row in &plan.rows {
+        let node_index = node_indices
+            .get(&row.node_identity)
+            .copied()
+            .ok_or(StructuralAssemblyError::ConstraintPlanNodeAbsent)?;
+        let kind = match row.dof {
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => {
+                StructuralDofKind::Ux
+            }
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => {
+                StructuralDofKind::Uy
+            }
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => {
+                StructuralDofKind::Uz
+            }
+            CanonicalStructuralDof::Rotation(_) => {
+                return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
+                    constraint_id: row.constraint_id.clone(),
+                    constraint_kind: "rotational_dof_on_solid",
+                });
+            }
+        };
+        constrain_dof(
+            layout,
+            constrained,
+            rhs,
+            node_index,
+            kind,
+            row.right_hand_side / row.coefficient,
+        );
+    }
+    Ok(())
+}
+
 fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
     for dof in 0..dof_count {
         if !constrained[dof] {
@@ -2557,13 +2660,11 @@ mod tests {
 
         assert!(matches!(
             err,
-            LinearAssemblyError::SolverMeshRegionMapping(
-                SolverMeshRegionMappingError::UnmappedConstraintRegion { .. }
-            )
+            LinearAssemblyError::ConstraintPlan(ConstraintPlanError::EmptyTarget { .. })
         ));
         let message = err.to_string();
-        assert!(message.contains("constraint_id=fixed_root"));
-        assert!(message.contains("region_id=missing_root"));
+        assert!(message.contains("`fixed_root`"));
+        assert!(message.contains("`missing_root`"));
     }
 
     #[test]

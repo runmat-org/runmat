@@ -754,8 +754,38 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    assert_eq!(prepared.inputs.len(), 2);
-    assert_eq!(prepared.program.request.arguments.len(), 3);
+    assert_eq!(prepared.inputs.len(), 3);
+    assert_eq!(prepared.program.request.arguments.len(), 4);
+    assert_eq!(
+        prepared
+            .inputs
+            .iter()
+            .map(|input| input.manifest.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            AnalysisNumericalObjectKind::SolverInvocation,
+            AnalysisNumericalObjectKind::Mesh,
+            AnalysisNumericalObjectKind::ConstraintPlan,
+        ]
+    );
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::from_canonical_bytes(
+            &prepared.inputs[2].payload(),
+        )
+        .unwrap();
+    constraint_plan
+        .validate_against(&solve.model, &mesh)
+        .unwrap();
+    assert_eq!(
+        prepared.inputs[2].manifest.logical_identity,
+        ConstraintPlanIdentity::new(
+            prepared.host.workload.step,
+            prepared.inputs[1].manifest.logical_identity,
+            constraint_plan.content_digest().unwrap(),
+        )
+        .unwrap()
+        .digest()
+    );
     assert!(prepared
         .program
         .request
@@ -857,7 +887,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    assert_eq!(branch.inputs.len(), 3);
+    assert_eq!(branch.inputs.len(), 4);
     assert_eq!(
         branch
             .inputs
@@ -867,6 +897,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         vec![
             AnalysisNumericalObjectKind::SolverInvocation,
             AnalysisNumericalObjectKind::Mesh,
+            AnalysisNumericalObjectKind::ConstraintPlan,
             AnalysisNumericalObjectKind::SemanticState,
         ]
     );
@@ -1294,6 +1325,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             .map(|input| input.reference_kind)
             .collect::<Vec<_>>()
             == vec![
+                ValueRefKind::DriverObject,
                 ValueRefKind::DriverObject,
                 ValueRefKind::DriverObject,
                 ValueRefKind::ResultObject,

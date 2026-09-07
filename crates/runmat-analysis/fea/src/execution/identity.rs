@@ -181,11 +181,11 @@ impl ConstraintPlanIdentity {
     pub fn new(
         step: StepIdentity,
         mesh_digest: Digest,
-        authored_constraints_digest: Digest,
+        constraint_plan_digest: Digest,
     ) -> AnalysisExecutionResult<Self> {
         Self::derive(
             "constraint-plan",
-            &(step, mesh_digest, authored_constraints_digest),
+            &(step, mesh_digest, constraint_plan_digest),
         )
     }
 }

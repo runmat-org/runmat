@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
 use runmat_analysis_fea::execution::{
     AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisWorkKind,
     CanonicalSemanticState, CanonicalStateTransition, CanonicalStateTransitionInput,
@@ -183,6 +184,15 @@ pub fn prepare_structural_linear_program(
         ));
     }
 
+    let constraint_plan =
+        CanonicalStructuralConstraintPlan::compile(&preparation.workload.model, &preparation.mesh)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_plan_bytes = constraint_plan
+        .canonical_bytes()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_plan_digest = constraint_plan
+        .content_digest()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let solve_bytes = preparation.workload.canonical_bytes()?;
     let mesh_bytes = preparation
         .mesh
@@ -222,6 +232,7 @@ pub fn prepare_structural_linear_program(
         preparation.authored_study_digest,
         preparation.frozen_project_digest,
         mesh_digest,
+        constraint_plan_digest,
     )?;
     if let Some(transition) = preparation.workload.initial_guess_transition.as_ref() {
         let producer = preparation
@@ -262,9 +273,18 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
+    let constraint_plan = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ConstraintPlan,
+        identities.constraint_plan.digest(),
+        &constraint_plan_bytes,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
     let mut inputs = vec![
         (invocation, ValueRefKind::DriverObject),
         (mesh, ValueRefKind::DriverObject),
+        (constraint_plan, ValueRefKind::DriverObject),
     ];
     if let Some(initial_guess) = preparation.initial_guess {
         inputs.push((initial_guess, ValueRefKind::ResultObject));
@@ -372,6 +392,7 @@ struct StructuralIdentities {
     sequence: SequenceIdentity,
     step: StepIdentity,
     problem: ProblemIdentity,
+    constraint_plan: ConstraintPlanIdentity,
     execution_plan: ExecutionPlanIdentity,
 }
 
@@ -380,16 +401,13 @@ fn derive_identities(
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
     mesh_digest: Digest,
+    constraint_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
     let step_contract = workload.procedure_step()?;
     let study = StudyIdentity::new(authored_study_digest, frozen_project_digest)?;
     let sequence = SequenceIdentity::from_authored(study, &workload.model.sequence)?;
     let step = StepIdentity::from_authored(sequence, step_contract)?;
-    let constraints = ConstraintPlanIdentity::new(
-        step,
-        mesh_digest,
-        contract_digest("constraints", &workload.model.constraints)?,
-    )?;
+    let constraints = ConstraintPlanIdentity::new(step, mesh_digest, constraint_plan_digest)?;
     let excitations = workload
         .model
         .excitations
@@ -471,6 +489,7 @@ fn derive_identities(
         sequence,
         step,
         problem,
+        constraint_plan: constraints,
         execution_plan,
     })
 }

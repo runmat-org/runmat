@@ -1,5 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisModel, BoundaryTransferImplementation, SourceImplementation, StructuralConstraintKind,
+    AnalysisModel, BoundaryTransferImplementation, CoordinateFrame, SourceImplementation,
+    StructuralConstraintKind,
 };
 
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
@@ -233,6 +234,12 @@ pub(super) fn validate_structural_inputs(
         .iter()
         .filter_map(|value| value.structural())
     {
+        if constraint.frame != CoordinateFrame::Global {
+            return Err(StructuralAssemblyError::UnsupportedConstraintFrame {
+                constraint_id: constraint.constraint_id.clone(),
+                frame: constraint.frame.context_label(),
+            });
+        }
         let supported = match basis {
             StructuralProjectionBasis::CanonicalSolid => matches!(
                 constraint.kind,
