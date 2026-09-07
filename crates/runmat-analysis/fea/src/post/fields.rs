@@ -60,7 +60,7 @@ pub fn recover_result_fields(
     let strain_energy_density_values =
         recover_strain_energy_density(&strain_values, &stress_values);
     let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
-    let reaction_values = recover_reaction_force(summary, &internal_force);
+    let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
     let rotation_values = recover_rotation(summary, &solve_result.solution);
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
@@ -104,7 +104,7 @@ pub fn recover_result_fields(
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-            reaction_shape(summary),
+            vec![node_count, VECTOR_COMPONENT_COUNT],
             reaction_values,
         ),
         AnalysisField::host_f64(
@@ -878,19 +878,29 @@ fn average_component(values: &[[f64; 6]; 3], component: usize) -> f64 {
     values.iter().map(|value| value[component]).sum::<f64>() / values.len() as f64
 }
 
-fn recover_reaction_force(summary: &AssemblySummary, internal_force: &[f64]) -> Vec<f64> {
-    let mut reactions = vec![0.0; reaction_shape(summary).iter().product()];
-    let mut constrained_ordinal = 0usize;
+fn recover_reaction_force(
+    summary: &AssemblySummary,
+    internal_force: &[f64],
+    node_count: usize,
+) -> Vec<f64> {
+    let mut reactions = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
     for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
         if !*is_constrained {
             continue;
         }
-        let row = constrained_ordinal / VECTOR_COMPONENT_COUNT;
-        let component = constrained_ordinal % VECTOR_COMPONENT_COUNT;
+        let Some(address) = summary.structural_dof_layout.address(dof) else {
+            continue;
+        };
+        let Some(component) = translational_component(address.kind) else {
+            continue;
+        };
+        let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
+        if target >= reactions.len() {
+            continue;
+        }
         let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
         let internal = internal_force.get(dof).copied().unwrap_or(0.0);
-        reactions[row * VECTOR_COMPONENT_COUNT + component] = internal - rhs;
-        constrained_ordinal += 1;
+        reactions[target] = internal - rhs;
     }
     reactions
 }
@@ -1003,13 +1013,6 @@ fn structural_displacement_node_count(summary: &AssemblySummary, dof_count: usiz
     }
 }
 
-fn reaction_shape(summary: &AssemblySummary) -> Vec<usize> {
-    let rows = summary
-        .constrained_dof_count
-        .div_ceil(VECTOR_COMPONENT_COUNT);
-    vec![rows, VECTOR_COMPONENT_COUNT]
-}
-
 fn recover_total_strain_energy(displacement: &[f64], internal_force: &[f64]) -> f64 {
     0.5 * displacement
         .iter()
@@ -1059,6 +1062,11 @@ mod tests {
     use crate::{
         assembly::{assemble_structural_system, StructuralFormulationRequirement},
         fixtures::{fixture_model, FixtureId},
+    };
+    use runmat_analysis_core::{
+        AnalysisConstraint, CoordinateFrame, Displacement, PrescribedStructuralDofs,
+        PrescribedValue, RegionTarget, StructuralConstraint, StructuralConstraintKind,
+        StructuralTranslationDof, TranslationDofValue,
     };
     use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -1116,6 +1124,63 @@ mod tests {
         assert_eq!(metrics.basis, "solid_tetrahedron4_constant_strain");
         assert_eq!(metrics.solver_mesh_node_count, 4);
         assert_eq!(metrics.solver_mesh_element_count, 1);
+    }
+
+    #[test]
+    fn reaction_force_retains_the_constrained_node_and_component() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "node_y".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::point("node:2"),
+                translations: vec![TranslationDofValue {
+                    dof: StructuralTranslationDof::Uy,
+                    value: PrescribedValue::Constant(Displacement::new(0.0)),
+                }],
+                rotations: Vec::new(),
+            }),
+        })];
+        let mesh = tetrahedron4_mesh();
+        let node_index = mesh
+            .topology
+            .nodes
+            .iter()
+            .position(|node| node.node_id == 2)
+            .expect("fixture contains node 2");
+        let summary = assemble_structural_system(
+            &model,
+            Some(mesh),
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("component constraint should assemble");
+        let constrained_dof = summary
+            .structural_dof_layout
+            .index(node_index, StructuralDofKind::Uy)
+            .expect("node y DOF should exist");
+        let mut internal_force = vec![0.0; summary.dof_count];
+        internal_force[constrained_dof] = 42.0;
+
+        let reactions = recover_reaction_force(
+            &summary,
+            &internal_force,
+            summary.structural_dof_layout.node_count(),
+        );
+
+        assert_eq!(reactions.len(), 4 * VECTOR_COMPONENT_COUNT);
+        assert_eq!(reactions[node_index * VECTOR_COMPONENT_COUNT + 1], 42.0);
+        assert_eq!(
+            reactions
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| **value != 0.0)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>(),
+            vec![node_index * VECTOR_COMPONENT_COUNT + 1]
+        );
     }
 
     #[test]

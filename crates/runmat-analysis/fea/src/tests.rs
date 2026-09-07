@@ -233,7 +233,7 @@ fn canonical_cantilever_benchmark_runs() {
     );
     assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE).shape,
-        vec![3, 3]
+        vec![4, 3]
     );
     assert_eq!(
         field(&result, FEA_FIELD_STRUCTURAL_ROTATION).shape,
