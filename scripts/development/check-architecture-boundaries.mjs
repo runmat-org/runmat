@@ -2234,6 +2234,38 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 224,
   leafLineCeiling: 256,
 });
+enforceMigratedBuiltinFamily({
+  name: "typecast catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/math/elementwise/typecast"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/typecast/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/math/elementwise/typecast/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/typecast.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/typecast.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "typecast runtime",
+  roots: ["crates/runmat-runtime/src/builtins/math/elementwise/typecast"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/typecast/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/typecast/host/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/typecast/host/bytes/mod.rs",
+    "crates/runmat-runtime/src/builtins/math/elementwise/typecast/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/math/elementwise/typecast.rs",
+  ],
+  testLineCeiling: 192,
+});
+const typecastTarget = read(
+  "crates/runmat-runtime/src/builtins/math/elementwise/typecast/target.rs"
+);
+if (/match\s+[^\n{]*(?:class|name).*\{/.test(typecastTarget)) {
+  fail("typecast target selection must resolve canonical typed class identities, not class-name switches");
+}
 const linearAlgebraOpsRoot = read(
   "crates/runmat-runtime/src/builtins/math/linalg/ops/mod.rs"
 );

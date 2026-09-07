@@ -68,6 +68,9 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::NumericComponent(rule) => {
             super::super::math::complex_components::infer(request, entry, rule)
         }
+        MathInferenceRule::Typecast => {
+            crate::catalog::entries::math::elementwise::typecast::infer(request, entry)
+        }
         MathInferenceRule::Rounding(function) => {
             super::super::math_rounding::infer_rounding(request, entry, function)
         }

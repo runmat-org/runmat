@@ -66,6 +66,16 @@ impl NumericClass {
         }
     }
 
+    /// Width of one real scalar in the class's native representation.
+    pub const fn byte_width(self) -> usize {
+        match self {
+            Self::Double | Self::Int64 | Self::UInt64 => 8,
+            Self::Single | Self::Int32 | Self::UInt32 => 4,
+            Self::Int16 | Self::UInt16 => 2,
+            Self::Int8 | Self::UInt8 => 1,
+        }
+    }
+
     pub const fn integer_class(self) -> Option<crate::IntegerClass> {
         use crate::IntegerClass;
 
