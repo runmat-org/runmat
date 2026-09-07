@@ -14,6 +14,7 @@ mod numeric_limits;
 mod powers_of_two;
 mod roots;
 mod support;
+pub(in crate::catalog) mod typecast;
 
 pub use binary_arithmetic::*;
 pub use complex_components::*;
@@ -30,6 +31,11 @@ pub use numeric_conversions::*;
 pub use numeric_limits::*;
 pub use powers_of_two::*;
 pub use roots::*;
+pub use typecast::{
+    TYPECAST_CATALOG_ENTRY, TYPECAST_DESCRIPTOR, TYPECAST_ERROR_GPU_UNSUPPORTED,
+    TYPECAST_ERROR_INTERNAL, TYPECAST_ERROR_INVALID_ARGUMENT, TYPECAST_ERROR_INVALID_INPUT,
+    TYPECAST_INTEGER_CAPABILITIES,
+};
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     binary_arithmetic::ENTRIES,
@@ -47,4 +53,5 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     numeric_limits::ENTRIES,
     powers_of_two::ENTRIES,
     roots::ENTRIES,
+    typecast::ENTRIES,
 ];
