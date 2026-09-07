@@ -104,6 +104,32 @@ fn unsupported_frame_fails_and_equivalent_overlaps_are_evidenced() {
         plan.evidence.active_row_count + plan.evidence.redundant_row_count,
         plan.rows.len()
     );
+    assert_eq!(
+        plan.rows
+            .iter()
+            .filter(|row| row.reaction_recovery == ReactionRecovery::RedundantEquation)
+            .count(),
+        plan.evidence.redundant_row_count
+    );
+    assert_eq!(
+        plan.rows
+            .iter()
+            .filter(|row| {
+                row.reaction_recovery == ReactionRecovery::UnconstrainedEquilibriumResidual
+            })
+            .count(),
+        plan.evidence.active_row_count
+    );
+
+    let mut substituted = plan;
+    let active = substituted
+        .rows
+        .iter_mut()
+        .find(|row| row.reaction_recovery == ReactionRecovery::UnconstrainedEquilibriumResidual)
+        .unwrap();
+    active.reaction_recovery = ReactionRecovery::RedundantEquation;
+    active.identity = super::plan::row_identity(active).unwrap();
+    assert!(substituted.validate().is_err());
 }
 
 #[test]

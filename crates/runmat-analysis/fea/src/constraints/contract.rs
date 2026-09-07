@@ -41,6 +41,7 @@ pub enum ConstraintEnforcement {
 #[serde(rename_all = "snake_case")]
 pub enum ReactionRecovery {
     UnconstrainedEquilibriumResidual,
+    RedundantEquation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

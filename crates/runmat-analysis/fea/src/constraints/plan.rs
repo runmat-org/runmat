@@ -118,7 +118,7 @@ impl CanonicalStructuralConstraintPlan {
 
         groups.sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
         rows.sort_by_key(|row| (row.node_identity, row.dof, row.constraint_id.clone()));
-        let (active_row_count, redundant_row_count) = analyze_rows(&rows)?;
+        let (active_row_count, redundant_row_count) = classify_rows(&mut rows)?;
         let plan = Self {
             schema_version: 1,
             topology_digest: mesh.canonical_digest,
@@ -189,7 +189,6 @@ impl CanonicalStructuralConstraintPlan {
                 || row.node_identity == StableDigest::ZERO
                 || row.coefficient != 1.0
                 || !row.right_hand_side.is_finite()
-                || row.reaction_recovery != ReactionRecovery::UnconstrainedEquilibriumResidual
                 || row.identity != row_identity(row)?
             {
                 return Err(ConstraintPlanError::Invalid(
@@ -197,7 +196,7 @@ impl CanonicalStructuralConstraintPlan {
                 ));
             }
         }
-        let (active, redundant) = analyze_rows(&self.rows)?;
+        let (active, redundant) = validate_row_classification(&self.rows)?;
         if active != self.evidence.active_row_count
             || redundant != self.evidence.redundant_row_count
         {
@@ -322,7 +321,9 @@ fn new_row(
     Ok(row)
 }
 
-fn row_identity(row: &CanonicalStructuralConstraintRow) -> Result<Digest, ConstraintPlanError> {
+pub(super) fn row_identity(
+    row: &CanonicalStructuralConstraintRow,
+) -> Result<Digest, ConstraintPlanError> {
     canonical_digest(
         ROW_DOMAIN,
         &(
@@ -340,7 +341,31 @@ fn row_key(row: &CanonicalStructuralConstraintRow) -> (StableDigest, CanonicalSt
     (row.node_identity, row.dof, row.constraint_id.as_str())
 }
 
-fn analyze_rows(
+fn classify_rows(
+    rows: &mut [CanonicalStructuralConstraintRow],
+) -> Result<(usize, usize), ConstraintPlanError> {
+    let mut owners = BTreeMap::<_, (&str, f64)>::new();
+    let mut redundant = 0;
+    for row in rows {
+        let key = (row.node_identity, row.dof);
+        if let Some((first, value)) = owners.get(&key).copied() {
+            if value != row.right_hand_side {
+                return Err(ConstraintPlanError::ConflictingRow {
+                    first_constraint_id: first.into(),
+                    second_constraint_id: row.constraint_id.clone(),
+                });
+            }
+            row.reaction_recovery = ReactionRecovery::RedundantEquation;
+            row.identity = row_identity(row)?;
+            redundant += 1;
+        } else {
+            owners.insert(key, (row.constraint_id.as_str(), row.right_hand_side));
+        }
+    }
+    Ok((owners.len(), redundant))
+}
+
+fn validate_row_classification(
     rows: &[CanonicalStructuralConstraintRow],
 ) -> Result<(usize, usize), ConstraintPlanError> {
     let mut owners = BTreeMap::<_, (&str, f64)>::new();
@@ -354,8 +379,18 @@ fn analyze_rows(
                     second_constraint_id: row.constraint_id.clone(),
                 });
             }
+            if row.reaction_recovery != ReactionRecovery::RedundantEquation {
+                return Err(ConstraintPlanError::Invalid(
+                    "a redundant constraint row claims independent reaction recovery".into(),
+                ));
+            }
             redundant += 1;
         } else {
+            if row.reaction_recovery != ReactionRecovery::UnconstrainedEquilibriumResidual {
+                return Err(ConstraintPlanError::Invalid(
+                    "an active constraint row does not own reaction recovery".into(),
+                ));
+            }
             owners.insert(key, (row.constraint_id.as_str(), row.right_hand_side));
         }
     }
