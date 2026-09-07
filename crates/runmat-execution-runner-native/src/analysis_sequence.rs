@@ -302,7 +302,11 @@ impl SequencePool for LocalSequencePool {
         let mut responses = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
         let mut failure = None;
         let mut deadline_exceeded = false;
-        let mut cancellation_started: Option<Instant> = None;
+        let mut user_cancelled = runmat_runtime::interrupt::is_cancelled();
+        let mut cancellation_started = user_cancelled.then(Instant::now);
+        if user_cancelled {
+            self.session.cancel(CancellationReason::User);
+        }
         while responses.iter().any(Option::is_none) {
             for (index, task) in tasks.iter().enumerate() {
                 if responses[index].is_some() {
@@ -312,7 +316,7 @@ impl SequencePool for LocalSequencePool {
                     match result {
                         Ok(success) => responses[index] = Some(success_response(success)),
                         Err(message) => {
-                            if !deadline_exceeded {
+                            if !deadline_exceeded && !user_cancelled {
                                 if failure.is_none() {
                                     self.session.cancel(CancellationReason::ParentScope);
                                     cancellation_started = Some(Instant::now());
@@ -327,7 +331,20 @@ impl SequencePool for LocalSequencePool {
                 }
             }
             if responses.iter().any(Option::is_none) {
-                if !deadline_exceeded && failure.is_none() && started.elapsed() >= maximum_wall {
+                if !deadline_exceeded
+                    && failure.is_none()
+                    && !user_cancelled
+                    && runmat_runtime::interrupt::is_cancelled()
+                {
+                    self.session.cancel(CancellationReason::User);
+                    user_cancelled = true;
+                    cancellation_started = Some(Instant::now());
+                }
+                if !deadline_exceeded
+                    && !user_cancelled
+                    && failure.is_none()
+                    && started.elapsed() >= maximum_wall
+                {
                     self.session.cancel(CancellationReason::Deadline);
                     deadline_exceeded = true;
                     cancellation_started = Some(Instant::now());
@@ -341,6 +358,9 @@ impl SequencePool for LocalSequencePool {
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
+        }
+        if user_cancelled {
+            return Err(NativeExecutionError::Cancelled);
         }
         if let Some(message) = failure {
             return Err(NativeExecutionError::Protocol(format!(

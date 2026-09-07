@@ -1,5 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum NativeExecutionError {
+    #[error("native execution was cancelled")]
+    Cancelled,
     #[error("invalid native execution configuration: {0}")]
     Configuration(String),
     #[error("native process host failed: {0}")]

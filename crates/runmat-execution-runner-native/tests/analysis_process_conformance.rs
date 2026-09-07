@@ -1,5 +1,9 @@
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
@@ -31,9 +35,9 @@ use runmat_execution_runner::{PoolSpec, WorkerSpec};
 use runmat_execution_runner_native::{
     execute_analysis_program_request, execute_structural_sequence_locally,
     execute_structural_sequence_remotely, run_remote_worker_quic, NativeAnalysisHostLimits,
-    NativeAnalysisKernel, NativeExecutionConfig, NativeProgramSession, NativeProgramTask,
-    QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel, RemoteWorkerChannelConfig,
-    RemoteWorkerQuicRequest, StructuralSequenceExecutionPolicy,
+    NativeAnalysisKernel, NativeExecutionConfig, NativeExecutionError, NativeProgramSession,
+    NativeProgramTask, QuicRemoteWorkerChannel, RemotePoolDriver, RemoteWorkerChannel,
+    RemoteWorkerChannelConfig, RemoteWorkerQuicRequest, StructuralSequenceExecutionPolicy,
 };
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
@@ -176,6 +180,24 @@ async fn parent() {
             .contains("exceeded its wall-time limit after reaching quiescence"),
         "unexpected structural sequence cancellation error: {cancellation}"
     );
+
+    let mut user_cancelled_config = NativeExecutionConfig::for_current_executable().unwrap();
+    user_cancelled_config.executable = std::env::current_exe().unwrap();
+    user_cancelled_config.worker_arguments = vec!["--child".into()];
+    user_cancelled_config.max_workers = 2;
+    user_cancelled_config.store_root = directory.path().join("user-cancelled-analysis-sequence");
+    let interrupt = Arc::new(AtomicBool::new(true));
+    let interrupt_guard =
+        runmat_runtime::interrupt::replace_interrupt(Some(Arc::clone(&interrupt)));
+    let cancellation = execute_structural_sequence_locally(
+        user_cancelled_config,
+        sequence_preparation(revision(), "user-cancelled-analysis-sequence"),
+        sequence_policy(),
+    )
+    .await;
+    assert!(matches!(cancellation, Err(NativeExecutionError::Cancelled)));
+    interrupt.store(false, Ordering::Relaxed);
+    drop(interrupt_guard);
 
     remote_conformance(process_payload).await;
     durable_conformance(inline_payload).await;

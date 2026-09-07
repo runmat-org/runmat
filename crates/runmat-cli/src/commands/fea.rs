@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use log::info;
 use runmat_config::runtime::RunMatRuntimeConfig;
+use runmat_execution_runner_native::NativeStructuralStudyPlacement;
 use runmat_runtime::analysis::{
     analysis_execute_structural_study_with_placement,
     analysis_execute_structural_sweep_with_placement, load_fea_document_from_path_async,
@@ -16,7 +17,6 @@ use crate::presentation;
 use crate::AlreadyReportedCliError;
 
 pub(super) mod callables;
-mod portable;
 pub(crate) mod remote;
 mod signal_materialization;
 
@@ -69,7 +69,9 @@ pub async fn execute_fea_path(
                 ExecutionTarget::Local => {
                     signal_materialization::materialize_study(&path, &mut spec, cli, config)
                         .await?;
-                    let placement = portable::LocalStructuralStudyPlacement::new(config);
+                    let placement = NativeStructuralStudyPlacement::for_current_executable(
+                        crate::diagnostics::parser_compat(config.language.compat),
+                    )?;
                     Some(
                         analysis_execute_structural_study_with_placement(
                             &spec,
@@ -111,7 +113,9 @@ pub async fn execute_fea_path(
                 ExecutionTarget::Local => {
                     signal_materialization::materialize_sweep(&path, &mut spec, cli, config)
                         .await?;
-                    let placement = portable::LocalStructuralStudyPlacement::new(config);
+                    let placement = NativeStructuralStudyPlacement::for_current_executable(
+                        crate::diagnostics::parser_compat(config.language.compat),
+                    )?;
                     Some(
                         analysis_execute_structural_sweep_with_placement(
                             &spec, context, &placement,

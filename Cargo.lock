@@ -6547,6 +6547,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "dirs 5.0.1",
+ "futures",
  "rand 0.8.6",
  "rcgen",
  "runmat-analysis-core",

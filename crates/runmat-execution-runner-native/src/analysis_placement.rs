@@ -1,18 +1,13 @@
 use std::collections::BTreeSet;
 
-use anyhow::Result;
 use futures::stream::{FuturesUnordered, StreamExt};
 use runmat_analysis_execution::StructuralSequencePreparation;
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
-use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::{Digest, ProgramRevision};
+use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ArtifactAccess;
-use runmat_execution_runner_native::{
-    execute_structural_sequence_locally, NativeExecutionConfig, StructuralSequenceExecutionPolicy,
-};
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
     StructuralStudyExecutionFailure, StructuralStudyPlacementEntry,
@@ -21,29 +16,47 @@ use runmat_runtime::analysis::{
     StructuralStudyStepNumericalResult,
 };
 
-pub(super) struct LocalStructuralStudyPlacement<'a> {
-    config: &'a RunMatRuntimeConfig,
+use crate::{
+    execute_structural_sequence_locally, NativeExecutionConfig, StructuralSequenceExecutionPolicy,
+};
+
+/// Native-process placement for runtime-prepared structural studies.
+///
+/// The runtime retains semantic preparation, sweep policy, numerical admission, and publication.
+/// This adapter owns only bounded process placement and translation to the generic task substrate.
+pub struct NativeStructuralStudyPlacement {
+    config: NativeExecutionConfig,
+    program_environment: ProgramEnvironment,
 }
 
-impl<'a> LocalStructuralStudyPlacement<'a> {
-    pub(super) fn new(config: &'a RunMatRuntimeConfig) -> Self {
-        Self { config }
+impl NativeStructuralStudyPlacement {
+    pub fn new(config: NativeExecutionConfig, program_environment: ProgramEnvironment) -> Self {
+        Self {
+            config,
+            program_environment,
+        }
+    }
+
+    pub fn for_current_executable(
+        compatibility_mode: runmat_core::CompatMode,
+    ) -> std::io::Result<Self> {
+        Ok(Self::new(
+            NativeExecutionConfig::for_current_executable()?,
+            runmat_core::program_environment(compatibility_mode),
+        ))
     }
 }
 
-impl StructuralStudyPlacementExecutor for LocalStructuralStudyPlacement<'_> {
+impl StructuralStudyPlacementExecutor for NativeStructuralStudyPlacement {
     fn execute<'a>(
         &'a self,
         entries: &'a [StructuralStudyPlacementEntry<'a>],
     ) -> StructuralStudyPlacementFuture<'a> {
         Box::pin(async move {
             if entries.is_empty() {
-                return Err("local structural placement requires at least one study".into());
+                return Err("native structural placement requires at least one study".into());
             }
-            let available_workers = NativeExecutionConfig::for_current_executable()
-                .map_err(|error| error.to_string())?
-                .max_workers
-                .max(1);
+            let available_workers = self.config.max_workers.max(1);
             let workers_per_study = if entries.len() == 1 {
                 available_workers
             } else {
@@ -56,7 +69,7 @@ impl StructuralStudyPlacementExecutor for LocalStructuralStudyPlacement<'_> {
             for batch in entries.chunks(concurrent_studies) {
                 let pending = FuturesUnordered::new();
                 for entry in batch {
-                    pending.push(execute_entry(entry, self.config, workers_per_study));
+                    pending.push(execute_entry(entry, self, workers_per_study));
                 }
                 results.extend(pending.collect::<Vec<_>>().await);
             }
@@ -67,13 +80,15 @@ impl StructuralStudyPlacementExecutor for LocalStructuralStudyPlacement<'_> {
 
 async fn execute_entry(
     entry: &StructuralStudyPlacementEntry<'_>,
-    config: &RunMatRuntimeConfig,
+    placement: &NativeStructuralStudyPlacement,
     workers_per_study: u32,
 ) -> StructuralStudyPlacementResult {
-    let outcome = match execute_one(entry.study, entry.prepared, config, workers_per_study).await {
-        Ok(result) => Ok(result),
-        Err(error) => Err(StructuralStudyExecutionFailure::Failed(error.to_string())),
-    };
+    let outcome = execute_one(entry.study, entry.prepared, placement, workers_per_study)
+        .await
+        .map_err(|error| match error {
+            crate::NativeExecutionError::Cancelled => StructuralStudyExecutionFailure::Cancelled,
+            error => StructuralStudyExecutionFailure::Failed(error.to_string()),
+        });
     StructuralStudyPlacementResult {
         study_index: entry.study_index,
         outcome,
@@ -83,15 +98,16 @@ async fn execute_entry(
 async fn execute_one(
     study: &AnalysisStudySpec,
     prepared: &PreparedStructuralStudy,
-    config: &RunMatRuntimeConfig,
+    placement: &NativeStructuralStudyPlacement,
     workers_per_study: u32,
-) -> Result<StructuralStudySequenceNumericalResult> {
+) -> crate::NativeExecutionResult<StructuralStudySequenceNumericalResult> {
     let study_digest = analysis_study_content_digest(study);
     let revision = ProgramRevision::new(
         study_digest,
         study_digest,
-        runmat_core::program_environment(crate::diagnostics::parser_compat(config.language.compat)),
-    )?;
+        placement.program_environment.clone(),
+    )
+    .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let workloads = prepared.workloads();
     let maximum_wall_millis = workloads
         .values()
@@ -100,13 +116,18 @@ async fn execute_one(
                 .procedure_step()
                 .map(|step| step.accuracy.resources.maximum_wall_time_milliseconds)
         })
-        .collect::<Result<Vec<_>, _>>()?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?
         .into_iter()
         .max()
-        .ok_or_else(|| anyhow::anyhow!("prepared structural study has no workloads"))?;
+        .ok_or_else(|| {
+            crate::NativeExecutionError::Configuration(
+                "prepared structural study has no workloads".into(),
+            )
+        })?;
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
-    let mut execution_config = NativeExecutionConfig::for_current_executable()?;
+    let mut execution_config = placement.config.clone();
     execution_config.max_workers = workers_per_study.max(1);
     let completed = execute_structural_sequence_locally(
         execution_config,

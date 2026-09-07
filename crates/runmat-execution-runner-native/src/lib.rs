@@ -2,6 +2,7 @@
 
 mod analysis_host;
 mod analysis_kernel;
+mod analysis_placement;
 mod analysis_sequence;
 mod config;
 mod driver;
@@ -30,6 +31,7 @@ mod worker;
 
 pub use analysis_host::{execute_analysis_program_request, NativeAnalysisHostLimits};
 pub use analysis_kernel::NativeAnalysisKernel;
+pub use analysis_placement::NativeStructuralStudyPlacement;
 pub use analysis_sequence::{
     execute_structural_sequence_locally, execute_structural_sequence_remotely,
     StructuralSequenceExecutionPolicy,
