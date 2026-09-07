@@ -3,6 +3,9 @@ set -euo pipefail
 
 if [[ ${RUNMAT_HEADLESS_DEBUG:-0} == "1" ]]; then
   set -x
+  DEBUG_ARGS=(--enable-logging=stderr --v=0)
+else
+  DEBUG_ARGS=()
 fi
 
 if [[ -n "${RUNMAT_CHROME_BIN:-}" ]]; then
@@ -41,6 +44,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     --enable-unsafe-webgpu \
     --disable-gpu-sandbox \
     --disable-webgpu-vsync \
+    "${DEBUG_ARGS[@]}" \
     "$@"
 else
   exec "${CHROME_BIN}" \
@@ -50,6 +54,6 @@ else
     --enable-unsafe-webgpu \
     --disable-gpu-sandbox \
     --disable-webgpu-vsync \
+    "${DEBUG_ARGS[@]}" \
     "$@"
 fi
-

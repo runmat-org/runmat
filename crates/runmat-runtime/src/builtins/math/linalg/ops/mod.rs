@@ -3,10 +3,7 @@
 pub(crate) mod cross;
 pub(crate) mod ctranspose;
 pub(crate) mod dot;
-pub(crate) mod mldivide;
-pub(crate) mod mpower;
-pub(crate) mod mrdivide;
-pub(crate) mod mtimes;
+pub(crate) mod matrix_arithmetic;
 pub(crate) mod pagemtimes;
 pub(crate) mod pagetranspose;
 pub(crate) mod trace;
@@ -15,8 +12,7 @@ pub(crate) mod transpose;
 pub use cross::cross_host_real_for_provider;
 pub use dot::dot_host_complex_for_provider;
 pub use dot::dot_host_real_for_provider;
-pub use mldivide::mldivide_host_real_for_provider;
-pub use mrdivide::mrdivide_host_real_for_provider;
+pub use matrix_arithmetic::{mldivide_host_real_for_provider, mrdivide_host_real_for_provider};
 
 type TransposedSparseValues<T> = (usize, usize, Vec<usize>, Vec<usize>, Vec<T>);
 

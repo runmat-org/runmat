@@ -833,9 +833,42 @@ fn divide_complex_value_f32(numerator: (f32, f32), denominator: (f32, f32)) -> (
 /// Regular power operation: A ^ B  
 /// For matrices, this is matrix exponentiation (A^n where n is integer)
 /// For scalars, this is regular exponentiation
+#[derive(Debug)]
+pub enum MatrixPowerEvaluationError {
+    InvalidExponent(String),
+    Matrix(crate::builtins::common::matrix::MatrixPowerError),
+    IntegerArithmetic(String),
+    UnsupportedOperands(String),
+}
+
+impl std::fmt::Display for MatrixPowerEvaluationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidExponent(message)
+            | Self::IntegerArithmetic(message)
+            | Self::UnsupportedOperands(message) => formatter.write_str(message),
+            Self::Matrix(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for MatrixPowerEvaluationError {}
+
+impl From<crate::builtins::common::matrix::MatrixPowerError> for MatrixPowerEvaluationError {
+    fn from(error: crate::builtins::common::matrix::MatrixPowerError) -> Self {
+        Self::Matrix(error)
+    }
+}
+
 pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
+    power_typed(a, b).map_err(|error| error.to_string())
+}
+
+pub(crate) fn power_typed(a: &Value, b: &Value) -> Result<Value, MatrixPowerEvaluationError> {
     if scalar_power_integer_candidate(a) && scalar_power_integer_candidate(b) {
-        if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Power, "power")? {
+        if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Power, "power")
+            .map_err(MatrixPowerEvaluationError::IntegerArithmetic)?
+        {
             return Ok(result);
         }
     }
@@ -886,9 +919,9 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
         }
 
         // Other cases not supported for regular matrix power
-        _ => Err(format!(
+        _ => Err(MatrixPowerEvaluationError::UnsupportedOperands(format!(
             "Power operation not supported for types: {a:?} ^ {b:?}"
-        )),
+        ))),
     }
 }
 
@@ -901,20 +934,26 @@ fn scalar_power_integer_candidate(value: &Value) -> bool {
     }
 }
 
-fn matrix_power_exponent_from_f64(value: f64) -> Result<i32, String> {
+fn matrix_power_exponent_from_f64(value: f64) -> Result<i32, MatrixPowerEvaluationError> {
     if !value.is_finite() || value.fract() != 0.0 {
-        return Err("Matrix power requires integer exponent".to_string());
+        return Err(MatrixPowerEvaluationError::InvalidExponent(
+            "Matrix power requires integer exponent".to_string(),
+        ));
     }
     if value < i32::MIN as f64 || value > i32::MAX as f64 {
-        return Err("Matrix power exponent is outside the supported int32 range".to_string());
+        return Err(MatrixPowerEvaluationError::InvalidExponent(
+            "Matrix power exponent is outside the supported int32 range".to_string(),
+        ));
     }
     Ok(value as i32)
 }
 
-fn matrix_power_exponent_from_int(value: &IntValue) -> Result<i32, String> {
-    value
-        .try_to_i32()
-        .ok_or_else(|| "Matrix power exponent is outside the supported int32 range".to_string())
+fn matrix_power_exponent_from_int(value: &IntValue) -> Result<i32, MatrixPowerEvaluationError> {
+    value.try_to_i32().ok_or_else(|| {
+        MatrixPowerEvaluationError::InvalidExponent(
+            "Matrix power exponent is outside the supported int32 range".to_string(),
+        )
+    })
 }
 
 /// Element-wise power: A .^ B

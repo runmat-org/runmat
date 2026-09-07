@@ -30,13 +30,6 @@ pub(crate) fn validate_resident_output(
         return Err("provider returned a malformed binary output".to_string());
     }
     let mut output = output;
-    let provenance = if runmat_accelerate_api::handle_is_explicit(left)
-        || runmat_accelerate_api::handle_is_explicit(right)
-    {
-        runmat_accelerate_api::GpuHandleProvenance::Explicit
-    } else {
-        runmat_accelerate_api::GpuHandleProvenance::Automatic
-    };
-    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+    super::gpu_helpers::propagate_output_provenance(&mut output, [left, right]);
     Ok(super::gpu_helpers::resident_gpu_value(output))
 }

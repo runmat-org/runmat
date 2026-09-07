@@ -48,7 +48,8 @@ use wasm_bindgen::JsCast;
 use crate::api::init::install_fs_provider_value;
 use crate::api::streams::js_input_request;
 use crate::runtime::config::{
-    parse_language_compat_from_str, parse_workspace_export_mode, SessionConfig,
+    parse_language_compat_from_str, parse_workspace_export_mode, request_error_namespace,
+    SessionConfig,
 };
 use crate::runtime::execution::BrowserExecutionService;
 use crate::runtime::gpu::{capture_memory_usage, GpuStatus};
@@ -811,6 +812,7 @@ struct ExecuteHostPolicyPayload {
 struct ExecuteRequestPayload {
     source: ExecuteRequestSourcePayload,
     compatibility: Option<String>,
+    error_namespace: Option<String>,
     host_policy: Option<ExecuteHostPolicyPayload>,
     requested_outputs: Option<u32>,
     retain_figures: Option<bool>,
@@ -909,15 +911,24 @@ impl RunMatWasm {
             runmat_core::abi::HostExecutionPolicy::default(),
             session.workspace_handle(),
         );
-        if let Some(compatibility) = request_payload.compatibility.as_deref() {
-            if let Some(parsed) = parse_language_compat_from_str(compatibility) {
-                request.compatibility = parsed;
-            } else {
-                return Err(js_error(&format!(
-                    "executeRequest compatibility is invalid: {compatibility}"
-                )));
-            }
-        }
+        let compatibility_override = request_payload
+            .compatibility
+            .as_deref()
+            .map(|compatibility| {
+                if let Some(parsed) = parse_language_compat_from_str(compatibility) {
+                    request.compatibility = parsed;
+                    Ok(parsed)
+                } else {
+                    Err(js_error(&format!(
+                        "executeRequest compatibility is invalid: {compatibility}"
+                    )))
+                }
+            })
+            .transpose()?;
+        let error_namespace_override = request_error_namespace(
+            compatibility_override,
+            request_payload.error_namespace.as_deref(),
+        );
         if let Some(host_policy) = request_payload.host_policy {
             if let Some(top_level_await) = host_policy.top_level_await {
                 request.host_policy.top_level_await = top_level_await;
@@ -930,7 +941,13 @@ impl RunMatWasm {
                 count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
             };
         }
+        if let Some(namespace) = error_namespace_override.as_deref() {
+            session.set_error_namespace(namespace);
+        }
         let exec_response = session.execute_request(request).await;
+        if error_namespace_override.is_some() {
+            session.set_error_namespace(self.config.borrow().error_namespace.clone());
+        }
         *self.session.borrow_mut() = session;
         let payload = match exec_response.result {
             Ok(outcome) => {

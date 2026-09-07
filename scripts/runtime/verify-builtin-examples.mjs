@@ -780,6 +780,8 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         ua: navigator && navigator.userAgent ? navigator.userAgent : "unknown"
       });
 
+      let logWorkerSnapshot = () => {};
+
       window.addEventListener("error", (event) => {
         logWorkerSnapshot("error");
         sendLog({
@@ -842,7 +844,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
             lowered.includes("worker error");
         };
 
-        const logWorkerSnapshot = (reason) => {
+        logWorkerSnapshot = (reason) => {
           const entries = Array.from(activeWorkerRecords.entries())
             .map(([id, record]) => ({
               id,
@@ -960,11 +962,17 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
           };
 
           worker.onerror = (event) => {
+            const location = event && event.filename
+              ? " at " + event.filename + ":" + (event.lineno || 0) + ":" + (event.colno || 0)
+              : "";
+            const stack = event && event.error && typeof event.error.stack === "string"
+              ? "\\n" + event.error.stack
+              : "";
             finalize({
               id: testCase.id,
               stdoutText: "",
               valueText: "",
-              errorText: "Worker error: " + (event && event.message ? event.message : "unknown")
+              errorText: "Worker error: " + (event && event.message ? event.message : "unknown") + location + stack
             });
           };
 
@@ -1609,7 +1617,9 @@ async function runHeadlessChrome(options) {
     const url = `http://127.0.0.1:${port}/__runner__/runner.html`;
     const chrome = spawn(options.chromeWrapper, [url], {
         cwd: options.repoRoot,
-        stdio: "ignore"
+        stdio: process.env.RUNMAT_HEADLESS_DEBUG === "1"
+            ? ["ignore", "inherit", "inherit"]
+            : "ignore"
     });
 
     const timeoutMs = options.overallTimeoutMs ?? 600000;

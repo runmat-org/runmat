@@ -1,5 +1,5 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use super::super::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult};
@@ -52,6 +52,12 @@ pub(crate) fn upload_value_protected(
             None,
             Some(runmat_accelerate_api::ProviderPrecision::F64),
         ),
+        Value::Int(value) => (
+            vec![1, 1],
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            Some(value.integer_class().into()),
+            None,
+        ),
         Value::Tensor(tensor) => (
             tensor.shape.clone(),
             runmat_accelerate_api::GpuTensorStorage::Real,
@@ -99,6 +105,21 @@ pub(crate) fn upload_value_protected(
                     .with_builtin(builtin)
                     .build()
             })?;
+            gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
+                build_runtime_error(format!(
+                    "{builtin}: failed to restore result to input provider: {error}"
+                ))
+                .with_builtin(builtin)
+                .build()
+            })?
+        }
+        Value::Int(value) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
+                .map_err(|error| {
+                    build_runtime_error(format!("{builtin}: {error}"))
+                        .with_builtin(builtin)
+                        .build()
+                })?;
             gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
                 build_runtime_error(format!(
                     "{builtin}: failed to restore result to input provider: {error}"

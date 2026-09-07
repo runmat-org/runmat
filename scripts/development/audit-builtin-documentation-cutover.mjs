@@ -7,7 +7,10 @@ import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const FIELD_RULES = Object.freeze({
-    aliases: semantic("catalog.identity"),
+    // Legacy sidecars used "aliases" for both callable names and search terms.
+    // Catalog entries model each callable identity independently, so preserve
+    // this metadata in the searchable documentation vocabulary during cutover.
+    aliases: subset("keywords"),
     arguments: semantic("catalog.descriptor"),
     backend: semantic("catalog.placement"),
     behaviors: semantic("sections"),
