@@ -650,6 +650,17 @@ fn sequence_preparation(
         initial_guess_transition: None,
     };
     let mesh = solver_mesh(&workload);
+    let workloads = workload
+        .model
+        .sequence
+        .steps
+        .iter()
+        .map(|step| {
+            let mut step_workload = workload.clone();
+            step_workload.step_id = step.step_id.clone();
+            (step.step_id.clone(), step_workload)
+        })
+        .collect();
     StructuralSequencePreparation {
         authored_study_digest: digest("process-sequence-study"),
         frozen_project_digest: None,
@@ -658,7 +669,7 @@ fn sequence_preparation(
             authorization_scope: authorization_scope.into(),
             encryption_context: digest("process-sequence-encryption"),
         },
-        workload_template: workload,
+        workloads,
         mesh,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),

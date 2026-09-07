@@ -35,7 +35,7 @@ pub struct StructuralSequencePreparation {
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
-    pub workload_template: StructuralLinearWorkload,
+    pub workloads: BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
     pub mesh: SolverMeshArtifact,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -120,14 +120,48 @@ pub struct StructuralSequenceCoordinator {
 
 impl StructuralSequenceCoordinator {
     pub fn new(preparation: StructuralSequencePreparation) -> AnalysisBridgeResult<Self> {
+        let model = preparation
+            .workloads
+            .values()
+            .next()
+            .ok_or_else(|| {
+                AnalysisBridgeError::Invalid(
+                    "structural sequence preparation has no step workloads".into(),
+                )
+            })?
+            .model
+            .clone();
+        let sequence = validate_model_sequence(&model)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        let expected_steps = sequence
+            .sequence()
+            .steps
+            .iter()
+            .map(|step| step.step_id.clone())
+            .collect::<BTreeSet<_>>();
         if preparation
-            .workload_template
-            .initial_guess_transition
-            .is_some()
+            .workloads
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != expected_steps
         {
             return Err(AnalysisBridgeError::Invalid(
-                "sequence preparation does not accept a prebound state transition".into(),
+                "structural sequence workloads do not exactly cover the authored steps".into(),
             ));
+        }
+        for (step_id, workload) in &preparation.workloads {
+            workload.validate_sequence_template()?;
+            if workload.model != model || workload.step_id != *step_id {
+                return Err(AnalysisBridgeError::Identity(
+                    "structural sequence workload differs from its authored step or model",
+                ));
+            }
+            if workload.initial_guess_transition.is_some() {
+                return Err(AnalysisBridgeError::Invalid(
+                    "sequence preparation does not accept a prebound state transition".into(),
+                ));
+            }
         }
         preparation
             .mesh
@@ -138,8 +172,6 @@ impl StructuralSequenceCoordinator {
                 "structural sequence chunk size must be non-zero".into(),
             ));
         }
-        let sequence = validate_model_sequence(&preparation.workload_template.model)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         Ok(Self {
             preparation,
             sequence,
@@ -213,9 +245,14 @@ impl StructuralSequenceCoordinator {
                 }
                 _ => None,
             };
-            let mut workload = self.preparation.workload_template.clone();
-            workload.step_id = step_id.clone();
-            workload.initial_guess_transition = None;
+            let workload = self
+                .preparation
+                .workloads
+                .get(step_id)
+                .ok_or(AnalysisBridgeError::Identity(
+                    "validated sequence step has no exact solver workload",
+                ))?
+                .clone();
             let prepared = prepare_structural_sequence_step(StructuralLinearProgramPreparation {
                 authored_study_digest: self.preparation.authored_study_digest,
                 frozen_project_digest: self.preparation.frozen_project_digest,

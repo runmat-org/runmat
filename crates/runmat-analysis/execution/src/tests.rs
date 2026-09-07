@@ -1145,12 +1145,58 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     }
     .canonical_bytes()
     .unwrap();
+    let mut left_workload = workload.clone();
+    left_workload.step_id = left.step_id.clone();
+    left_workload.preconditioner = SpdPreconditionerKind::Ilu0;
+    let mut right_workload = workload.clone();
+    right_workload.step_id = right.step_id.clone();
+    let workloads = BTreeMap::from([
+        (root.step_id.clone(), workload),
+        (left.step_id.clone(), left_workload),
+        (right.step_id.clone(), right_workload),
+    ]);
+    let mut incomplete_workloads = workloads.clone();
+    incomplete_workloads.remove(&right.step_id);
+    assert!(
+        StructuralSequenceCoordinator::new(StructuralSequencePreparation {
+            authored_study_digest: digest("incomplete-branch-study"),
+            frozen_project_digest: Some(digest("branch-project")),
+            program_revision: revision(),
+            artifact_access: access(),
+            workloads: incomplete_workloads,
+            mesh: mesh.clone(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
+        .is_err()
+    );
+    let mut substituted_workloads = workloads.clone();
+    substituted_workloads
+        .get_mut(&right.step_id)
+        .unwrap()
+        .model
+        .model_id = runmat_analysis_core::AnalysisModelId("substituted-model".into());
+    assert!(
+        StructuralSequenceCoordinator::new(StructuralSequencePreparation {
+            authored_study_digest: digest("substituted-branch-study"),
+            frozen_project_digest: Some(digest("branch-project")),
+            program_revision: revision(),
+            artifact_access: access(),
+            workloads: substituted_workloads,
+            mesh: mesh.clone(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
+        .is_err()
+    );
     let mut coordinator = StructuralSequenceCoordinator::new(StructuralSequencePreparation {
         authored_study_digest: digest("branch-study"),
         frozen_project_digest: Some(digest("branch-project")),
         program_revision: revision(),
         artifact_access: access(),
-        workload_template: workload,
+        workloads,
         mesh,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1253,6 +1299,27 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
                 ValueRefKind::ResultObject,
             ]
     }));
+    let branch_preconditioners = branches
+        .tasks
+        .iter()
+        .map(|task| {
+            let StructuralSequenceNode::Solve(step_id) = &task.node else {
+                unreachable!();
+            };
+            let workload =
+                StructuralLinearWorkload::from_canonical_bytes(&task.prepared.inputs[0].payload())
+                    .unwrap();
+            (step_id.as_str(), workload.preconditioner)
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        branch_preconditioners.get("left"),
+        Some(&SpdPreconditionerKind::Ilu0)
+    );
+    assert_eq!(
+        branch_preconditioners.get("right"),
+        Some(&SpdPreconditionerKind::Jacobi)
+    );
     let branch_source_states = branches
         .tasks
         .iter()

@@ -38,6 +38,51 @@ pub struct StructuralLinearWorkload {
 
 impl StructuralLinearWorkload {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        let step = self.validate_common()?;
+        self.validate_state_input(step)
+    }
+
+    /// Validates one authored sequence workload before its upstream state is bound.
+    ///
+    /// The coordinator accepts only the currently executable transition envelope: a fresh root
+    /// step or one upstream structural-primary state used as an initial guess. Executable workload
+    /// validation remains stricter and requires the exact canonical transition receipt.
+    pub fn validate_sequence_template(&self) -> AnalysisExecutionResult<()> {
+        let step = self.validate_common()?;
+        if self.initial_guess_transition.is_some() {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural sequence template cannot contain a prebound transition".into(),
+            ));
+        }
+        if !step.activations.is_empty() {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural sequence execution does not yet implement step object activation"
+                    .into(),
+            ));
+        }
+        if step.restart != RestartPolicy::Fresh {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural sequence execution does not yet implement restart policies".into(),
+            ));
+        }
+        match step.state_inputs.as_slice() {
+            [] => Ok(()),
+            [input]
+                if input.use_as == StateUse::InitialGuess
+                    && input.required_kind
+                        == runmat_analysis_core::StateKind::StructuralPrimary
+                    && matches!(input.source, StateSource::Upstream { .. }) =>
+            {
+                Ok(())
+            }
+            _ => Err(AnalysisExecutionError::Invalid(
+                "structural sequence execution currently supports at most one upstream structural-primary initial guess"
+                    .into(),
+            )),
+        }
+    }
+
+    fn validate_common(&self) -> AnalysisExecutionResult<&ProcedureStep> {
         if self.schema_version != 1 {
             return Err(AnalysisExecutionError::Invalid(
                 "unsupported structural linear workload schema".into(),
@@ -58,8 +103,7 @@ impl StructuralLinearWorkload {
                 "structural linear workload requires a structural or thermomechanical static direct procedure".into(),
             ));
         }
-        self.validate_state_input(step)?;
-        Ok(())
+        Ok(step)
     }
 
     pub fn procedure_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
