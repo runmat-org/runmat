@@ -2364,6 +2364,193 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
     }
 }
 
+struct CanonicalStudyPlacement {
+    reverse_results: bool,
+}
+
+impl StructuralStudyPlacementExecutor for CanonicalStudyPlacement {
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        Box::pin(async move {
+            let solver = CanonicalStructuralExecutor {
+                calls: AtomicU64::new(0),
+            };
+            let mut results = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let workload = entry
+                    .prepared
+                    .workloads()
+                    .into_values()
+                    .next()
+                    .ok_or_else(|| "prepared placement study has no workload".to_string())?;
+                let run = solver.execute(&workload, entry.prepared.solver_mesh())?;
+                results.push(StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Ok(test_structural_sequence_result(
+                        entry.study,
+                        &workload,
+                        entry.prepared.solver_mesh(),
+                        run,
+                    )),
+                });
+            }
+            if self.reverse_results {
+                results.reverse();
+            }
+            Ok(results)
+        })
+    }
+}
+
+struct CancelledStudyPlacement;
+
+impl StructuralStudyPlacementExecutor for CancelledStudyPlacement {
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        Box::pin(async move {
+            Ok(entries
+                .iter()
+                .map(|entry| StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Err(StructuralStudyExecutionFailure::Cancelled),
+                })
+                .collect())
+        })
+    }
+}
+
+struct FailingStudyPlacement {
+    calls: AtomicU64,
+}
+
+impl StructuralStudyPlacementExecutor for FailingStudyPlacement {
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(entries
+                .iter()
+                .map(|entry| StructuralStudyPlacementResult {
+                    study_index: entry.study_index,
+                    outcome: Err(StructuralStudyExecutionFailure::Failed(
+                        "injected placement failure".to_string(),
+                    )),
+                })
+                .collect())
+        })
+    }
+}
+
+#[test]
+fn placement_lifecycle_restores_authored_sweep_order_before_publication() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-sweep");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-lifecycle-solver-mesh");
+    let mut first = sample_linear_static_study_spec();
+    first.study_id = "placement_first".to_string();
+    first.create_model_intent.model_id = "placement_first_model".to_string();
+    first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let mut second = first.clone();
+    second.study_id = "placement_second".to_string();
+    second.create_model_intent.model_id = "placement_second_model".to_string();
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "placement_order_sweep".to_string(),
+        studies: vec![first, second],
+        fail_fast: false,
+    };
+
+    let envelope = pollster::block_on(analysis_execute_structural_sweep_with_placement(
+        &sweep,
+        OperationContext::new(None, None),
+        &CanonicalStudyPlacement {
+            reverse_results: true,
+        },
+    ))
+    .expect("placement lifecycle should publish the complete sweep");
+
+    assert_eq!(envelope.data.run_entries.len(), 2);
+    assert_eq!(envelope.data.run_entries[0].study_id, "placement_first");
+    assert_eq!(envelope.data.run_entries[1].study_id, "placement_second");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn placement_lifecycle_preserves_cancelled_terminal() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-cancelled");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-cancelled-solver-mesh");
+    let mut spec = sample_linear_static_study_spec();
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+
+    let error = pollster::block_on(analysis_execute_structural_study_with_placement(
+        &spec,
+        OperationContext::new(None, None),
+        &CancelledStudyPlacement,
+    ))
+    .expect_err("cancelled placement must remain cancelled");
+
+    assert_eq!(error.error_type, OperationErrorType::Cancelled);
+    assert_eq!(
+        error.error_code,
+        "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_CANCELLED"
+    );
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
+#[test]
+fn placement_lifecycle_owns_fail_fast_admission() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("placement-lifecycle-fail-fast");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("placement-fail-fast-solver-mesh");
+    let mut first = sample_linear_static_study_spec();
+    first.study_id = "placement_fail_fast_first".to_string();
+    first.create_model_intent.model_id = "placement_fail_fast_first_model".to_string();
+    first.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let mut second = first.clone();
+    second.study_id = "placement_fail_fast_second".to_string();
+    second.create_model_intent.model_id = "placement_fail_fast_second_model".to_string();
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "placement_fail_fast_sweep".to_string(),
+        studies: vec![first, second],
+        fail_fast: true,
+    };
+    let placement = FailingStudyPlacement {
+        calls: AtomicU64::new(0),
+    };
+
+    let error = pollster::block_on(analysis_execute_structural_sweep_with_placement(
+        &sweep,
+        OperationContext::new(None, None),
+        &placement,
+    ))
+    .expect_err("fail-fast sweep must stop at its first failed study");
+
+    assert_eq!(placement.calls.load(Ordering::Relaxed), 1);
+    assert_eq!(error.error_code, "RM.FEA.RUN_STUDY_SWEEP.STUDY_FAILED");
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
 #[test]
 fn portable_structural_study_reenters_shared_runtime_persistence() {
     let _guard = analysis_test_guard();

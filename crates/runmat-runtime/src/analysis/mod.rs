@@ -89,6 +89,7 @@ mod solver_mesh_flow_topology;
 pub mod storage;
 mod structural_study;
 mod study_execution;
+mod study_placement;
 mod study_sweep;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
@@ -107,13 +108,19 @@ pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
     StructuralStudyCompletionIdentity, StructuralStudyExecutionFailure,
-    STRUCTURAL_STUDY_INTENT_MAX_BYTES,
+    StructuralStudySequenceExecutionOutcome, STRUCTURAL_STUDY_INTENT_MAX_BYTES,
 };
 use structural_study::{
     complete_study_run, persist_immutable_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, PreparedStudySequence, PreparedStudyStep,
 };
 use study_execution::execute_study_step;
+pub use study_placement::{
+    analysis_execute_structural_study_with_placement,
+    analysis_execute_structural_sweep_with_placement, StructuralStudyPlacementEntry,
+    StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
+    StructuralStudyPlacementResult,
+};
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
@@ -1101,26 +1108,38 @@ pub fn analysis_prepare_structural_study_op(
 
 pub fn analysis_complete_structural_study_op(
     mut prepared: PreparedStructuralStudy,
-    result: Result<StructuralStudySequenceNumericalResult, String>,
+    outcome: StructuralStudySequenceExecutionOutcome,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
-    let result = result.map_err(|message| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &prepared.study.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_FAILED",
-                error_type: OperationErrorType::Backend,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            message,
-            BTreeMap::from([(
-                "analysis_model_id".to_string(),
-                prepared.study.model.model_id.0.clone(),
-            )]),
-        )
-    })?;
+    let result = match outcome {
+        Ok(result) => result,
+        Err(StructuralStudyExecutionFailure::Failed(message)) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_FAILED",
+                OperationErrorType::Backend,
+                OperationErrorSeverity::Error,
+                message,
+            ));
+        }
+        Err(StructuralStudyExecutionFailure::Cancelled) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_CANCELLED",
+                OperationErrorType::Cancelled,
+                OperationErrorSeverity::Error,
+                "portable structural study execution was cancelled",
+            ));
+        }
+        Err(StructuralStudyExecutionFailure::Indeterminate(message)) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.PORTABLE_EXECUTION_INDETERMINATE",
+                OperationErrorType::Internal,
+                OperationErrorSeverity::Fatal,
+                message,
+            ));
+        }
+    };
     let mut completed = Vec::with_capacity(result.steps.len());
     for step in result.steps {
         let linear = prepared.linears.remove(&step.step_id).ok_or_else(|| {
@@ -1168,6 +1187,31 @@ pub fn analysis_complete_structural_study_op(
         completed,
         result.states,
         result.frozen_project_digest,
+    )
+}
+
+fn structural_study_completion_failure(
+    prepared: &PreparedStructuralStudy,
+    error_code: &'static str,
+    error_type: OperationErrorType,
+    severity: OperationErrorSeverity,
+    message: impl Into<String>,
+) -> OperationErrorEnvelope {
+    operation_error(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &prepared.study.context,
+        OperationErrorSpec {
+            error_code,
+            error_type,
+            retryable: error_type == OperationErrorType::Internal,
+            severity,
+        },
+        message,
+        BTreeMap::from([(
+            "analysis_model_id".to_string(),
+            prepared.study.model.model_id.0.clone(),
+        )]),
     )
 }
 

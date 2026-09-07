@@ -341,6 +341,12 @@ pub fn structural_study_execution_failure(
             OperationErrorSeverity::Error,
             message,
         ),
+        super::StructuralStudyExecutionFailure::Cancelled => (
+            "RM.FEA.RUN_STUDY.EXECUTION_CANCELLED",
+            OperationErrorType::Cancelled,
+            OperationErrorSeverity::Error,
+            "structural study execution was cancelled".to_string(),
+        ),
         super::StructuralStudyExecutionFailure::Indeterminate(message) => (
             "RM.FEA.RUN_STUDY.REMOTE_EXECUTION_INDETERMINATE",
             OperationErrorType::Internal,

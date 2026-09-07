@@ -135,7 +135,12 @@ pub(crate) fn materialize_remote_sweep_outputs(
                     StructuralStudyExecutionFailure::Failed(message),
                 )),
             ),
-            ExactStructuralSweepTerminal::Cancelled => Ok(AnalysisStudySweepRunOutcome::NotRun),
+            ExactStructuralSweepTerminal::Cancelled => Ok(AnalysisStudySweepRunOutcome::Cancelled(
+                structural_study_execution_failure(
+                    &intent,
+                    StructuralStudyExecutionFailure::Cancelled,
+                ),
+            )),
             ExactStructuralSweepTerminal::Indeterminate(message) => Ok(
                 AnalysisStudySweepRunOutcome::Indeterminate(structural_study_execution_failure(
                     &intent,

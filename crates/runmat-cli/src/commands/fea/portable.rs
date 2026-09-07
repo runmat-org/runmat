@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::Result;
+use futures::stream::{FuturesUnordered, StreamExt};
 use runmat_analysis_execution::StructuralSequencePreparation;
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
 use runmat_config::runtime::RunMatRuntimeConfig;
@@ -14,57 +15,76 @@ use runmat_execution_runner_native::{
 };
 use runmat_runtime::analysis::{
     analysis_study_content_digest, AnalysisStudySpec, PreparedStructuralStudy,
-    StructuralStudySequenceNumericalResult, StructuralStudyStepNumericalResult,
+    StructuralStudyExecutionFailure, StructuralStudyPlacementEntry,
+    StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
+    StructuralStudyPlacementResult, StructuralStudySequenceNumericalResult,
+    StructuralStudyStepNumericalResult,
 };
 
-pub(super) struct LocalSweepEntry<'a> {
-    pub(super) study: &'a AnalysisStudySpec,
-    pub(super) prepared: &'a PreparedStructuralStudy,
+pub(super) struct LocalStructuralStudyPlacement<'a> {
+    config: &'a RunMatRuntimeConfig,
 }
 
-pub(super) enum LocalSweepOutcome {
-    Completed(Result<StructuralStudySequenceNumericalResult, String>),
-    NotRun,
-}
-
-pub(super) async fn execute_structural_study(
-    study: &AnalysisStudySpec,
-    prepared: &PreparedStructuralStudy,
-    config: &RunMatRuntimeConfig,
-) -> Result<StructuralStudySequenceNumericalResult, String> {
-    execute_one(study, prepared, config)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-pub(super) async fn execute_structural_sweep(
-    entries: &[LocalSweepEntry<'_>],
-    config: &RunMatRuntimeConfig,
-    fail_fast: bool,
-) -> Result<Vec<LocalSweepOutcome>, String> {
-    if entries.is_empty() {
-        return Err("local structural sweep must contain at least one prepared study".into());
+impl<'a> LocalStructuralStudyPlacement<'a> {
+    pub(super) fn new(config: &'a RunMatRuntimeConfig) -> Self {
+        Self { config }
     }
-    let mut outcomes = Vec::with_capacity(entries.len());
-    let mut failed = false;
-    for entry in entries {
-        if fail_fast && failed {
-            outcomes.push(LocalSweepOutcome::NotRun);
-            continue;
-        }
-        let result = execute_one(entry.study, entry.prepared, config)
-            .await
-            .map_err(|error| error.to_string());
-        failed |= result.is_err();
-        outcomes.push(LocalSweepOutcome::Completed(result));
+}
+
+impl StructuralStudyPlacementExecutor for LocalStructuralStudyPlacement<'_> {
+    fn execute<'a>(
+        &'a self,
+        entries: &'a [StructuralStudyPlacementEntry<'a>],
+    ) -> StructuralStudyPlacementFuture<'a> {
+        Box::pin(async move {
+            if entries.is_empty() {
+                return Err("local structural placement requires at least one study".into());
+            }
+            let available_workers = NativeExecutionConfig::for_current_executable()
+                .map_err(|error| error.to_string())?
+                .max_workers
+                .max(1);
+            let workers_per_study = if entries.len() == 1 {
+                available_workers
+            } else {
+                1
+            };
+            let concurrent_studies = usize::try_from(available_workers)
+                .unwrap_or(usize::MAX)
+                .min(entries.len());
+            let mut results = Vec::with_capacity(entries.len());
+            for batch in entries.chunks(concurrent_studies) {
+                let pending = FuturesUnordered::new();
+                for entry in batch {
+                    pending.push(execute_entry(entry, self.config, workers_per_study));
+                }
+                results.extend(pending.collect::<Vec<_>>().await);
+            }
+            Ok(results)
+        })
     }
-    Ok(outcomes)
+}
+
+async fn execute_entry(
+    entry: &StructuralStudyPlacementEntry<'_>,
+    config: &RunMatRuntimeConfig,
+    workers_per_study: u32,
+) -> StructuralStudyPlacementResult {
+    let outcome = match execute_one(entry.study, entry.prepared, config, workers_per_study).await {
+        Ok(result) => Ok(result),
+        Err(error) => Err(StructuralStudyExecutionFailure::Failed(error.to_string())),
+    };
+    StructuralStudyPlacementResult {
+        study_index: entry.study_index,
+        outcome,
+    }
 }
 
 async fn execute_one(
     study: &AnalysisStudySpec,
     prepared: &PreparedStructuralStudy,
     config: &RunMatRuntimeConfig,
+    workers_per_study: u32,
 ) -> Result<StructuralStudySequenceNumericalResult> {
     let study_digest = analysis_study_content_digest(study);
     let revision = ProgramRevision::new(
@@ -86,8 +106,10 @@ async fn execute_one(
         .ok_or_else(|| anyhow::anyhow!("prepared structural study has no workloads"))?;
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
+    let mut execution_config = NativeExecutionConfig::for_current_executable()?;
+    execution_config.max_workers = workers_per_study.max(1);
     let completed = execute_structural_sequence_locally(
-        NativeExecutionConfig::for_current_executable()?,
+        execution_config,
         StructuralSequencePreparation {
             authored_study_digest: study_digest,
             frozen_project_digest: None,

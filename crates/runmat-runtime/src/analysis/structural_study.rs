@@ -8,7 +8,7 @@ use crate::operations::OperationContext;
 
 use super::{
     AnalysisExecutionStep, AnalysisModelTemplate, AnalysisRunOptions, AnalysisSolverOptions,
-    AnalysisStudySpec, PreparedStructuralLinearRun,
+    AnalysisStudySpec, PreparedStructuralLinearRun, StructuralStudySequenceNumericalResult,
 };
 
 mod lifecycle;
@@ -130,8 +130,12 @@ pub(super) struct PreparedStructuralStudyIntentStep {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuralStudyExecutionFailure {
     Failed(String),
+    Cancelled,
     Indeterminate(String),
 }
+
+pub type StructuralStudySequenceExecutionOutcome =
+    Result<StructuralStudySequenceNumericalResult, StructuralStudyExecutionFailure>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

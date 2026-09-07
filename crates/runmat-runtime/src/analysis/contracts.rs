@@ -2531,6 +2531,7 @@ pub struct AnalysisStudySweepFailureEntry {
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisStudySweepFailureKind {
     Failed,
+    Cancelled,
     Indeterminate,
 }
 
@@ -2538,6 +2539,7 @@ impl AnalysisStudySweepFailureKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
             Self::Indeterminate => "indeterminate",
         }
     }

@@ -23,6 +23,7 @@ use super::{
 pub enum AnalysisStudySweepRunOutcome {
     Succeeded(Box<OperationEnvelope<AnalysisStudyRunData>>),
     Failed(OperationErrorEnvelope),
+    Cancelled(OperationErrorEnvelope),
     Indeterminate(OperationErrorEnvelope),
     NotRun,
 }
@@ -48,6 +49,9 @@ pub fn analysis_complete_study_sweep_op(
                 .find_map(|(index, outcome)| match outcome {
                     AnalysisStudySweepRunOutcome::Failed(error) => {
                         Some((index, AnalysisStudySweepFailureKind::Failed, error))
+                    }
+                    AnalysisStudySweepRunOutcome::Cancelled(error) => {
+                        Some((index, AnalysisStudySweepFailureKind::Cancelled, error))
                     }
                     AnalysisStudySweepRunOutcome::Indeterminate(error) => {
                         Some((index, AnalysisStudySweepFailureKind::Indeterminate, error))
@@ -109,6 +113,25 @@ pub fn analysis_complete_study_sweep_op(
                     study_id: study.study_id.clone(),
                     study_index: index,
                     kind: AnalysisStudySweepFailureKind::Failed,
+                    error_code: error.error_code,
+                    message: error.message,
+                });
+            }
+            AnalysisStudySweepRunOutcome::Cancelled(error) => {
+                if spec.fail_fast {
+                    return Err(study_failure(
+                        spec,
+                        study.study_id.as_str(),
+                        index,
+                        AnalysisStudySweepFailureKind::Cancelled,
+                        &error,
+                        &context,
+                    ));
+                }
+                failure_entries.push(AnalysisStudySweepFailureEntry {
+                    study_id: study.study_id.clone(),
+                    study_index: index,
+                    kind: AnalysisStudySweepFailureKind::Cancelled,
                     error_code: error.error_code,
                     message: error.message,
                 });
@@ -257,6 +280,13 @@ fn study_failure(
             false,
             OperationErrorSeverity::Error,
             "failed",
+        ),
+        AnalysisStudySweepFailureKind::Cancelled => (
+            "RM.FEA.RUN_STUDY_SWEEP.STUDY_CANCELLED",
+            OperationErrorType::Cancelled,
+            false,
+            OperationErrorSeverity::Error,
+            "cancelled",
         ),
         AnalysisStudySweepFailureKind::Indeterminate => (
             "RM.FEA.RUN_STUDY_SWEEP.STUDY_INDETERMINATE",
