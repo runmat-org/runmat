@@ -231,6 +231,7 @@ impl StructuralLinearWorkload {
 pub struct StructuralLinearWorkloadResult {
     pub schema_version: u16,
     pub run: FeaRunResult,
+    pub constraint_result: crate::constraints::CanonicalStructuralConstraintResult,
 }
 
 impl StructuralLinearWorkloadResult {
@@ -240,6 +241,9 @@ impl StructuralLinearWorkloadResult {
                 "structural linear result schema or field set is invalid".into(),
             ));
         }
+        self.constraint_result
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let mut field_ids = std::collections::BTreeSet::new();
         for field in &self.run.fields {
             if field.field_id.trim().is_empty() || !field_ids.insert(field.field_id.as_str()) {

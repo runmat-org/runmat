@@ -379,7 +379,16 @@ pub fn import_structural_linear_completion(
         ));
     }
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
-    validate_result_semantics(&prepared.inputs[0], &result)?;
+    let constraint_plan = prepared
+        .inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ConstraintPlan)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid(
+                "prepared structural program has no canonical constraint plan".into(),
+            )
+        })?;
+    validate_result_semantics(&prepared.inputs[0], constraint_plan, &result)?;
     Ok(ImportedStructuralLinearResult {
         identity: expected_result,
         result,
@@ -505,9 +514,17 @@ fn contract_digest<T: Serialize>(domain: &'static str, value: &T) -> AnalysisBri
 
 fn validate_result_semantics(
     invocation: &PreparedAnalysisObjects,
+    constraint_plan: &PreparedAnalysisObjects,
     result: &StructuralLinearWorkloadResult,
 ) -> AnalysisBridgeResult<()> {
     let workload = StructuralLinearWorkload::from_canonical_bytes(&invocation.payload())?;
+    let constraint_plan =
+        CanonicalStructuralConstraintPlan::from_canonical_bytes(&constraint_plan.payload())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    result
+        .constraint_result
+        .validate_against(&constraint_plan)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let step = workload.procedure_step()?;
     if result.run.requested_backend != workload.backend
         || result.run.identity.family() != step.family

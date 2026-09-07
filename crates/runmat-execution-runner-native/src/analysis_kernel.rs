@@ -2,7 +2,9 @@ use runmat_analysis_execution::{
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisKernel, AnalysisKernelInvocation,
     AnalysisKernelOutput,
 };
-use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
+use runmat_analysis_fea::constraints::{
+    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult,
+};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState, ConstraintPlanIdentity,
     SemanticStatePublicationRequest, SolverResultIdentity, StructuralLinearWorkload,
@@ -125,7 +127,7 @@ fn execute_structural_linear(
             preconditioner_kind: solve.preconditioner,
             algebra_backend_kind: solve.algebra_backend,
             solver_mesh_artifact_path: None,
-            solver_mesh: Some(mesh),
+            solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
             thermo_mechanical_context: solve.thermo_mechanical_context,
             electro_thermal_context: solve.electro_thermal_context,
@@ -134,9 +136,13 @@ fn execute_structural_linear(
         &constraint_plan,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_result =
+        CanonicalStructuralConstraintResult::recover(&constraint_plan, &mesh, &run.fields)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let payload = StructuralLinearWorkloadResult {
         schema_version: 1,
         run,
+        constraint_result,
     }
     .canonical_bytes()?;
     let result_identity = SolverResultIdentity::new(
@@ -412,6 +418,12 @@ mod tests {
         let result =
             StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
         assert!(!result.run.fields_are_empty());
+        let executed_constraint_plan =
+            CanonicalStructuralConstraintPlan::from_canonical_bytes(&inputs[2].payload()).unwrap();
+        result
+            .constraint_result
+            .validate_against(&executed_constraint_plan)
+            .unwrap();
         assert!(result
             .run
             .diagnostics

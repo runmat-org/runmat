@@ -6,12 +6,16 @@
 
 mod contract;
 mod plan;
+mod result;
 mod target;
 
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow, CanonicalStructuralDof,
     ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence,
     ReactionRecovery, ResolvedConstraintTarget,
+};
+pub use result::{
+    CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintResultError,
 };
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, CoordinateFrame, Displacement, PrescribedStructuralDofs,
-    PrescribedValue, RegionTarget, StructuralConstraint, StructuralConstraintKind,
-    StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement,
+    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
@@ -176,5 +176,68 @@ fn duplicate_constraint_ids_fail_with_the_typed_diagnostic() {
         Err(ConstraintPlanError::DuplicateConstraintId {
             constraint_id: structural.constraint_id,
         })
+    );
+}
+
+#[test]
+fn result_evidence_aggregates_only_canonical_reaction_owners() {
+    let (mut model, mesh) = model_and_mesh();
+    let structural = model.constraints[0].structural().unwrap().clone();
+    model.constraints = vec![
+        AnalysisConstraint::Structural(structural.clone()),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "redundant_fixed".into(),
+            ..structural
+        }),
+    ];
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let node_count = mesh.topology.nodes.len();
+    let mut reactions = vec![0.0; node_count * 3];
+    let owner = plan
+        .rows
+        .iter()
+        .find(|row| {
+            row.reaction_recovery == ReactionRecovery::UnconstrainedEquilibriumResidual
+                && row.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux)
+        })
+        .unwrap();
+    let node_index = mesh
+        .topology
+        .nodes
+        .iter()
+        .position(|node| node.stable_identity == owner.node_identity)
+        .unwrap();
+    reactions[node_index * 3] = 10.0;
+    let fields = vec![
+        AnalysisField::host_f64(
+            crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            vec![node_count, 3],
+            vec![0.0; node_count * 3],
+        ),
+        AnalysisField::host_f64(
+            crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            vec![node_count, 3],
+            reactions,
+        ),
+    ];
+
+    let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
+
+    assert_eq!(result.resultant_force_newtons, [10.0, 0.0, 0.0]);
+    assert_eq!(result.maximum_prescribed_error_meters, 0.0);
+    let redundant = result
+        .groups
+        .iter()
+        .find(|group| group.constraint_id == "redundant_fixed")
+        .unwrap();
+    assert_eq!(redundant.active_row_count, 0);
+    assert!(redundant.redundant_row_count > 0);
+    assert_eq!(redundant.resultant_force_newtons, [0.0; 3]);
+
+    let mut substituted = result;
+    substituted.resultant_force_newtons[0] = 20.0;
+    assert_eq!(
+        substituted.validate(),
+        Err(ConstraintResultError::InvalidEvidence)
     );
 }

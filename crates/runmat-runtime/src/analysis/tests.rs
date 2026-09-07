@@ -2343,7 +2343,7 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
                 preconditioner_kind: workload.preconditioner,
                 algebra_backend_kind: workload.algebra_backend,
                 solver_mesh_artifact_path: None,
-                solver_mesh: Some(mesh),
+                solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
                 thermo_mechanical_context: workload.thermo_mechanical_context,
                 electro_thermal_context: workload.electro_thermal_context,
@@ -2351,10 +2351,24 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
             },
         )
         .map_err(|error| error.to_string())?;
+        let constraint_plan =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile(
+                &workload.model,
+                &mesh,
+            )
+            .map_err(|error| error.to_string())?;
+        let constraint_result =
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+                &constraint_plan,
+                &mesh,
+                &run.fields,
+            )
+            .map_err(|error| error.to_string())?;
         runmat_analysis_fea::execution::StructuralLinearWorkloadResult::from_canonical_bytes(
             &runmat_analysis_fea::execution::StructuralLinearWorkloadResult {
                 schema_version: 1,
                 run,
+                constraint_result,
             }
             .canonical_bytes()
             .map_err(|error| error.to_string())?,

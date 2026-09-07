@@ -809,9 +809,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         },
     )
     .unwrap();
+    let constraint_result =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+            &constraint_plan,
+            &mesh,
+            &raw.fields,
+        )
+        .unwrap();
     let encoded = StructuralLinearWorkloadResult {
         schema_version: 1,
         run: raw.clone(),
+        constraint_result: constraint_result.clone(),
     }
     .canonical_bytes()
     .unwrap();
@@ -993,7 +1001,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         program_revision: revision(),
         artifact_access: access(),
         workload: backend_variant,
-        mesh,
+        mesh: mesh.clone(),
         initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1022,6 +1030,35 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let encoded = StructuralLinearWorkloadResult {
         schema_version: 1,
         run: wrong_backend,
+        constraint_result: constraint_result.clone(),
+    }
+    .canonical_bytes()
+    .unwrap();
+    let completed = execute_serial_analysis(
+        &prepared.program.request,
+        &mut store,
+        &StructuralResultKernel(encoded),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&prepared.host, &completed)
+        .unwrap()
+        .program_response();
+    assert!(import_structural_linear_result(
+        &store,
+        response,
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+
+    let mut substituted_constraint_result = constraint_result;
+    substituted_constraint_result.constraint_plan_digest = digest("substituted-plan");
+    let encoded = StructuralLinearWorkloadResult {
+        schema_version: 1,
+        run: decoded.run,
+        constraint_result: substituted_constraint_result,
     }
     .canonical_bytes()
     .unwrap();
@@ -1170,9 +1207,23 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         },
     )
     .unwrap();
+    let constraint_plan =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile(
+            &workload.model,
+            &mesh,
+        )
+        .unwrap();
+    let constraint_result =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult::recover(
+            &constraint_plan,
+            &mesh,
+            &raw.fields,
+        )
+        .unwrap();
     let encoded = StructuralLinearWorkloadResult {
         schema_version: 1,
         run: raw,
+        constraint_result,
     }
     .canonical_bytes()
     .unwrap();
