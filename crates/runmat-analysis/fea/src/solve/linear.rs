@@ -7,6 +7,7 @@ use crate::{
     operator::{apply_k, csr_stiffness, dense_stiffness},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
+        affine::solve_affine_constraint_system,
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
     },
@@ -34,6 +35,15 @@ pub fn solve_linear_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
+    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
+        return solve_affine_constraint_system(
+            summary,
+            reduction,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+        );
+    }
     let mut effective_backend_kind = backend_kind;
     let mut runtime_tensor_fallback = false;
     if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
@@ -493,6 +503,8 @@ mod tests {
                 runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
             ],
             constrained_dof_count: 0,
+            constraint_matrix: None,
+            affine_constraint_reduction: None,
             load_count: 1,
             structural_material: StructuralMaterialSummary {
                 youngs_modulus_pa: 1.0,

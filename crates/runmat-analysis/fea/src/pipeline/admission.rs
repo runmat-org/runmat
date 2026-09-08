@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation, CoupledPhysicsFamily,
     FormulationRequirement, PhysicsFamily, ProcedureStep, SolutionSpace, SourceImplementation,
-    TopologyImplementation,
+    StructuralConstraintKind, TopologyImplementation,
 };
 
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
@@ -46,6 +46,17 @@ pub(super) fn require_structural(
         requirement,
     )
     .map_err(FeaRunError::from)?;
+    if procedure != AnalysisProcedure::Static
+        && model.constraints.iter().any(|constraint| {
+            constraint.structural().is_some_and(|constraint| {
+                matches!(constraint.kind, StructuralConstraintKind::Equation(_))
+            })
+        })
+    {
+        return Err(FeaRunError::InvalidModel(format!(
+            "structural equation constraints are not yet admitted for {procedure:?}; modal, transient, and nonlinear operators require procedure-specific affine reduction"
+        )));
+    }
     Ok(step)
 }
 

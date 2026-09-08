@@ -4,6 +4,7 @@
 //! projection from that physical intent onto solver topology. Assembly consumes the resulting
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
+mod algebra;
 mod contract;
 mod plan;
 mod rank;
@@ -18,7 +19,9 @@ pub use contract::{
 };
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintResultError,
+    ConstraintRowReaction,
 };
 
 #[cfg(test)]
 mod tests;
+pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};

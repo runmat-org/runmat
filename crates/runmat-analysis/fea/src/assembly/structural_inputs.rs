@@ -243,7 +243,9 @@ pub(super) fn validate_structural_inputs(
         let supported = match basis {
             StructuralProjectionBasis::CanonicalSolid => matches!(
                 constraint.kind,
-                StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
+                StructuralConstraintKind::Fixed { .. }
+                    | StructuralConstraintKind::Prescribed(_)
+                    | StructuralConstraintKind::Equation(_)
             ),
             StructuralProjectionBasis::ExplicitConnectivity => matches!(
                 constraint.kind,

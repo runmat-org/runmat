@@ -885,7 +885,7 @@ fn recover_reaction_force(
 ) -> Vec<f64> {
     let mut reactions = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
     for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
-        if !*is_constrained {
+        if !*is_constrained && !is_affine_constraint_dof(summary, dof) {
             continue;
         }
         let Some(address) = summary.structural_dof_layout.address(dof) else {
@@ -967,7 +967,7 @@ fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) ->
         return reactions;
     }
     for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
-        if !*is_constrained {
+        if !*is_constrained && !is_affine_constraint_dof(summary, dof) {
             continue;
         }
         let Some(address) = summary.structural_dof_layout.address(dof) else {
@@ -1032,19 +1032,32 @@ fn recover_residual_metrics(
 ) -> StructuralResidualMetrics {
     let mut solution = displacement.to_vec();
     solution.resize(summary.dof_count, 0.0);
-    let applied = apply_k(&summary.operator, &solution);
-    let residual_norm = applied
+    let applied = if summary.affine_constraint_reduction.is_some() {
+        apply_k_unconstrained(&summary.operator, &solution)
+    } else {
+        apply_k(&summary.operator, &solution)
+    };
+    let full_residual = applied
         .iter()
         .zip(summary.operator.rhs.iter())
-        .map(|(lhs, rhs)| {
-            let residual = lhs - rhs;
-            residual * residual
-        })
+        .map(|(lhs, rhs)| lhs - rhs)
+        .collect::<Vec<_>>();
+    let residual = summary
+        .affine_constraint_reduction
+        .as_ref()
+        .and_then(|reduction| reduction.transpose_apply(&full_residual).ok())
+        .unwrap_or(full_residual);
+    let scaled_rhs = summary
+        .affine_constraint_reduction
+        .as_ref()
+        .and_then(|reduction| reduction.transpose_apply(&summary.operator.rhs).ok())
+        .unwrap_or_else(|| summary.operator.rhs.clone());
+    let residual_norm = residual
+        .iter()
+        .map(|value| value * value)
         .sum::<f64>()
         .sqrt();
-    let equation_scale = summary
-        .operator
-        .rhs
+    let equation_scale = scaled_rhs
         .iter()
         .map(|value| value * value)
         .sum::<f64>()
@@ -1054,6 +1067,13 @@ fn recover_residual_metrics(
         normalized_residual_norm: residual_norm / equation_scale,
         equation_scale,
     }
+}
+
+fn is_affine_constraint_dof(summary: &AssemblySummary, dof: usize) -> bool {
+    summary
+        .constraint_matrix
+        .as_ref()
+        .is_some_and(|matrix| matrix.column_indices.contains(&dof))
 }
 
 #[cfg(test)]

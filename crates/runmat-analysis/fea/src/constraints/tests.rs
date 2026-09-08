@@ -11,6 +11,15 @@ use runmat_meshing_core::{
 
 use super::*;
 use crate::fixtures::{fixture_model, FixtureId};
+use crate::{
+    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    post::fields::recover_result_fields,
+    solve::{
+        backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
+        linear::solve_linear_system,
+        preconditioner::SpdPreconditionerKind,
+    },
+};
 
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -207,6 +216,29 @@ fn equation_constraint(
     })
 }
 
+fn prescribed_constraint(
+    constraint_id: &str,
+    node: u64,
+    dofs: &[StructuralTranslationDof],
+) -> AnalysisConstraint {
+    AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: constraint_id.into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::point(format!("node:{node}")),
+            translations: dofs
+                .iter()
+                .copied()
+                .map(|dof| TranslationDofValue {
+                    dof,
+                    value: PrescribedValue::Constant(Displacement::new(0.0)),
+                })
+                .collect(),
+            rotations: Vec::new(),
+        }),
+    })
+}
+
 #[test]
 fn general_equation_compiles_to_one_canonical_sparse_row() {
     let (mut model, mesh) = model_and_mesh();
@@ -227,6 +259,29 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
         ConstraintEnforcement::AffineReduction
     );
     assert_eq!(plan.evidence.rank, 1);
+
+    let node_columns = mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.stable_identity, index * 3))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let matrix =
+        ResolvedConstraintMatrix::from_plan(&plan, mesh.topology.nodes.len() * 3, |node, dof| {
+            let component = match dof {
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => 0,
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => 1,
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => 2,
+                CanonicalStructuralDof::Rotation(_) => return None,
+            };
+            node_columns.get(&node).map(|base| base + component)
+        })
+        .unwrap();
+    assert_eq!(matrix.row_offsets, vec![0, 2]);
+    assert_eq!(matrix.column_indices, vec![0, 3]);
+    assert_eq!(matrix.coefficients, vec![1.0, -1.0]);
+    assert_eq!(matrix.right_hand_side, vec![0.01]);
 }
 
 #[test]
@@ -284,6 +339,69 @@ fn dependent_equations_are_evidenced_and_inconsistent_equations_fail() {
             second_constraint_id: "second".into(),
         })
     );
+}
+
+#[test]
+fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let summary = assemble_structural_system(
+        &model,
+        Some(mesh.clone()),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert_eq!(summary.constraint_matrix.as_ref().unwrap().row_count(), 7);
+    assert_eq!(
+        summary
+            .affine_constraint_reduction
+            .as_ref()
+            .unwrap()
+            .reduced_dof_count,
+        5
+    );
+
+    let solve = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    assert!(solve.converged, "{:?}", solve.diagnostics);
+    assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-10);
+
+    let fields = recover_result_fields(&summary, &solve);
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
+    let equation = result
+        .groups
+        .iter()
+        .find(|group| group.constraint_id == "relative_x")
+        .unwrap();
+    assert_eq!(equation.row_reactions.len(), 1);
+    assert!(equation.maximum_prescribed_error_meters <= 1.0e-10);
+    assert!(equation.row_reactions[0].generalized_reaction.is_finite());
 }
 
 #[test]

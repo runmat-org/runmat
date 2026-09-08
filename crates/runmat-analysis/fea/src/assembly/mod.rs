@@ -43,8 +43,8 @@ use self::{
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::constraints::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralDof, ConstraintPlanError,
-    ReactionRecovery,
+    AffineConstraintReduction, CanonicalStructuralConstraintPlan, CanonicalStructuralDof,
+    ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery, ResolvedConstraintMatrix,
 };
 use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
@@ -93,6 +93,10 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_boundary_transfers: Vec<BoundaryTransferImplementation>,
     pub constrained_dof_count: usize,
+    #[serde(default)]
+    pub constraint_matrix: Option<ResolvedConstraintMatrix>,
+    #[serde(default)]
+    pub affine_constraint_reduction: Option<AffineConstraintReduction>,
     pub load_count: usize,
     pub structural_material: StructuralMaterialSummary,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
@@ -104,6 +108,7 @@ pub struct AssemblySummary {
 pub enum LinearAssemblyError {
     ExcitationRealization(String),
     ConstraintPlan(ConstraintPlanError),
+    ConstraintAlgebra(ConstraintAlgebraError),
     Structural(StructuralAssemblyError),
     SolidStiffness(SolverSolidAssemblyError),
     SolverMeshRegionMapping(SolverMeshRegionMappingError),
@@ -115,6 +120,9 @@ impl fmt::Display for LinearAssemblyError {
             LinearAssemblyError::ExcitationRealization(err) => write!(f, "{err}"),
             LinearAssemblyError::ConstraintPlan(err) => {
                 write!(f, "constraint planning failed: {err}")
+            }
+            LinearAssemblyError::ConstraintAlgebra(err) => {
+                write!(f, "constraint algebra preparation failed: {err}")
             }
             LinearAssemblyError::Structural(err) => write!(f, "{err}"),
             LinearAssemblyError::SolidStiffness(err) => {
@@ -714,6 +722,8 @@ fn assemble_linear_system_impl(
         rhs[dof] = 0.0;
     }
     let mut structural_wrench_lowering = Vec::new();
+    let mut constraint_matrix = None;
+    let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
         if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
             structural_wrench_lowering = apply_solver_mesh_structural_loads(
@@ -735,14 +745,26 @@ fn assemble_linear_system_impl(
                     .map_err(LinearAssemblyError::ConstraintPlan)?;
                 &compiled_plan
             };
-            apply_solid_constraint_plan(
-                constraint_plan,
-                mesh,
-                &structural_dof_layout,
-                &mut constrained,
-                &mut rhs,
-            )
-            .map_err(LinearAssemblyError::Structural)?;
+            if constraint_plan.rows.iter().any(|row| row.terms.len() > 1) {
+                let matrix =
+                    resolve_solid_constraint_matrix(constraint_plan, mesh, &structural_dof_layout)
+                        .map_err(LinearAssemblyError::ConstraintAlgebra)?;
+                affine_constraint_reduction = Some(
+                    matrix
+                        .affine_reduction()
+                        .map_err(LinearAssemblyError::ConstraintAlgebra)?,
+                );
+                constraint_matrix = Some(matrix);
+            } else {
+                apply_solid_constraint_plan(
+                    constraint_plan,
+                    mesh,
+                    &structural_dof_layout,
+                    &mut constrained,
+                    &mut rhs,
+                )
+                .map_err(LinearAssemblyError::Structural)?;
+            }
         }
     }
 
@@ -947,7 +969,10 @@ fn assemble_linear_system_impl(
         stiffness_upper.fill(0.0);
     }
 
-    let constrained_dof_count = constrained.iter().filter(|value| **value).count();
+    let constrained_dof_count = affine_constraint_reduction
+        .as_ref()
+        .map(|reduction| reduction.pivot_dof_indices.len())
+        .unwrap_or_else(|| constrained.iter().filter(|value| **value).count());
 
     Ok(AssemblySummary {
         dof_count,
@@ -1023,6 +1048,8 @@ fn assemble_linear_system_impl(
             },
         ),
         constrained_dof_count,
+        constraint_matrix,
+        affine_constraint_reduction,
         load_count: excitations.len(),
         structural_material,
         thermo_mechanical,
@@ -1567,6 +1594,8 @@ fn assemble_explicit_structural_system(
             StructuralProjectionBasis::ExplicitConnectivity,
         ),
         constrained_dof_count,
+        constraint_matrix: None,
+        affine_constraint_reduction: None,
         load_count: excitations.len(),
         structural_material,
         thermo_mechanical: None,
@@ -2123,6 +2152,38 @@ fn apply_solid_constraint_plan(
         );
     }
     Ok(())
+}
+
+fn resolve_solid_constraint_matrix(
+    plan: &CanonicalStructuralConstraintPlan,
+    mesh: &SolverMeshArtifact,
+    layout: &StructuralDofLayout,
+) -> Result<ResolvedConstraintMatrix, ConstraintAlgebraError> {
+    let node_indices = mesh
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.stable_identity, index))
+        .collect::<BTreeMap<_, _>>();
+    ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |node, dof| {
+        let node_index = node_indices.get(&node).copied()?;
+        let kind = match dof {
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => {
+                StructuralDofKind::Ux
+            }
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => {
+                StructuralDofKind::Uy
+            }
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => {
+                StructuralDofKind::Uz
+            }
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rx) => StructuralDofKind::Rx,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => StructuralDofKind::Ry,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => StructuralDofKind::Rz,
+        };
+        layout.index(node_index, kind)
+    })
 }
 
 fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
