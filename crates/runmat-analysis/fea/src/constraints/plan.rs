@@ -5,6 +5,7 @@
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisModel, StructuralConstraintKind};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -47,6 +48,31 @@ impl CanonicalStructuralConstraintPlan {
             ));
         }
         if !self
+            .reference_points
+            .windows(2)
+            .all(|pair| pair[0].identity < pair[1].identity)
+            || self.reference_points.iter().any(|point| {
+                point.reference_point_id.trim().is_empty()
+                    || point.position_meters.iter().any(|value| !value.is_finite())
+                    || match reference_point_identity(
+                        &point.reference_point_id,
+                        point.position_meters,
+                    ) {
+                        Ok(identity) => identity != point.identity,
+                        Err(_) => true,
+                    }
+            })
+        {
+            return Err(ConstraintPlanError::Invalid(
+                "canonical reference-point evidence is invalid".into(),
+            ));
+        }
+        let reference_point_identities = self
+            .reference_points
+            .iter()
+            .map(|point| point.identity)
+            .collect::<BTreeSet<_>>();
+        if !self
             .groups
             .windows(2)
             .all(|pair| pair[0].constraint_id < pair[1].constraint_id)
@@ -72,6 +98,48 @@ impl CanonicalStructuralConstraintPlan {
                     .targets
                     .windows(2)
                     .all(|pair| pair[0].selection_digest < pair[1].selection_digest)
+                || !group
+                    .reference_point_identities
+                    .windows(2)
+                    .all(|pair| pair[0] < pair[1])
+                || group
+                    .reference_point_identities
+                    .iter()
+                    .any(|identity| !reference_point_identities.contains(identity))
+                || match &group.coupling {
+                    Some(coupling) => {
+                        group.reference_point_identities.as_slice()
+                            != [coupling.reference_point_identity]
+                            || coupling.target_weights.is_empty()
+                            || !coupling.characteristic_length_meters.is_finite()
+                            || coupling.characteristic_length_meters < 0.0
+                            || (coupling.kind == ConstraintCouplingKind::Distributing
+                                && coupling.characteristic_length_meters <= 1.0e-12)
+                            || !coupling
+                                .target_weights
+                                .windows(2)
+                                .all(|pair| pair[0].node_identity < pair[1].node_identity)
+                            || coupling.target_weights.iter().any(|weight| {
+                                weight.node_identity == StableDigest::ZERO
+                                    || !weight.weight.is_finite()
+                                    || weight.weight <= 0.0
+                                    || !group.targets.iter().any(|target| {
+                                        target
+                                            .matched_node_identities
+                                            .contains(&weight.node_identity)
+                                    })
+                            })
+                            || (coupling
+                                .target_weights
+                                .iter()
+                                .map(|weight| weight.weight)
+                                .sum::<f64>()
+                                - 1.0)
+                                .abs()
+                                > 1.0e-10
+                    }
+                    None => !group.reference_point_identities.is_empty(),
+                }
                 || !group
                     .pairings
                     .windows(2)
@@ -119,9 +187,15 @@ impl CanonicalStructuralConstraintPlan {
                 ));
             }
             if row.terms.iter().any(|term| {
-                term.node_identity == StableDigest::ZERO
-                    || !term.coefficient.is_finite()
-                    || term.coefficient == 0.0
+                let invalid_owner = match term.owner {
+                    CanonicalStructuralDofOwner::MeshNode(identity) => {
+                        identity == StableDigest::ZERO
+                    }
+                    CanonicalStructuralDofOwner::ReferencePoint(identity) => {
+                        !reference_point_identities.contains(&identity)
+                    }
+                };
+                invalid_owner || !term.coefficient.is_finite() || term.coefficient == 0.0
             }) || !row
                 .terms
                 .windows(2)
@@ -263,4 +337,14 @@ pub(super) fn canonical_digest<T: Serialize>(
     encode_contract(PLAN_PREFIX, domain, value, PLAN_LIMITS)
         .map(|bytes| Digest::sha256(&bytes))
         .map_err(|error| ConstraintPlanError::Encoding(error.to_string()))
+}
+
+pub(super) fn reference_point_identity(
+    reference_point_id: &str,
+    position_meters: [f64; 3],
+) -> Result<Digest, ConstraintPlanError> {
+    canonical_digest(
+        "structural-reference-point",
+        &(reference_point_id, position_meters),
+    )
 }

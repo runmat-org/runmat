@@ -1,6 +1,6 @@
 //! One-way lowering from authored structural constraints to solver-topology rows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
@@ -10,14 +10,18 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use super::contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, ConstraintEnforcement,
-    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
+    ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
     ConstraintPlanEvidence, ResolvedConstraintTarget,
 };
+use super::coupling::compile_reference_coupling;
 use super::frame::{boundary_tangent_basis, translation_basis};
 use super::normal::boundary_node_normals;
 use super::pairing::{displacement_transform, pair_targets};
-use super::plan::{authored_constraints_digest, source_digest, structural_constraints};
+use super::plan::{
+    authored_constraints_digest, reference_point_identity, source_digest, structural_constraints,
+};
 use super::row;
 use super::target::resolve_solid_target;
 
@@ -25,6 +29,7 @@ type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
     Vec<CanonicalStructuralConstraintRow>,
     Vec<ConstraintPairingEvidence>,
+    Option<ConstraintCouplingEvidence>,
 );
 
 pub(super) fn compile(
@@ -35,6 +40,7 @@ pub(super) fn compile(
         .map_err(|error| ConstraintPlanError::Invalid(error.to_string()))?;
     let authored = structural_constraints(model);
     validate_unique_ids(&authored)?;
+    let reference_points = canonical_reference_points(&authored)?;
     let authored_constraints_digest = authored_constraints_digest(&authored)?;
     let mut groups = Vec::with_capacity(authored.len());
     let mut rows = Vec::new();
@@ -45,7 +51,8 @@ pub(super) fn compile(
                 constraint_id: constraint.constraint_id.clone(),
             }
         })?;
-        let (mut targets, compiled_rows, pairings) = compile_constraint(model, mesh, constraint)?;
+        let (mut targets, compiled_rows, pairings, coupling) =
+            compile_constraint(model, mesh, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
         let enforcement = enforcement_for(&compiled_rows);
@@ -55,6 +62,11 @@ pub(super) fn compile(
             constraint_id: constraint.constraint_id.clone(),
             source_digest: source_digest(constraint)?,
             targets,
+            reference_point_identities: coupling
+                .iter()
+                .map(|coupling| coupling.reference_point_identity)
+                .collect(),
+            coupling,
             pairings,
             enforcement,
             row_count: rows.len() - first_row,
@@ -71,6 +83,7 @@ pub(super) fn compile(
         geometry_revision: mesh.geometry.geometry_revision,
         persistent_mapping_version: mesh.geometry.persistent_mapping_version,
         authored_constraints_digest,
+        reference_points,
         evidence: ConstraintPlanEvidence {
             authored_constraint_count: groups.len(),
             active_row_count,
@@ -95,6 +108,55 @@ fn validate_unique_ids(constraints: &[&StructuralConstraint]) -> Result<(), Cons
         }
     }
     Ok(())
+}
+
+fn canonical_reference_points(
+    constraints: &[&StructuralConstraint],
+) -> Result<Vec<CanonicalStructuralReferencePoint>, ConstraintPlanError> {
+    let mut by_id = BTreeMap::<String, [f64; 3]>::new();
+    for constraint in constraints {
+        let coupling = match &constraint.kind {
+            StructuralConstraintKind::RigidCoupling(coupling)
+            | StructuralConstraintKind::DistributingCoupling(coupling) => coupling,
+            _ => continue,
+        };
+        let id = coupling.reference_point.reference_point_id.trim();
+        let position = coupling.reference_point.position.meters;
+        if id.is_empty() || position.iter().any(|value| !value.is_finite()) {
+            return Err(ConstraintPlanError::Invalid(format!(
+                "constraint `{}` has an invalid reference point",
+                constraint.constraint_id
+            )));
+        }
+        if by_id
+            .insert(id.into(), position)
+            .is_some_and(|existing| existing != position)
+        {
+            return Err(ConstraintPlanError::Invalid(format!(
+                "reference point `{id}` has conflicting positions"
+            )));
+        }
+    }
+    let mut points = by_id
+        .into_iter()
+        .map(|(reference_point_id, position_meters)| {
+            Ok(CanonicalStructuralReferencePoint {
+                identity: reference_point_identity(&reference_point_id, position_meters)?,
+                reference_point_id,
+                position_meters,
+            })
+        })
+        .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
+    points.sort_by_key(|point| point.identity);
+    if points
+        .windows(2)
+        .any(|pair| pair[0].identity == pair[1].identity)
+    {
+        return Err(ConstraintPlanError::Invalid(
+            "reference-point identities collide".into(),
+        ));
+    }
+    Ok(points)
 }
 
 fn compile_constraint(
@@ -130,7 +192,7 @@ fn compile_constraint(
                         .matched_node_identities
                         .iter()
                         .map(|node_identity| CanonicalStructuralConstraintTerm {
-                            node_identity: *node_identity,
+                            owner: CanonicalStructuralDofOwner::MeshNode(*node_identity),
                             dof: term.dof.into(),
                             coefficient: term.coefficient,
                         }),
@@ -151,6 +213,7 @@ fn compile_constraint(
                     right_hand_side,
                 )?],
                 Vec::new(),
+                None,
             ))
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
@@ -171,7 +234,7 @@ fn compile_constraint(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((vec![resolved], rows, Vec::new()))
+            Ok((vec![resolved], rows, Vec::new(), None))
         }
         StructuralConstraintKind::Symmetry { target } => {
             compile_boundary_directions(mesh, constraint, target, false)
@@ -179,16 +242,21 @@ fn compile_constraint(
         StructuralConstraintKind::Antisymmetry { target } => {
             compile_boundary_directions(mesh, constraint, target, true)
         }
+        StructuralConstraintKind::RigidCoupling(coupling) => {
+            compile_coupling(mesh, constraint, coupling, ConstraintCouplingKind::Rigid)
+        }
+        StructuralConstraintKind::DistributingCoupling(coupling) => compile_coupling(
+            mesh,
+            constraint,
+            coupling,
+            ConstraintCouplingKind::Distributing,
+        ),
         StructuralConstraintKind::Tie(pair) => {
             compile_pair(mesh, constraint, pair, &PeriodicTransform::Identity, false)
         }
         StructuralConstraintKind::Periodic(periodic) => {
             compile_periodic(mesh, constraint, periodic)
         }
-        kind => Err(ConstraintPlanError::UnsupportedKind {
-            constraint_id: constraint.constraint_id.clone(),
-            kind: structural_kind_name(kind),
-        }),
     }
 }
 
@@ -207,7 +275,7 @@ fn compile_fixed(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok((vec![resolved], rows, Vec::new()))
+    Ok((vec![resolved], rows, Vec::new(), None))
 }
 
 fn compile_prescribed(
@@ -258,7 +326,7 @@ fn compile_prescribed(
             )?);
         }
     }
-    Ok((vec![resolved], rows, Vec::new()))
+    Ok((vec![resolved], rows, Vec::new(), None))
 }
 
 fn compile_boundary_directions(
@@ -286,7 +354,7 @@ fn compile_boundary_directions(
             )?);
         }
     }
-    Ok((vec![resolved], rows, Vec::new()))
+    Ok((vec![resolved], rows, Vec::new(), None))
 }
 
 fn compile_periodic(
@@ -326,7 +394,7 @@ fn compile_pair(
             CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
         {
             let mut terms = vec![CanonicalStructuralConstraintTerm {
-                node_identity: pairing.secondary_node_identity,
+                owner: CanonicalStructuralDofOwner::MeshNode(pairing.secondary_node_identity),
                 dof: secondary_dof,
                 coefficient: 1.0,
             }];
@@ -337,7 +405,9 @@ fn compile_pair(
                         .zip(transformed_direction)
                         .filter(|(_, coefficient)| *coefficient != 0.0)
                         .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-                            node_identity: weight.primary_node_identity,
+                            owner: CanonicalStructuralDofOwner::MeshNode(
+                                weight.primary_node_identity,
+                            ),
                             dof,
                             coefficient: -weight.weight * coefficient,
                         }),
@@ -346,7 +416,30 @@ fn compile_pair(
             rows.push(row::new_sparse(&constraint.constraint_id, terms, 0.0)?);
         }
     }
-    Ok((vec![primary, secondary], rows, pairings))
+    Ok((vec![primary, secondary], rows, pairings, None))
+}
+
+fn compile_coupling(
+    mesh: &SolverMeshArtifact,
+    constraint: &StructuralConstraint,
+    coupling: &runmat_analysis_core::ReferencePointCoupling,
+    kind: ConstraintCouplingKind,
+) -> Result<CompiledConstraint, ConstraintPlanError> {
+    require_global_frame(constraint)?;
+    let target = resolve_solid_target(mesh, &coupling.target, &constraint.constraint_id)?;
+    let identity = reference_point_identity(
+        &coupling.reference_point.reference_point_id,
+        coupling.reference_point.position.meters,
+    )?;
+    let (rows, evidence) = compile_reference_coupling(
+        mesh,
+        &target,
+        &coupling.reference_point,
+        identity,
+        kind,
+        &constraint.constraint_id,
+    )?;
+    Ok((vec![target], rows, Vec::new(), Some(evidence)))
 }
 
 fn enforcement_for(rows: &[CanonicalStructuralConstraintRow]) -> ConstraintEnforcement {
@@ -431,19 +524,4 @@ fn study_constant_displacement(
         });
     }
     Ok(value)
-}
-
-fn structural_kind_name(kind: &StructuralConstraintKind) -> &'static str {
-    match kind {
-        StructuralConstraintKind::Fixed { .. } => "fixed",
-        StructuralConstraintKind::Prescribed(_) => "prescribed",
-        StructuralConstraintKind::NormalDisplacement { .. } => "normal_displacement",
-        StructuralConstraintKind::Symmetry { .. } => "symmetry",
-        StructuralConstraintKind::Antisymmetry { .. } => "antisymmetry",
-        StructuralConstraintKind::RigidCoupling(_) => "rigid_coupling",
-        StructuralConstraintKind::DistributingCoupling(_) => "distributing_coupling",
-        StructuralConstraintKind::Tie(_) => "tie",
-        StructuralConstraintKind::Periodic(_) => "periodic",
-        StructuralConstraintKind::Equation(_) => "equation",
-    }
 }

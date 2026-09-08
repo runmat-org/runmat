@@ -7,25 +7,30 @@
 mod algebra;
 mod compile;
 mod contract;
+mod coupling;
 mod frame;
 mod normal;
 mod pairing;
 mod plan;
 mod rank;
+mod reaction;
 mod result;
+mod result_state;
 mod row;
 mod target;
 mod vector;
 
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, ConstraintEnforcement,
-    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPairingWeight,
-    ConstraintPlanError, ConstraintPlanEvidence, ReactionRecovery, ResolvedConstraintTarget,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
+    ConstraintCouplingWeight, ConstraintEnforcement, ConstraintGroupEvidence,
+    ConstraintPairingEvidence, ConstraintPairingWeight, ConstraintPlanError,
+    ConstraintPlanEvidence, ReactionRecovery, ResolvedConstraintTarget,
 };
 pub use result::{
-    CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintResultError,
-    ConstraintRowReaction,
+    CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintReferencePointResult,
+    ConstraintResultError, ConstraintRowReaction,
 };
 
 #[cfg(test)]

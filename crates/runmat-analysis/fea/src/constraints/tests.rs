@@ -1,9 +1,10 @@
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement, Length,
-    PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
-    PrescribedStructuralDofs, PrescribedValue, RegionTarget, Rotation, StructuralConstraint,
-    StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
-    StructuralTranslationDof, Translation, TranslationDofValue,
+    PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform, Position,
+    PrescribedStructuralDofs, PrescribedValue, ReferencePoint, ReferencePointCoupling,
+    RegionTarget, Rotation, StructuralConstraint, StructuralConstraintEquation,
+    StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralTranslationDof,
+    Translation, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
@@ -11,7 +12,9 @@ use runmat_meshing_core::{
 };
 
 use super::*;
-use crate::fixtures::{fixture_model, FixtureId};
+use crate::fixtures::{
+    fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind, FixtureId,
+};
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     post::fields::recover_result_fields,
@@ -259,7 +262,7 @@ fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces()
         let tangent_rows = antisymmetry
             .rows
             .iter()
-            .filter(|row| row.terms[0].node_identity == normal_row.terms[0].node_identity)
+            .filter(|row| row.terms[0].owner == normal_row.terms[0].owner)
             .collect::<Vec<_>>();
         assert_eq!(tangent_rows.len(), 2);
         for tangent in tangent_rows {
@@ -327,14 +330,15 @@ fn rotated_periodic_relation_rotates_displacements_with_geometry() {
         .iter()
         .find(|row| {
             row.terms.iter().any(|term| {
-                term.node_identity == mesh.topology.nodes[3].stable_identity
+                term.owner
+                    == CanonicalStructuralDofOwner::MeshNode(mesh.topology.nodes[3].stable_identity)
                     && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz)
                     && term.coefficient == 1.0
             })
         })
         .unwrap();
     assert!(uz_row.terms.iter().any(|term| {
-        term.node_identity == mesh.topology.nodes[2].stable_identity
+        term.owner == CanonicalStructuralDofOwner::MeshNode(mesh.topology.nodes[2].stable_identity)
             && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy)
             && (term.coefficient + 1.0).abs() <= 1.0e-12
     }));
@@ -376,6 +380,102 @@ fn geometric_tie_projects_secondary_node_to_primary_surface() {
     assert!(weights.iter().all(|weight| *weight > 0.0));
     assert!((weights.into_iter().sum::<f64>() - 1.0).abs() <= 1.0e-12);
     assert_eq!(plan.rows.len(), 3);
+}
+
+#[test]
+fn rigid_coupling_compiles_mesh_motion_against_six_reference_dofs() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "rigid_end".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
+            target: RegionTarget::boundary("root"),
+            reference_point: ReferencePoint {
+                reference_point_id: "control".into(),
+                position: Position::new([0.25, 0.25, 0.25]),
+            },
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.reference_points.len(), 1);
+    assert_eq!(plan.groups[0].reference_point_identities.len(), 1);
+    assert_eq!(
+        plan.groups[0].coupling.as_ref().unwrap().kind,
+        ConstraintCouplingKind::Rigid
+    );
+    assert_eq!(plan.rows.len(), mesh.topology.nodes.len() * 3);
+    assert!(plan.rows.iter().all(|row| {
+        row.terms
+            .iter()
+            .any(|term| matches!(term.owner, CanonicalStructuralDofOwner::ReferencePoint(_)))
+    }));
+}
+
+#[test]
+fn distributing_coupling_uses_area_weights_and_six_resultant_relations() {
+    let (mut model, mesh) = model_and_mesh();
+    let face = mesh.topology.boundary_faces[0]
+        .provenance
+        .iter()
+        .find(|entity| entity.source_topology_id != "root")
+        .unwrap()
+        .source_topology_id
+        .clone();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "distributed_end".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+            target: RegionTarget::boundary(face),
+            reference_point: ReferencePoint {
+                reference_point_id: "control".into(),
+                position: Position::new([0.25, 0.25, 0.0]),
+            },
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let coupling = plan.groups[0].coupling.as_ref().unwrap();
+
+    assert_eq!(coupling.kind, ConstraintCouplingKind::Distributing);
+    assert_eq!(coupling.target_weights.len(), 3);
+    assert!(
+        (coupling
+            .target_weights
+            .iter()
+            .map(|entry| entry.weight)
+            .sum::<f64>()
+            - 1.0)
+            .abs()
+            <= 1.0e-12
+    );
+    assert_eq!(plan.rows.len(), 6);
+    assert_eq!(plan.evidence.rank, 6);
+}
+
+#[test]
+fn reference_coupling_rejects_a_rotationally_rank_deficient_target() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "point_coupling".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::RigidCoupling(ReferencePointCoupling {
+            target: RegionTarget::point("node:1"),
+            reference_point: ReferencePoint {
+                reference_point_id: "control".into(),
+                position: Position::new([1.0, 1.0, 1.0]),
+            },
+        }),
+    })];
+
+    let error = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ConstraintPlanError::Invalid(message)
+            if message.contains("must contain non-collinear nodes")
+    ));
 }
 
 fn row_vector(row: &CanonicalStructuralConstraintRow) -> [f64; 3] {
@@ -518,7 +618,10 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
         .map(|(index, node)| (node.stable_identity, index * 3))
         .collect::<std::collections::BTreeMap<_, _>>();
     let matrix =
-        ResolvedConstraintMatrix::from_plan(&plan, mesh.topology.nodes.len() * 3, |node, dof| {
+        ResolvedConstraintMatrix::from_plan(&plan, mesh.topology.nodes.len() * 3, |owner, dof| {
+            let CanonicalStructuralDofOwner::MeshNode(node) = owner else {
+                return None;
+            };
             let component = match dof {
                 CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => 0,
                 CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => 1,
@@ -655,6 +758,103 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
 }
 
 #[test]
+fn reference_point_wrench_solves_through_distributing_coupling() {
+    let (mut model, mesh) = model_and_mesh();
+    let boundary_ids = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            face.provenance
+                .iter()
+                .find(|entity| entity.source_topology_id != "root")
+                .unwrap()
+                .source_topology_id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    model.constraints = vec![
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "anchor".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: RegionTarget::boundary(&boundary_ids[0]),
+            },
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "remote_load".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                target: RegionTarget::boundary(&boundary_ids[3]),
+                reference_point: ReferencePoint {
+                    reference_point_id: "control".into(),
+                    position: Position::new([1.0 / 3.0; 3]),
+                },
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "remote_wrench".into(),
+            region_id: "control".into(),
+            kind: FixtureExcitationKind::Wrench {
+                force: [10.0, 0.0, 0.0],
+                moment: [0.0, 1.0, 0.0],
+                point_m: [1.0 / 3.0; 3],
+            },
+        }],
+    );
+
+    let summary = assemble_structural_system(
+        &model,
+        Some(mesh.clone()),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert_eq!(summary.dof_count, 18);
+    assert_eq!(summary.structural_dof_layout.reference_point_count(), 1);
+    let solve = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    assert!(solve.converged, "{:?}", solve.diagnostics);
+    let matrix = summary.constraint_matrix.as_ref().unwrap();
+    for row in 0..matrix.row_count() {
+        let start = matrix.row_offsets[row];
+        let end = matrix.row_offsets[row + 1];
+        let value = matrix.column_indices[start..end]
+            .iter()
+            .zip(&matrix.coefficients[start..end])
+            .map(|(column, coefficient)| coefficient * solve.solution[*column])
+            .sum::<f64>();
+        assert!((value - matrix.right_hand_side[row]).abs() <= 1.0e-9);
+    }
+    let internal = crate::operator::apply_k_unconstrained(&summary.operator, &solve.solution);
+    let reaction = internal
+        .iter()
+        .zip(&summary.operator.rhs)
+        .map(|(internal, applied)| internal - applied)
+        .collect::<Vec<_>>();
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let result = CanonicalStructuralConstraintResult::recover_from_solver_state(
+        &plan,
+        &mesh,
+        &solve.solution,
+        &reaction,
+    )
+    .unwrap();
+    assert_eq!(result.reference_points.len(), 1);
+    assert!((result.reference_points[0].constraint_force_newtons[0] + 10.0).abs() <= 1.0e-7);
+    assert!((result.reference_points[0].constraint_moment_newton_meters[1] + 1.0).abs() <= 1.0e-7);
+}
+
+#[test]
 fn result_evidence_aggregates_only_canonical_reaction_owners() {
     let (mut model, mesh) = model_and_mesh();
     let structural = model.constraints[0].structural().unwrap().clone();
@@ -681,7 +881,9 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
         .topology
         .nodes
         .iter()
-        .position(|node| node.stable_identity == owner.terms[0].node_identity)
+        .position(|node| {
+            owner.terms[0].owner == CanonicalStructuralDofOwner::MeshNode(node.stable_identity)
+        })
         .unwrap();
     reactions[node_index * 3] = 10.0;
     let fields = vec![

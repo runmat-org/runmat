@@ -166,14 +166,15 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::CanonicalPointProjection => 5,
         SourceImplementation::AcousticHashedTargetGraphProjection => 6,
         SourceImplementation::BoundaryResultantWrenchDistribution => 7,
-        SourceImplementation::ExplicitRegionNodalDistribution => 8,
-        SourceImplementation::UniformNodeDistribution => 9,
-        SourceImplementation::PrescribedTemperatureDeltaProfile => 10,
-        SourceImplementation::OrdinalRegionTemperatureDistribution => 11,
-        SourceImplementation::SampledTemporalProfileInterpolation => 12,
-        SourceImplementation::OrdinalDistribution => 13,
-        SourceImplementation::SyntheticProfileFallback => 14,
-        SourceImplementation::UnmappedFallback => 15,
+        SourceImplementation::ReferencePointGeneralizedLoad => 8,
+        SourceImplementation::ExplicitRegionNodalDistribution => 9,
+        SourceImplementation::UniformNodeDistribution => 10,
+        SourceImplementation::PrescribedTemperatureDeltaProfile => 11,
+        SourceImplementation::OrdinalRegionTemperatureDistribution => 12,
+        SourceImplementation::SampledTemporalProfileInterpolation => 13,
+        SourceImplementation::OrdinalDistribution => 14,
+        SourceImplementation::SyntheticProfileFallback => 15,
+        SourceImplementation::UnmappedFallback => 16,
     }
 }
 
@@ -215,6 +216,7 @@ fn validate_projection_evidence(
             SourceImplementation::CanonicalBoundaryProjection,
             SourceImplementation::CanonicalBoundaryPressureIntegration,
             SourceImplementation::BoundaryResultantWrenchDistribution,
+            SourceImplementation::ReferencePointGeneralizedLoad,
             SourceImplementation::UniformNodeDistribution,
         ],
         StructuralOperatorImplementation::EulerBernoulliBeam3d

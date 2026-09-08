@@ -4,7 +4,8 @@ use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
     SolverMeshRegionMappingError, StructuralLoadKind, WrenchLoweringSummary,
 };
-use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
+use crate::constraints::CanonicalStructuralConstraintPlan;
+use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
 
 pub(super) fn apply_solver_mesh_structural_loads(
     excitations: &RealizedExcitations,
@@ -17,6 +18,9 @@ pub(super) fn apply_solver_mesh_structural_loads(
 
     let mut wrench_lowering = Vec::new();
     for load in excitations.iter() {
+        if matches!(load.target, RealizedExcitationTarget::ReferencePoint { .. }) {
+            continue;
+        }
         let Some(region_id) = load.target.solver_region_id() else {
             continue;
         };
@@ -101,6 +105,87 @@ pub(super) fn apply_solver_mesh_structural_loads(
     }
 
     Ok(wrench_lowering)
+}
+
+pub(super) fn apply_reference_point_structural_loads(
+    excitations: &RealizedExcitations,
+    plan: &CanonicalStructuralConstraintPlan,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+) -> Result<(), SolverMeshRegionMappingError> {
+    for load in excitations.iter() {
+        let RealizedExcitationTarget::ReferencePoint {
+            reference_point_id,
+            position,
+        } = &load.target
+        else {
+            continue;
+        };
+        let point_index = plan
+            .reference_points
+            .iter()
+            .position(|point| point.reference_point_id == *reference_point_id)
+            .ok_or_else(|| SolverMeshRegionMappingError::UncoupledReferencePoint {
+                load_id: load.excitation_id.0.clone(),
+                reference_point_id: reference_point_id.clone(),
+            })?;
+        if plan.reference_points[point_index].position_meters != position.meters {
+            return Err(
+                SolverMeshRegionMappingError::ReferencePointPositionMismatch {
+                    load_id: load.excitation_id.0.clone(),
+                    reference_point_id: reference_point_id.clone(),
+                },
+            );
+        }
+        match load.kind {
+            RealizedExcitationKind::Force(force) => {
+                add_reference_vector(layout, rhs, point_index, force.real, false)
+            }
+            RealizedExcitationKind::Moment(moment) => {
+                add_reference_vector(layout, rhs, point_index, moment.real, true)
+            }
+            RealizedExcitationKind::Wrench { force, moment, .. } => {
+                add_reference_vector(layout, rhs, point_index, force.real, false);
+                add_reference_vector(layout, rhs, point_index, moment.real, true);
+            }
+            _ => {
+                return Err(
+                    SolverMeshRegionMappingError::UnsupportedReferencePointLoad {
+                        load_id: load.excitation_id.0.clone(),
+                        load_kind: super::structural_inputs::explicit_load_kind(&load.kind),
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn add_reference_vector(
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    point_index: usize,
+    values: [f64; 3],
+    rotational: bool,
+) {
+    let kinds = if rotational {
+        [
+            StructuralDofKind::Rx,
+            StructuralDofKind::Ry,
+            StructuralDofKind::Rz,
+        ]
+    } else {
+        [
+            StructuralDofKind::Ux,
+            StructuralDofKind::Uy,
+            StructuralDofKind::Uz,
+        ]
+    };
+    for (kind, value) in kinds.into_iter().zip(values) {
+        if let Some(dof) = layout.reference_point_index(point_index, kind) {
+            rhs[dof] += value;
+        }
+    }
 }
 
 fn solver_mesh_region_node_indices(mesh: &SolverMeshArtifact, region_id: &str) -> Vec<usize> {

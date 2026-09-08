@@ -63,9 +63,34 @@ pub struct ConstraintGroupEvidence {
     pub constraint_id: String,
     pub source_digest: Digest,
     pub targets: Vec<ResolvedConstraintTarget>,
+    pub reference_point_identities: Vec<Digest>,
+    pub coupling: Option<ConstraintCouplingEvidence>,
     pub pairings: Vec<ConstraintPairingEvidence>,
     pub enforcement: ConstraintEnforcement,
     pub row_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintCouplingKind {
+    Rigid,
+    Distributing,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintCouplingEvidence {
+    pub kind: ConstraintCouplingKind,
+    pub reference_point_identity: Digest,
+    pub target_weights: Vec<ConstraintCouplingWeight>,
+    pub characteristic_length_meters: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintCouplingWeight {
+    pub node_identity: StableDigest,
+    pub weight: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -86,9 +111,24 @@ pub struct ConstraintPairingWeight {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalStructuralConstraintTerm {
-    pub node_identity: StableDigest,
+    pub owner: CanonicalStructuralDofOwner,
     pub dof: CanonicalStructuralDof,
     pub coefficient: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalStructuralDofOwner {
+    MeshNode(StableDigest),
+    ReferencePoint(Digest),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalStructuralReferencePoint {
+    pub identity: Digest,
+    pub reference_point_id: String,
+    pub position_meters: [f64; 3],
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +160,7 @@ pub struct CanonicalStructuralConstraintPlan {
     pub geometry_revision: u64,
     pub persistent_mapping_version: u32,
     pub authored_constraints_digest: Digest,
+    pub reference_points: Vec<CanonicalStructuralReferencePoint>,
     pub groups: Vec<ConstraintGroupEvidence>,
     pub rows: Vec<CanonicalStructuralConstraintRow>,
     pub evidence: ConstraintPlanEvidence,
@@ -127,11 +168,6 @@ pub struct CanonicalStructuralConstraintPlan {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConstraintPlanError {
-    #[error("constraint `{constraint_id}` uses unsupported kind `{kind}`")]
-    UnsupportedKind {
-        constraint_id: String,
-        kind: &'static str,
-    },
     #[error("constraint `{constraint_id}` uses unsupported frame `{frame}`")]
     UnsupportedFrame {
         constraint_id: String,

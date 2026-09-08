@@ -7,7 +7,7 @@ use runmat_meshing_core::StableDigest;
 
 use super::contract::{
     CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
-    ConstraintEnforcement, ConstraintPlanError, ReactionRecovery,
+    CanonicalStructuralDofOwner, ConstraintEnforcement, ConstraintPlanError, ReactionRecovery,
 };
 use super::{plan::canonical_digest, rank};
 
@@ -23,7 +23,7 @@ pub(super) fn new_singleton(
     new_sparse(
         constraint_id,
         vec![CanonicalStructuralConstraintTerm {
-            node_identity,
+            owner: CanonicalStructuralDofOwner::MeshNode(node_identity),
             dof,
             coefficient,
         }],
@@ -42,7 +42,7 @@ pub(super) fn new_direction(
         .zip(direction)
         .filter(|(_, coefficient)| *coefficient != 0.0)
         .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-            node_identity,
+            owner: CanonicalStructuralDofOwner::MeshNode(node_identity),
             dof,
             coefficient,
         })
@@ -105,8 +105,8 @@ pub(super) fn row_identity(
 
 pub(super) fn term_key(
     term: &CanonicalStructuralConstraintTerm,
-) -> (StableDigest, CanonicalStructuralDof) {
-    (term.node_identity, term.dof)
+) -> (CanonicalStructuralDofOwner, CanonicalStructuralDof) {
+    (term.owner, term.dof)
 }
 
 pub(super) fn compare_rows(

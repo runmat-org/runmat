@@ -1,12 +1,16 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, StructuralTranslationDof};
+use runmat_analysis_core::AnalysisField;
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{CanonicalStructuralConstraintPlan, CanonicalStructuralDof, ReactionRecovery};
+use super::{
+    reaction::solve_constraint_multipliers,
+    result_state::{nodal_vector_field, owner_dof_index, translation_component},
+    CanonicalStructuralConstraintPlan, CanonicalStructuralDofOwner, ReactionRecovery,
+};
 use crate::contracts::{FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,11 +40,23 @@ pub struct CanonicalStructuralConstraintResult {
     pub schema_version: u16,
     pub constraint_plan_digest: Digest,
     pub topology_digest: StableDigest,
+    pub reference_points: Vec<ConstraintReferencePointResult>,
     pub groups: Vec<ConstraintGroupResult>,
     pub resultant_force_newtons: [f64; 3],
     pub resultant_moment_about_global_origin_newton_meters: [f64; 3],
     pub constraint_work_joules: f64,
     pub maximum_prescribed_error_meters: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintReferencePointResult {
+    pub identity: Digest,
+    pub reference_point_id: String,
+    pub translation_meters: [f64; 3],
+    pub rotation_radians: [f64; 3],
+    pub constraint_force_newtons: [f64; 3],
+    pub constraint_moment_newton_meters: [f64; 3],
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -59,6 +75,8 @@ pub enum ConstraintResultError {
     InvalidEvidence,
     #[error("constraint reactions could not be resolved from the independent equation rows")]
     ReactionRecoveryFailed,
+    #[error("constraint result requires the complete mesh-node and reference-point solver state")]
+    GeneralizedStateRequired,
     #[error("constraint plan could not be validated: {0}")]
     InvalidPlan(String),
 }
@@ -69,6 +87,20 @@ impl CanonicalStructuralConstraintResult {
         mesh: &SolverMeshArtifact,
         fields: &[AnalysisField],
     ) -> Result<Self, ConstraintResultError> {
+        if !plan.reference_points.is_empty() {
+            return Err(ConstraintResultError::GeneralizedStateRequired);
+        }
+        let displacement = nodal_vector_field(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT, mesh)?;
+        let reaction = nodal_vector_field(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE, mesh)?;
+        Self::recover_from_solver_state(plan, mesh, displacement, reaction)
+    }
+
+    pub fn recover_from_solver_state(
+        plan: &CanonicalStructuralConstraintPlan,
+        mesh: &SolverMeshArtifact,
+        displacement: &[f64],
+        reaction: &[f64],
+    ) -> Result<Self, ConstraintResultError> {
         plan.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
         mesh.validate()
@@ -76,8 +108,14 @@ impl CanonicalStructuralConstraintResult {
         if plan.topology_digest != mesh.canonical_digest {
             return Err(ConstraintResultError::TopologyMismatch);
         }
-        let displacement = nodal_vector_field(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT, mesh)?;
-        let reaction = nodal_vector_field(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE, mesh)?;
+        let expected_dofs = mesh.topology.nodes.len() * 3 + plan.reference_points.len() * 6;
+        if displacement.len() != expected_dofs
+            || reaction.len() != expected_dofs
+            || !all_finite(displacement)
+            || !all_finite(reaction)
+        {
+            return Err(ConstraintResultError::GeneralizedStateRequired);
+        }
         let nodes = mesh
             .topology
             .nodes
@@ -116,12 +154,10 @@ impl CanonicalStructuralConstraintResult {
                 row.terms
                     .iter()
                     .map(|term| {
-                        let (node_index, _) = nodes
-                            .get(&term.node_identity)
-                            .copied()
-                            .ok_or(ConstraintResultError::NodeAbsent)?;
-                        let component = translation_component(term.dof)?;
-                        Ok((node_index * 3 + component, term.coefficient))
+                        Ok((
+                            owner_dof_index(plan, &nodes, term.owner, term.dof)?,
+                            term.coefficient,
+                        ))
                     })
                     .collect::<Result<BTreeMap<_, _>, ConstraintResultError>>()
             })
@@ -169,9 +205,8 @@ impl CanonicalStructuralConstraintResult {
                 .terms
                 .iter()
                 .map(|term| {
-                    let (node_index, _) = nodes[&term.node_identity];
-                    let component = translation_component(term.dof)?;
-                    Ok(term.coefficient * displacement[node_index * 3 + component])
+                    Ok(term.coefficient
+                        * displacement[owner_dof_index(plan, &nodes, term.owner, term.dof)?])
                 })
                 .collect::<Result<Vec<_>, ConstraintResultError>>()?
                 .into_iter()
@@ -179,15 +214,17 @@ impl CanonicalStructuralConstraintResult {
             let error = (equation_value - row.right_hand_side).abs();
             group.active_row_count += 1;
             for term in &row.terms {
-                let (_, coordinates) = nodes[&term.node_identity];
-                let component = translation_component(term.dof)?;
-                let force = term.coefficient * multiplier;
-                group.resultant_force_newtons[component] += force;
-                add_cross_product(
-                    &mut group.resultant_moment_about_global_origin_newton_meters,
-                    coordinates,
-                    component_vector(component, force),
-                );
+                if let CanonicalStructuralDofOwner::MeshNode(identity) = term.owner {
+                    let (_, coordinates) = nodes[&identity];
+                    let component = translation_component(term.dof)?;
+                    let force = term.coefficient * multiplier;
+                    group.resultant_force_newtons[component] += force;
+                    add_cross_product(
+                        &mut group.resultant_moment_about_global_origin_newton_meters,
+                        coordinates,
+                        component_vector(component, force),
+                    );
+                }
             }
             group.constraint_work_joules += multiplier * row.right_hand_side;
             group.maximum_prescribed_error_meters =
@@ -199,6 +236,38 @@ impl CanonicalStructuralConstraintResult {
             });
         }
 
+        let reference_points = plan
+            .reference_points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| {
+                let base = mesh.topology.nodes.len() * 3 + index * 6;
+                ConstraintReferencePointResult {
+                    identity: point.identity,
+                    reference_point_id: point.reference_point_id.clone(),
+                    translation_meters: [
+                        displacement[base],
+                        displacement[base + 1],
+                        displacement[base + 2],
+                    ],
+                    rotation_radians: [
+                        displacement[base + 3],
+                        displacement[base + 4],
+                        displacement[base + 5],
+                    ],
+                    constraint_force_newtons: [
+                        predicted_reaction.get(&base).copied().unwrap_or(0.0),
+                        predicted_reaction.get(&(base + 1)).copied().unwrap_or(0.0),
+                        predicted_reaction.get(&(base + 2)).copied().unwrap_or(0.0),
+                    ],
+                    constraint_moment_newton_meters: [
+                        predicted_reaction.get(&(base + 3)).copied().unwrap_or(0.0),
+                        predicted_reaction.get(&(base + 4)).copied().unwrap_or(0.0),
+                        predicted_reaction.get(&(base + 5)).copied().unwrap_or(0.0),
+                    ],
+                }
+            })
+            .collect::<Vec<_>>();
         let groups = groups.into_values().collect::<Vec<_>>();
         let mut result = Self {
             schema_version: 1,
@@ -206,6 +275,7 @@ impl CanonicalStructuralConstraintResult {
                 .content_digest()
                 .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?,
             topology_digest: mesh.canonical_digest,
+            reference_points,
             resultant_force_newtons: [0.0; 3],
             resultant_moment_about_global_origin_newton_meters: [0.0; 3],
             constraint_work_joules: 0.0,
@@ -240,6 +310,15 @@ impl CanonicalStructuralConstraintResult {
                     .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?
             || self.topology_digest != plan.topology_digest
             || self.groups.len() != plan.groups.len()
+            || self.reference_points.len() != plan.reference_points.len()
+            || self
+                .reference_points
+                .iter()
+                .zip(&plan.reference_points)
+                .any(|(result, planned)| {
+                    result.identity != planned.identity
+                        || result.reference_point_id != planned.reference_point_id
+                })
         {
             return Err(ConstraintResultError::InvalidEvidence);
         }
@@ -284,6 +363,18 @@ impl CanonicalStructuralConstraintResult {
             || self.constraint_plan_digest.bytes() == &[0; 32]
             || self.topology_digest == StableDigest::ZERO
             || self.groups.iter().any(|group| !group_is_finite(group))
+            || self.reference_points.iter().any(|point| {
+                point.identity.bytes() == &[0; 32]
+                    || point.reference_point_id.trim().is_empty()
+                    || !all_finite(&point.translation_meters)
+                    || !all_finite(&point.rotation_radians)
+                    || !all_finite(&point.constraint_force_newtons)
+                    || !all_finite(&point.constraint_moment_newton_meters)
+            })
+            || !self
+                .reference_points
+                .windows(2)
+                .all(|pair| pair[0].identity < pair[1].identity)
             || !self
                 .groups
                 .windows(2)
@@ -320,36 +411,6 @@ impl CanonicalStructuralConstraintResult {
     }
 }
 
-fn nodal_vector_field<'a>(
-    fields: &'a [AnalysisField],
-    field_id: &'static str,
-    mesh: &SolverMeshArtifact,
-) -> Result<&'a [f64], ConstraintResultError> {
-    let field = fields
-        .iter()
-        .find(|field| field.field_id == field_id)
-        .ok_or(ConstraintResultError::MissingField { field_id })?;
-    let AnalysisFieldValues::HostF64(values) = &field.values else {
-        return Err(ConstraintResultError::InvalidField { field_id });
-    };
-    if field.shape != [mesh.topology.nodes.len(), 3]
-        || values.len() != mesh.topology.nodes.len() * 3
-        || values.iter().any(|value| !value.is_finite())
-    {
-        return Err(ConstraintResultError::InvalidField { field_id });
-    }
-    Ok(values)
-}
-
-fn translation_component(dof: CanonicalStructuralDof) -> Result<usize, ConstraintResultError> {
-    match dof {
-        CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => Ok(0),
-        CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => Ok(1),
-        CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => Ok(2),
-        CanonicalStructuralDof::Rotation(_) => Err(ConstraintResultError::InvalidEvidence),
-    }
-}
-
 fn component_vector(component: usize, value: f64) -> [f64; 3] {
     let mut vector = [0.0; 3];
     vector[component] = value;
@@ -375,91 +436,6 @@ fn group_is_finite(group: &ConstraintGroupResult) -> bool {
                 && row.violation_meters.is_finite()
                 && row.violation_meters >= 0.0
         })
-}
-
-fn solve_constraint_multipliers(
-    rows: &[BTreeMap<usize, f64>],
-    right_hand_side: &[f64],
-) -> Option<Vec<f64>> {
-    if rows.len() != right_hand_side.len() {
-        return None;
-    }
-    if rows.is_empty() {
-        return Some(Vec::new());
-    }
-    let inverse_diagonal = rows
-        .iter()
-        .map(|row| {
-            let diagonal = row.values().map(|value| value * value).sum::<f64>();
-            (diagonal > 1.0e-18 && diagonal.is_finite()).then_some(diagonal.recip())
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let mut solution = vec![0.0; rows.len()];
-    let mut residual = right_hand_side.to_vec();
-    let mut preconditioned = residual
-        .iter()
-        .zip(&inverse_diagonal)
-        .map(|(residual, inverse)| residual * inverse)
-        .collect::<Vec<_>>();
-    let mut direction = preconditioned.clone();
-    let mut rz = dot(&residual, &preconditioned);
-    let scale = dot(right_hand_side, right_hand_side).sqrt().max(1.0);
-    if dot(&residual, &residual).sqrt() / scale <= 1.0e-10 {
-        return Some(solution);
-    }
-    for _ in 0..rows.len().saturating_mul(4).max(256) {
-        let applied = apply_constraint_gram(rows, &direction);
-        let denominator = dot(&direction, &applied);
-        if !denominator.is_finite() || denominator <= 1.0e-18 {
-            return None;
-        }
-        let alpha = rz / denominator;
-        for index in 0..rows.len() {
-            solution[index] += alpha * direction[index];
-            residual[index] -= alpha * applied[index];
-        }
-        if dot(&residual, &residual).sqrt() / scale <= 1.0e-10 {
-            return solution
-                .iter()
-                .all(|value| value.is_finite())
-                .then_some(solution);
-        }
-        preconditioned = residual
-            .iter()
-            .zip(&inverse_diagonal)
-            .map(|(residual, inverse)| residual * inverse)
-            .collect();
-        let next_rz = dot(&residual, &preconditioned);
-        let beta = next_rz / rz;
-        for (direction, preconditioned) in direction.iter_mut().zip(&preconditioned) {
-            *direction = preconditioned + beta * *direction;
-        }
-        rz = next_rz;
-    }
-    None
-}
-
-fn apply_constraint_gram(rows: &[BTreeMap<usize, f64>], values: &[f64]) -> Vec<f64> {
-    let mut dofs = BTreeMap::<usize, f64>::new();
-    for (row, value) in rows.iter().zip(values) {
-        for (dof, coefficient) in row {
-            *dofs.entry(*dof).or_insert(0.0) += coefficient * value;
-        }
-    }
-    rows.iter()
-        .map(|row| {
-            row.iter()
-                .map(|(dof, coefficient)| coefficient * dofs.get(dof).copied().unwrap_or(0.0))
-                .sum()
-        })
-        .collect()
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| left * right)
-        .sum()
 }
 
 fn all_finite(values: &[f64]) -> bool {

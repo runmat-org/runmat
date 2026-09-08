@@ -4,9 +4,10 @@ mod model;
 mod realize;
 
 #[cfg(test)]
-pub(crate) use model::{ComplexScalar, RealizedExcitationTarget};
+pub(crate) use model::ComplexScalar;
 pub(crate) use model::{
-    ComplexVector3, RealizedExcitation, RealizedExcitationKind, RealizedExcitations,
+    ComplexVector3, RealizedExcitation, RealizedExcitationKind, RealizedExcitationTarget,
+    RealizedExcitations,
 };
 pub(crate) use realize::realize_model_excitations;
 

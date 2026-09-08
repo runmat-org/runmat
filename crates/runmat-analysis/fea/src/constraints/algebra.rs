@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::Digest;
-use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralDof, ConstraintPlanError,
-    ReactionRecovery,
+    CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    ConstraintPlanError, ReactionRecovery,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -55,7 +54,7 @@ impl ResolvedConstraintMatrix {
     pub fn from_plan(
         plan: &CanonicalStructuralConstraintPlan,
         full_dof_count: usize,
-        mut resolve: impl FnMut(StableDigest, CanonicalStructuralDof) -> Option<usize>,
+        mut resolve: impl FnMut(CanonicalStructuralDofOwner, CanonicalStructuralDof) -> Option<usize>,
     ) -> Result<Self, ConstraintAlgebraError> {
         plan.validate()
             .map_err(|error| ConstraintAlgebraError::InvalidPlan(error.to_string()))?;
@@ -75,7 +74,7 @@ impl ResolvedConstraintMatrix {
         for row in active_rows {
             let mut coefficients = BTreeMap::<usize, f64>::new();
             for term in &row.terms {
-                let column = resolve(term.node_identity, term.dof).ok_or_else(|| {
+                let column = resolve(term.owner, term.dof).ok_or_else(|| {
                     ConstraintAlgebraError::UnavailableDof {
                         constraint_id: row.constraint_id.clone(),
                     }

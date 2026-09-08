@@ -33,7 +33,9 @@ use self::{
     solver_solid::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
-    solver_solid_boundary::apply_solver_mesh_structural_loads,
+    solver_solid_boundary::{
+        apply_reference_point_structural_loads, apply_solver_mesh_structural_loads,
+    },
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_constraint_kind_name,
@@ -44,7 +46,8 @@ use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::constraints::{
     AffineConstraintReduction, CanonicalStructuralConstraintPlan, CanonicalStructuralDof,
-    ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery, ResolvedConstraintMatrix,
+    CanonicalStructuralDofOwner, ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery,
+    ResolvedConstraintMatrix,
 };
 use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
@@ -392,6 +395,18 @@ pub enum SolverMeshRegionMappingError {
         region_id: String,
         load_kind: StructuralLoadKind,
     },
+    UncoupledReferencePoint {
+        load_id: String,
+        reference_point_id: String,
+    },
+    ReferencePointPositionMismatch {
+        load_id: String,
+        reference_point_id: String,
+    },
+    UnsupportedReferencePointLoad {
+        load_id: String,
+        load_kind: StructuralLoadKind,
+    },
 }
 
 impl fmt::Display for SolverMeshRegionMappingError {
@@ -404,6 +419,24 @@ impl fmt::Display for SolverMeshRegionMappingError {
             } => write!(
                 f,
                 "solver mesh load region did not resolve to persistent boundary provenance: load_id={load_id} region_id={region_id} load_kind={load_kind}"
+            ),
+            SolverMeshRegionMappingError::UncoupledReferencePoint {
+                load_id,
+                reference_point_id,
+            } => write!(
+                f,
+                "reference-point load has no rigid or distributing coupling: load_id={load_id} reference_point_id={reference_point_id}"
+            ),
+            SolverMeshRegionMappingError::ReferencePointPositionMismatch {
+                load_id,
+                reference_point_id,
+            } => write!(
+                f,
+                "reference-point load position differs from its coupling: load_id={load_id} reference_point_id={reference_point_id}"
+            ),
+            SolverMeshRegionMappingError::UnsupportedReferencePointLoad { load_id, load_kind } => write!(
+                f,
+                "load kind is not supported on a structural reference point: load_id={load_id} load_kind={load_kind}"
             ),
         }
     }
@@ -610,10 +643,30 @@ fn assemble_linear_system_impl(
         )
         .map_err(LinearAssemblyError::Structural)?;
     }
-    let dof_count = solid_topology
+    let compiled_constraint_plan = match (
+        structural_requirement,
+        supplied_constraint_plan,
+        solver_mesh.as_ref(),
+    ) {
+        (Some(_), None, Some(mesh)) => Some(
+            CanonicalStructuralConstraintPlan::compile(model, mesh)
+                .map_err(LinearAssemblyError::ConstraintPlan)?,
+        ),
+        _ => None,
+    };
+    let constraint_plan = supplied_constraint_plan.or(compiled_constraint_plan.as_ref());
+    if let (Some(plan), Some(mesh)) = (constraint_plan, solver_mesh.as_ref()) {
+        plan.validate_against(model, mesh)
+            .map_err(LinearAssemblyError::ConstraintPlan)?;
+    }
+    let mesh_dof_count = solid_topology
         .as_ref()
         .map(|topology| topology.dof_count)
         .unwrap_or(base_dof_count);
+    let reference_point_count = constraint_plan
+        .map(|plan| plan.reference_points.len())
+        .unwrap_or(0);
+    let dof_count = mesh_dof_count + reference_point_count * 6;
     let structural_solid_recovery = solver_mesh
         .as_ref()
         .map(solid_recovery_from_solver_mesh)
@@ -675,7 +728,7 @@ fn assemble_linear_system_impl(
     let mut stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
     let mut mass_diag = vec![0.0; dof_count];
     let mut damping_diag = vec![0.0; dof_count];
-    for i in 0..dof_count {
+    for i in 0..mesh_dof_count {
         let factor = 1.0 + (i as f64) * 0.05;
         stiffness_diag[i] = stiffness_base * factor;
         mass_diag[i] = 1.0 + (i as f64) * 0.01;
@@ -691,7 +744,8 @@ fn assemble_linear_system_impl(
         apply_reduced_multiphysics_rhs(&excitations, &mut rhs);
     }
 
-    let structural_dof_layout = StructuralDofLayout::reduced_translational_rows(dof_count);
+    let structural_dof_layout = StructuralDofLayout::reduced_translational_rows(mesh_dof_count)
+        .with_reference_points(reference_point_count);
     let structural_moment_load_count = excitations
         .iter()
         .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
@@ -726,6 +780,11 @@ fn assemble_linear_system_impl(
     let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
         if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
+            let constraint_plan = constraint_plan.ok_or_else(|| {
+                LinearAssemblyError::ConstraintPlan(ConstraintPlanError::Invalid(
+                    "canonical solid assembly has no compiled constraint plan".into(),
+                ))
+            })?;
             structural_wrench_lowering = apply_solver_mesh_structural_loads(
                 &excitations,
                 mesh,
@@ -734,17 +793,14 @@ fn assemble_linear_system_impl(
                 true,
             )
             .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+            apply_reference_point_structural_loads(
+                &excitations,
+                constraint_plan,
+                &structural_dof_layout,
+                &mut rhs,
+            )
+            .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
             constrained.fill(false);
-            let compiled_plan;
-            let constraint_plan = if let Some(plan) = supplied_constraint_plan {
-                plan.validate_against(model, mesh)
-                    .map_err(LinearAssemblyError::ConstraintPlan)?;
-                plan
-            } else {
-                compiled_plan = CanonicalStructuralConstraintPlan::compile(model, mesh)
-                    .map_err(LinearAssemblyError::ConstraintPlan)?;
-                &compiled_plan
-            };
             if constraint_plan.rows.iter().any(|row| row.terms.len() > 1) {
                 let matrix =
                     resolve_solid_constraint_matrix(constraint_plan, mesh, &structural_dof_layout)
@@ -823,7 +879,7 @@ fn assemble_linear_system_impl(
         let temporal_profile_variation =
             thermo_mechanical::temporal_profile_variation(Some(&context));
         let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
-        for i in 0..dof_count {
+        for i in 0..mesh_dof_count {
             let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
             let local_scale =
                 (effective_modulus_scale * (1.0 + dof_adjustments[i])).clamp(0.75, 1.2);
@@ -911,7 +967,7 @@ fn assemble_linear_system_impl(
             / 1.0e6)
             .clamp(0.0, 10.0);
 
-        for i in 0..dof_count {
+        for i in 0..mesh_dof_count {
             let local = conductivity_scales[i];
             damping_diag[i] *= (1.0 + 0.02 * local).clamp(1.0, 1.1);
             if !constrained[i] {
@@ -939,7 +995,7 @@ fn assemble_linear_system_impl(
         });
     }
 
-    let stiffness_csr = match solver_mesh.as_ref() {
+    let mut stiffness_csr = match solver_mesh.as_ref() {
         Some(mesh) => Some(
             assemble_solver_solid_stiffness_csr(
                 mesh,
@@ -954,9 +1010,17 @@ fn assemble_linear_system_impl(
         ),
         None => None,
     };
+    if let Some(csr) = stiffness_csr.as_mut() {
+        let terminal_offset = csr.row_offsets.last().copied().unwrap_or(0);
+        csr.row_offsets.resize(dof_count + 1, terminal_offset);
+    }
     if let Some(csr) = stiffness_csr.as_ref() {
         apply_csr_constraints(csr, &constrained, &mut rhs, dof_count);
         for (i, diagonal) in stiffness_diag.iter_mut().enumerate().take(dof_count) {
+            if i >= mesh_dof_count {
+                *diagonal = 0.0;
+                continue;
+            }
             let start = csr.row_offsets[i];
             let end = csr.row_offsets[i + 1];
             *diagonal = csr.column_indices[start..end]
@@ -2121,8 +2185,11 @@ fn apply_solid_constraint_plan(
                 constraint_kind: "general_constraint_equation",
             });
         };
+        let CanonicalStructuralDofOwner::MeshNode(node_identity) = term.owner else {
+            return Err(StructuralAssemblyError::ConstraintPlanNodeAbsent);
+        };
         let node_index = node_indices
-            .get(&term.node_identity)
+            .get(&node_identity)
             .copied()
             .ok_or(StructuralAssemblyError::ConstraintPlanNodeAbsent)?;
         let kind = match term.dof {
@@ -2166,8 +2233,13 @@ fn resolve_solid_constraint_matrix(
         .enumerate()
         .map(|(index, node)| (node.stable_identity, index))
         .collect::<BTreeMap<_, _>>();
-    ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |node, dof| {
-        let node_index = node_indices.get(&node).copied()?;
+    let reference_point_indices = plan
+        .reference_points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| (point.identity, index))
+        .collect::<BTreeMap<_, _>>();
+    ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |owner, dof| {
         let kind = match dof {
             CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => {
                 StructuralDofKind::Ux
@@ -2182,7 +2254,14 @@ fn resolve_solid_constraint_matrix(
             CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => StructuralDofKind::Ry,
             CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => StructuralDofKind::Rz,
         };
-        layout.index(node_index, kind)
+        match owner {
+            CanonicalStructuralDofOwner::MeshNode(node) => {
+                layout.index(node_indices.get(&node).copied()?, kind)
+            }
+            CanonicalStructuralDofOwner::ReferencePoint(identity) => {
+                layout.reference_point_index(reference_point_indices.get(&identity).copied()?, kind)
+            }
+        }
     })
 }
 
@@ -2773,9 +2852,23 @@ mod tests {
     }
 
     #[test]
-    fn solver_mesh_boundary_regions_lower_wrench_moments() {
+    fn solver_mesh_reference_point_coupling_receives_wrench_moments() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-        model.constraints = Vec::new();
+        model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Structural(
+            runmat_analysis_core::StructuralConstraint {
+                constraint_id: "tip_coupling".into(),
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                kind: runmat_analysis_core::StructuralConstraintKind::DistributingCoupling(
+                    runmat_analysis_core::ReferencePointCoupling {
+                        target: runmat_analysis_core::RegionTarget::boundary("tip"),
+                        reference_point: runmat_analysis_core::ReferencePoint {
+                            reference_point_id: "tip".into(),
+                            position: runmat_analysis_core::Position::new([0.0, 0.0, 0.0]),
+                        },
+                    },
+                ),
+            },
+        )];
         replace_fixture_excitations(
             &mut model,
             vec![FixtureExcitation {
@@ -2801,17 +2894,16 @@ mod tests {
         )
         .expect("valid wrench boundary should assemble");
 
-        assert_eq!(summary.structural_wrench_lowering.len(), 1);
-        let lowering = &summary.structural_wrench_lowering[0];
-        assert_eq!(lowering.load_id, "wrench_tip");
-        assert_eq!(lowering.region_id, "tip");
-        assert!(lowering.moment_couple_applied);
-        assert_close(lowering.applied_moment_at_point[1], 6.0);
-        assert_close(lowering.moment_residual[1], 0.0);
-        assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+        assert!(summary.structural_wrench_lowering.is_empty());
+        assert_eq!(summary.structural_dof_layout.reference_point_count(), 1);
+        let reference_ry = summary
+            .structural_dof_layout
+            .reference_point_index(0, StructuralDofKind::Ry)
+            .unwrap();
+        assert_close(summary.operator.rhs[reference_ry], 6.0);
         assert_eq!(
             summary.structural_sources,
-            vec![SourceImplementation::BoundaryResultantWrenchDistribution]
+            vec![SourceImplementation::ReferencePointGeneralizedLoad]
         );
     }
 

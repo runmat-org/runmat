@@ -3,7 +3,7 @@ use runmat_analysis_core::{
     StructuralConstraintKind,
 };
 
-use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
+use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
 
 use super::{StructuralAssemblyError, StructuralLoadKind};
 
@@ -71,32 +71,48 @@ pub(super) fn structural_source_implementations(
 ) -> Vec<SourceImplementation> {
     let mut implementations = Vec::new();
     for excitation in excitations.iter() {
-        let implementation = match (&excitation.kind, basis) {
-            (RealizedExcitationKind::Force(_), StructuralProjectionBasis::CanonicalSolid) => {
-                SourceImplementation::CanonicalBoundaryProjection
-            }
-            (RealizedExcitationKind::Pressure(_), StructuralProjectionBasis::CanonicalSolid) => {
-                SourceImplementation::CanonicalBoundaryPressureIntegration
-            }
-            (
-                RealizedExcitationKind::Wrench { .. },
-                StructuralProjectionBasis::CanonicalSolid
-                | StructuralProjectionBasis::ExplicitConnectivity,
-            ) => SourceImplementation::BoundaryResultantWrenchDistribution,
-            (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::CanonicalSolid) => {
-                SourceImplementation::UniformNodeDistribution
-            }
-            (
-                RealizedExcitationKind::Force(_) | RealizedExcitationKind::Moment(_),
-                StructuralProjectionBasis::ExplicitConnectivity,
-            ) => SourceImplementation::ExplicitRegionNodalDistribution,
-            (
+        let implementation = if basis == StructuralProjectionBasis::CanonicalSolid
+            && matches!(
+                excitation.target,
+                RealizedExcitationTarget::ReferencePoint { .. }
+            )
+            && matches!(
+                excitation.kind,
                 RealizedExcitationKind::Force(_)
-                | RealizedExcitationKind::Pressure(_)
-                | RealizedExcitationKind::BodyForce(_),
-                StructuralProjectionBasis::Synthetic,
-            ) => SourceImplementation::OrdinalDistribution,
-            _ => continue,
+                    | RealizedExcitationKind::Moment(_)
+                    | RealizedExcitationKind::Wrench { .. }
+            ) {
+            SourceImplementation::ReferencePointGeneralizedLoad
+        } else {
+            match (&excitation.kind, basis) {
+                (RealizedExcitationKind::Force(_), StructuralProjectionBasis::CanonicalSolid) => {
+                    SourceImplementation::CanonicalBoundaryProjection
+                }
+                (
+                    RealizedExcitationKind::Pressure(_),
+                    StructuralProjectionBasis::CanonicalSolid,
+                ) => SourceImplementation::CanonicalBoundaryPressureIntegration,
+                (
+                    RealizedExcitationKind::Wrench { .. },
+                    StructuralProjectionBasis::CanonicalSolid
+                    | StructuralProjectionBasis::ExplicitConnectivity,
+                ) => SourceImplementation::BoundaryResultantWrenchDistribution,
+                (
+                    RealizedExcitationKind::BodyForce(_),
+                    StructuralProjectionBasis::CanonicalSolid,
+                ) => SourceImplementation::UniformNodeDistribution,
+                (
+                    RealizedExcitationKind::Force(_) | RealizedExcitationKind::Moment(_),
+                    StructuralProjectionBasis::ExplicitConnectivity,
+                ) => SourceImplementation::ExplicitRegionNodalDistribution,
+                (
+                    RealizedExcitationKind::Force(_)
+                    | RealizedExcitationKind::Pressure(_)
+                    | RealizedExcitationKind::BodyForce(_),
+                    StructuralProjectionBasis::Synthetic,
+                ) => SourceImplementation::OrdinalDistribution,
+                _ => continue,
+            }
         };
         push_unique(&mut implementations, implementation);
     }
@@ -250,6 +266,8 @@ pub(super) fn validate_structural_inputs(
                     | StructuralConstraintKind::NormalDisplacement { .. }
                     | StructuralConstraintKind::Symmetry { .. }
                     | StructuralConstraintKind::Antisymmetry { .. }
+                    | StructuralConstraintKind::RigidCoupling(_)
+                    | StructuralConstraintKind::DistributingCoupling(_)
                     | StructuralConstraintKind::Tie(_)
                     | StructuralConstraintKind::Periodic(_)
                     | StructuralConstraintKind::Equation(_)

@@ -48,13 +48,19 @@ pub(super) fn require_structural(
     .map_err(FeaRunError::from)?;
     if procedure != AnalysisProcedure::Static
         && model.constraints.iter().any(|constraint| {
-            constraint.structural().is_some_and(|constraint| {
-                matches!(constraint.kind, StructuralConstraintKind::Equation(_))
-            })
+            constraint
+                .structural()
+                .is_some_and(|constraint| match &constraint.kind {
+                    StructuralConstraintKind::Fixed { .. } => false,
+                    StructuralConstraintKind::Prescribed(_) => {
+                        constraint.frame != runmat_analysis_core::CoordinateFrame::Global
+                    }
+                    _ => true,
+                })
         })
     {
         return Err(FeaRunError::InvalidModel(format!(
-            "structural equation constraints are not yet admitted for {procedure:?}; modal, transient, and nonlinear operators require procedure-specific affine reduction"
+            "structural affine constraints are not yet admitted for {procedure:?}; modal, transient, and nonlinear operators require procedure-specific stiffness, mass, damping, tangent, and effective-load reduction"
         )));
     }
     Ok(step)

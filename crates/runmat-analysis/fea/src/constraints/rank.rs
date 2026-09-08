@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::StableDigest;
-
 use super::{
-    CanonicalStructuralConstraintRow, CanonicalStructuralDof, ConstraintPlanError, ReactionRecovery,
+    CanonicalStructuralConstraintRow, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    ConstraintPlanError, ReactionRecovery,
 };
 
-type DofKey = (StableDigest, CanonicalStructuralDof);
+type DofKey = (CanonicalStructuralDofOwner, CanonicalStructuralDof);
 
 const RELATIVE_RANK_TOLERANCE: f64 = 1.0e-11;
 
@@ -34,7 +33,7 @@ pub(super) fn classify(
         let mut coefficients = row
             .terms
             .iter()
-            .map(|term| ((term.node_identity, term.dof), term.coefficient))
+            .map(|term| ((term.owner, term.dof), term.coefficient))
             .collect::<BTreeMap<_, _>>();
         let mut right_hand_side = row.right_hand_side;
         let mut sources = BTreeSet::from([row.constraint_id.clone()]);
