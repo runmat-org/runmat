@@ -2347,6 +2347,42 @@ enforceMigratedBuiltinFamily({
     "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/callback/invoke.rs",
   ],
 });
+enforceMigratedBuiltinFamily({
+  name: "structfun catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/structs/core/structfun"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/structs/core/structfun/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/structfun/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/structfun/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/structfun.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/structfun.json",
+  ],
+  testLineCeiling: 192,
+});
+enforceMigratedBuiltinFamily({
+  name: "structfun runtime",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/structfun"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/structfun/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/structfun/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/structfun.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "uniform scalar output runtime service",
+  roots: ["crates/runmat-runtime/src/builtins/common/uniform_scalar_output"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/common/uniform_scalar_output/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/output/classify.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/output/finish.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/output/collector",
+  ],
+});
 const cellfunRuntimeMacro = read(
   "crates/runmat-runtime/src/builtins/cells/core/cellfun/mod.rs"
 );
@@ -2355,6 +2391,22 @@ if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(ce
 }
 if (/\bcellfun_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
   fail("cellfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+const structfunRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/structs/core/structfun/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(structfunRuntimeMacro)) {
+  fail("structfun runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\bstructfun_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+  fail("structfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/structs/core/structfun"
+)) {
+  if (!sourcePath.includes("/tests/") && /cellfun:|\.replace\s*\(/.test(text)) {
+    fail(`${sourcePath} rewrites callback error text instead of adapting a typed callback failure`);
+  }
 }
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun"
@@ -2452,7 +2504,7 @@ if (/"(?:mldivide|mpower|mrdivide|mtimes)"/.test(matrixArithmeticCatalogInferenc
   fail("matrix-arithmetic inference must dispatch from its closed typed rule, not builtin identity strings");
 }
 const catalogInferenceFacade = read("crates/runmat-builtins/src/catalog/inference.rs");
-if (catalogInferenceFacade.split("\n").length > 64) {
+if (catalogInferenceFacade.split("\n").length > 40) {
   fail("catalog inference must remain a bounded domain router, not a builtin semantic owner");
 }
 if (/\bmatch\b|\bBuiltinInferenceRule::/.test(catalogInferenceFacade)) {

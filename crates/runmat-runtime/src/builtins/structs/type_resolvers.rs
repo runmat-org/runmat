@@ -41,10 +41,6 @@ pub fn setfield_type(args: &[Type], _context: &ResolveContext) -> Type {
         .unwrap_or(Type::Unknown)
 }
 
-pub fn structfun_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 fn struct_container_type(ty: &Type) -> Option<Type> {
     match ty {
         Type::Struct { known_fields } => Some(Type::Struct {
@@ -144,14 +140,6 @@ mod tests {
                 &ResolveContext::new(Vec::new()),
             ),
             Type::Struct { known_fields: None }
-        );
-    }
-
-    #[test]
-    fn structfun_type_is_unknown() {
-        assert_eq!(
-            structfun_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Unknown
         );
     }
 }

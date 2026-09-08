@@ -16,6 +16,7 @@ mod logical;
 mod math;
 mod parallel;
 mod stats;
+mod structs;
 
 pub use acceleration::*;
 pub use aggregate::*;
@@ -27,6 +28,7 @@ pub use logical::*;
 pub use math::*;
 pub use parallel::*;
 pub use stats::*;
+pub use structs::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinContractMaturity {
@@ -48,6 +50,7 @@ pub enum BuiltinInferenceRule {
     Math(MathInferenceRule),
     Parallel(ParallelInferenceRule),
     Stats(StatsInferenceRule),
+    Structs(StructInferenceRule),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

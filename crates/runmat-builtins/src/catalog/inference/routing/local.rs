@@ -7,6 +7,7 @@ pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
         BuiltinInferenceRule::Cells(rule) => super::cells::infer(rule, request, entry),
         BuiltinInferenceRule::Math(rule) => super::math::infer(rule, request, entry),
         BuiltinInferenceRule::Stats(rule) => super::stats::infer(rule, request, entry),
+        BuiltinInferenceRule::Structs(rule) => super::structs::infer(rule, request, entry),
         BuiltinInferenceRule::Acceleration(rule) => {
             super::acceleration::infer(rule, request, entry)
         }
