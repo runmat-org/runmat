@@ -64,6 +64,7 @@ pub(crate) mod constraints;
 pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
+pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
 mod modeling;
@@ -113,6 +114,7 @@ pub(crate) fn ensure_value_classes_registered() {
     accuracy::ensure_accuracy_classes_registered();
     constraints::ensure_constraint_support_classes_registered();
     execution::ensure_execution_classes_registered();
+    generator_policies::ensure_generator_policy_classes_registered();
     values::ensure_quantity_classes_registered();
     signal_policies::ensure_signal_policy_classes_registered();
     signals::ensure_signal_classes_registered();
@@ -783,19 +785,19 @@ pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<
 )]
 pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, VALIDATE_NAME).await? {
-        FeaResolvedDocument::Study(spec) => operation_result_to_object(
+        RuntimeResolvedDocument::Study(composed) => operation_result_to_object(
             VALIDATE_NAME,
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
             FEA_VALIDATION_CLASS,
-            analysis_validate_study_op(&spec, OperationContext::new(None, None)),
+            analysis_validate_study_op(&composed.study, OperationContext::new(None, None)),
         ),
-        FeaResolvedDocument::Sweep(spec) => operation_result_to_object(
+        RuntimeResolvedDocument::Sweep(composed) => operation_result_to_object(
             VALIDATE_NAME,
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
             FEA_SWEEP_VALIDATION_CLASS,
-            analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None)),
+            analysis_validate_study_sweep_op(&composed.sweep, OperationContext::new(None, None)),
         ),
     }
 }
@@ -811,15 +813,15 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
 )]
 pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, PLAN_NAME).await? {
-        FeaResolvedDocument::Study(spec) => operation_result_to_object(
+        RuntimeResolvedDocument::Study(composed) => operation_result_to_object(
             PLAN_NAME,
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
             FEA_PLAN_CLASS,
-            analysis_plan_study_op(&spec, OperationContext::new(None, None)),
+            analysis_plan_study_op(&composed.study, OperationContext::new(None, None)),
         ),
-        FeaResolvedDocument::Sweep(spec) => sweep_plan_result_to_object(
-            analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None)),
+        RuntimeResolvedDocument::Sweep(composed) => sweep_plan_result_to_object(
+            analysis_plan_study_sweep_op(&composed.sweep, OperationContext::new(None, None)),
         ),
     }
 }
@@ -835,10 +837,29 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, RUN_NAME).await? {
-        FeaResolvedDocument::Study(spec) => run_study_result_to_object(&spec),
-        FeaResolvedDocument::Sweep(spec) => sweep_run_result_to_object(
-            analysis_run_study_sweep_op(&spec, OperationContext::new(None, None)),
-        ),
+        RuntimeResolvedDocument::Study(composed) => {
+            if !composed.frozen_generators.is_empty() {
+                return Err(builtin_error(
+                    RUN_NAME,
+                    &ERROR_OPERATION,
+                    "callable-backed signals require the analysis materialization host before solve",
+                ));
+            }
+            run_study_result_to_object(&composed.study)
+        }
+        RuntimeResolvedDocument::Sweep(composed) => {
+            if !composed.frozen_generators.is_empty() {
+                return Err(builtin_error(
+                    RUN_NAME,
+                    &ERROR_OPERATION,
+                    "callable-backed signals require the analysis materialization host before solve",
+                ));
+            }
+            sweep_run_result_to_object(analysis_run_study_sweep_op(
+                &composed.sweep,
+                OperationContext::new(None, None),
+            ))
+        }
     }
 }
 
@@ -930,30 +951,78 @@ async fn load_document_object(path: PathBuf) -> BuiltinResult<Value> {
 async fn resolve_document_input(
     input: Value,
     builtin: &'static str,
-) -> BuiltinResult<FeaResolvedDocument> {
+) -> BuiltinResult<RuntimeResolvedDocument> {
     match input {
         Value::Object(ref object) if object.class_name == FEA_STUDY_CLASS => {
-            let spec: AnalysisStudySpec = object_payload(builtin, &input, FEA_STUDY_CLASS)?;
-            Ok(FeaResolvedDocument::Study(Box::new(spec)))
+            modeling::study_from_value_with_generators(builtin, &input)
+                .map(RuntimeResolvedDocument::Study)
         }
         Value::Object(ref object) if object.class_name == FEA_SWEEP_CLASS => {
-            let spec: AnalysisStudySweepSpec = object_payload(builtin, &input, FEA_SWEEP_CLASS)?;
-            Ok(FeaResolvedDocument::Sweep(spec))
+            modeling::sweep_from_value_with_generators(builtin, &input)
+                .map(RuntimeResolvedDocument::Sweep)
         }
-        Value::String(path) => load_fea_document_from_path_async(&PathBuf::from(path))
-            .await
-            .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err)),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            let path: String = chars.data.iter().collect();
+        Value::String(path) => resolved_runtime_document_from_file(
             load_fea_document_from_path_async(&PathBuf::from(path))
                 .await
-                .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err))
+                .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err))?,
+        ),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            let path: String = chars.data.iter().collect();
+            resolved_runtime_document_from_file(
+                load_fea_document_from_path_async(&PathBuf::from(path))
+                    .await
+                    .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err))?,
+            )
         }
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
             format!("expected .fea path, {FEA_STUDY_CLASS}, or {FEA_SWEEP_CLASS}; got {other:?}"),
         )),
+    }
+}
+
+enum RuntimeResolvedDocument {
+    Study(modeling::ComposedStudy),
+    Sweep(modeling::ComposedSweep),
+}
+
+fn resolved_runtime_document_from_file(
+    document: FeaResolvedDocument,
+) -> BuiltinResult<RuntimeResolvedDocument> {
+    match document {
+        FeaResolvedDocument::Study(study) => {
+            let signals = study
+                .model
+                .as_ref()
+                .map(|model| model.signals.as_slice())
+                .unwrap_or_default();
+            let frozen_generators =
+                signals::bindings::FrozenGeneratorInventory::new(LOAD_NAME, signals, Vec::new())?;
+            Ok(RuntimeResolvedDocument::Study(modeling::ComposedStudy {
+                study: *study,
+                frozen_generators,
+            }))
+        }
+        FeaResolvedDocument::Sweep(sweep) => {
+            let composed = sweep
+                .studies
+                .iter()
+                .cloned()
+                .map(|study| {
+                    (
+                        study,
+                        signals::bindings::FrozenGeneratorInventory::default(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            Ok(RuntimeResolvedDocument::Sweep(modeling::ComposedSweep {
+                frozen_generators: signals::bindings::FrozenStudyGeneratorInventory::new(
+                    LOAD_NAME, &composed,
+                )?,
+                sweep,
+            }))
+        }
     }
 }
 
@@ -2778,7 +2847,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
-    use runmat_value::CellArray;
+    use runmat_value::{CellArray, Closure};
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -3743,6 +3812,25 @@ execution:
         ))
         .expect("thermo-mechanical domain should build");
 
+        let signal_domain = block_on(generator_policies::time_domain()).unwrap();
+        let signal_sampling = block_on(generator_policies::uniform_sampling(
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Int(IntValue::U64(3)),
+        ))
+        .unwrap();
+        let generated_force = block_on(signals::callable::force(vec![
+            Value::String("generated_force".into()),
+            Value::Closure(Closure {
+                function_name: "loads.force".into(),
+                bound_function: Some(41),
+                captures: vec![Value::Num(2.0)],
+            }),
+            signal_domain,
+            signal_sampling,
+        ]))
+        .expect("callable force signal should build");
+
         let model = block_on(fea_model_builtin(vec![
             Value::String("bracket_static_model".to_string()),
             geometry.clone(),
@@ -3760,14 +3848,41 @@ execution:
             cell(vec![step.clone()]),
             Value::String("Domains".to_string()),
             cell(vec![domain]),
+            Value::String("Signals".to_string()),
+            cell(vec![generated_force]),
         ]))
         .expect("model should build");
         assert_object_class(&model, FEA_MODEL_CLASS);
-        let decoded_model: AnalysisModel = object_payload(&model);
-        let thermo = decoded_model
+        let encoded_model = crate::execution::value_codec::encode_inline_value(&model)
+            .expect("model with a frozen generator should be portable");
+        let model = crate::execution::value_codec::decode_inline_value(&encoded_model)
+            .expect("portable model should decode");
+        let composed_model = modeling::model_from_value("test", &model).unwrap();
+        assert_eq!(composed_model.frozen_generators.bindings().len(), 1);
+        let thermo = composed_model
+            .model
             .thermo_mechanical
             .expect("thermo-mechanical domain");
         assert_eq!(thermo.reference_temperature.kelvin, 293.15);
+
+        let mut substituted_model = model.clone();
+        let Value::Object(substituted) = &mut substituted_model else {
+            unreachable!()
+        };
+        let Value::Cell(bindings) = substituted
+            .properties
+            .get_mut(signals::bindings::FROZEN_GENERATORS_PROPERTY)
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let Value::Struct(binding) = &mut bindings.data[0] else {
+            unreachable!()
+        };
+        binding
+            .fields
+            .insert("signal_id".into(), Value::String("substituted".into()));
+        assert!(modeling::model_from_value("test", &substituted_model).is_err());
 
         let sequence = block_on(sequences::sequence(vec![
             Value::String("bracket_sequence".to_string()),
@@ -3796,7 +3911,35 @@ execution:
         ]))
         .expect("study should build");
         assert_object_class(&study, FEA_STUDY_CLASS);
+        let (binding_property, owner) = crate::class_registry::lookup_property(
+            FEA_STUDY_CLASS,
+            signals::bindings::FROZEN_GENERATORS_PROPERTY,
+        )
+        .expect("study frozen-generator property should be registered");
+        assert_eq!(owner, FEA_STUDY_CLASS);
+        assert_eq!(binding_property.get_access, MemberAccess::Private);
+        let encoded_study = crate::execution::value_codec::encode_inline_value(&study)
+            .expect("study with a frozen generator should be portable");
+        let study = crate::execution::value_codec::decode_inline_value(&encoded_study)
+            .expect("portable study should decode");
+        let composed_study = modeling::study_from_value_with_generators("test", &study).unwrap();
+        assert_eq!(composed_study.frozen_generators.bindings().len(), 1);
+        let error = block_on(fea_run_builtin(study.clone()))
+            .expect_err("unmaterialized callable must not enter a solver");
+        assert!(error.message().contains("materialization host"));
 
+        let sweep = block_on(fea_sweep_builtin(vec![
+            Value::String("bracket_sweep".to_string()),
+            cell(vec![study.clone(), study]),
+            Value::String("FailFast".to_string()),
+            Value::Bool(false),
+        ]))
+        .expect_err("duplicate study identities must be rejected");
+        assert!(sweep.message().contains("declared more than once"));
+
+        let study =
+            study_to_object_with_generators(composed_study.study, composed_study.frozen_generators)
+                .unwrap();
         let sweep = block_on(fea_sweep_builtin(vec![
             Value::String("bracket_sweep".to_string()),
             cell(vec![study]),
@@ -3805,6 +3948,19 @@ execution:
         ]))
         .expect("sweep should build");
         assert_object_class(&sweep, FEA_SWEEP_CLASS);
+        let encoded_sweep = crate::execution::value_codec::encode_inline_value(&sweep)
+            .expect("sweep with frozen generators should be portable");
+        let sweep = crate::execution::value_codec::decode_inline_value(&encoded_sweep)
+            .expect("portable sweep should decode");
+        let sweep = modeling::sweep_from_value_with_generators("test", &sweep).unwrap();
+        assert_eq!(
+            sweep
+                .frozen_generators
+                .for_study("bracket_static")
+                .bindings()
+                .len(),
+            1
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ use runmat_analysis_core::{
     SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
     SignalShape, SignalValue, TabulatedSignal, Traction,
 };
+use runmat_execution::value::CallableValue;
 
 pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = "fea.DisplacementSignal";
 pub(super) const ROTATION_SIGNAL_CLASS: &str = "fea.RotationSignal";
@@ -37,11 +38,26 @@ pub(super) const CHARGE_DENSITY_SIGNAL_CLASS: &str = "fea.ChargeDensitySignal";
 pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str = "fea.MagneticVectorPotentialSignal";
 pub(super) const MASS_FLOW_SIGNAL_CLASS: &str = "fea.MassFlowSignal";
 
-const SIGNAL_FIELDS: &[&str] = &["signal"];
+const SIGNAL_FIELDS: &[&str] = &["signal", FROZEN_GENERATOR_PROPERTY];
+const SIGNAL_REQUIRED_FIELDS: &[&str] = &["signal"];
+pub(super) const FROZEN_GENERATOR_PROPERTY: &str = "frozen_generator";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SignalObject {
     signal: PhysicalSignal,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct FrozenSignalGenerator {
+    pub(super) signal_id: SignalId,
+    pub(super) callable: CallableValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RuntimeSignal {
+    pub(super) signal: PhysicalSignal,
+    pub(super) frozen_generator: Option<FrozenSignalGenerator>,
 }
 
 const SCALAR_INPUTS: [BuiltinParamDescriptor; 2] = [
@@ -100,6 +116,47 @@ fn signal_object(
         class_name,
         &SignalObject { signal },
     )
+}
+
+fn callable_signal_object(
+    builtin: &'static str,
+    class_name: &'static str,
+    signal: PhysicalSignal,
+    callable: CallableValue,
+) -> BuiltinResult<Value> {
+    let signal_id = signal.signal_id().clone();
+    let mut value = signal_object(builtin, class_name, signal)?;
+    let Value::Object(object) = &mut value else {
+        unreachable!("signal_object always returns an object")
+    };
+    object.properties.insert(
+        FROZEN_GENERATOR_PROPERTY.into(),
+        callable_to_value(builtin, callable)?,
+    );
+    runtime_signal_from_value(builtin, &value).and_then(|runtime| {
+        if runtime
+            .frozen_generator
+            .as_ref()
+            .is_some_and(|binding| binding.signal_id == signal_id)
+        {
+            Ok(value)
+        } else {
+            Err(builtin_error(
+                builtin,
+                &ERROR_INTERNAL,
+                "frozen signal generator was not retained",
+            ))
+        }
+    })
+}
+
+fn callable_to_value(builtin: &'static str, callable: CallableValue) -> BuiltinResult<Value> {
+    crate::execution::value_codec::decode_inline_value(
+        &runmat_execution::value::ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::Callable(callable),
+        )),
+    )
+    .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))
 }
 
 fn constant_signal<Q>(
@@ -452,6 +509,8 @@ scalar_signal!(
     PhysicalSignal::MassFlowRate
 );
 
+pub(super) mod bindings;
+pub(super) mod callable;
 pub(crate) mod time_samples;
 
 pub(super) fn physical_signal_from_value(
@@ -472,8 +531,13 @@ pub(super) fn physical_signal_from_value(
             format!("unsupported FEA signal class `{}`", object.class_name),
         )
     })?;
-    let payload: SignalObject =
-        object_payload(builtin, value, signal_class_name(expected_quantity))?;
+    let mut public_object = object.clone();
+    public_object.properties.remove(FROZEN_GENERATOR_PROPERTY);
+    let payload: SignalObject = object_payload(
+        builtin,
+        &Value::Object(public_object),
+        signal_class_name(expected_quantity),
+    )?;
     if payload.signal.quantity() != expected_quantity {
         return Err(builtin_error(
             builtin,
@@ -482,6 +546,83 @@ pub(super) fn physical_signal_from_value(
         ));
     }
     Ok(payload.signal)
+}
+
+pub(super) fn runtime_signal_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<RuntimeSignal> {
+    let signal = physical_signal_from_value(builtin, value)?;
+    let Value::Object(object) = value else {
+        unreachable!("physical_signal_from_value accepted only an object")
+    };
+    let frozen_generator = object
+        .properties
+        .get(FROZEN_GENERATOR_PROPERTY)
+        .map(|callable| frozen_generator_from_value(builtin, &signal, callable))
+        .transpose()?;
+    if signal.generator().is_some() != frozen_generator.is_some() {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "a runtime callable signal must retain exactly one frozen generator binding",
+        ));
+    }
+    Ok(RuntimeSignal {
+        signal,
+        frozen_generator,
+    })
+}
+
+fn frozen_generator_from_value(
+    builtin: &'static str,
+    signal: &PhysicalSignal,
+    value: &Value,
+) -> BuiltinResult<FrozenSignalGenerator> {
+    let payload = crate::execution::value_codec::encode_inline_value(value)
+        .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
+    let runmat_execution::value::ValuePayload::Inline(value) = payload else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "frozen signal callable must be an inline portable value",
+        ));
+    };
+    let runmat_execution::value::InlineValue::Callable(callable) = *value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "frozen signal generator must be a function handle or closure",
+        ));
+    };
+    callable
+        .validate_identity()
+        .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
+    if !callable.owner_identity.starts_with("bound:") {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "signal generators must be semantically bound functions or closures",
+        ));
+    }
+    let generator = signal.generator().ok_or_else(|| {
+        builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "only callable-backed signals may retain a frozen generator",
+        )
+    })?;
+    if generator.qualified_function != callable.qualified_name {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "frozen callable identity does not match the signal generator",
+        ));
+    }
+    Ok(FrozenSignalGenerator {
+        signal_id: signal.signal_id().clone(),
+        callable,
+    })
 }
 
 fn signal_class_name(quantity: runmat_analysis_core::PhysicalQuantityKind) -> &'static str {
@@ -553,7 +694,7 @@ pub(super) fn ensure_signal_classes_registered() {
                     type_identity,
                     schema_version: 1,
                     allowed_fields: SIGNAL_FIELDS,
-                    required_fields: SIGNAL_FIELDS,
+                    required_fields: SIGNAL_REQUIRED_FIELDS,
                     validate: validate_signal_object,
                 },
             )
@@ -570,10 +711,14 @@ pub(super) fn ensure_signal_classes_registered() {
                 "fromTimeSamples".into(),
                 static_method("fromTimeSamples", time_sample_builtin(class_name)),
             );
+            methods.insert(
+                "fromFunction".into(),
+                static_method("fromFunction", callable::callable_builtin(class_name)),
+            );
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
                 name: class_name.into(),
                 parent: None,
-                properties: immutable_properties(SIGNAL_FIELDS),
+                properties: signal_properties(),
                 methods,
             });
         }
@@ -617,7 +762,30 @@ fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
             object.class_name
         ));
     }
+    if let Some(callable) = object.properties.get(FROZEN_GENERATOR_PROPERTY) {
+        let payload = crate::execution::value_codec::encode_inline_value(callable)
+            .map_err(|error| error.to_string())?;
+        if !matches!(
+            payload,
+            runmat_execution::value::ValuePayload::Inline(value)
+                if matches!(*value, runmat_execution::value::InlineValue::Callable(_))
+        ) {
+            return Err(format!(
+                "{}.{} must be a portable callable",
+                object.class_name, FROZEN_GENERATOR_PROPERTY
+            ));
+        }
+    }
     Ok(())
+}
+
+fn signal_properties() -> HashMap<String, crate::class_registry::RuntimeProperty> {
+    let mut properties = immutable_properties(SIGNAL_FIELDS);
+    properties
+        .get_mut(FROZEN_GENERATOR_PROPERTY)
+        .expect("frozen generator property is registered")
+        .get_access = MemberAccess::Private;
+    properties
 }
 
 fn immutable_properties(

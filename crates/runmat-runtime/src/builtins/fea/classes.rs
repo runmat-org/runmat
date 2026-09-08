@@ -53,10 +53,17 @@ pub(super) const STUDY_FIELDS: &[&str] = &[
     "model",
     "execution",
     "meshing_settings",
+    "immutable_values",
     "solver_mesh_artifact_path",
     "meshing_evidence_artifact_path",
+    super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
 ];
-pub(super) const SWEEP_FIELDS: &[&str] = &["sweep_id", "studies", "fail_fast"];
+pub(super) const SWEEP_FIELDS: &[&str] = &[
+    "sweep_id",
+    "studies",
+    "fail_fast",
+    super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY,
+];
 pub(super) const VALIDATION_FIELDS: &[&str] =
     &["valid", "issue_codes", "issues", "evidence_artifact_path"];
 pub(super) const SWEEP_VALIDATION_FIELDS: &[&str] = &[
@@ -144,6 +151,7 @@ pub(super) const MODEL_FIELDS: &[&str] = &[
     "initial_conditions",
     "response_spectra",
     "sequence",
+    super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
 ];
 pub(super) const MATERIAL_FIELDS: &[&str] = &[
     "material_id",
@@ -323,7 +331,15 @@ fn immutable_runtime_properties(
                     is_static: false,
                     is_constant: true,
                     is_dependent: false,
-                    get_access: MemberAccess::Public,
+                    get_access: if matches!(
+                        *name,
+                        super::signals::bindings::FROZEN_GENERATORS_PROPERTY
+                            | super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY
+                    ) {
+                        MemberAccess::Private
+                    } else {
+                        MemberAccess::Public
+                    },
                     set_access: MemberAccess::Private,
                     default_value: None,
                 },
@@ -342,6 +358,21 @@ fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
             "immutable FEA class `{}` contains an opaque runtime property",
             object.class_name
         ));
+    }
+    for field in [
+        super::signals::bindings::FROZEN_GENERATORS_PROPERTY,
+        super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY,
+    ] {
+        if object
+            .properties
+            .get(field)
+            .is_some_and(|value| !matches!(value, Value::Cell(_)))
+        {
+            return Err(format!(
+                "immutable FEA class `{}` has malformed frozen generator data",
+                object.class_name
+            ));
+        }
     }
     Ok(())
 }
@@ -691,7 +722,7 @@ fn fea_class_schemas() -> [FeaClassSchema; 42] {
             FEA_SWEEP_CLASS,
             "runmat.fea.sweep",
             SWEEP_FIELDS,
-            SWEEP_FIELDS,
+            &["sweep_id", "studies", "fail_fast"],
             validate_fea_object,
         ),
         (

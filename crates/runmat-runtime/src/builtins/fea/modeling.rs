@@ -1,3 +1,7 @@
+use super::signals::bindings::{
+    FrozenGeneratorInventory, FrozenStudyGeneratorInventory, FROZEN_GENERATORS_PROPERTY,
+    FROZEN_STUDY_GENERATORS_PROPERTY,
+};
 use super::*;
 
 #[derive(Debug, Clone)]
@@ -35,6 +39,30 @@ pub(super) enum ModelDefaultsMode {
     None,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ComposedModel {
+    pub(super) model: AnalysisModel,
+    pub(super) frozen_generators: FrozenGeneratorInventory,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ComposedStudy {
+    pub(super) study: AnalysisStudySpec,
+    pub(super) frozen_generators: FrozenGeneratorInventory,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ComposedSweep {
+    pub(super) sweep: AnalysisStudySweepSpec,
+    pub(super) frozen_generators: FrozenStudyGeneratorInventory,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct RuntimeSignals {
+    signals: Vec<PhysicalSignal>,
+    frozen_generators: FrozenGeneratorInventory,
+}
+
 impl Default for ModelDefaultsMode {
     fn default() -> Self {
         Self::TemplateScaffold
@@ -46,7 +74,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) template: Option<AnalysisModelTemplate>,
     pub(super) execution: Option<AnalysisExecutionPlan>,
     pub(super) model_id: Option<String>,
-    pub(super) model: Option<AnalysisModel>,
+    pub(super) model: Option<ComposedModel>,
     pub(super) frame: Option<CoordinateFrame>,
     pub(super) model_defaults: ModelDefaultsMode,
     pub(super) materials: Vec<MaterialModel>,
@@ -54,6 +82,7 @@ pub(super) struct StudyConstructorOptions {
     pub(super) constraints: Vec<BoundConstraintPayload>,
     pub(super) boundaries: Vec<GeometryBoundBoundary>,
     pub(super) signals: Vec<PhysicalSignal>,
+    pub(super) frozen_generators: FrozenGeneratorInventory,
     pub(super) excitations: Vec<super::excitations::GeometryBoundExcitation>,
     pub(super) excitation_cases: Vec<ExcitationCase>,
     pub(super) initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
@@ -79,16 +108,24 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let supplied_mesh = options.mesh.clone();
     let template = resolve_study_template(&options)?;
     let supplied_execution = options.execution.clone();
+    if options.model.is_some() && options.has_model_components() {
+        return Err(builtin_error(
+            STUDY_NAME,
+            &ERROR_INPUT,
+            "Model cannot be combined with separate model component options; compose components in fea.model",
+        ));
+    }
     let model_id = options.model_id.clone().unwrap_or_else(|| {
         options
             .model
             .as_ref()
-            .map(|model| model.model_id.0.clone())
+            .map(|model| model.model.model_id.0.clone())
             .unwrap_or_else(|| format!("{}_model", sanitize_id(&study_id)))
     });
-    let mut model = match options.model {
-        Some(model) => model,
-        None if options.has_model_components() => build_model_from_parts(
+    let has_model_components = options.has_model_components();
+    let (mut model, frozen_generators) = match options.model {
+        Some(model) => (model.model, model.frozen_generators),
+        None if has_model_components => build_model_from_parts(
             STUDY_NAME,
             &geometry,
             model_id.clone(),
@@ -108,9 +145,10 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             options.sequence,
             options.domains,
             options.interfaces,
-        )?,
+        )
+        .map(|model| (model, options.frozen_generators))?,
         None => {
-            analysis_create_model_op(
+            let model = analysis_create_model_op(
                 &geometry,
                 AnalysisCreateModelIntentSpec {
                     model_id: model_id.clone(),
@@ -119,7 +157,8 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
                 OperationContext::new(None, None),
             )
             .map_err(|error| operation_error(STUDY_NAME, &ERROR_OPERATION, error))?
-            .data
+            .data;
+            (model, FrozenGeneratorInventory::default())
         }
     };
     if let Some(mesh) = supplied_mesh.as_ref() {
@@ -162,7 +201,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             .as_ref()
             .and_then(|mesh| mesh.evidence_path.clone()),
     };
-    study_to_object(spec)
+    study_to_object_with_generators(spec, frozen_generators)
 }
 
 impl StudyConstructorOptions {
@@ -234,7 +273,9 @@ impl StudyConstructorOptions {
                     options.boundaries = boundary_vec_from_value(STUDY_NAME, &pair[1])?;
                 }
                 "signals" => {
-                    options.signals = signal_vec_from_value(STUDY_NAME, &pair[1])?;
+                    let signals = signal_vec_from_value(STUDY_NAME, &pair[1])?;
+                    options.signals = signals.signals;
+                    options.frozen_generators = signals.frozen_generators;
                 }
                 "excitations" => {
                     options.excitations =
@@ -305,6 +346,7 @@ struct ModelConstructorOptions {
     constraints: Vec<BoundConstraintPayload>,
     boundaries: Vec<GeometryBoundBoundary>,
     signals: Vec<PhysicalSignal>,
+    frozen_generators: FrozenGeneratorInventory,
     excitations: Vec<super::excitations::GeometryBoundExcitation>,
     excitation_cases: Vec<ExcitationCase>,
     initial_conditions: Vec<super::initial_conditions::GeometryBoundInitialCondition>,
@@ -349,11 +391,19 @@ pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<V
             }
         }
     }
-    sweep_to_object(AnalysisStudySweepSpec {
+    let spec = AnalysisStudySweepSpec {
         sweep_id,
-        studies,
+        studies: studies.iter().map(|study| study.study.clone()).collect(),
         fail_fast,
-    })
+    };
+    let inventory = FrozenStudyGeneratorInventory::new(
+        SWEEP_NAME,
+        &studies
+            .into_iter()
+            .map(|study| (study.study, study.frozen_generators))
+            .collect::<Vec<_>>(),
+    )?;
+    sweep_to_object_with_generators(spec, inventory)
 }
 
 pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -395,14 +445,10 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         options.domains,
         options.interfaces,
     )?;
-    serializable_to_object_preserving_integers(
-        MODEL_NAME,
-        &ERROR_INTERNAL,
-        FEA_MODEL_CLASS,
-        &model,
-        &[],
-        &["geometry_revision", "revision"],
-    )
+    model_to_object(ComposedModel {
+        model,
+        frozen_generators: options.frozen_generators,
+    })
 }
 
 fn parse_model_constructor_options(
@@ -435,7 +481,11 @@ fn parse_model_constructor_options(
             "boundaries" => {
                 options.boundaries = boundary_vec_from_value(builtin, pair.value)?;
             }
-            "signals" => options.signals = signal_vec_from_value(builtin, pair.value)?,
+            "signals" => {
+                let signals = signal_vec_from_value(builtin, pair.value)?;
+                options.signals = signals.signals;
+                options.frozen_generators = signals.frozen_generators;
+            }
             "excitations" => {
                 options.excitations =
                     super::excitations::bound_excitation_vec_from_value(builtin, pair.value)?
@@ -925,15 +975,156 @@ fn material_assignment_to_object(assignment: MaterialAssignment) -> BuiltinResul
     )
 }
 
-fn model_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<AnalysisModel> {
-    object_payload(builtin, value, FEA_MODEL_CLASS)
+fn model_to_object(composed: ComposedModel) -> BuiltinResult<Value> {
+    let frozen_generators = FrozenGeneratorInventory::new(
+        MODEL_NAME,
+        &composed.model.signals,
+        composed.frozen_generators.bindings().to_vec(),
+    )?;
+    let mut value = serializable_to_object_preserving_integers(
+        MODEL_NAME,
+        &ERROR_INTERNAL,
+        FEA_MODEL_CLASS,
+        &composed.model,
+        &[],
+        &["geometry_revision", "revision"],
+    )?;
+    let Value::Object(object) = &mut value else {
+        unreachable!("model serialization always returns an object")
+    };
+    frozen_generators.attach_to(object)?;
+    Ok(value)
 }
 
-fn study_vec_from_value(
+pub(super) fn study_to_object_with_generators(
+    spec: AnalysisStudySpec,
+    frozen_generators: FrozenGeneratorInventory,
+) -> BuiltinResult<Value> {
+    let signals = spec
+        .model
+        .as_ref()
+        .map(|model| model.signals.as_slice())
+        .unwrap_or_default();
+    let frozen_generators =
+        FrozenGeneratorInventory::new(STUDY_NAME, signals, frozen_generators.bindings().to_vec())?;
+    let mut value = serializable_to_object(STUDY_NAME, &ERROR_INTERNAL, FEA_STUDY_CLASS, &spec)?;
+    let Value::Object(object) = &mut value else {
+        unreachable!("study serialization always returns an object")
+    };
+    frozen_generators.attach_to(object)?;
+    Ok(value)
+}
+
+pub(super) fn study_from_value_with_generators(
     builtin: &'static str,
     value: &Value,
-) -> BuiltinResult<Vec<AnalysisStudySpec>> {
-    object_vec_from_value(builtin, value, FEA_STUDY_CLASS)
+) -> BuiltinResult<ComposedStudy> {
+    let Value::Object(object) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected {FEA_STUDY_CLASS} object"),
+        ));
+    };
+    let sidecar = object.properties.get(FROZEN_GENERATORS_PROPERTY).cloned();
+    let mut stripped = object.clone();
+    stripped.properties.remove(FROZEN_GENERATORS_PROPERTY);
+    let study: AnalysisStudySpec =
+        object_payload(builtin, &Value::Object(stripped), FEA_STUDY_CLASS)?;
+    let signals = study
+        .model
+        .as_ref()
+        .map(|model| model.signals.as_slice())
+        .unwrap_or_default();
+    let frozen_generators =
+        FrozenGeneratorInventory::from_property_value(builtin, sidecar.as_ref(), signals)?;
+    Ok(ComposedStudy {
+        study,
+        frozen_generators,
+    })
+}
+
+pub(super) fn sweep_to_object_with_generators(
+    spec: AnalysisStudySweepSpec,
+    frozen_generators: FrozenStudyGeneratorInventory,
+) -> BuiltinResult<Value> {
+    let mut value = serializable_to_object(SWEEP_NAME, &ERROR_INTERNAL, FEA_SWEEP_CLASS, &spec)?;
+    let Value::Object(object) = &mut value else {
+        unreachable!("sweep serialization always returns an object")
+    };
+    frozen_generators.attach_to(object)?;
+    Ok(value)
+}
+
+pub(super) fn sweep_from_value_with_generators(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<ComposedSweep> {
+    let Value::Object(object) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected {FEA_SWEEP_CLASS} object"),
+        ));
+    };
+    let sidecar = object
+        .properties
+        .get(FROZEN_STUDY_GENERATORS_PROPERTY)
+        .cloned();
+    let mut stripped = object.clone();
+    stripped.properties.remove(FROZEN_STUDY_GENERATORS_PROPERTY);
+    let sweep: AnalysisStudySweepSpec =
+        object_payload(builtin, &Value::Object(stripped), FEA_SWEEP_CLASS)?;
+    let frozen_generators = FrozenStudyGeneratorInventory::from_property_value(
+        builtin,
+        sidecar.as_ref(),
+        &sweep.studies,
+    )?;
+    Ok(ComposedSweep {
+        sweep,
+        frozen_generators,
+    })
+}
+
+pub(super) fn model_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<ComposedModel> {
+    let Value::Object(object) = value else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            format!("expected {FEA_MODEL_CLASS} object"),
+        ));
+    };
+    let sidecar = object.properties.get(FROZEN_GENERATORS_PROPERTY).cloned();
+    let mut stripped = object.clone();
+    stripped.properties.remove(FROZEN_GENERATORS_PROPERTY);
+    let model: AnalysisModel = object_payload(builtin, &Value::Object(stripped), FEA_MODEL_CLASS)?;
+    let frozen_generators =
+        FrozenGeneratorInventory::from_property_value(builtin, sidecar.as_ref(), &model.signals)?;
+    Ok(ComposedModel {
+        model,
+        frozen_generators,
+    })
+}
+
+fn study_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ComposedStudy>> {
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
+        other => {
+            return Err(builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                format!("expected a typed FEA study object or cell array; got {other:?}"),
+            ))
+        }
+    };
+    values
+        .into_iter()
+        .map(|value| study_from_value_with_generators(builtin, value))
+        .collect()
 }
 
 fn material_vec_from_value(
@@ -1055,25 +1246,32 @@ fn bound_boundary_payload(
     Ok(boundary)
 }
 
-fn signal_vec_from_value(
-    builtin: &'static str,
-    value: &Value,
-) -> BuiltinResult<Vec<PhysicalSignal>> {
-    match value {
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .map(|item| super::signals::physical_signal_from_value(builtin, item))
-            .collect(),
-        Value::Object(_) => Ok(vec![super::signals::physical_signal_from_value(
-            builtin, value,
-        )?]),
+fn signal_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<RuntimeSignals> {
+    let values = match value {
+        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![value],
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
             format!("expected a typed FEA signal object or cell array; got {other:?}"),
-        )),
-    }
+        ))?,
+    };
+    let runtime = values
+        .into_iter()
+        .map(|item| super::signals::runtime_signal_from_value(builtin, item))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let signals = runtime
+        .iter()
+        .map(|signal| signal.signal.clone())
+        .collect::<Vec<_>>();
+    let bindings = runtime
+        .into_iter()
+        .filter_map(|signal| signal.frozen_generator)
+        .collect();
+    Ok(RuntimeSignals {
+        frozen_generators: FrozenGeneratorInventory::new(builtin, &signals, bindings)?,
+        signals,
+    })
 }
 
 pub(super) fn step_vec_from_value(

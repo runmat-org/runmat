@@ -357,8 +357,18 @@ fn validate_artifact(artifact: &SignalArtifactRef) -> Result<(), String> {
 
 fn validate_generator(generator: &SignalGenerator) -> Result<(), String> {
     let parts = generator.qualified_function.split('.').collect::<Vec<_>>();
-    if parts.len() < 2 || parts.iter().any(|part| !is_identifier(part)) {
-        return Err("generator requires a project-qualified function name".to_string());
+    let project_function = parts.len() >= 2 && parts.iter().all(|part| is_identifier(part));
+    let semantic_anonymous = generator
+        .qualified_function
+        .strip_prefix("anonymous#")
+        .is_some_and(|ordinal| {
+            !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+        });
+    if !project_function && !semantic_anonymous {
+        return Err(
+            "generator requires a project-qualified function or frozen semantic closure identity"
+                .to_string(),
+        );
     }
     if matches!(
         &generator.domain,
@@ -477,6 +487,28 @@ mod tests {
         let signal = generated_force(SignalProvenance::Authored);
 
         validate_signals(&[signal]).expect("authored generator should validate");
+    }
+
+    #[test]
+    fn frozen_semantic_closure_identity_is_valid_but_malformed_labels_are_not() {
+        let mut signal = generated_force(SignalProvenance::Authored);
+        set_generator_name(&mut signal, "anonymous#17");
+        validate_signals(&[signal.clone()]).expect("semantic closure identity should validate");
+
+        for invalid in ["anonymous#", "anonymous#x", "workspace_function"] {
+            set_generator_name(&mut signal, invalid);
+            assert!(validate_signals(&[signal.clone()]).is_err());
+        }
+    }
+
+    fn set_generator_name(signal: &mut PhysicalSignal, name: &str) {
+        let PhysicalSignal::Force(signal) = signal else {
+            unreachable!()
+        };
+        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+            unreachable!()
+        };
+        generator.qualified_function = name.into();
     }
 
     #[test]
