@@ -111,21 +111,26 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 
 /// Return the canonical MATLAB class name for a runtime value.
 pub(crate) fn class_name_for_value(value: &Value) -> String {
+    class_identity_for_value(value).display_name().to_owned()
+}
+
+/// Return the canonical class identity without reducing it to display text.
+pub(crate) fn class_identity_for_value(value: &Value) -> runmat_types::ClassIdentity {
     match value {
-        Value::Num(_) | Value::Complex(_, _) => "double".to_string(),
-        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
-        Value::Tensor(tensor) => tensor.numeric_dtype().class_name().to_string(),
-        Value::SparseTensor(sparse) => sparse.class_name().to_string(),
-        Value::Int(iv) => iv.class_name().to_string(),
-        Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
-        Value::String(_) | Value::StringArray(_) => "string".to_string(),
-        Value::CharArray(_) => "char".to_string(),
-        Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
-        Value::Cell(_) => "cell".to_string(),
-        Value::Struct(_) => "struct".to_string(),
+        Value::Num(_) | Value::Complex(_, _) => runmat_types::standard::DOUBLE.owned(),
+        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_identity(),
+        Value::Tensor(tensor) => tensor.numeric_dtype().class_identity(),
+        Value::SparseTensor(sparse) => runmat_types::ClassIdentity::from(sparse.class_name()),
+        Value::Int(iv) => runmat_types::ClassIdentity::from(iv.class_name()),
+        Value::Bool(_) | Value::LogicalArray(_) => runmat_types::standard::LOGICAL.owned(),
+        Value::String(_) | Value::StringArray(_) => runmat_types::standard::STRING.owned(),
+        Value::CharArray(_) => runmat_types::standard::CHAR.owned(),
+        Value::Symbolic(_) | Value::SymbolicArray(_) => runmat_types::ClassIdentity::from("sym"),
+        Value::Cell(_) => runmat_types::standard::CELL.owned(),
+        Value::Struct(_) => runmat_types::standard::STRUCT.owned(),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_is_explicit(handle) {
-                "gpuArray".to_string()
+                runmat_types::ClassIdentity::from("gpuArray")
             } else {
                 crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
                     runmat_accelerate_api::handle_precision(handle),
@@ -133,29 +138,29 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
                     runmat_accelerate_api::handle_is_logical(handle),
                 )
                 .unwrap_or_else(|| runmat_types::standard::DOUBLE.owned())
-                .display_name()
-                .to_owned()
             }
         }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_) => "function_handle".to_string(),
-        Value::HandleObject(handle) => handle.class_name.to_string(),
-        Value::Listener(_) => "event.listener".to_string(),
-        Value::ObjectArray(array) => array.class_name().to_string(),
-        Value::Object(obj) => obj.class_name.to_string(),
-        Value::ClassRef(_) => "meta.class".to_string(),
-        Value::MException(_) => "MException".to_string(),
-        Value::OutputList(_) => "output_list".to_string(),
-        Value::Future(_) => "parallel.Future".to_string(),
-        Value::Task(_) => "parallel.Task".to_string(),
-        Value::Pool(_) => "parallel.Pool".to_string(),
-        Value::Job(_) => "parallel.Job".to_string(),
-        Value::Distributed(_) => "distributed".to_string(),
-        Value::Composite(_) => "Composite".to_string(),
-        Value::Foreign(reference) => reference.type_identity.name.clone(),
+        | Value::Closure(_) => runmat_types::ClassIdentity::from("function_handle"),
+        Value::HandleObject(handle) => handle.class_name.clone(),
+        Value::Listener(_) => runmat_types::ClassIdentity::from("event.listener"),
+        Value::ObjectArray(array) => array.class_name().clone(),
+        Value::Object(object) => object.class_name.clone(),
+        Value::ClassRef(_) => runmat_types::ClassIdentity::from("meta.class"),
+        Value::MException(_) => runmat_types::ClassIdentity::from("MException"),
+        Value::OutputList(_) => runmat_types::ClassIdentity::from("output_list"),
+        Value::Future(_) => runmat_types::ClassIdentity::from("parallel.Future"),
+        Value::Task(_) => runmat_types::ClassIdentity::from("parallel.Task"),
+        Value::Pool(_) => runmat_types::ClassIdentity::from("parallel.Pool"),
+        Value::Job(_) => runmat_types::ClassIdentity::from("parallel.Job"),
+        Value::Distributed(_) => runmat_types::ClassIdentity::from("distributed"),
+        Value::Composite(_) => runmat_types::ClassIdentity::from("Composite"),
+        Value::Foreign(reference) => {
+            runmat_types::ClassIdentity::from(reference.type_identity.name.clone())
+        }
     }
 }
 
@@ -186,6 +191,16 @@ pub(crate) mod tests {
     fn class_reports_integer_type_names() {
         let name = class_builtin(Value::Int(IntValue::I32(12))).expect("class");
         assert_eq!(name, "int32");
+    }
+
+    #[test]
+    fn class_identity_remains_typed_until_the_display_boundary() {
+        let value = Value::Int(IntValue::I32(12));
+        assert_eq!(
+            class_identity_for_value(&value),
+            runmat_types::standard::INT32.owned()
+        );
+        assert_eq!(class_name_for_value(&value), "int32");
     }
 
     #[test]

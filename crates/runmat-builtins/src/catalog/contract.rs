@@ -9,6 +9,7 @@ use crate::{
 mod acceleration;
 mod aggregate;
 mod array;
+mod cells;
 mod introspection;
 mod io;
 mod logical;
@@ -19,6 +20,7 @@ mod stats;
 pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
+pub use cells::*;
 pub use introspection::*;
 pub use io::*;
 pub use logical::*;
@@ -39,6 +41,7 @@ pub enum BuiltinInferenceRule {
     Acceleration(AccelerationInferenceRule),
     Aggregate(AggregateInferenceRule),
     Array(ArrayInferenceRule),
+    Cells(CellInferenceRule),
     Introspection(IntrospectionInferenceRule),
     Io(IoInferenceRule),
     Logical(LogicalInferenceRule),

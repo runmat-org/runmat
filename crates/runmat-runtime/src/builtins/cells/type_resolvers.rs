@@ -16,10 +16,6 @@ pub fn cell2mat_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn cellfun_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 pub fn cellstr_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell_of(Type::String)
 }
@@ -157,14 +153,6 @@ mod tests {
                 &ResolveContext::new(Vec::new())
             ),
             Type::Union(vec![Type::tensor(), Type::logical()])
-        );
-    }
-
-    #[test]
-    fn cellfun_type_is_unknown() {
-        assert_eq!(
-            cellfun_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Unknown
         );
     }
 
