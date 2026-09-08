@@ -2361,6 +2361,44 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "cellstr catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/cells/core/cellstr"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/cells/core/cellstr/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/cellstr.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/cellstr.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "cellstr runtime",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/cellstr"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/cellstr/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellstr/conversion/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellstr/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/cells/core/cellstr.rs"],
+  testLineCeiling: 160,
+});
+const cellstrRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/cells/core/cellstr/mod.rs"
+);
+if (
+  /\b(?:category|summary|keywords|accel|type_resolver|descriptor|extensions|integer_audit)\s*=/.test(
+    cellstrRuntimeMacro
+  )
+) {
+  fail("cellstr runtime registration must not duplicate catalog-owned contracts");
+}
+for (const { path: sourcePath, text } of allRust) {
+  if (/\bcellstr_type\b/.test(text)) {
+    fail(`${sourcePath} retains the obsolete cellstr type resolver`);
+  }
+}
+enforceMigratedBuiltinFamily({
   name: "mapped callable runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/mapped_callable"],
   compositionFiles: ["crates/runmat-runtime/src/builtins/common/mapped_callable/mod.rs"],

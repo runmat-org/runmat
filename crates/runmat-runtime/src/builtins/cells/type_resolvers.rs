@@ -16,10 +16,6 @@ pub fn cell2mat_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn cellstr_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell_of(Type::String)
-}
-
 pub fn mat2cell_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::cell();
@@ -153,14 +149,6 @@ mod tests {
                 &ResolveContext::new(Vec::new())
             ),
             Type::Union(vec![Type::tensor(), Type::logical()])
-        );
-    }
-
-    #[test]
-    fn cellstr_type_is_string_cell() {
-        assert_eq!(
-            cellstr_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
         );
     }
 
