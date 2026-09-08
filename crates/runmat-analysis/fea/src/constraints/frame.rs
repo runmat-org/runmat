@@ -1,7 +1,43 @@
-use runmat_analysis_core::CoordinateFrame;
+use runmat_analysis_core::{CoordinateFrame, StructuralConstraint, StructuralTranslationDof};
 
 use super::vector::{cross, dot, magnitude, scale, subtract};
-use super::ConstraintPlanError;
+use super::{CanonicalStructuralDof, ConstraintPlanError};
+
+pub(super) fn require_global(constraint: &StructuralConstraint) -> Result<(), ConstraintPlanError> {
+    if constraint.frame != CoordinateFrame::Global {
+        return Err(ConstraintPlanError::UnsupportedFrame {
+            constraint_id: constraint.constraint_id.clone(),
+            frame: constraint.frame.context_label(),
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn require_normal_capable(
+    constraint: &StructuralConstraint,
+) -> Result<(), ConstraintPlanError> {
+    if !matches!(
+        constraint.frame,
+        CoordinateFrame::Global | CoordinateFrame::BoundaryNormalTangent
+    ) {
+        return Err(ConstraintPlanError::UnsupportedFrame {
+            constraint_id: constraint.constraint_id.clone(),
+            frame: constraint.frame.context_label(),
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn translation_direction(dof: CanonicalStructuralDof, basis: [[f64; 3]; 3]) -> [f64; 3] {
+    match dof {
+        CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => basis[0],
+        CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => basis[1],
+        CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => basis[2],
+        CanonicalStructuralDof::Rotation(_) => {
+            unreachable!("translation values contain no rotational DOF")
+        }
+    }
+}
 
 pub(super) fn translation_basis(
     frame: &CoordinateFrame,

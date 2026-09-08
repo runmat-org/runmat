@@ -6,7 +6,7 @@ use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
     PrescribedStructuralDofs, PrescribedValue, StructuralConstraint, StructuralConstraintKind,
 };
-use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
+use runmat_meshing_core::SolverMeshArtifact;
 
 use super::contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
@@ -16,14 +16,18 @@ use super::contract::{
     ConstraintPlanEvidence, ResolvedConstraintTarget,
 };
 use super::coupling::compile_reference_coupling;
-use super::frame::{boundary_tangent_basis, translation_basis};
+use super::enforcement;
+use super::frame::{
+    boundary_tangent_basis, require_global, require_normal_capable, translation_basis,
+    translation_direction,
+};
 use super::normal::boundary_node_normals;
 use super::pairing::{displacement_transform, pair_targets};
 use super::plan::{
     authored_constraints_digest, reference_point_identity, source_digest, structural_constraints,
 };
 use super::row;
-use super::target::resolve_solid_target;
+use super::target::{node_coordinates, resolve_solid_target};
 
 type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
@@ -44,6 +48,7 @@ pub(super) fn compile(
     let authored_constraints_digest = authored_constraints_digest(&authored)?;
     let mut groups = Vec::with_capacity(authored.len());
     let mut rows = Vec::new();
+    let mut enforcement = ConstraintEnforcement::DirectElimination;
 
     for constraint in authored {
         runmat_analysis_core::validate_coordinate_frame(&constraint.frame).map_err(|_| {
@@ -55,7 +60,10 @@ pub(super) fn compile(
             compile_constraint(model, mesh, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
-        let enforcement = enforcement_for(&compiled_rows);
+        enforcement = enforcement::combine(
+            enforcement,
+            enforcement::select(&constraint.kind, &compiled_rows),
+        );
         let first_row = rows.len();
         rows.extend(compiled_rows);
         groups.push(ConstraintGroupEvidence {
@@ -68,7 +76,6 @@ pub(super) fn compile(
                 .collect(),
             coupling,
             pairings,
-            enforcement,
             row_count: rows.len() - first_row,
         });
     }
@@ -83,6 +90,7 @@ pub(super) fn compile(
         geometry_revision: mesh.geometry.geometry_revision,
         persistent_mapping_version: mesh.geometry.persistent_mapping_version,
         authored_constraints_digest,
+        enforcement,
         reference_points,
         evidence: ConstraintPlanEvidence {
             authored_constraint_count: groups.len(),
@@ -170,7 +178,7 @@ fn compile_constraint(
             compile_prescribed(model, mesh, constraint, values)
         }
         StructuralConstraintKind::Equation(equation) => {
-            require_global_frame(constraint)?;
+            require_global(constraint)?;
             if equation.terms.is_empty() {
                 return Err(ConstraintPlanError::Invalid(format!(
                     "constraint `{}` has no equation terms",
@@ -217,7 +225,7 @@ fn compile_constraint(
             ))
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
-            require_normal_frame(constraint)?;
+            require_normal_capable(constraint)?;
             let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
             let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
             let right_hand_side =
@@ -335,7 +343,7 @@ fn compile_boundary_directions(
     target: &runmat_analysis_core::RegionTarget,
     tangential: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    require_normal_frame(constraint)?;
+    require_normal_capable(constraint)?;
     let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
     let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
     let mut rows = Vec::new();
@@ -372,7 +380,7 @@ fn compile_pair(
     transform: &PeriodicTransform,
     transform_displacement: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    require_global_frame(constraint)?;
+    require_global(constraint)?;
     let primary = resolve_solid_target(mesh, &pair.primary, &constraint.constraint_id)?;
     let secondary = resolve_solid_target(mesh, &pair.secondary, &constraint.constraint_id)?;
     let pairings = pair_targets(
@@ -425,7 +433,7 @@ fn compile_coupling(
     coupling: &runmat_analysis_core::ReferencePointCoupling,
     kind: ConstraintCouplingKind,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    require_global_frame(constraint)?;
+    require_global(constraint)?;
     let target = resolve_solid_target(mesh, &coupling.target, &constraint.constraint_id)?;
     let identity = reference_point_identity(
         &coupling.reference_point.reference_point_id,
@@ -440,71 +448,6 @@ fn compile_coupling(
         &constraint.constraint_id,
     )?;
     Ok((vec![target], rows, Vec::new(), Some(evidence)))
-}
-
-fn enforcement_for(rows: &[CanonicalStructuralConstraintRow]) -> ConstraintEnforcement {
-    if rows.iter().all(|row| row.terms.len() == 1) {
-        ConstraintEnforcement::DirectElimination
-    } else {
-        ConstraintEnforcement::AffineReduction
-    }
-}
-
-fn require_global_frame(constraint: &StructuralConstraint) -> Result<(), ConstraintPlanError> {
-    if constraint.frame != CoordinateFrame::Global {
-        return Err(ConstraintPlanError::UnsupportedFrame {
-            constraint_id: constraint.constraint_id.clone(),
-            frame: constraint.frame.context_label(),
-        });
-    }
-    Ok(())
-}
-
-fn require_normal_frame(constraint: &StructuralConstraint) -> Result<(), ConstraintPlanError> {
-    if !matches!(
-        constraint.frame,
-        CoordinateFrame::Global | CoordinateFrame::BoundaryNormalTangent
-    ) {
-        return Err(ConstraintPlanError::UnsupportedFrame {
-            constraint_id: constraint.constraint_id.clone(),
-            frame: constraint.frame.context_label(),
-        });
-    }
-    Ok(())
-}
-
-fn node_coordinates(
-    mesh: &SolverMeshArtifact,
-    identity: StableDigest,
-    constraint_id: &str,
-) -> Result<[f64; 3], ConstraintPlanError> {
-    mesh.topology
-        .nodes
-        .iter()
-        .find(|node| node.stable_identity == identity)
-        .map(|node| node.coordinates_m)
-        .ok_or_else(|| {
-            ConstraintPlanError::Invalid(format!(
-                "constraint `{constraint_id}` references a node absent from solver topology"
-            ))
-        })
-}
-
-fn translation_direction(dof: CanonicalStructuralDof, basis: [[f64; 3]; 3]) -> [f64; 3] {
-    match dof {
-        CanonicalStructuralDof::Translation(runmat_analysis_core::StructuralTranslationDof::Ux) => {
-            basis[0]
-        }
-        CanonicalStructuralDof::Translation(runmat_analysis_core::StructuralTranslationDof::Uy) => {
-            basis[1]
-        }
-        CanonicalStructuralDof::Translation(runmat_analysis_core::StructuralTranslationDof::Uz) => {
-            basis[2]
-        }
-        CanonicalStructuralDof::Rotation(_) => {
-            unreachable!("translation values contain no rotational DOF")
-        }
-    }
 }
 
 fn study_constant_displacement(

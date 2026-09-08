@@ -299,6 +299,7 @@ impl ExecutionBackend {
 pub enum SolverMethod {
     DenseDirect,
     MatrixFreePcg,
+    MatrixFreeSaddlePointGmres,
     MatrixFreeSubspaceIteration,
     ImplicitEulerPcg,
     IncrementalNewtonRaphson,
@@ -315,6 +316,7 @@ impl SolverMethod {
         match self {
             Self::DenseDirect => "dense_direct",
             Self::MatrixFreePcg => "matrix_free_pcg",
+            Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
             Self::ImplicitEulerPcg => "implicit_euler_pcg",
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",

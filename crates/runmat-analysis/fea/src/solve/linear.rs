@@ -9,6 +9,7 @@ use crate::{
     solve::{
         affine::solve_affine_constraint_system,
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
+        multiplier::solve_multiplier_constraint_system,
         runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
     },
 };
@@ -39,6 +40,15 @@ pub fn solve_linear_system(
         return solve_affine_constraint_system(
             summary,
             reduction,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+        );
+    }
+    if let Some(matrix) = summary.constraint_matrix.as_ref() {
+        return solve_multiplier_constraint_system(
+            summary,
+            matrix,
             backend_kind,
             algebra_backend,
             initial_guess,

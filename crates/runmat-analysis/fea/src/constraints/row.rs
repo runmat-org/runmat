@@ -7,7 +7,7 @@ use runmat_meshing_core::StableDigest;
 
 use super::contract::{
     CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
-    CanonicalStructuralDofOwner, ConstraintEnforcement, ConstraintPlanError, ReactionRecovery,
+    CanonicalStructuralDofOwner, ConstraintPlanError, ReactionRecovery,
 };
 use super::{plan::canonical_digest, rank};
 
@@ -163,21 +163,4 @@ pub(super) fn validate_row_classification(
         }
     }
     Ok(result)
-}
-
-pub(super) fn enforcement_matches_rows(
-    enforcement: ConstraintEnforcement,
-    rows: &[&CanonicalStructuralConstraintRow],
-) -> bool {
-    match enforcement {
-        ConstraintEnforcement::DirectElimination => {
-            !rows.is_empty() && rows.iter().all(|row| row.terms.len() == 1)
-        }
-        ConstraintEnforcement::AffineReduction => {
-            !rows.is_empty() && rows.iter().any(|row| row.terms.len() > 1)
-        }
-        ConstraintEnforcement::LagrangeMultiplier | ConstraintEnforcement::NullSpaceReduction => {
-            false
-        }
-    }
 }

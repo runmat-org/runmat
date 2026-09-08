@@ -805,11 +805,15 @@ fn assemble_linear_system_impl(
                 let matrix =
                     resolve_solid_constraint_matrix(constraint_plan, mesh, &structural_dof_layout)
                         .map_err(LinearAssemblyError::ConstraintAlgebra)?;
-                affine_constraint_reduction = Some(
-                    matrix
-                        .affine_reduction()
-                        .map_err(LinearAssemblyError::ConstraintAlgebra)?,
-                );
+                if constraint_plan.enforcement
+                    != crate::constraints::ConstraintEnforcement::LagrangeMultiplier
+                {
+                    affine_constraint_reduction = Some(
+                        matrix
+                            .affine_reduction()
+                            .map_err(LinearAssemblyError::ConstraintAlgebra)?,
+                    );
+                }
                 constraint_matrix = Some(matrix);
             } else {
                 apply_solid_constraint_plan(
@@ -1036,6 +1040,11 @@ fn assemble_linear_system_impl(
     let constrained_dof_count = affine_constraint_reduction
         .as_ref()
         .map(|reduction| reduction.pivot_dof_indices.len())
+        .or_else(|| {
+            constraint_matrix
+                .as_ref()
+                .map(ResolvedConstraintMatrix::row_count)
+        })
         .unwrap_or_else(|| constrained.iter().filter(|value| **value).count());
 
     Ok(AssemblySummary {

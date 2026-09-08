@@ -128,3 +128,20 @@ pub(super) fn validate_resolved_target(
     }
     Ok(())
 }
+
+pub(super) fn node_coordinates(
+    mesh: &SolverMeshArtifact,
+    identity: StableDigest,
+    constraint_id: &str,
+) -> Result<[f64; 3], ConstraintPlanError> {
+    mesh.topology
+        .nodes
+        .iter()
+        .find(|node| node.stable_identity == identity)
+        .map(|node| node.coordinates_m)
+        .ok_or_else(|| {
+            ConstraintPlanError::Invalid(format!(
+                "constraint `{constraint_id}` references a node absent from solver topology"
+            ))
+        })
+}

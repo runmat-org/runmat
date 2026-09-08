@@ -14,9 +14,8 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::Serialize;
 
 use super::contract::*;
-use super::row::{
-    compare_rows, enforcement_matches_rows, row_identity, term_key, validate_row_classification,
-};
+use super::enforcement;
+use super::row::{compare_rows, row_identity, term_key, validate_row_classification};
 use super::target::validate_resolved_target;
 
 const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
@@ -72,6 +71,12 @@ impl CanonicalStructuralConstraintPlan {
             .iter()
             .map(|point| point.identity)
             .collect::<BTreeSet<_>>();
+        let all_rows = self.rows.iter().collect::<Vec<_>>();
+        if !enforcement::matches_rows(self.enforcement, &all_rows) {
+            return Err(ConstraintPlanError::Invalid(
+                "plan enforcement differs from its canonical row space".into(),
+            ));
+        }
         if !self
             .groups
             .windows(2)
@@ -166,7 +171,6 @@ impl CanonicalStructuralConstraintPlan {
                             .abs()
                             > 1.0e-10
                 })
-                || !enforcement_matches_rows(group.enforcement, &group_rows)
             {
                 return Err(ConstraintPlanError::Invalid(
                     "group evidence differs from its canonical rows".into(),

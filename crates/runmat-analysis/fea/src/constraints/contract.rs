@@ -37,7 +37,6 @@ pub enum ConstraintEnforcement {
     DirectElimination,
     AffineReduction,
     LagrangeMultiplier,
-    NullSpaceReduction,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -66,7 +65,6 @@ pub struct ConstraintGroupEvidence {
     pub reference_point_identities: Vec<Digest>,
     pub coupling: Option<ConstraintCouplingEvidence>,
     pub pairings: Vec<ConstraintPairingEvidence>,
-    pub enforcement: ConstraintEnforcement,
     pub row_count: usize,
 }
 
@@ -160,6 +158,7 @@ pub struct CanonicalStructuralConstraintPlan {
     pub geometry_revision: u64,
     pub persistent_mapping_version: u32,
     pub authored_constraints_digest: Digest,
+    pub enforcement: ConstraintEnforcement,
     pub reference_points: Vec<CanonicalStructuralReferencePoint>,
     pub groups: Vec<ConstraintGroupEvidence>,
     pub rows: Vec<CanonicalStructuralConstraintRow>,

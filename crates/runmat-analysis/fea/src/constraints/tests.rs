@@ -6,6 +6,7 @@ use runmat_analysis_core::{
     StructuralConstraintEquationTerm, StructuralConstraintKind, StructuralTranslationDof,
     Translation, TranslationDofValue,
 };
+use runmat_execution::Digest;
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
     SolverMeshArtifact, StableDigest,
@@ -182,10 +183,7 @@ fn cartesian_prescription_compiles_frame_axis_into_global_sparse_terms() {
     assert_eq!(plan.rows[0].terms.len(), 2);
     assert!((plan.rows[0].terms[0].coefficient - root_two).abs() <= 1.0e-12);
     assert!((plan.rows[0].terms[1].coefficient - root_two).abs() <= 1.0e-12);
-    assert_eq!(
-        plan.groups[0].enforcement,
-        ConstraintEnforcement::AffineReduction
-    );
+    assert_eq!(plan.enforcement, ConstraintEnforcement::AffineReduction);
 }
 
 #[test]
@@ -604,10 +602,7 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
         ReactionRecovery::ConstraintMultiplier
     );
     assert_eq!(plan.groups[0].targets.len(), 2);
-    assert_eq!(
-        plan.groups[0].enforcement,
-        ConstraintEnforcement::AffineReduction
-    );
+    assert_eq!(plan.enforcement, ConstraintEnforcement::AffineReduction);
     assert_eq!(plan.evidence.rank, 1);
 
     let node_columns = mesh
@@ -635,6 +630,31 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
     assert_eq!(matrix.column_indices, vec![0, 3]);
     assert_eq!(matrix.coefficients, vec![1.0, -1.0]);
     assert_eq!(matrix.right_hand_side, vec![0.01]);
+}
+
+#[test]
+fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
+    let constraint = equation_constraint("global", 1, 2, 0.0);
+    let kind = &constraint.structural().unwrap().kind;
+    let terms = (1_u8..=33)
+        .map(|identity| CanonicalStructuralConstraintTerm {
+            owner: CanonicalStructuralDofOwner::MeshNode(StableDigest::from_bytes([identity; 32])),
+            dof: CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux),
+            coefficient: 1.0,
+        })
+        .collect();
+    let rows = vec![CanonicalStructuralConstraintRow {
+        identity: Digest::from_bytes([1; 32]),
+        constraint_id: "global".into(),
+        terms,
+        right_hand_side: 0.0,
+        reaction_recovery: ReactionRecovery::ConstraintMultiplier,
+    }];
+
+    assert_eq!(
+        super::enforcement::select(kind, &rows),
+        ConstraintEnforcement::LagrangeMultiplier
+    );
 }
 
 #[test]
@@ -754,6 +774,65 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
         .unwrap();
     assert_eq!(equation.row_reactions.len(), 1);
     assert!(equation.maximum_prescribed_error_meters <= 1.0e-10);
+    assert!(equation.row_reactions[0].generalized_reaction.is_finite());
+}
+
+#[test]
+fn canonical_solid_solve_enforces_exact_multiplier_equations() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let mut summary = assemble_structural_system(
+        &model,
+        Some(mesh.clone()),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert_eq!(summary.constraint_matrix.as_ref().unwrap().row_count(), 7);
+    summary.affine_constraint_reduction = None;
+
+    let solve = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+
+    assert!(solve.converged, "{:?}", solve.diagnostics);
+    assert_eq!(
+        solve.solver_method,
+        crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
+    );
+    assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-9);
+    let fields = recover_result_fields(&summary, &solve);
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
+    let equation = result
+        .groups
+        .iter()
+        .find(|group| group.constraint_id == "relative_x")
+        .unwrap();
+    assert!(equation.maximum_prescribed_error_meters <= 1.0e-9);
     assert!(equation.row_reactions[0].generalized_reaction.is_finite());
 }
 

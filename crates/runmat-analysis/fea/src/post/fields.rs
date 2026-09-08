@@ -1032,7 +1032,7 @@ fn recover_residual_metrics(
 ) -> StructuralResidualMetrics {
     let mut solution = displacement.to_vec();
     solution.resize(summary.dof_count, 0.0);
-    let applied = if summary.affine_constraint_reduction.is_some() {
+    let applied = if summary.constraint_matrix.is_some() {
         apply_k_unconstrained(&summary.operator, &solution)
     } else {
         apply_k(&summary.operator, &solution)
