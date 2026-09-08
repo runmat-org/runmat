@@ -62,12 +62,18 @@ impl CellArray {
             total_len(&normalized[2..])
                 .ok_or_else(|| "Cell page shape exceeds platform limits".to_string())?
         };
-        let mut row_major = Vec::with_capacity(data.len());
+        let mut source = data.into_iter().map(Some).collect::<Vec<_>>();
+        let mut row_major = Vec::with_capacity(source.len());
         for page in 0..pages {
             let page_offset = page * rows * cols;
             for row in 0..rows {
                 for col in 0..cols {
-                    row_major.push(data[page_offset + row + col * rows].clone());
+                    let index = page_offset + row + col * rows;
+                    let value = source
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .ok_or_else(|| "cell storage does not match its shape".to_string())?;
+                    row_major.push(value);
                 }
             }
         }
