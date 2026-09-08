@@ -1,7 +1,8 @@
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement,
     PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
-    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
+    StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
@@ -179,6 +180,112 @@ fn duplicate_constraint_ids_fail_with_the_typed_diagnostic() {
     );
 }
 
+fn equation_constraint(
+    constraint_id: &str,
+    left_node: u64,
+    right_node: u64,
+    right_hand_side_meters: f64,
+) -> AnalysisConstraint {
+    AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: constraint_id.into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Equation(StructuralConstraintEquation {
+            terms: vec![
+                StructuralConstraintEquationTerm {
+                    target: RegionTarget::point(format!("node:{left_node}")),
+                    dof: StructuralTranslationDof::Ux,
+                    coefficient: 1.0,
+                },
+                StructuralConstraintEquationTerm {
+                    target: RegionTarget::point(format!("node:{right_node}")),
+                    dof: StructuralTranslationDof::Ux,
+                    coefficient: -1.0,
+                },
+            ],
+            right_hand_side: Displacement::new(right_hand_side_meters),
+        }),
+    })
+}
+
+#[test]
+fn general_equation_compiles_to_one_canonical_sparse_row() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![equation_constraint("relative_x", 1, 2, 0.01)];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.rows.len(), 1);
+    assert_eq!(plan.rows[0].terms.len(), 2);
+    assert_eq!(plan.rows[0].right_hand_side, 0.01);
+    assert_eq!(
+        plan.rows[0].reaction_recovery,
+        ReactionRecovery::ConstraintMultiplier
+    );
+    assert_eq!(plan.groups[0].targets.len(), 2);
+    assert_eq!(
+        plan.groups[0].enforcement,
+        ConstraintEnforcement::AffineReduction
+    );
+    assert_eq!(plan.evidence.rank, 1);
+}
+
+#[test]
+fn equation_term_order_does_not_change_plan_identity() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![equation_constraint("relative_x", 1, 2, 0.01)];
+    let baseline = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    let equation = match &mut model.constraints[0] {
+        AnalysisConstraint::Structural(StructuralConstraint {
+            kind: StructuralConstraintKind::Equation(equation),
+            ..
+        }) => equation,
+        _ => unreachable!(),
+    };
+    equation.terms.reverse();
+    let reordered = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(baseline, reordered);
+}
+
+#[test]
+fn dependent_equations_are_evidenced_and_inconsistent_equations_fail() {
+    let (mut model, mesh) = model_and_mesh();
+    let first = equation_constraint("first", 1, 2, 0.01);
+    let mut second = equation_constraint("second", 1, 2, 0.02);
+    let AnalysisConstraint::Structural(StructuralConstraint {
+        kind: StructuralConstraintKind::Equation(equation),
+        ..
+    }) = &mut second
+    else {
+        unreachable!()
+    };
+    for term in &mut equation.terms {
+        term.coefficient *= 2.0;
+    }
+    model.constraints = vec![first.clone(), second.clone()];
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    assert_eq!(plan.evidence.active_row_count, 1);
+    assert_eq!(plan.evidence.redundant_row_count, 1);
+
+    let AnalysisConstraint::Structural(StructuralConstraint {
+        kind: StructuralConstraintKind::Equation(equation),
+        ..
+    }) = &mut second
+    else {
+        unreachable!()
+    };
+    equation.right_hand_side = Displacement::new(0.03);
+    model.constraints = vec![first, second];
+    assert_eq!(
+        CanonicalStructuralConstraintPlan::compile(&model, &mesh),
+        Err(ConstraintPlanError::ConflictingRow {
+            first_constraint_id: "first".into(),
+            second_constraint_id: "second".into(),
+        })
+    );
+}
+
 #[test]
 fn result_evidence_aggregates_only_canonical_reaction_owners() {
     let (mut model, mesh) = model_and_mesh();
@@ -198,14 +305,15 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
         .iter()
         .find(|row| {
             row.reaction_recovery == ReactionRecovery::UnconstrainedEquilibriumResidual
-                && row.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux)
+                && row.terms[0].dof
+                    == CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux)
         })
         .unwrap();
     let node_index = mesh
         .topology
         .nodes
         .iter()
-        .position(|node| node.stable_identity == owner.node_identity)
+        .position(|node| node.stable_identity == owner.terms[0].node_identity)
         .unwrap();
     reactions[node_index * 3] = 10.0;
     let fields = vec![

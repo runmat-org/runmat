@@ -35,12 +35,16 @@ impl From<StructuralRotationDof> for CanonicalStructuralDof {
 #[serde(rename_all = "snake_case")]
 pub enum ConstraintEnforcement {
     DirectElimination,
+    AffineReduction,
+    LagrangeMultiplier,
+    NullSpaceReduction,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReactionRecovery {
     UnconstrainedEquilibriumResidual,
+    ConstraintMultiplier,
     RedundantEquation,
 }
 
@@ -58,9 +62,17 @@ pub struct ResolvedConstraintTarget {
 pub struct ConstraintGroupEvidence {
     pub constraint_id: String,
     pub source_digest: Digest,
-    pub target: ResolvedConstraintTarget,
+    pub targets: Vec<ResolvedConstraintTarget>,
     pub enforcement: ConstraintEnforcement,
     pub row_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalStructuralConstraintTerm {
+    pub node_identity: StableDigest,
+    pub dof: CanonicalStructuralDof,
+    pub coefficient: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -68,9 +80,7 @@ pub struct ConstraintGroupEvidence {
 pub struct CanonicalStructuralConstraintRow {
     pub identity: Digest,
     pub constraint_id: String,
-    pub node_identity: StableDigest,
-    pub dof: CanonicalStructuralDof,
-    pub coefficient: f64,
+    pub terms: Vec<CanonicalStructuralConstraintTerm>,
     pub right_hand_side: f64,
     pub reaction_recovery: ReactionRecovery,
 }

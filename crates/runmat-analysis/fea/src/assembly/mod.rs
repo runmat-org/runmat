@@ -44,6 +44,7 @@ use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::constraints::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralDof, ConstraintPlanError,
+    ReactionRecovery,
 };
 use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
@@ -2082,11 +2083,20 @@ fn apply_solid_constraint_plan(
         .map(|(index, node)| (node.stable_identity, index))
         .collect::<BTreeMap<_, _>>();
     for row in &plan.rows {
+        if row.reaction_recovery == ReactionRecovery::RedundantEquation {
+            continue;
+        }
+        let [term] = row.terms.as_slice() else {
+            return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
+                constraint_id: row.constraint_id.clone(),
+                constraint_kind: "general_constraint_equation",
+            });
+        };
         let node_index = node_indices
-            .get(&row.node_identity)
+            .get(&term.node_identity)
             .copied()
             .ok_or(StructuralAssemblyError::ConstraintPlanNodeAbsent)?;
-        let kind = match row.dof {
+        let kind = match term.dof {
             CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => {
                 StructuralDofKind::Ux
             }
@@ -2109,7 +2119,7 @@ fn apply_solid_constraint_plan(
             rhs,
             node_index,
             kind,
-            row.right_hand_side / row.coefficient,
+            row.right_hand_side / term.coefficient,
         );
     }
     Ok(())

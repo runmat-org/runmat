@@ -6,13 +6,15 @@
 
 mod contract;
 mod plan;
+mod rank;
 mod result;
 mod target;
 
 pub use contract::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow, CanonicalStructuralDof,
-    ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence,
-    ReactionRecovery, ResolvedConstraintTarget,
+    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, ConstraintEnforcement,
+    ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence, ReactionRecovery,
+    ResolvedConstraintTarget,
 };
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintResultError,

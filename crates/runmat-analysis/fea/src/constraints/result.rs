@@ -101,14 +101,17 @@ impl CanonicalStructuralConstraintResult {
                 group.redundant_row_count += 1;
                 continue;
             }
+            let [term] = row.terms.as_slice() else {
+                return Err(ConstraintResultError::InvalidEvidence);
+            };
             let (node_index, coordinates) = nodes
-                .get(&row.node_identity)
+                .get(&term.node_identity)
                 .copied()
                 .ok_or(ConstraintResultError::NodeAbsent)?;
-            let component = translation_component(row.dof)?;
+            let component = translation_component(term.dof)?;
             let value_index = node_index * 3 + component;
             let reaction_value = reaction[value_index];
-            let prescribed_value = row.right_hand_side / row.coefficient;
+            let prescribed_value = row.right_hand_side / term.coefficient;
             let error = (displacement[value_index] - prescribed_value).abs();
             group.active_row_count += 1;
             group.resultant_force_newtons[component] += reaction_value;

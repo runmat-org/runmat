@@ -4,7 +4,7 @@
 //! projection from that physical intent onto solver topology. Assembly consumes the resulting
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PrescribedValue, StructuralConstraintKind,
@@ -15,6 +15,7 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::Serialize;
 
 use super::contract::*;
+use super::rank;
 use super::target::{resolve_solid_target, validate_resolved_target};
 
 const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
@@ -50,16 +51,31 @@ impl CanonicalStructuralConstraintPlan {
                     frame: constraint.frame.context_label(),
                 });
             }
-            let (target, prescribed) = match &constraint.kind {
-                StructuralConstraintKind::Fixed { target } => (target, PrescribedRows::Fixed),
+            let (mut targets, compiled_rows, enforcement) = match &constraint.kind {
+                StructuralConstraintKind::Fixed { target } => {
+                    let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
+                    let compiled_rows = resolved
+                        .matched_node_identities
+                        .iter()
+                        .flat_map(|node_identity| {
+                            CanonicalStructuralDof::TRANSLATIONS.map(|dof| {
+                                new_row(&constraint.constraint_id, *node_identity, dof, 1.0, 0.0)
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    (
+                        vec![resolved],
+                        compiled_rows,
+                        ConstraintEnforcement::DirectElimination,
+                    )
+                }
                 StructuralConstraintKind::Prescribed(values) => {
-                    let target = &values.target;
                     if !values.rotations.is_empty() {
                         return Err(ConstraintPlanError::UnavailableRotationalDof {
                             constraint_id: constraint.constraint_id.clone(),
                         });
                     }
-                    let prescribed_rows = values
+                    let prescribed = values
                         .translations
                         .iter()
                         .map(|value| {
@@ -71,7 +87,58 @@ impl CanonicalStructuralConstraintPlan {
                             Ok((CanonicalStructuralDof::from(value.dof), constant))
                         })
                         .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
-                    (target, PrescribedRows::Values(prescribed_rows))
+                    let resolved =
+                        resolve_solid_target(mesh, &values.target, &constraint.constraint_id)?;
+                    let compiled_rows = resolved
+                        .matched_node_identities
+                        .iter()
+                        .flat_map(|node_identity| {
+                            prescribed.iter().map(move |&(dof, value)| {
+                                new_row(&constraint.constraint_id, *node_identity, dof, 1.0, value)
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    (
+                        vec![resolved],
+                        compiled_rows,
+                        ConstraintEnforcement::DirectElimination,
+                    )
+                }
+                StructuralConstraintKind::Equation(equation) => {
+                    if equation.terms.is_empty() {
+                        return Err(ConstraintPlanError::Invalid(format!(
+                            "constraint `{}` has no equation terms",
+                            constraint.constraint_id
+                        )));
+                    }
+                    let mut targets = Vec::with_capacity(equation.terms.len());
+                    let mut terms = Vec::new();
+                    for term in &equation.terms {
+                        if !term.coefficient.is_finite() || term.coefficient == 0.0 {
+                            return Err(ConstraintPlanError::Invalid(format!(
+                                "constraint `{}` contains a zero or non-finite equation coefficient",
+                                constraint.constraint_id
+                            )));
+                        }
+                        let resolved =
+                            resolve_solid_target(mesh, &term.target, &constraint.constraint_id)?;
+                        terms.extend(resolved.matched_node_identities.iter().map(
+                            |node_identity| CanonicalStructuralConstraintTerm {
+                                node_identity: *node_identity,
+                                dof: term.dof.into(),
+                                coefficient: term.coefficient,
+                            },
+                        ));
+                        targets.push(resolved);
+                    }
+                    let right_hand_side = equation.right_hand_side.meters;
+                    if !right_hand_side.is_finite() {
+                        return Err(ConstraintPlanError::NonFiniteValue {
+                            constraint_id: constraint.constraint_id.clone(),
+                        });
+                    }
+                    let row = new_sparse_row(&constraint.constraint_id, terms, right_hand_side)?;
+                    (targets, vec![row], ConstraintEnforcement::AffineReduction)
                 }
                 kind => {
                     return Err(ConstraintPlanError::UnsupportedKind {
@@ -80,44 +147,22 @@ impl CanonicalStructuralConstraintPlan {
                     });
                 }
             };
-            let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
+            targets.sort_by_key(|target| target.selection_digest);
+            targets.dedup_by_key(|target| target.selection_digest);
             let source_digest = source_digest(constraint)?;
             let first_row = rows.len();
-            for node_identity in &resolved.matched_node_identities {
-                match &prescribed {
-                    PrescribedRows::Fixed => {
-                        for dof in CanonicalStructuralDof::TRANSLATIONS {
-                            rows.push(new_row(
-                                &constraint.constraint_id,
-                                *node_identity,
-                                dof,
-                                0.0,
-                            )?);
-                        }
-                    }
-                    PrescribedRows::Values(values) => {
-                        for &(dof, value) in values {
-                            rows.push(new_row(
-                                &constraint.constraint_id,
-                                *node_identity,
-                                dof,
-                                value,
-                            )?);
-                        }
-                    }
-                }
-            }
+            rows.extend(compiled_rows);
             groups.push(ConstraintGroupEvidence {
                 constraint_id: constraint.constraint_id.clone(),
                 source_digest,
-                target: resolved,
-                enforcement: ConstraintEnforcement::DirectElimination,
+                targets,
+                enforcement,
                 row_count: rows.len() - first_row,
             });
         }
 
         groups.sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
-        rows.sort_by_key(|row| (row.node_identity, row.dof, row.constraint_id.clone()));
+        rows.sort_by(|left, right| row_key(left).cmp(&row_key(right)));
         let (active_row_count, redundant_row_count) = classify_rows(&mut rows)?;
         let plan = Self {
             schema_version: 1,
@@ -169,30 +214,49 @@ impl CanonicalStructuralConstraintPlan {
             ));
         }
         for group in &self.groups {
+            let group_rows = self
+                .rows
+                .iter()
+                .filter(|row| row.constraint_id == group.constraint_id)
+                .collect::<Vec<_>>();
             if group.constraint_id.is_empty()
-                || group.enforcement != ConstraintEnforcement::DirectElimination
-                || group.row_count
-                    != self
-                        .rows
-                        .iter()
-                        .filter(|row| row.constraint_id == group.constraint_id)
-                        .count()
+                || group.targets.is_empty()
+                || group.row_count != group_rows.len()
+                || !group
+                    .targets
+                    .windows(2)
+                    .all(|pair| pair[0].selection_digest < pair[1].selection_digest)
+                || !enforcement_matches_rows(group.enforcement, &group_rows)
             {
                 return Err(ConstraintPlanError::Invalid(
                     "group evidence differs from its canonical rows".into(),
                 ));
             }
-            validate_resolved_target(&group.constraint_id, &group.target)?;
+            for target in &group.targets {
+                validate_resolved_target(&group.constraint_id, target)?;
+            }
         }
         for row in &self.rows {
             if row.constraint_id.is_empty()
-                || row.node_identity == StableDigest::ZERO
-                || row.coefficient != 1.0
+                || row.terms.is_empty()
                 || !row.right_hand_side.is_finite()
                 || row.identity != row_identity(row)?
             {
                 return Err(ConstraintPlanError::Invalid(
                     "constraint row identity or numerical content is invalid".into(),
+                ));
+            }
+            if row.terms.iter().any(|term| {
+                term.node_identity == StableDigest::ZERO
+                    || !term.coefficient.is_finite()
+                    || term.coefficient == 0.0
+            }) || !row
+                .terms
+                .windows(2)
+                .all(|pair| term_key(&pair[0]) < term_key(&pair[1]))
+            {
+                return Err(ConstraintPlanError::Invalid(
+                    "constraint row terms are invalid or not uniquely ordered".into(),
                 ));
             }
         }
@@ -251,9 +315,19 @@ impl CanonicalStructuralConstraintPlan {
     }
 }
 
-enum PrescribedRows {
-    Fixed,
-    Values(Vec<(CanonicalStructuralDof, f64)>),
+fn enforcement_matches_rows(
+    enforcement: ConstraintEnforcement,
+    rows: &[&CanonicalStructuralConstraintRow],
+) -> bool {
+    match enforcement {
+        ConstraintEnforcement::DirectElimination => {
+            !rows.is_empty() && rows.iter().all(|row| row.terms.len() == 1)
+        }
+        ConstraintEnforcement::AffineReduction => rows.len() == 1 && rows[0].terms.len() > 1,
+        ConstraintEnforcement::LagrangeMultiplier | ConstraintEnforcement::NullSpaceReduction => {
+            false
+        }
+    }
 }
 
 fn structural_constraints(
@@ -280,7 +354,49 @@ fn authored_constraints_digest(
 fn source_digest(
     constraint: &runmat_analysis_core::StructuralConstraint,
 ) -> Result<Digest, ConstraintPlanError> {
-    canonical_digest(SOURCE_DOMAIN, constraint)
+    if let StructuralConstraintKind::Equation(equation) = &constraint.kind {
+        let mut terms = equation.terms.clone();
+        terms.sort_by(|left, right| {
+            authored_target_key(&left.target)
+                .cmp(&authored_target_key(&right.target))
+                .then_with(|| left.dof.cmp(&right.dof))
+                .then_with(|| left.coefficient.total_cmp(&right.coefficient))
+        });
+        canonical_digest(
+            SOURCE_DOMAIN,
+            &(
+                &constraint.constraint_id,
+                &constraint.frame,
+                "equation",
+                terms,
+                equation.right_hand_side,
+            ),
+        )
+    } else {
+        canonical_digest(SOURCE_DOMAIN, constraint)
+    }
+}
+
+fn authored_target_key(target: &runmat_analysis_core::RegionTarget) -> (&str, u8, u8, u8) {
+    use runmat_analysis_core::{EntityDimension, ExpectedTopology, TargetCardinality};
+    let dimension = match target.entity_dimension {
+        EntityDimension::Point => 0,
+        EntityDimension::Edge => 1,
+        EntityDimension::Face => 2,
+        EntityDimension::Volume => 3,
+    };
+    let topology = match target.expected_topology {
+        ExpectedTopology::GeometryEntity => 0,
+        ExpectedTopology::MeshNode => 1,
+        ExpectedTopology::MeshElement => 2,
+        ExpectedTopology::BoundaryFace => 3,
+        ExpectedTopology::Cell => 4,
+    };
+    let cardinality = match target.cardinality {
+        TargetCardinality::One => 0,
+        TargetCardinality::OneOrMore => 1,
+    };
+    (&target.region_id, dimension, topology, cardinality)
 }
 
 fn study_constant_displacement(
@@ -306,17 +422,53 @@ fn new_row(
     constraint_id: &str,
     node_identity: StableDigest,
     dof: CanonicalStructuralDof,
+    coefficient: f64,
     right_hand_side: f64,
 ) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
+    new_sparse_row(
+        constraint_id,
+        vec![CanonicalStructuralConstraintTerm {
+            node_identity,
+            dof,
+            coefficient,
+        }],
+        right_hand_side,
+    )
+}
+
+fn new_sparse_row(
+    constraint_id: &str,
+    mut terms: Vec<CanonicalStructuralConstraintTerm>,
+    right_hand_side: f64,
+) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
+    terms.sort_by_key(term_key);
+    let mut combined: Vec<CanonicalStructuralConstraintTerm> = Vec::with_capacity(terms.len());
+    for term in terms {
+        if let Some(previous) = combined
+            .last_mut()
+            .filter(|previous| term_key(previous) == term_key(&term))
+        {
+            previous.coefficient += term.coefficient;
+        } else {
+            combined.push(term);
+        }
+    }
+    combined.retain(|term| term.coefficient != 0.0);
+    if combined.is_empty() || !right_hand_side.is_finite() {
+        return Err(ConstraintPlanError::Invalid(format!(
+            "constraint `{constraint_id}` compiles to an empty or non-finite equation"
+        )));
+    }
     let mut row = CanonicalStructuralConstraintRow {
         identity: Digest::from_bytes([0; 32]),
         constraint_id: constraint_id.into(),
-        node_identity,
-        dof,
-        coefficient: 1.0,
+        terms: combined,
         right_hand_side,
-        reaction_recovery: ReactionRecovery::UnconstrainedEquilibriumResidual,
+        reaction_recovery: ReactionRecovery::ConstraintMultiplier,
     };
+    if row.terms.len() == 1 {
+        row.reaction_recovery = ReactionRecovery::UnconstrainedEquilibriumResidual;
+    }
     row.identity = row_identity(&row)?;
     Ok(row)
 }
@@ -328,73 +480,64 @@ pub(super) fn row_identity(
         ROW_DOMAIN,
         &(
             &row.constraint_id,
-            row.node_identity,
-            row.dof,
-            row.coefficient,
+            &row.terms,
             row.right_hand_side,
             row.reaction_recovery,
         ),
     )
 }
 
-fn row_key(row: &CanonicalStructuralConstraintRow) -> (StableDigest, CanonicalStructuralDof, &str) {
-    (row.node_identity, row.dof, row.constraint_id.as_str())
+fn term_key(term: &CanonicalStructuralConstraintTerm) -> (StableDigest, CanonicalStructuralDof) {
+    (term.node_identity, term.dof)
+}
+
+fn row_key(
+    row: &CanonicalStructuralConstraintRow,
+) -> (&str, StableDigest, CanonicalStructuralDof, usize) {
+    let first = &row.terms[0];
+    (
+        row.constraint_id.as_str(),
+        first.node_identity,
+        first.dof,
+        row.terms.len(),
+    )
 }
 
 fn classify_rows(
     rows: &mut [CanonicalStructuralConstraintRow],
 ) -> Result<(usize, usize), ConstraintPlanError> {
-    let mut owners = BTreeMap::<_, (&str, f64)>::new();
-    let mut redundant = 0;
+    let result = rank::classify(rows)?;
     for row in rows {
-        let key = (row.node_identity, row.dof);
-        if let Some((first, value)) = owners.get(&key).copied() {
-            if value != row.right_hand_side {
-                return Err(ConstraintPlanError::ConflictingRow {
-                    first_constraint_id: first.into(),
-                    second_constraint_id: row.constraint_id.clone(),
-                });
-            }
-            row.reaction_recovery = ReactionRecovery::RedundantEquation;
-            row.identity = row_identity(row)?;
-            redundant += 1;
-        } else {
-            owners.insert(key, (row.constraint_id.as_str(), row.right_hand_side));
-        }
+        row.identity = row_identity(row)?;
     }
-    Ok((owners.len(), redundant))
+    Ok(result)
 }
 
 fn validate_row_classification(
     rows: &[CanonicalStructuralConstraintRow],
 ) -> Result<(usize, usize), ConstraintPlanError> {
-    let mut owners = BTreeMap::<_, (&str, f64)>::new();
-    let mut redundant = 0;
-    for row in rows {
-        let key = (row.node_identity, row.dof);
-        if let Some((first, value)) = owners.get(&key).copied() {
-            if value != row.right_hand_side {
-                return Err(ConstraintPlanError::ConflictingRow {
-                    first_constraint_id: first.into(),
-                    second_constraint_id: row.constraint_id.clone(),
-                });
-            }
-            if row.reaction_recovery != ReactionRecovery::RedundantEquation {
-                return Err(ConstraintPlanError::Invalid(
-                    "a redundant constraint row claims independent reaction recovery".into(),
-                ));
-            }
-            redundant += 1;
-        } else {
-            if row.reaction_recovery != ReactionRecovery::UnconstrainedEquilibriumResidual {
-                return Err(ConstraintPlanError::Invalid(
-                    "an active constraint row does not own reaction recovery".into(),
-                ));
-            }
-            owners.insert(key, (row.constraint_id.as_str(), row.right_hand_side));
+    let expected = rows
+        .iter()
+        .map(|row| {
+            let mut row = row.clone();
+            row.reaction_recovery = if row.terms.len() == 1 {
+                ReactionRecovery::UnconstrainedEquilibriumResidual
+            } else {
+                ReactionRecovery::ConstraintMultiplier
+            };
+            Ok(row)
+        })
+        .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
+    let mut expected = expected;
+    let result = rank::classify(&mut expected)?;
+    for (actual, expected) in rows.iter().zip(expected) {
+        if actual.reaction_recovery != expected.reaction_recovery {
+            return Err(ConstraintPlanError::Invalid(
+                "constraint row rank classification is inconsistent".into(),
+            ));
         }
     }
-    Ok((owners.len(), redundant))
+    Ok(result)
 }
 
 pub(super) fn canonical_digest<T: Serialize>(
