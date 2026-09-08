@@ -5,6 +5,7 @@ pub(super) const FEA_SWEEP_VALIDATION_CLASS: &str = "fea.SweepValidation";
 pub(super) const FEA_PLAN_CLASS: &str = "fea.Plan";
 pub(super) const FEA_SWEEP_PLAN_CLASS: &str = "fea.SweepPlan";
 pub(super) const FEA_RUN_RESULT_CLASS: &str = "fea.RunResult";
+pub(super) const FEA_STEP_RUN_RESULT_CLASS: &str = "fea.StepRunResult";
 pub(super) const FEA_SWEEP_RUN_RESULT_CLASS: &str = "fea.SweepRunResult";
 pub(super) const FEA_MODEL_CLASS: &str = "fea.Model";
 pub(super) const FEA_MATERIAL_CLASS: &str = "fea.Material";
@@ -97,13 +98,26 @@ pub(super) const RUN_RESULT_FIELDS: &[&str] = &[
     "study_id",
     "model_id",
     "model_template",
-    "procedure_step",
-    "execution",
-    "identity",
+    "sequence_identity",
+    "steps",
+    "states",
     "solver_mesh_artifact_path",
     "meshing_evidence_artifact_path",
     "study_fingerprint",
     "operation_sequence",
+    "run_status",
+    "numerically_acceptable",
+    "production_publishable",
+    "solver_convergence",
+    "result_quality",
+    "evidence_artifact_path",
+    FEA_STUDY_CONTEXT_PROPERTY,
+];
+pub(super) const STEP_RUN_RESULT_FIELDS: &[&str] = &[
+    "ordinal",
+    "procedure_step",
+    "execution",
+    "identity",
     "run_operation",
     "run_op_version",
     "run_id",
@@ -304,6 +318,7 @@ pub(crate) fn ensure_fea_classes_registered() {
                     conjugate_heat_transfer_interface_methods()
                 }
                 FEA_RUN_RESULT_CLASS => run_result_methods(),
+                FEA_STEP_RUN_RESULT_CLASS => step_run_result_methods(),
                 FEA_RESULTS_CLASS => results_methods(),
                 FEA_FIELD_CLASS => field_methods(),
                 _ => HashMap::new(),
@@ -709,7 +724,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 42] {
+fn fea_class_schemas() -> [FeaClassSchema; 43] {
     [
         (
             FEA_STUDY_CLASS,
@@ -757,28 +772,14 @@ fn fea_class_schemas() -> [FeaClassSchema; 42] {
             FEA_RUN_RESULT_CLASS,
             "runmat.fea.run-result",
             RUN_RESULT_FIELDS,
-            &[
-                "study_id",
-                "model_id",
-                "model_template",
-                "procedure_step",
-                "execution",
-                "identity",
-                "study_fingerprint",
-                "operation_sequence",
-                "run_operation",
-                "run_op_version",
-                "run_id",
-                "run_status",
-                "numerically_acceptable",
-                "production_publishable",
-                "solver_convergence",
-                "result_quality",
-                "quality_reasons",
-                "production_publication_reasons",
-                "provenance",
-                "evidence_artifact_path",
-            ],
+            RUN_RESULT_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_STEP_RUN_RESULT_CLASS,
+            "runmat.fea.step-run-result",
+            STEP_RUN_RESULT_FIELDS,
+            STEP_RUN_RESULT_FIELDS,
             validate_fea_object,
         ),
         (
@@ -1087,4 +1088,6 @@ use std::sync::Once;
 use runmat_types::MemberAccess;
 use runmat_value::{IntValue, ObjectInstance, Value};
 
-use super::{field_methods, results_methods, run_result_methods, workflow_methods};
+use super::{
+    field_methods, results_methods, run_result_methods, step_run_result_methods, workflow_methods,
+};

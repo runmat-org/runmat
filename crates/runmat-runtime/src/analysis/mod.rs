@@ -103,6 +103,8 @@ use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
 use result_policy::{classify_run_status, evaluate_production_publication};
 #[cfg(test)]
+use structural_study::persist_immutable_study_evidence;
+#[cfg(test)]
 use structural_study::run_evidence_stage;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
@@ -111,7 +113,7 @@ pub use structural_study::{
     StructuralStudySequenceExecutionOutcome, STRUCTURAL_STUDY_INTENT_MAX_BYTES,
 };
 use structural_study::{
-    complete_study_run, persist_immutable_study_evidence, study_completion_from_prepared,
+    complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, PreparedStudySequence, PreparedStudyStep,
 };
 use study_execution::execute_study_step;
@@ -871,7 +873,7 @@ pub fn analysis_validate_study_op(
         })
         .collect();
     let study_fingerprint = study_fingerprint(spec);
-    let evidence_artifact_path = persist_immutable_study_evidence(
+    let evidence_artifact_path = persist_content_addressed_study_evidence(
         &study_fingerprint,
         "validate",
         serde_json::json!({
@@ -981,7 +983,7 @@ pub fn analysis_plan_study_op(
             .map(|step| step.run_op_version.clone())
             .collect::<Vec<_>>(),
     );
-    let evidence_artifact_path = persist_immutable_study_evidence(
+    let evidence_artifact_path = persist_content_addressed_study_evidence(
         &study_fingerprint,
         "plan",
         serde_json::json!({

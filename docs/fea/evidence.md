@@ -114,14 +114,18 @@ Use the artifact roots when a workflow needs reproducibility, auditability, tren
 
 ## Results Access
 
-Every successful study run prints and stores a `run_id`. Use that id for post-processing:
+Every successful procedure step stores a `run_id`. A single-step aggregate can be queried directly;
+select a step explicitly when the study contains more than one:
 
 ```matlab
 result = fea.run(study);
 results = fea.results(result);
 
+stepRun = result.step("static");
+results = fea.results(stepRun);
+
 % Later, or in another process that can see the same artifact root:
-results = fea.results("run_...");
+results = fea.results(stepRun.run_id);
 stress = fea.field(results, "von_mises");
 ```
 

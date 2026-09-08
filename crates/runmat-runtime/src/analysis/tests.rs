@@ -1929,7 +1929,7 @@ fn analysis_validate_study_reports_invalid_study_id() {
     assert!(envelope
         .data
         .evidence_artifact_path
-        .ends_with("validate.json"));
+        .contains("validate_sha256_"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -2066,7 +2066,10 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
-    assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
+    assert!(envelope
+        .data
+        .evidence_artifact_path
+        .contains("plan_sha256_"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }

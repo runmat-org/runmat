@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn repeatable_study_evidence_is_addressed_by_its_validated_content() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("content-addressed-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let _runtime_guard = scoped_study_artifact_root(&root);
+    let study_fingerprint = runmat_execution::Digest::sha256(b"same-study").to_string();
+
+    let first = persist_content_addressed_study_evidence(
+        &study_fingerprint,
+        "validate",
+        serde_json::json!({"valid": false, "message": "first contract"}),
+    )
+    .unwrap();
+    let repeated = persist_content_addressed_study_evidence(
+        &study_fingerprint,
+        "validate",
+        serde_json::json!({"valid": false, "message": "first contract"}),
+    )
+    .unwrap();
+    let revised = persist_content_addressed_study_evidence(
+        &study_fingerprint,
+        "validate",
+        serde_json::json!({"valid": false, "message": "revised contract"}),
+    )
+    .unwrap();
+
+    assert_eq!(first, repeated);
+    assert_ne!(first, revised);
+    assert!(first.contains("validate_sha256_"));
+    assert!(revised.contains("validate_sha256_"));
+    drop(_runtime_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn study_run_evidence_is_immutable_per_run_identity() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("run-addressed-study-evidence");

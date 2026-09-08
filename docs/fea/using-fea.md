@@ -28,7 +28,10 @@ positional script arguments. RunMat does not invent non-MATLAB `argv` semantics 
 Remote typed function entrypoints accept declared string inputs through
 `runmat job submit --function NAME -- ...`. `--emit-bytecode` applies only to `.m` files.
 
-By default, FEA run output is human-readable and includes the `run_id`, status, quality gates, evidence path, and a `fea.results("<run_id>")` hint for post-processing. Use `runmat run --json studies/bracket_static.fea` when a script or CI job needs structured JSON. Use `runmat check --json studies/bracket_static.fea` for structured validation and plan output.
+By default, FEA run output is human-readable and includes each procedure step's `run_id`, status,
+quality gates, evidence path, and a `fea.results("<run_id>")` hint for post-processing. Use
+`runmat run --json studies/bracket_static.fea` when a script or CI job needs structured JSON. Use
+`runmat check --json studies/bracket_static.fea` for structured validation and plan output.
 
 ## Smallest Runnable Study
 
@@ -224,7 +227,7 @@ stress = result.field("structural.von_mises");
 peakStressPa = max(stress.values);
 ```
 
-`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object, and `meshing.generate(...)` returns a validated `meshing.Mesh`. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. Study operations return `fea.Validation`, `fea.Plan`, and `fea.RunResult`; sweep operations return the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. A `fea.RunResult` exposes `results()`, `field(fieldId)`, and `mesh()` methods, while a sweep result exposes its `run_entries` for explicit selection. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties plus `plot()` and `mesh()` visualization methods. Field selection belongs to `fea.field`; it is not a plotting option.
+`fea.load(...)` returns either a `fea.Study` or `fea.Sweep` object. `geometry.load(...)` returns a `geometry.Asset` object, and `meshing.generate(...)` returns a validated `meshing.Mesh`. The workflow builtins accept `.fea` paths, `fea.Study` objects, or `fea.Sweep` objects. Study operations return `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; sweep operations return the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Select one persisted procedure-step run with `stepRun = result.step("step_id")`; the resulting `fea.StepRunResult` owns the step's `run_id` and exposes `results()`, `field(fieldId)`, and `mesh()`. Those methods also work directly on a `fea.RunResult` when the study has exactly one step. A multi-step aggregate requires explicit step selection. `fea.Field` objects expose script-friendly `values`, `shape`, `unit`, `location`, `kind`, `family`, and `quantity` properties plus `plot()` and `mesh()` visualization methods. Field selection belongs to `fea.field`; it is not a plotting option.
 
 The typed constructors and post-processing helpers do not intrinsically require native OCCT. They can consume an existing `geometry.Asset`, STL-backed or synthetic geometry, and persisted mesh/result artifacts without OCCT; only an earlier import of topology-bearing CAD such as STEP, IGES, or BREP may require the configured OCCT geometry backend.
 
@@ -277,6 +280,7 @@ The typed constructors are:
 | `fea.model(...)` | Explicit model assembled from typed components. |
 | `fea.study(...)` | Study assembled from geometry, a typed model template/model, sequence, backend, and formulation requirement. |
 | `fea.sweep(...)` | Study sweep assembled from `fea.Study` objects. |
+| `fea.stepResult(run, stepId)` | Select a typed `fea.StepRunResult` from an aggregate study result. |
 | `plot(field, ...)` | Plot an `fea.Field` through the ordinary plotting function. |
 | `mesh(runOrResultsOrField, ...)` | Display solver topology, CAD geometry, or both through the ordinary mesh function. |
 

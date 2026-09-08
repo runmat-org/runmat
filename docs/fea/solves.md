@@ -152,7 +152,8 @@ print(figureHandle, "von_mises.png", "-dpng");
 meshHandle = mesh(fea.results(run));
 print(meshHandle, "solver_mesh.png", "-dpng");
 
-later = fea.results(run.run_id);
+stepRun = run.step("static");
+later = fea.results(stepRun.run_id);
 comparison = fea.compare("run_baseline", "run_candidate");
 trend = fea.trends("WindowSize", 16);
 ```

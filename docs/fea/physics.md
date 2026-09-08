@@ -51,7 +51,10 @@ Families can add controls such as modal mode count, transient time stepping, non
 
 ## Result Payloads
 
-All families return common run fields: `run_id`, fields, diagnostics, quality gates, quality reasons, publishability, and provenance. Some families add domain payloads:
+Every procedure-step result has a `run_id`, fields, diagnostics, quality gates, quality reasons,
+publishability, and provenance. `fea.run` returns an aggregate study result whose `steps` preserve
+the authored sequence; select a typed `fea.StepRunResult` before querying a multi-step study. Some
+families add domain payloads:
 
 | Payload | Used by |
 | --- | --- |

@@ -114,6 +114,7 @@ Error codes use `RM.<DOMAIN>.<OPERATION>.<REASON>`, for example `RM.FEA.RUN_STUD
 | `fea.validate(study)` | Validate a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.plan(study)` | Plan a `.fea` path, `fea.Study`, or `fea.Sweep`. |
 | `fea.run(study)` | Run a `.fea` path, `fea.Study`, or `fea.Sweep`. |
+| `fea.stepResult(run, stepId)` or `run.step(stepId)` | Select one typed persisted procedure-step result from an aggregate study run. |
 | `fea.results(runOrId, Name, Value, ...)` | Load result data from a run result object or persisted run id. |
 | `fea.field(resultsOrRun, fieldId)` | Extract one field from a result query. |
 | `plot(field, Name, Value, ...)` | Plot an `fea.Field` using its retained study geometry and solver topology context. Field selection remains in `fea.field`. |
@@ -214,7 +215,7 @@ Mode and transient snapshot selectors use the normal one-based RunMat scripting 
 
 The `fea.results` and `fea.trends` query paths read canonical host `double` result fields and never trigger device execution or an implicit transfer. `fea.run` may execute through the study's configured GPU solver; its backend, device-operator ratio, synchronization count, and fallback provenance remain separate from published field storage. None of these operations intrinsically requires native OCCT when consuming existing typed objects, STL/synthetic geometry, or persisted artifacts; only path-time import of topology-bearing CAD may require the configured OCCT backend.
 
-`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. Only `fea.RunResult` represents one run and therefore exposes `results`, `field`, and `plot`. `fea.Results` exposes `field` and `plot`; `fea.Field` exposes `plot`.
+`fea.Study` and `fea.Sweep` objects expose `validate`, `plan`, and `run` methods through the class system. A study produces `fea.Validation`, `fea.Plan`, and an aggregate `fea.RunResult`; a sweep produces the distinct aggregate classes `fea.SweepValidation`, `fea.SweepPlan`, and `fea.SweepRunResult`. `fea.RunResult.step(stepId)` returns one typed `fea.StepRunResult`, which owns the persisted `run_id` and exposes `results`, `field`, and `mesh`. The aggregate exposes the same convenience methods only when it contains exactly one step. `fea.Results` exposes `field` and `mesh`; `fea.Field` exposes `plot` and `mesh`.
 
 ## `.fea` Document Fields
 

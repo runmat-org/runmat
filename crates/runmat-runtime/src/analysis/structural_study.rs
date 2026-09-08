@@ -18,12 +18,12 @@ pub use lifecycle::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure,
 };
-#[cfg(test)]
-pub(super) use publication::run_evidence_stage;
 pub(super) use publication::{
-    complete_study_run, persist_immutable_study_evidence, study_completion_from_prepared,
+    complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep,
 };
+#[cfg(test)]
+pub(super) use publication::{persist_immutable_study_evidence, run_evidence_stage};
 
 pub const STRUCTURAL_STUDY_INTENT_MAX_BYTES: usize = 64 * 1024 * 1024;
 

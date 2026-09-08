@@ -71,6 +71,7 @@ mod modeling;
 pub(crate) mod observations;
 pub(crate) mod response_spectra;
 pub(crate) mod response_spectrum_policies;
+mod run_results;
 pub(crate) mod sequences;
 pub(crate) mod signal_policies;
 pub(crate) mod signals;
@@ -1297,11 +1298,28 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::Object(object) if object.class_name == FEA_RUN_RESULT_CLASS => {
+            let aggregate: crate::analysis::AnalysisStudyRunData =
+                object_payload(builtin, value, FEA_RUN_RESULT_CLASS)?;
+            match aggregate.steps.as_slice() {
+                [step] => Ok(step.run_id.clone()),
+                [] => Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "fea.RunResult contains no procedure-step results",
+                )),
+                _ => Err(builtin_error(
+                    builtin,
+                    &ERROR_INPUT,
+                    "fea.RunResult contains multiple procedure-step results; select one with run.step(\"step_id\")",
+                )),
+            }
+        }
+        Value::Object(object) if object.class_name == FEA_STEP_RUN_RESULT_CLASS => {
             run_id_from_object(object).ok_or_else(|| {
                 builtin_error(
                     builtin,
                     &ERROR_INPUT,
-                    "fea.RunResult does not contain its required run_id",
+                    "fea.StepRunResult does not contain its required run_id",
                 )
             })
         }
@@ -1318,7 +1336,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
         other => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected run id string or fea.RunResult; got {other:?}"),
+            format!("expected run id string, fea.RunResult, or fea.StepRunResult; got {other:?}"),
         )),
     }
 }
@@ -2702,6 +2720,31 @@ fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
 
 fn run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     [
+        ("step", "fea.stepResult"),
+        ("results", RESULTS_NAME),
+        ("field", FIELD_NAME),
+        ("mesh", MESH_METHOD_BUILTIN_NAME),
+    ]
+    .into_iter()
+    .map(|(name, function_name)| {
+        (
+            name.to_string(),
+            crate::class_registry::RuntimeMethod {
+                name: name.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: MemberAccess::Public,
+                function_name: function_name.to_string(),
+                implicit_class_argument: None,
+            },
+        )
+    })
+    .collect()
+}
+
+fn step_run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    [
         ("results", RESULTS_NAME),
         ("field", FIELD_NAME),
         ("mesh", MESH_METHOD_BUILTIN_NAME),
@@ -3249,6 +3292,15 @@ mod tests {
             assert!(crate::class_registry::lookup_property(class_name, "sweep_id").is_none());
         }
         assert!(crate::class_registry::lookup_method(FEA_RUN_RESULT_CLASS, "results").is_some());
+        assert!(crate::class_registry::lookup_method(FEA_RUN_RESULT_CLASS, "step").is_some());
+        assert!(crate::class_registry::lookup_property(FEA_RUN_RESULT_CLASS, "steps").is_some());
+        assert!(crate::class_registry::lookup_property(FEA_RUN_RESULT_CLASS, "run_id").is_none());
+        assert!(
+            crate::class_registry::lookup_property(FEA_STEP_RUN_RESULT_CLASS, "run_id").is_some()
+        );
+        assert!(
+            crate::class_registry::lookup_method(FEA_STEP_RUN_RESULT_CLASS, "results").is_some()
+        );
         assert!(
             crate::class_registry::lookup_method(FEA_SWEEP_RUN_RESULT_CLASS, "results").is_none()
         );
@@ -4253,7 +4305,7 @@ execution:
         };
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
 
-        let mut object = ObjectInstance::new(FEA_RUN_RESULT_CLASS.to_string());
+        let mut object = ObjectInstance::new(FEA_STEP_RUN_RESULT_CLASS.to_string());
         object
             .properties
             .insert("run_id".to_string(), Value::String(run_id.clone()));

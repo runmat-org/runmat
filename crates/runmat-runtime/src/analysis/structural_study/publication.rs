@@ -64,6 +64,23 @@ pub(in crate::analysis) fn persist_immutable_study_evidence(
     stage: &str,
     payload: serde_json::Value,
 ) -> Result<String, String> {
+    persist_study_evidence(study_fingerprint, stage, payload, false)
+}
+
+pub(in crate::analysis) fn persist_content_addressed_study_evidence(
+    study_fingerprint: &str,
+    stage: &str,
+    payload: serde_json::Value,
+) -> Result<String, String> {
+    persist_study_evidence(study_fingerprint, stage, payload, true)
+}
+
+fn persist_study_evidence(
+    study_fingerprint: &str,
+    stage: &str,
+    payload: serde_json::Value,
+    content_addressed: bool,
+) -> Result<String, String> {
     let digest = study_fingerprint
         .strip_prefix("sha256:")
         .filter(|digest| {
@@ -90,12 +107,20 @@ pub(in crate::analysis) fn persist_immutable_study_evidence(
         return Err("study evidence payload may not define the reserved `$evidence` field".into());
     }
 
+    let content_digest = payload_digest(&payload)?;
+    let path_identity = if content_addressed {
+        format!(
+            "{stage}_sha256_{}",
+            content_digest.trim_start_matches("sha256:")
+        )
+    } else {
+        stage.to_string()
+    };
     let evidence_root = study_evidence_root();
     storage::ensure_owned_directory(&evidence_root, "study evidence root")?;
     let root = evidence_root.join(format!("sha256_{digest}"));
     storage::ensure_owned_directory(&root, "study evidence fingerprint directory")?;
-    let path = root.join(format!("{stage}.json"));
-    let content_digest = payload_digest(&payload)?;
+    let path = root.join(format!("{path_identity}.json"));
     let evidence = PersistedStudyEvidence {
         binding: StudyEvidenceBinding {
             schema_version: STUDY_EVIDENCE_SCHEMA_VERSION.to_string(),
