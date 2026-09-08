@@ -19,7 +19,7 @@ pub(crate) use model::{
     ComplexVector3, RealizedExcitation, RealizedExcitationKind, RealizedExcitationTarget,
     RealizedExcitations,
 };
-pub(crate) use projection::SpatialProjectionAccumulator;
+pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumulator};
 pub(crate) use realize::realize_model_excitations;
 
 #[cfg(test)]

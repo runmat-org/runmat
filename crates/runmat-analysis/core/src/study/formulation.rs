@@ -26,6 +26,7 @@ pub enum StructuralOperatorImplementation {
 pub enum SpatialOperatorImplementation {
     Structural(StructuralOperatorImplementation),
     ReducedThermalDiffusion,
+    ThermalGalerkinConduction,
     PrescribedThermalCouplingProfile,
     ReducedAcousticHelmholtz,
     ReducedElectromagneticPotential,
@@ -41,6 +42,7 @@ pub enum TemporalImplementation {
     StructuralFirstOrderRelaxation,
     StructuralScalarResidualIteration,
     ThermalTransientRelaxation,
+    ThermalBackwardEuler,
     ElectromagneticReducedEdgeGraphHarmonicSolve,
     AcousticDomainGraphHarmonicSolve,
     CfdReducedChannelSteadyIteration,
@@ -57,6 +59,7 @@ pub enum ConstitutiveImplementation {
     IsotropicLinearElasticity,
     ReducedScalarStructuralNonlinearity,
     ReducedThermalCoefficientProfile,
+    IsotropicThermalConduction,
     ReducedFrequencyMaterialResponse,
     ReducedAcousticMedium,
     ReducedIncompressibleFlowClosure,

@@ -1,5 +1,7 @@
 use runmat_analysis_core::AnalysisModel;
 
+pub(crate) mod assembly;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThermalConstitutiveStats {
     pub conductivity_mean: f64,

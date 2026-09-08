@@ -15,7 +15,10 @@ use crate::{
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
     excitation::{realize_model_excitations, RealizedExcitationKind},
-    physics::{coupling::thermo_mechanical, thermal::constitutive_stats},
+    physics::{
+        coupling::thermo_mechanical,
+        thermal::{assembly::assemble as assemble_thermal_operator, constitutive_stats},
+    },
     progress::{check_cancelled, emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
 };
 
@@ -82,19 +85,42 @@ pub fn run_thermal_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_linear_system(
+    let mut summary = assemble_linear_system(
         model,
         options.solver_mesh.clone(),
         Some(thermo_context.clone()),
         None,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let physical_thermal = options
+        .solver_mesh
+        .as_ref()
+        .map(|mesh| {
+            let excitations = realize_model_excitations(model)
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            assemble_thermal_operator(model, mesh, &excitations)
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))
+        })
+        .transpose()?;
+    if let Some(physical) = &physical_thermal {
+        summary
+            .spatial_projection_evidence
+            .extend(physical.source_evidence.clone());
+    }
     let identity = super::admission::admit_nonstructural(
         runmat_analysis_core::PhysicsFamily::Thermal,
         options.procedure,
         options.solver_mesh.as_ref(),
-        runmat_analysis_core::SourceImplementation::OrdinalDistribution,
-        runmat_analysis_core::BoundaryTransferImplementation::GlobalCountProfile,
+        if physical_thermal.is_some() {
+            runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection
+        } else {
+            runmat_analysis_core::SourceImplementation::OrdinalDistribution
+        },
+        if physical_thermal.is_some() {
+            runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
+        } else {
+            runmat_analysis_core::BoundaryTransferImplementation::GlobalCountProfile
+        },
         options.formulation_requirement,
     )?;
     super::validate_rotational_dof_targets(model, &summary)?;
@@ -193,17 +219,46 @@ pub fn run_thermal_with_options(
                 .push(thermo_context.reference_temperature_k + effective_delta * spatial_factor);
         }
 
-        let mut temperatures = Vec::with_capacity(node_count);
-        let mut residual_sum = 0.0;
-        for i in 0..node_count {
-            let prev = previous_temperatures[i];
-            let laplacian = recovery_topology.diffusion_laplacian(&previous_temperatures, i);
-            let candidate =
-                prev + relax_gain * (target_temperatures[i] - prev) + diffusion_gain * laplacian;
-            residual_sum += (candidate - prev).abs();
-            min_temperature_k = min_temperature_k.min(candidate);
-            max_temperature_k = max_temperature_k.max(candidate);
-            temperatures.push(candidate);
+        let (temperatures, residual_sum) = if let Some(physical) = &physical_thermal {
+            let operator = physical.transient_operator(dt, &previous_temperatures);
+            let algebra = crate::solve::backend::cpu_reference::CpuReferenceBackend;
+            let solve = crate::solve::linear::solve_operator_system(
+                &operator,
+                crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+                crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+                &algebra,
+                Some(&previous_temperatures),
+            );
+            if !solve.converged {
+                return Err(FeaRunError::Assembly(format!(
+                    "physical thermal solve did not converge: residual_norm={}",
+                    solve.residual_norm
+                )));
+            }
+            let residual_sum = solve
+                .solution
+                .iter()
+                .zip(&previous_temperatures)
+                .map(|(current, previous)| (current - previous).abs())
+                .sum();
+            (solve.solution, residual_sum)
+        } else {
+            let mut temperatures = Vec::with_capacity(node_count);
+            let mut residual_sum = 0.0;
+            for i in 0..node_count {
+                let prev = previous_temperatures[i];
+                let laplacian = recovery_topology.diffusion_laplacian(&previous_temperatures, i);
+                let candidate = prev
+                    + relax_gain * (target_temperatures[i] - prev)
+                    + diffusion_gain * laplacian;
+                residual_sum += (candidate - prev).abs();
+                temperatures.push(candidate);
+            }
+            (temperatures, residual_sum)
+        };
+        for &temperature in &temperatures {
+            min_temperature_k = min_temperature_k.min(temperature);
+            max_temperature_k = max_temperature_k.max(temperature);
         }
         if step > 0 {
             residual_norms.push(residual_sum / node_count as f64);

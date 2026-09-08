@@ -68,24 +68,33 @@ pub fn registered_formulations(
 }
 
 fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
-    let temporal = match procedure {
-        AnalysisProcedure::TransientResponse => TemporalImplementation::ThermalTransientRelaxation,
+    match procedure {
+        AnalysisProcedure::TransientResponse => {}
         _ => return Vec::new(),
-    };
+    }
     [
         (
+            SpatialOperatorImplementation::ThermalGalerkinConduction,
+            ConstitutiveImplementation::IsotropicThermalConduction,
+            TemporalImplementation::ThermalBackwardEuler,
             vec![TopologyImplementation::CanonicalSolverMeshTet4],
             RecoveryImplementation::ThermalSolverMeshGradient,
-            vec![SourceImplementation::OrdinalDistribution],
-            vec![BoundaryTransferImplementation::GlobalCountProfile],
+            vec![SourceImplementation::CanonicalVolumeProjection],
+            vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
         ),
         (
+            SpatialOperatorImplementation::ThermalGalerkinConduction,
+            ConstitutiveImplementation::IsotropicThermalConduction,
+            TemporalImplementation::ThermalBackwardEuler,
             vec![TopologyImplementation::CanonicalSolverMeshTet10],
             RecoveryImplementation::ThermalSolverMeshGradient,
-            vec![SourceImplementation::OrdinalDistribution],
-            vec![BoundaryTransferImplementation::GlobalCountProfile],
+            vec![SourceImplementation::CanonicalVolumeProjection],
+            vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
         ),
         (
+            SpatialOperatorImplementation::ReducedThermalDiffusion,
+            ConstitutiveImplementation::ReducedThermalCoefficientProfile,
+            TemporalImplementation::ThermalTransientRelaxation,
             vec![TopologyImplementation::InferredLattice],
             RecoveryImplementation::ThermalInferredAxisGradient,
             vec![SourceImplementation::OrdinalDistribution],
@@ -94,10 +103,18 @@ fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRea
     ]
     .into_iter()
     .map(
-        |(topologies, recovery, sources, boundary_transfers)| ExactFormulationRealization {
+        |(
+            spatial_operator,
+            constitutive,
+            temporal,
+            topologies,
+            recovery,
+            sources,
+            boundary_transfers,
+        )| ExactFormulationRealization {
             components: vec![ExactFormulationComponent {
-                spatial_operator: SpatialOperatorImplementation::ReducedThermalDiffusion,
-                constitutive: ConstitutiveImplementation::ReducedThermalCoefficientProfile,
+                spatial_operator,
+                constitutive,
                 recovery,
                 topologies,
                 sources,
@@ -107,12 +124,6 @@ fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRea
             boundary_transfers,
         },
     )
-    .filter(|_| {
-        matches!(
-            procedure,
-            AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
-        )
-    })
     .collect()
 }
 

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::{
-    model::RealizedExcitation, ProjectionVector3, SpatialIntegrationRule, SpatialProjectionBalance,
-    SpatialProjectionEvidence,
+    model::RealizedExcitation, ProjectionScalar, ProjectionVector3, SpatialIntegrationRule,
+    SpatialProjectionBalance, SpatialProjectionEvidence,
 };
 use crate::topology::AnalysisProjection;
 
@@ -21,6 +21,89 @@ pub(crate) struct SpatialProjectionAccumulator<'a> {
     projected_resultant_scale: f64,
     requested_moment_scale: f64,
     projected_moment_scale: f64,
+}
+
+pub(crate) struct ScalarProjectionAccumulator<'a> {
+    load: &'a RealizedExcitation,
+    projection: &'a AnalysisProjection,
+    integration_rule: SpatialIntegrationRule,
+    resolved_entity_count: usize,
+    resolved_nodes: BTreeSet<usize>,
+    requested: ProjectionScalar,
+    projected: ProjectionScalar,
+    requested_scale: f64,
+    projected_scale: f64,
+}
+
+impl<'a> ScalarProjectionAccumulator<'a> {
+    pub(crate) fn new(
+        load: &'a RealizedExcitation,
+        projection: &'a AnalysisProjection,
+        integration_rule: SpatialIntegrationRule,
+        resolved_entity_count: usize,
+    ) -> Self {
+        Self {
+            load,
+            projection,
+            integration_rule,
+            resolved_entity_count,
+            resolved_nodes: BTreeSet::new(),
+            requested: ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0,
+            },
+            projected: ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0,
+            },
+            requested_scale: 0.0,
+            projected_scale: 0.0,
+        }
+    }
+
+    pub(crate) fn add_requested(&mut self, real: f64, imaginary: f64) {
+        self.requested.real += real;
+        self.requested.imaginary += imaginary;
+        self.requested_scale += real.hypot(imaginary);
+    }
+
+    pub(crate) fn add_projected(&mut self, node_index: usize, real: f64, imaginary: f64) {
+        self.resolved_nodes.insert(node_index);
+        self.projected.real += real;
+        self.projected.imaginary += imaginary;
+        self.projected_scale += real.hypot(imaginary);
+    }
+
+    pub(crate) fn finish(self) -> SpatialProjectionEvidence {
+        let normalization_scale = self.requested_scale.max(self.projected_scale);
+        let error = (self.requested.real - self.projected.real)
+            .hypot(self.requested.imaginary - self.projected.imaginary);
+        let relative_error = if normalization_scale == 0.0 {
+            0.0
+        } else {
+            error / normalization_scale
+        };
+        let requirements = self.load.policy.projection;
+        SpatialProjectionEvidence {
+            excitation_id: self.load.excitation_id.0.clone(),
+            signal_id: self.load.signal_id.0.clone(),
+            quantity: self.load.quantity,
+            analysis_projection_digest: self.projection.projection_digest,
+            integration_rule: self.integration_rule,
+            resolved_entity_count: self.resolved_entity_count,
+            resolved_node_count: self.resolved_nodes.len(),
+            reference_point_m: [0.0; 3],
+            balance: SpatialProjectionBalance::ScalarIntegral {
+                requested_integral: self.requested,
+                projected_integral: self.projected,
+                normalization_scale,
+                relative_error,
+            },
+            relative_tolerance: requirements.relative_tolerance,
+            accepted: !requirements.preserve_resultant
+                || relative_error <= requirements.relative_tolerance,
+        }
+    }
 }
 
 impl<'a> SpatialProjectionAccumulator<'a> {
