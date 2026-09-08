@@ -2,16 +2,24 @@
 
 mod action;
 mod activation;
+mod evidence;
 mod model;
+mod projection;
 mod realize;
 mod sample;
 mod target;
 
-#[cfg(test)]
-pub(crate) use model::{ComplexScalar, RealizedExcitation};
-pub(crate) use model::{
-    ComplexVector3, RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
+pub use evidence::{
+    ProjectionScalar, ProjectionVector3, SpatialIntegrationRule, SpatialProjectionBalance,
+    SpatialProjectionEvidence,
 };
+#[cfg(test)]
+pub(crate) use model::{ComplexScalar, RealizedExcitationPolicy};
+pub(crate) use model::{
+    ComplexVector3, RealizedExcitation, RealizedExcitationKind, RealizedExcitationTarget,
+    RealizedExcitations,
+};
+pub(crate) use projection::SpatialProjectionAccumulator;
 pub(crate) use realize::realize_model_excitations;
 
 #[cfg(test)]

@@ -188,6 +188,17 @@ fn validate_action_policy(
     if matches!(action, ExcitationAction::Moment(_)) && !excitation.projection.preserve_moment {
         return Err("moment excitation requires moment conservation".to_string());
     }
+    if matches!(
+        action,
+        ExcitationAction::HeatGeneration(_)
+            | ExcitationAction::HeatFlux(_)
+            | ExcitationAction::ElectricCurrent(_)
+            | ExcitationAction::ElectricCharge(_)
+            | ExcitationAction::MassFlow(_)
+    ) && excitation.projection.preserve_moment
+    {
+        return Err("a scalar-integral excitation cannot require moment conservation".to_string());
+    }
     if excitation.kinematics == ExcitationKinematics::Follower
         && !matches!(
             action,
@@ -485,4 +496,57 @@ fn validate_response_spectra(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        CoordinateFrame, ExcitationCaseId, ExcitationId, HeatFlux, ProjectionRequirement,
+        RegionTarget, Signal, SignalApproximationEvidence, SignalPrecision, SignalProvenance,
+        SignalRepresentation, SignalValue,
+    };
+
+    #[test]
+    fn scalar_integral_action_rejects_a_moment_requirement() {
+        let signal = PhysicalSignal::HeatFlux(Signal {
+            signal_id: SignalId("flux".to_string()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation: SignalRepresentation::Constant(SignalValue::Scalar(HeatFlux::new(
+                10.0,
+            ))),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+            provenance: SignalProvenance::Authored,
+        });
+        let excitation = AnalysisExcitation {
+            excitation_id: ExcitationId("flux".to_string()),
+            case_id: ExcitationCaseId("case".to_string()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("wall")),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("flux".to_string()),
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: true,
+                relative_tolerance: 1.0e-12,
+            },
+        };
+
+        let action = ExcitationAction::HeatFlux(excitation);
+        assert_eq!(
+            validate_action_policy(&action, action.excitation(), &signal),
+            Err("a scalar-integral excitation cannot require moment conservation".to_string())
+        );
+    }
 }

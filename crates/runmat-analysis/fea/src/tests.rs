@@ -1064,11 +1064,15 @@ fn explicit_beam_topology_does_not_require_solver_mesh() {
 #[test]
 fn solver_mesh_linear_static_reports_solid_assembly_basis() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh();
+    let projection_digest = crate::topology::AnalysisProjection::derive(&mesh)
+        .expect("canonical solver mesh must project")
+        .projection_digest;
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            solver_mesh: Some(single_tetrahedron_solver_mesh()),
+            solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
             ..experimental_linear_static_options()
         },
@@ -1091,6 +1095,17 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
             && diag.message.contains("solver_mesh_node_count=4")
             && diag.message.contains("solver_mesh_element_count=1")
     }));
+    let evidence = result
+        .spatial_projection_evidence
+        .first()
+        .expect("executed force projection must survive into the run result");
+    assert_eq!(evidence.analysis_projection_digest, projection_digest);
+    assert_eq!(
+        evidence.quantity,
+        runmat_analysis_core::PhysicalQuantityKind::Force
+    );
+    assert_eq!(evidence.signal_id, "tip_load.signal");
+    assert!(evidence.accepted);
 }
 
 #[test]
@@ -1197,6 +1212,144 @@ fn single_tetrahedron_solver_mesh_for_model(
         add_face_region(&mut mesh, 1, &region);
     }
     reseal_solver_mesh(&mut mesh);
+    mesh
+}
+
+fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
+    let template = single_tetrahedron_solver_mesh();
+    let mut mesh = template.clone();
+    mesh.topology.nodes.clear();
+    mesh.topology.volume_elements.clear();
+    mesh.topology.neighbors.clear();
+    mesh.topology.boundary_faces.clear();
+    mesh.topology.boundary_edges.clear();
+    mesh.topology.regions.clear();
+
+    let regions = ["mid_aluminum", "polymer_segment", "tip_steel"];
+    for (copy, region_name) in regions.into_iter().enumerate() {
+        let offset = copy as u64 * 100;
+        let coordinate_offset = copy as f64 * 2.0;
+        let node_start = mesh.topology.nodes.len();
+        for (local_node, node) in template.topology.nodes.iter().enumerate() {
+            let mut node = node.clone();
+            node.node_id += offset;
+            node.stable_identity = runmat_meshing_core::StableDigest::from_bytes(
+                [32 + (copy * 4 + local_node) as u8; 32],
+            );
+            node.coordinates_m[0] += coordinate_offset;
+            mesh.topology.nodes.push(node);
+        }
+
+        let mut element = template.topology.volume_elements[0].clone();
+        element.element_id += offset;
+        for node_id in &mut element.node_ids {
+            *node_id += offset;
+        }
+        element.region_id = PersistentEntityId {
+            kind: PersistentEntityKind::Region,
+            source_topology_id: region_name.to_string(),
+            assembly_path: vec!["root".to_string()],
+        };
+        element.stable_identity =
+            runmat_meshing_core::solver_volume_element_identity(std::array::from_fn(|index| {
+                mesh.topology.nodes[node_start + index].stable_identity
+            }));
+        mesh.topology.volume_elements.push(element.clone());
+        mesh.topology.regions.push(runmat_meshing_core::MeshRegion {
+            region_id: element.region_id.clone(),
+            element_ids: vec![element.element_id],
+        });
+
+        for neighbor in &template.topology.neighbors {
+            let mut neighbor = *neighbor;
+            neighbor.element_id += offset;
+            neighbor.adjacent_element_id = neighbor.adjacent_element_id.map(|id| id + offset);
+            mesh.topology.neighbors.push(neighbor);
+        }
+        for (local_face, face) in template.topology.boundary_faces.iter().enumerate() {
+            let mut face = face.clone();
+            face.face_id += offset;
+            for node_id in &mut face.node_ids {
+                *node_id += offset;
+            }
+            for element_id in &mut face.adjacent_volume_element_ids {
+                *element_id += offset;
+            }
+            face.stable_identity =
+                runmat_meshing_core::solver_boundary_face_identity(std::array::from_fn(|index| {
+                    mesh.topology.nodes
+                        [node_start + face.node_ids[index] as usize - 1 - offset as usize]
+                        .stable_identity
+                }));
+            let targets: &[&str] = match local_face {
+                0 => &["interface", "root"],
+                2 if copy == 0 => &["mid_aluminum"],
+                2 if copy == 2 => &["tip_steel"],
+                _ => &[],
+            };
+            for target in targets {
+                face.provenance.push(PersistentEntityId {
+                    kind: PersistentEntityKind::Face,
+                    source_topology_id: (*target).to_string(),
+                    assembly_path: vec!["root".to_string()],
+                });
+            }
+            face.provenance.sort();
+            face.provenance.dedup();
+            mesh.topology.boundary_faces.push(face);
+        }
+        for edge in &template.topology.boundary_edges {
+            let mut edge = edge.clone();
+            edge.edge_id += offset;
+            for node_id in &mut edge.node_ids {
+                *node_id += offset;
+            }
+            for face_id in &mut edge.adjacent_boundary_face_ids {
+                *face_id += offset;
+            }
+            edge.stable_identity =
+                runmat_meshing_core::solver_boundary_edge_identity(std::array::from_fn(|index| {
+                    mesh.topology.nodes
+                        [node_start + edge.node_ids[index] as usize - 1 - offset as usize]
+                        .stable_identity
+                }));
+            mesh.topology.boundary_edges.push(edge);
+        }
+    }
+    mesh.topology
+        .regions
+        .sort_by(|left, right| left.region_id.cmp(&right.region_id));
+    for topology in &mut mesh.topology.field_topologies {
+        topology.ordered_entity_ids = match topology.location {
+            runmat_meshing_core::FieldTopologyLocation::Node => mesh
+                .topology
+                .nodes
+                .iter()
+                .map(|node| node.node_id)
+                .collect(),
+            runmat_meshing_core::FieldTopologyLocation::VolumeElement => mesh
+                .topology
+                .volume_elements
+                .iter()
+                .map(|element| element.element_id)
+                .collect(),
+            runmat_meshing_core::FieldTopologyLocation::BoundaryFace => mesh
+                .topology
+                .boundary_faces
+                .iter()
+                .map(|face| face.face_id)
+                .collect(),
+            runmat_meshing_core::FieldTopologyLocation::BoundaryEdge => mesh
+                .topology
+                .boundary_edges
+                .iter()
+                .map(|edge| edge.edge_id)
+                .collect(),
+        };
+    }
+    reseal_solver_mesh(&mut mesh);
+    mesh.validate()
+        .expect("multi-region fixture must be canonical");
     mesh
 }
 
@@ -2389,14 +2542,32 @@ fn moment_load_region_must_resolve_to_rotational_dofs() {
 
 #[test]
 fn multi_material_fixture_has_distinct_response_profile() {
-    let baseline = run_linear_static_with_single_tetrahedron_mesh(
-        &fixture_model(FixtureId::CantileverLinearStatic),
+    let multi_model = fixture_model(FixtureId::MultiMaterialAssembly);
+    let mesh = multi_region_tetrahedron_solver_mesh();
+    let mut all_steel_model = multi_model.clone();
+    for assignment in &mut all_steel_model.material_assignments {
+        assignment.expected_material_id = "mat_steel".to_string();
+        assignment.assigned_material_id = "mat_steel".to_string();
+        assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
+    }
+    let baseline = crate::run_linear_static_with_options(
+        &all_steel_model,
         ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh.clone()),
+            solver_mesh_artifact_path: Some("all-steel-solver-mesh.cbor".to_string()),
+            ..experimental_linear_static_options()
+        },
     )
-    .expect("baseline solve should succeed");
-    let multi_material = run_linear_static_with_single_tetrahedron_mesh(
-        &fixture_model(FixtureId::MultiMaterialAssembly),
+    .expect("all-steel reference solve should succeed");
+    let multi_material = crate::run_linear_static_with_options(
+        &multi_model,
         ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            solver_mesh_artifact_path: Some("multi-region-solver-mesh.cbor".to_string()),
+            ..experimental_linear_static_options()
+        },
     )
     .expect("multi-material solve should succeed");
 

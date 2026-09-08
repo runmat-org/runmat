@@ -12,7 +12,7 @@ use runmat_analysis_core::{
     TranslationDofValue,
 };
 #[cfg(test)]
-use runmat_analysis_core::{ElectricCurrent, Position, ReferencePoint};
+use runmat_analysis_core::{ElectricCurrent, Position, ReferencePoint, Traction};
 use runmat_geometry_core::UnitSystem;
 
 #[derive(Debug, Clone)]
@@ -26,6 +26,8 @@ pub(crate) struct FixtureExcitation {
 pub(crate) enum FixtureExcitationKind {
     Force([f64; 3]),
     Moment([f64; 3]),
+    #[cfg(test)]
+    Traction([f64; 3]),
     Pressure(f64),
     BodyForce([f64; 3]),
     #[cfg(test)]
@@ -98,6 +100,10 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
         FixtureExcitationKind::Pressure(_) => {
             ExcitationTarget::Region(RegionTarget::boundary(&specification.region_id))
         }
+        #[cfg(test)]
+        FixtureExcitationKind::Traction(_) => {
+            ExcitationTarget::Region(RegionTarget::boundary(&specification.region_id))
+        }
         FixtureExcitationKind::BodyForce(_) => {
             ExcitationTarget::Region(RegionTarget::volume(&specification.region_id))
         }
@@ -120,6 +126,15 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
             target,
             value,
             VectorExcitationKind::Moment,
+        ),
+        #[cfg(test)]
+        FixtureExcitationKind::Traction(value) => append_vector_excitation(
+            model,
+            &specification.id,
+            case_id.clone(),
+            target,
+            value,
+            VectorExcitationKind::Traction,
         ),
         FixtureExcitationKind::Pressure(value) => append_scalar_excitation(
             model,
@@ -183,6 +198,8 @@ fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureEx
 enum VectorExcitationKind {
     Force,
     Moment,
+    #[cfg(test)]
+    Traction,
     BodyForce,
 }
 
@@ -204,6 +221,11 @@ fn append_vector_excitation(
             PhysicalSignal::Moment(fixture_vector_signal(signal_id.clone(), values)),
             ExcitationDistribution::PreserveResultant,
         ),
+        #[cfg(test)]
+        VectorExcitationKind::Traction => (
+            PhysicalSignal::Traction(fixture_vector_signal(signal_id.clone(), values)),
+            ExcitationDistribution::IntensityPerArea,
+        ),
         VectorExcitationKind::BodyForce => (
             PhysicalSignal::BodyForceDensity(fixture_vector_signal(signal_id.clone(), values)),
             ExcitationDistribution::IntensityPerVolume,
@@ -214,6 +236,8 @@ fn append_vector_excitation(
     model.excitations.push(match kind {
         VectorExcitationKind::Force => ExcitationAction::Force(action),
         VectorExcitationKind::Moment => ExcitationAction::Moment(action),
+        #[cfg(test)]
+        VectorExcitationKind::Traction => ExcitationAction::Traction(action),
         VectorExcitationKind::BodyForce => ExcitationAction::BodyForce(action),
     });
 }
@@ -311,6 +335,13 @@ impl FromFixtureComponent for Force {
 }
 
 impl FromFixtureComponent for Moment {
+    fn from_component(value: f64) -> Self {
+        Self::new(value)
+    }
+}
+
+#[cfg(test)]
+impl FromFixtureComponent for Traction {
     fn from_component(value: f64) -> Self {
         Self::new(value)
     }

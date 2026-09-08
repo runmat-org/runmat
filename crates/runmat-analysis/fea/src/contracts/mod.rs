@@ -390,6 +390,8 @@ pub struct FeaRunResult {
     pub preconditioner: SolverPreconditioner,
     pub solver_host_sync_count: u32,
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
+    #[serde(default)]
+    pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     pub fields: Vec<AnalysisField>,
 }
 

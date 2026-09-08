@@ -1,0 +1,178 @@
+use std::collections::BTreeSet;
+
+use super::{
+    model::RealizedExcitation, ProjectionVector3, SpatialIntegrationRule, SpatialProjectionBalance,
+    SpatialProjectionEvidence,
+};
+use crate::topology::AnalysisProjection;
+
+pub(crate) struct SpatialProjectionAccumulator<'a> {
+    load: &'a RealizedExcitation,
+    projection: &'a AnalysisProjection,
+    integration_rule: SpatialIntegrationRule,
+    resolved_entity_count: usize,
+    resolved_nodes: BTreeSet<usize>,
+    reference_point_m: [f64; 3],
+    requested_resultant: [f64; 3],
+    projected_resultant: [f64; 3],
+    requested_moment: [f64; 3],
+    projected_moment: [f64; 3],
+    requested_resultant_scale: f64,
+    projected_resultant_scale: f64,
+    requested_moment_scale: f64,
+    projected_moment_scale: f64,
+}
+
+impl<'a> SpatialProjectionAccumulator<'a> {
+    pub(crate) fn new(
+        load: &'a RealizedExcitation,
+        projection: &'a AnalysisProjection,
+        integration_rule: SpatialIntegrationRule,
+        resolved_entity_count: usize,
+        reference_point_m: [f64; 3],
+    ) -> Self {
+        Self {
+            load,
+            projection,
+            integration_rule,
+            resolved_entity_count,
+            resolved_nodes: BTreeSet::new(),
+            reference_point_m,
+            requested_resultant: [0.0; 3],
+            projected_resultant: [0.0; 3],
+            requested_moment: [0.0; 3],
+            projected_moment: [0.0; 3],
+            requested_resultant_scale: 0.0,
+            projected_resultant_scale: 0.0,
+            requested_moment_scale: 0.0,
+            projected_moment_scale: 0.0,
+        }
+    }
+
+    pub(crate) fn add_requested_force(&mut self, position_m: [f64; 3], force: [f64; 3]) {
+        add(&mut self.requested_resultant, force);
+        let arm = subtract(position_m, self.reference_point_m);
+        let moment = cross(arm, force);
+        add(&mut self.requested_moment, moment);
+        self.requested_resultant_scale += norm(force);
+        self.requested_moment_scale += norm(moment);
+    }
+
+    pub(crate) fn add_requested_moment(&mut self, moment: [f64; 3]) {
+        add(&mut self.requested_moment, moment);
+        self.requested_moment_scale += norm(moment);
+    }
+
+    pub(crate) fn add_projected_moment(&mut self, moment: [f64; 3]) {
+        add(&mut self.projected_moment, moment);
+        self.projected_moment_scale += norm(moment);
+    }
+
+    pub(crate) fn register_nodes(&mut self, nodes: impl IntoIterator<Item = usize>) {
+        self.resolved_nodes.extend(nodes);
+    }
+
+    pub(crate) fn add_projected_force(&mut self, node_index: usize, force: [f64; 3]) {
+        self.resolved_nodes.insert(node_index);
+        self.add_projected_generalized_force(force);
+        let arm = subtract(
+            self.projection.nodes[node_index].coordinates_m,
+            self.reference_point_m,
+        );
+        let moment = cross(arm, force);
+        add(&mut self.projected_moment, moment);
+        self.projected_moment_scale += norm(moment);
+    }
+
+    pub(crate) fn add_projected_generalized_force(&mut self, force: [f64; 3]) {
+        add(&mut self.projected_resultant, force);
+        self.projected_resultant_scale += norm(force);
+    }
+
+    pub(crate) fn finish(self) -> SpatialProjectionEvidence {
+        let resultant_scale = self
+            .requested_resultant_scale
+            .max(self.projected_resultant_scale);
+        let moment_scale = self.requested_moment_scale.max(self.projected_moment_scale);
+        let resultant_relative_error = relative_vector_error(
+            self.requested_resultant,
+            self.projected_resultant,
+            resultant_scale,
+        );
+        let moment_relative_error =
+            relative_vector_error(self.requested_moment, self.projected_moment, moment_scale);
+        let requirements = self.load.policy.projection;
+        let accepted = (!requirements.preserve_resultant
+            || resultant_relative_error <= requirements.relative_tolerance)
+            && (!requirements.preserve_moment
+                || moment_relative_error <= requirements.relative_tolerance);
+        SpatialProjectionEvidence {
+            excitation_id: self.load.excitation_id.0.clone(),
+            signal_id: self.load.signal_id.0.clone(),
+            quantity: self.load.quantity,
+            analysis_projection_digest: self.projection.projection_digest,
+            integration_rule: self.integration_rule,
+            resolved_entity_count: self.resolved_entity_count,
+            resolved_node_count: self.resolved_nodes.len(),
+            reference_point_m: self.reference_point_m,
+            balance: SpatialProjectionBalance::VectorResultant {
+                requested_resultant: ProjectionVector3 {
+                    real: self.requested_resultant,
+                    imaginary: [0.0; 3],
+                },
+                projected_resultant: ProjectionVector3 {
+                    real: self.projected_resultant,
+                    imaginary: [0.0; 3],
+                },
+                requested_moment: ProjectionVector3 {
+                    real: self.requested_moment,
+                    imaginary: [0.0; 3],
+                },
+                projected_moment: ProjectionVector3 {
+                    real: self.projected_moment,
+                    imaginary: [0.0; 3],
+                },
+                resultant_scale,
+                moment_scale,
+                resultant_relative_error,
+                moment_relative_error,
+            },
+            relative_tolerance: requirements.relative_tolerance,
+            accepted,
+        }
+    }
+}
+
+fn relative_vector_error(requested: [f64; 3], projected: [f64; 3], scale: f64) -> f64 {
+    if scale == 0.0 {
+        0.0
+    } else {
+        norm(subtract(requested, projected)) / scale
+    }
+}
+
+fn add(target: &mut [f64; 3], value: [f64; 3]) {
+    for axis in 0..3 {
+        target[axis] += value[axis];
+    }
+}
+
+fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|axis| left[axis] - right[axis])
+}
+
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn norm(value: [f64; 3]) -> f64 {
+    value
+        .into_iter()
+        .map(|component| component * component)
+        .sum::<f64>()
+        .sqrt()
+}

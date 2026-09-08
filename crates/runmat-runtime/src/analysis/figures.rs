@@ -2385,6 +2385,7 @@ mod tests {
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
+                spatial_projection_evidence: Vec::new(),
                 fields,
             },
             render_topology: Some(render_topology),

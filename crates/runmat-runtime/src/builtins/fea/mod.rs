@@ -4253,6 +4253,7 @@ execution:
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
+                spatial_projection_evidence: Vec::new(),
                 fields: vec![AnalysisField::host_f64(
                     "structural.von_mises",
                     vec![1],
@@ -4337,6 +4338,7 @@ execution:
                 preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
+                spatial_projection_evidence: Vec::new(),
                 fields: Vec::new(),
             },
             render_topology: None,

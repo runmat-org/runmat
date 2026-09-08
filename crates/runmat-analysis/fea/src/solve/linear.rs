@@ -499,6 +499,7 @@ mod tests {
             structural_direct_rotational_moment_load_count: 0,
             structural_requested_moment_norm_n_m: 0.0,
             structural_moment_projection: Vec::new(),
+            spatial_projection_evidence: Vec::new(),
             structural_rotational_constraint_count: 0,
             structural_beam_element_count: 0,
             structural_shell_element_count: 0,

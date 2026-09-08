@@ -82,6 +82,10 @@ pub(super) fn structural_source_implementations(
                     RealizedExcitationKind::Pressure(_),
                     StructuralProjectionBasis::CanonicalSolid,
                 ) => SourceImplementation::CanonicalBoundaryPressureIntegration,
+                (
+                    RealizedExcitationKind::Traction(_),
+                    StructuralProjectionBasis::CanonicalSolid,
+                ) => SourceImplementation::CanonicalBoundaryProjection,
                 (RealizedExcitationKind::Moment(_), StructuralProjectionBasis::CanonicalSolid) => {
                     SourceImplementation::BoundaryResultantMomentProjection
                 }
@@ -155,6 +159,9 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::Pressure(_), StructuralProjectionBasis::CanonicalSolid)
             | (RealizedExcitationKind::Pressure(_), StructuralProjectionBasis::Synthetic) => {
                 (StructuralLoadKind::Pressure, true)
+            }
+            (RealizedExcitationKind::Traction(_), StructuralProjectionBasis::CanonicalSolid) => {
+                (StructuralLoadKind::Traction, true)
             }
             (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::CanonicalSolid)
             | (RealizedExcitationKind::BodyForce(_), StructuralProjectionBasis::Synthetic) => {

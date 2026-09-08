@@ -3,7 +3,8 @@ use super::{
         AnalysisProjectionError, BoundaryNormalOrientation, ProjectedBoundaryFace,
         ProjectedElement, ProjectedNode,
     },
-    element::{cross, dot, norm, subtract},
+    element::{dot, norm, subtract},
+    quadrature::visit_boundary_quadrature,
 };
 use runmat_meshing_core::SolverBoundaryFace;
 
@@ -14,26 +15,29 @@ pub(super) fn project_boundary_face(
     nodes: &[ProjectedNode],
     elements: &[ProjectedElement],
 ) -> Result<ProjectedBoundaryFace, AnalysisProjectionError> {
-    let corners =
-        node_indices
-            .get(..3)
-            .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
-                face_id: face.face_id,
-            })?;
-    let coordinates = [
-        nodes[corners[0]].coordinates_m,
-        nodes[corners[1]].coordinates_m,
-        nodes[corners[2]].coordinates_m,
-    ];
-    let centroid =
-        std::array::from_fn(|axis| coordinates.iter().map(|point| point[axis]).sum::<f64>() / 3.0);
-    let mut area_vector = cross(
-        subtract(coordinates[1], coordinates[0]),
-        subtract(coordinates[2], coordinates[0]),
-    )
-    .map(|value| 0.5 * value);
-    let area = norm(area_vector);
-    if !area.is_finite() || area <= 0.0 || adjacent_element_indices.is_empty() {
+    let coordinates = node_indices
+        .iter()
+        .map(|index| nodes[*index].coordinates_m)
+        .collect::<Vec<_>>();
+    let mut area = 0.0;
+    let mut first_moment_m3 = [0.0; 3];
+    let mut area_vector = [0.0; 3];
+    visit_boundary_quadrature(face.order, &coordinates, |point| {
+        area += point.area_weight_m2;
+        for axis in 0..3 {
+            first_moment_m3[axis] += point.position_m[axis] * point.area_weight_m2;
+            area_vector[axis] += point.area_vector_weight_m2[axis];
+        }
+    })
+    .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+        face_id: face.face_id,
+    })?;
+    let centroid = first_moment_m3.map(|value| value / area);
+    if !area.is_finite()
+        || area <= 0.0
+        || norm(area_vector) <= f64::EPSILON
+        || adjacent_element_indices.is_empty()
+    {
         return Err(AnalysisProjectionError::InvalidBoundaryGeometry {
             face_id: face.face_id,
         });

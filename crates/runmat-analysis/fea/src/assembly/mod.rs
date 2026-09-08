@@ -1,5 +1,6 @@
 pub mod dofs;
 pub mod elements;
+mod moment_projection;
 mod reduced_rhs;
 mod solid_matrix;
 pub mod solver_solid;
@@ -33,15 +34,14 @@ use self::{
     solver_solid::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
-    solver_solid_boundary::{
-        apply_reference_point_structural_loads, apply_solver_mesh_structural_loads,
-    },
+    solver_solid_boundary::apply_solver_mesh_structural_loads,
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_constraint_kind_name,
         structural_source_implementations, validate_structural_inputs, StructuralProjectionBasis,
     },
 };
+use moment_projection::project_moment;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::constraints::{
@@ -73,6 +73,8 @@ pub struct AssemblySummary {
     pub structural_requested_moment_norm_n_m: f64,
     #[serde(default)]
     pub structural_moment_projection: Vec<MomentProjectionSummary>,
+    #[serde(default)]
+    pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     #[serde(default)]
     pub structural_rotational_constraint_count: usize,
     #[serde(default)]
@@ -107,7 +109,7 @@ pub struct AssemblySummary {
     pub operator: OperatorSystem,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LinearAssemblyError {
     ExcitationRealization(String),
     ConstraintPlan(ConstraintPlanError),
@@ -386,7 +388,7 @@ pub enum StructuralFormulationRequirement {
     ExperimentalSyntheticOperator,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SolverMeshRegionMappingError {
     InvalidAnalysisProjection(String),
     UnmappedLoadRegion {
@@ -405,6 +407,12 @@ pub enum SolverMeshRegionMappingError {
     UnsupportedReferencePointLoad {
         load_id: String,
         load_kind: StructuralLoadKind,
+    },
+    ProjectionConservation {
+        load_id: String,
+        resultant_relative_error: f64,
+        moment_relative_error: f64,
+        relative_tolerance: f64,
     },
 }
 
@@ -439,6 +447,15 @@ impl fmt::Display for SolverMeshRegionMappingError {
             SolverMeshRegionMappingError::UnsupportedReferencePointLoad { load_id, load_kind } => write!(
                 f,
                 "load kind is not supported on a structural reference point: load_id={load_id} load_kind={load_kind}"
+            ),
+            SolverMeshRegionMappingError::ProjectionConservation {
+                load_id,
+                resultant_relative_error,
+                moment_relative_error,
+                relative_tolerance,
+            } => write!(
+                f,
+                "spatial load projection violates its conservation requirement: load_id={load_id} resultant_relative_error={resultant_relative_error:e} moment_relative_error={moment_relative_error:e} relative_tolerance={relative_tolerance:e}"
             ),
         }
     }
@@ -779,6 +796,7 @@ fn assemble_linear_system_impl(
         rhs[dof] = 0.0;
     }
     let mut structural_moment_projection = Vec::new();
+    let mut spatial_projection_evidence = Vec::new();
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
@@ -788,21 +806,17 @@ fn assemble_linear_system_impl(
                     "canonical solid assembly has no compiled constraint plan".into(),
                 ))
             })?;
-            structural_moment_projection = apply_solver_mesh_structural_loads(
+            let source_projection = apply_solver_mesh_structural_loads(
                 &excitations,
                 mesh,
+                constraint_plan,
                 &structural_dof_layout,
                 &mut rhs,
                 true,
             )
             .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
-            apply_reference_point_structural_loads(
-                &excitations,
-                constraint_plan,
-                &structural_dof_layout,
-                &mut rhs,
-            )
-            .map_err(LinearAssemblyError::SolverMeshRegionMapping)?;
+            structural_moment_projection = source_projection.moment_projection;
+            spatial_projection_evidence = source_projection.evidence;
             constrained.fill(false);
             if constraint_plan.rows.iter().any(|row| row.terms.len() > 1) {
                 let matrix =
@@ -1060,6 +1074,7 @@ fn assemble_linear_system_impl(
         structural_direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m,
         structural_moment_projection,
+        spatial_projection_evidence,
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
@@ -1417,6 +1432,12 @@ fn assemble_explicit_structural_system(
 
     let mut direct_rotational_moment_load_count = 0usize;
     let mut structural_moment_projection = Vec::new();
+    let spatial_projection_evidence = Vec::new();
+    let structural_node_coordinates_m = structural
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
     for load in excitations.iter() {
         if matches!(
             load.kind,
@@ -1501,7 +1522,7 @@ fn assemble_explicit_structural_system(
                     }
                 } else {
                     let summary = add_moment_projection_rhs(
-                        structural,
+                        &structural_node_coordinates_m,
                         &structural_dof_layout,
                         &mut rhs,
                         &target_nodes,
@@ -1651,6 +1672,7 @@ fn assemble_explicit_structural_system(
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m: requested_moment_norm(excitations),
         structural_moment_projection,
+        spatial_projection_evidence,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
@@ -1955,89 +1977,30 @@ fn add_rhs(
 }
 
 fn add_moment_projection_rhs(
-    structural: &StructuralModel,
+    node_coordinates_m: &[[f64; 3]],
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     target_nodes: &[usize],
     requested_moment: [f64; 3],
 ) -> MomentProjectionSummary {
-    if target_nodes.is_empty() {
-        return MomentProjectionSummary {
-            load_id: String::new(),
-            region_id: String::new(),
-            target_node_count: 0,
-            projection_point_m: [0.0; 3],
-            applied_force: [0.0; 3],
-            applied_moment: [0.0; 3],
-            force_residual: [0.0; 3],
-            moment_residual: requested_moment,
-            projection_applied: false,
-        };
+    let projection = project_moment(node_coordinates_m, target_nodes, requested_moment);
+    for (&node_index, &force) in target_nodes.iter().zip(&projection.nodal_forces) {
+        add_translational_rhs(layout, rhs, node_index, force);
     }
-
-    let centroid = target_centroid(structural, target_nodes);
-    let mut nodal_forces = vec![[0.0; 3]; target_nodes.len()];
-    let mut projection_applied = false;
-
-    if !requested_moment
-        .iter()
-        .all(|component| component.abs() <= f64::EPSILON)
-    {
-        let mut coupling = [[0.0_f64; 3]; 3];
-        let offsets = target_nodes
-            .iter()
-            .map(|&node_index| {
-                let node = structural.nodes[node_index].coordinates_m;
-                [
-                    node[0] - centroid[0],
-                    node[1] - centroid[1],
-                    node[2] - centroid[2],
-                ]
-            })
-            .collect::<Vec<_>>();
-        for offset in &offsets {
-            let r2 = dot(*offset, *offset);
-            for row in 0..3 {
-                coupling[row][row] += r2;
-                for col in 0..3 {
-                    coupling[row][col] -= offset[row] * offset[col];
-                }
-            }
-        }
-
-        if let Some(inv) = invert_3x3(coupling) {
-            let lambda = mat_vec(inv, requested_moment);
-            for ((&node_index, offset), nodal_force) in target_nodes
-                .iter()
-                .zip(offsets.iter())
-                .zip(nodal_forces.iter_mut())
-            {
-                let couple_force = cross(lambda, *offset);
-                add_translational_rhs(layout, rhs, node_index, couple_force);
-                nodal_force[0] += couple_force[0];
-                nodal_force[1] += couple_force[1];
-                nodal_force[2] += couple_force[2];
-            }
-            projection_applied = true;
-        }
-    }
-
-    let (applied_force, applied_moment) =
-        projected_resultants(structural, target_nodes, &nodal_forces, centroid);
     MomentProjectionSummary {
         load_id: String::new(),
         region_id: String::new(),
         target_node_count: target_nodes.len(),
-        projection_point_m: centroid,
-        applied_force,
-        applied_moment,
-        force_residual: applied_force.map(|value| -value),
+        projection_point_m: projection.point_m,
+        applied_force: projection.applied_force,
+        applied_moment: projection.applied_moment,
+        force_residual: projection.applied_force.map(|value| -value),
         moment_residual: [
-            requested_moment[0] - applied_moment[0],
-            requested_moment[1] - applied_moment[1],
-            requested_moment[2] - applied_moment[2],
+            requested_moment[0] - projection.applied_moment[0],
+            requested_moment[1] - projection.applied_moment[1],
+            requested_moment[2] - projection.applied_moment[2],
         ],
-        projection_applied,
+        projection_applied: projection.projection_applied,
     }
 }
 
@@ -2050,90 +2013,6 @@ fn add_translational_rhs(
     add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, force[0]);
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, force[1]);
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
-}
-
-fn target_centroid(structural: &StructuralModel, target_nodes: &[usize]) -> [f64; 3] {
-    let mut centroid = [0.0_f64; 3];
-    for &node_index in target_nodes {
-        let node = structural.nodes[node_index].coordinates_m;
-        centroid[0] += node[0];
-        centroid[1] += node[1];
-        centroid[2] += node[2];
-    }
-    scale_vec(centroid, 1.0 / target_nodes.len() as f64)
-}
-
-fn projected_resultants(
-    structural: &StructuralModel,
-    target_nodes: &[usize],
-    nodal_forces: &[[f64; 3]],
-    point_m: [f64; 3],
-) -> ([f64; 3], [f64; 3]) {
-    let mut applied_force = [0.0_f64; 3];
-    let mut applied_moment = [0.0_f64; 3];
-    for (&node_index, &force) in target_nodes.iter().zip(nodal_forces.iter()) {
-        applied_force[0] += force[0];
-        applied_force[1] += force[1];
-        applied_force[2] += force[2];
-        let node = structural.nodes[node_index].coordinates_m;
-        let arm = [
-            node[0] - point_m[0],
-            node[1] - point_m[1],
-            node[2] - point_m[2],
-        ];
-        let moment = cross(arm, force);
-        applied_moment[0] += moment[0];
-        applied_moment[1] += moment[1];
-        applied_moment[2] += moment[2];
-    }
-    (applied_force, applied_moment)
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn scale_vec(value: [f64; 3], scale: f64) -> [f64; 3] {
-    [value[0] * scale, value[1] * scale, value[2] * scale]
-}
-
-fn mat_vec(matrix: [[f64; 3]; 3], value: [f64; 3]) -> [f64; 3] {
-    [
-        dot(matrix[0], value),
-        dot(matrix[1], value),
-        dot(matrix[2], value),
-    ]
-}
-
-fn invert_3x3(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
-    let m = matrix;
-    let c00 = m[1][1] * m[2][2] - m[1][2] * m[2][1];
-    let c01 = -(m[1][0] * m[2][2] - m[1][2] * m[2][0]);
-    let c02 = m[1][0] * m[2][1] - m[1][1] * m[2][0];
-    let c10 = -(m[0][1] * m[2][2] - m[0][2] * m[2][1]);
-    let c11 = m[0][0] * m[2][2] - m[0][2] * m[2][0];
-    let c12 = -(m[0][0] * m[2][1] - m[0][1] * m[2][0]);
-    let c20 = m[0][1] * m[1][2] - m[0][2] * m[1][1];
-    let c21 = -(m[0][0] * m[1][2] - m[0][2] * m[1][0]);
-    let c22 = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-    let det = m[0][0] * c00 + m[0][1] * c01 + m[0][2] * c02;
-    if det.abs() <= 1.0e-18 {
-        return None;
-    }
-    let inv_det = 1.0 / det;
-    Some([
-        [c00 * inv_det, c10 * inv_det, c20 * inv_det],
-        [c01 * inv_det, c11 * inv_det, c21 * inv_det],
-        [c02 * inv_det, c12 * inv_det, c22 * inv_det],
-    ])
 }
 
 fn constrain_dof(
@@ -2884,6 +2763,198 @@ mod tests {
     }
 
     #[test]
+    fn tet10_pressure_quadrature_loads_midside_nodes_and_preserves_resultants() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = Vec::new();
+        let mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet10);
+        let region_id = mesh.topology.boundary_faces[1].provenance[0]
+            .analysis_selection_id()
+            .unwrap();
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "pressure_tip".into(),
+                region_id: region_id.clone(),
+                kind: FixtureExcitationKind::Pressure(12.0),
+            }],
+        );
+        let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+        let face = projection
+            .boundary_faces_matching(&region_id)
+            .next()
+            .unwrap()
+            .clone();
+
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
+            .expect("valid quadratic pressure boundary should assemble");
+        let mut force = [0.0; 3];
+        let mut moment = [0.0; 3];
+        for &node_index in &face.node_indices {
+            let nodal = [
+                summary.operator.rhs[summary
+                    .structural_dof_layout
+                    .index(node_index, StructuralDofKind::Ux)
+                    .unwrap()],
+                summary.operator.rhs[summary
+                    .structural_dof_layout
+                    .index(node_index, StructuralDofKind::Uy)
+                    .unwrap()],
+                summary.operator.rhs[summary
+                    .structural_dof_layout
+                    .index(node_index, StructuralDofKind::Uz)
+                    .unwrap()],
+            ];
+            for axis in 0..3 {
+                force[axis] += nodal[axis];
+            }
+            let arm = std::array::from_fn::<_, 3, _>(|axis| {
+                projection.nodes[node_index].coordinates_m[axis] - face.centroid_m[axis]
+            });
+            let nodal_moment = [
+                arm[1] * nodal[2] - arm[2] * nodal[1],
+                arm[2] * nodal[0] - arm[0] * nodal[2],
+                arm[0] * nodal[1] - arm[1] * nodal[0],
+            ];
+            for axis in 0..3 {
+                moment[axis] += nodal_moment[axis];
+            }
+        }
+        let expected_force = face.oriented_area_vector_m2.map(|value| 12.0 * value);
+        for axis in 0..3 {
+            assert_close(force[axis], expected_force[axis]);
+            assert_close(moment[axis], 0.0);
+        }
+        assert!(face.node_indices[3..].iter().any(|node_index| {
+            summary.operator.rhs[summary
+                .structural_dof_layout
+                .index(*node_index, StructuralDofKind::Uy)
+                .unwrap()]
+            .abs()
+                > 0.0
+        }));
+        let evidence = summary
+            .spatial_projection_evidence
+            .first()
+            .expect("pressure projection must publish evidence");
+        assert_eq!(
+            evidence.integration_rule,
+            crate::excitation::SpatialIntegrationRule::BoundaryDunavantSeven
+        );
+        assert_eq!(evidence.resolved_entity_count, 1);
+        assert_eq!(evidence.resolved_node_count, 6);
+        assert!(evidence.accepted);
+        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
+        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+    }
+
+    #[test]
+    fn tet10_traction_quadrature_preserves_force_and_moment() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = Vec::new();
+        let mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet10);
+        let region_id = mesh.topology.boundary_faces[1].provenance[0]
+            .analysis_selection_id()
+            .unwrap();
+        let traction = [5.0, -7.0, 11.0];
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "traction_tip".into(),
+                region_id: region_id.clone(),
+                kind: FixtureExcitationKind::Traction(traction),
+            }],
+        );
+        let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+        let face = projection
+            .boundary_faces_matching(&region_id)
+            .next()
+            .unwrap();
+
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
+            .expect("valid quadratic traction boundary should assemble");
+        let evidence = summary
+            .spatial_projection_evidence
+            .first()
+            .expect("traction projection must publish evidence");
+        assert_eq!(
+            evidence.integration_rule,
+            crate::excitation::SpatialIntegrationRule::BoundaryDunavantSeven
+        );
+        let crate::excitation::SpatialProjectionBalance::VectorResultant {
+            requested_resultant,
+            projected_resultant,
+            ..
+        } = evidence.balance
+        else {
+            panic!("traction projection must report a vector resultant")
+        };
+        for (axis, component) in traction.into_iter().enumerate() {
+            assert_close(requested_resultant.real[axis], component * face.area_m2);
+            assert_close(projected_resultant.real[axis], component * face.area_m2);
+        }
+        assert_eq!(evidence.resolved_node_count, 6);
+        assert!(evidence.accepted);
+        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
+        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+    }
+
+    #[test]
+    fn tet10_body_force_quadrature_preserves_integrated_volume_resultant() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = Vec::new();
+        let mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet10);
+        let region_id = mesh.topology.volume_elements[0]
+            .region_id
+            .analysis_selection_id()
+            .unwrap();
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "body_force".into(),
+                region_id,
+                kind: FixtureExcitationKind::BodyForce([3.0, -6.0, 9.0]),
+            }],
+        );
+        let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+        let volume = projection.elements[0].signed_volume_m3;
+
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
+            .expect("valid quadratic body force should assemble");
+        let mut force = [0.0; 3];
+        for node_index in 0..projection.nodes.len() {
+            for (axis, kind) in [
+                StructuralDofKind::Ux,
+                StructuralDofKind::Uy,
+                StructuralDofKind::Uz,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                force[axis] += summary.operator.rhs[summary
+                    .structural_dof_layout
+                    .index(node_index, kind)
+                    .unwrap()];
+            }
+        }
+        for (actual, expected) in force.into_iter().zip([3.0, -6.0, 9.0]) {
+            assert_close(actual, expected * volume);
+        }
+        let evidence = summary
+            .spatial_projection_evidence
+            .first()
+            .expect("body-force projection must publish evidence");
+        assert_eq!(
+            evidence.integration_rule,
+            crate::excitation::SpatialIntegrationRule::VolumeKeastFifteen
+        );
+        assert_eq!(evidence.resolved_entity_count, 1);
+        assert_eq!(evidence.resolved_node_count, 10);
+        assert!(evidence.accepted);
+        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
+        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+    }
+
+    #[test]
     fn solver_mesh_reference_point_coupling_receives_wrench_moments() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Structural(
@@ -2937,6 +3008,14 @@ mod tests {
             summary.structural_sources,
             vec![SourceImplementation::ReferencePointGeneralizedLoad]
         );
+        assert_eq!(summary.spatial_projection_evidence.len(), 2);
+        assert!(summary.spatial_projection_evidence.iter().all(|evidence| {
+            evidence.integration_rule
+                == crate::excitation::SpatialIntegrationRule::ReferencePointGeneralized
+                && evidence.accepted
+                && evidence.resolved_entity_count == 1
+                && evidence.resolved_node_count == 0
+        }));
     }
 
     #[test]
@@ -3183,23 +3262,37 @@ mod tests {
                     4.0,
                 )),
                 StructuralLoadKind::ElectricCurrent,
+                runmat_analysis_core::PhysicalQuantityKind::ElectricCurrent,
             ),
             (
                 RealizedExcitationKind::CurrentDensity(crate::excitation::ComplexVector3::real([
                     1.0, 2.0, 3.0,
                 ])),
                 StructuralLoadKind::CurrentDensity,
+                runmat_analysis_core::PhysicalQuantityKind::ElectricCurrentDensity,
             ),
         ];
-        for (kind, expected_kind) in cases {
+        for (kind, expected_kind, quantity) in cases {
             let excitations =
                 RealizedExcitations::new(vec![crate::excitation::RealizedExcitation {
                     excitation_id: runmat_analysis_core::ExcitationId(format!(
                         "unsupported_{expected_kind}"
                     )),
                     case_id: runmat_analysis_core::ExcitationCaseId("case".to_string()),
+                    signal_id: runmat_analysis_core::SignalId("signal".to_string()),
+                    quantity,
                     target: crate::excitation::RealizedExcitationTarget::WholeModel,
                     kind,
+                    policy: crate::excitation::RealizedExcitationPolicy {
+                        frame: runmat_analysis_core::CoordinateFrame::Global,
+                        distribution: runmat_analysis_core::ExcitationDistribution::Concentrated,
+                        kinematics: runmat_analysis_core::ExcitationKinematics::FixedFrame,
+                        projection: runmat_analysis_core::ProjectionRequirement {
+                            preserve_resultant: false,
+                            preserve_moment: false,
+                            relative_tolerance: 1.0e-12,
+                        },
+                    },
                 }]);
             let error = validate_structural_inputs(
                 &model,

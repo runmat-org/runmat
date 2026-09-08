@@ -377,6 +377,7 @@ fn run_linear_static_with_constraint_plan(
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         fields,
     })
 }

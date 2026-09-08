@@ -2627,6 +2627,7 @@ fn solve_acoustic_harmonic(
         solver_method: SolverMethod::AcousticDomainGraphHelmholtzHarmonic,
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
+        spatial_projection_evidence: Vec::new(),
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
                 code: "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL".to_string(),
@@ -4442,6 +4443,7 @@ fn solve_cfd_finite_volume_run(
         solver_method: SolverMethod::CfdVelocityPressureFiniteVolume,
         preconditioner: SolverPreconditioner::FiniteVolumePressureBalance,
         solver_host_sync_count: 0,
+        spatial_projection_evidence: Vec::new(),
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
                 code: "FEA_CFD_RESIDUAL".to_string(),
@@ -7189,6 +7191,7 @@ pub fn analysis_run_fsi_with_options_op(
         preconditioner: SolverPreconditioner::InterfaceRelaxation,
         solver_host_sync_count: 0,
         diagnostics: Vec::new(),
+        spatial_projection_evidence: Vec::new(),
         fields: fsi_fields,
     };
     let reynolds_number = cfd_reynolds_number_for_velocity(

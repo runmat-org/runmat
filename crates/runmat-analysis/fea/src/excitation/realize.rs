@@ -5,7 +5,7 @@ use runmat_analysis_core::{AnalysisModel, IndependentDomain};
 use super::{
     action::realize_kind,
     activation::active_case_ids,
-    model::{RealizedExcitation, RealizedExcitations},
+    model::{RealizedExcitation, RealizedExcitationPolicy, RealizedExcitations},
     sample::ExcitationSamplePoint,
     target::realize_target,
 };
@@ -102,8 +102,16 @@ pub(crate) fn realize_excitations(
         entries.push(RealizedExcitation {
             excitation_id: excitation.excitation_id.clone(),
             case_id: excitation.case_id.clone(),
+            signal_id: excitation.signal_id.clone(),
+            quantity: action.expected_quantity(),
             target: realize_target(&excitation.target),
             kind: realize_kind(action, signal, sample)?,
+            policy: RealizedExcitationPolicy {
+                frame: excitation.frame.clone(),
+                distribution: excitation.distribution,
+                kinematics: excitation.kinematics,
+                projection: excitation.projection,
+            },
         });
     }
     Ok(RealizedExcitations::new(entries))

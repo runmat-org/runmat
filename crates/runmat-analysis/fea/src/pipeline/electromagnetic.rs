@@ -1348,6 +1348,7 @@ pub fn run_electromagnetic_with_options(
         preconditioner: crate::contracts::SolverPreconditioner::BlockJacobi,
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         fields: Vec::new(),
     };
 

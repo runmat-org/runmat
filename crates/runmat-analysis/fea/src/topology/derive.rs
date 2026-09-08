@@ -10,6 +10,7 @@ use super::{
     },
     element::tetrahedron_geometry,
     identity::projection_digest,
+    quadrature::visit_volume_quadrature,
 };
 
 impl AnalysisProjection {
@@ -68,12 +69,28 @@ impl AnalysisProjection {
                 nodes[corners[2]].coordinates_m,
                 nodes[corners[3]].coordinates_m,
             ];
-            let (signed_volume_m3, centroid_m, characteristic_length_m) = tetrahedron_geometry(
-                coordinates,
-            )
+            tetrahedron_geometry(coordinates).ok_or(
+                AnalysisProjectionError::InvalidElementGeometry {
+                    element_id: element.element_id,
+                },
+            )?;
+            let element_coordinates = node_indices
+                .iter()
+                .map(|index| nodes[*index].coordinates_m)
+                .collect::<Vec<_>>();
+            let mut signed_volume_m3 = 0.0;
+            let mut first_moment_m4 = [0.0; 3];
+            visit_volume_quadrature(element.order, &element_coordinates, |point| {
+                signed_volume_m3 += point.volume_weight_m3;
+                for (first_moment, position) in first_moment_m4.iter_mut().zip(point.position_m) {
+                    *first_moment += position * point.volume_weight_m3;
+                }
+            })
             .ok_or(AnalysisProjectionError::InvalidElementGeometry {
                 element_id: element.element_id,
             })?;
+            let centroid_m = first_moment_m4.map(|value| value / signed_volume_m3);
+            let characteristic_length_m = (6.0 * signed_volume_m3).cbrt();
             for left in 0..node_indices.len() {
                 for right in (left + 1)..node_indices.len() {
                     neighbor_sets[node_indices[left]].insert(node_indices[right]);

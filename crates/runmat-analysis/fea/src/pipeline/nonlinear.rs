@@ -156,6 +156,7 @@ pub fn run_nonlinear_with_options(
         preconditioner: nonlinear.preconditioner,
         solver_host_sync_count: nonlinear.solver_host_sync_count,
         diagnostics,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,

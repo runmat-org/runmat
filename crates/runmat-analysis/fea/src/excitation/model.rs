@@ -1,4 +1,7 @@
-use runmat_analysis_core::{ExcitationCaseId, ExcitationId, Position};
+use runmat_analysis_core::{
+    CoordinateFrame, ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics,
+    PhysicalQuantityKind, Position, ProjectionRequirement, SignalId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ComplexScalar {
@@ -84,8 +87,19 @@ pub(crate) enum RealizedExcitationKind {
 pub(crate) struct RealizedExcitation {
     pub excitation_id: ExcitationId,
     pub case_id: ExcitationCaseId,
+    pub signal_id: SignalId,
+    pub quantity: PhysicalQuantityKind,
     pub target: RealizedExcitationTarget,
     pub kind: RealizedExcitationKind,
+    pub policy: RealizedExcitationPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RealizedExcitationPolicy {
+    pub frame: CoordinateFrame,
+    pub distribution: ExcitationDistribution,
+    pub kinematics: ExcitationKinematics,
+    pub projection: ProjectionRequirement,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

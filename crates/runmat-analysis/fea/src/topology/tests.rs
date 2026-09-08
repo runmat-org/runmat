@@ -18,6 +18,24 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
     assert_eq!(projection.boundary_faces.len(), 4);
     assert_eq!(projection.elements[0].node_indices.len(), 10);
     assert!(projection.elements[0].signed_volume_m3 > 0.0);
+    let mut integrated_volume = 0.0;
+    let mut integrated_shapes = [0.0; 10];
+    projection
+        .visit_element_quadrature(&projection.elements[0], |point| {
+            integrated_volume += point.volume_weight_m3;
+            for (node, &shape) in point.shape_values().iter().enumerate() {
+                integrated_shapes[node] += shape * point.volume_weight_m3;
+            }
+        })
+        .unwrap();
+    assert!((integrated_volume - projection.elements[0].signed_volume_m3).abs() <= 1.0e-12);
+    let volume = projection.elements[0].signed_volume_m3;
+    for value in &integrated_shapes[..4] {
+        assert!((*value + volume / 20.0).abs() <= 1.0e-12);
+    }
+    for value in &integrated_shapes[4..] {
+        assert!((*value - volume / 5.0).abs() <= 1.0e-12);
+    }
     for face in &projection.boundary_faces {
         let interior_direction = std::array::from_fn::<_, 3, _>(|axis| {
             projection.elements[face.adjacent_element_indices[0]].centroid_m[axis]

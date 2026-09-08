@@ -539,6 +539,7 @@ pub fn run_thermal_with_options(
         preconditioner: crate::contracts::SolverPreconditioner::None,
         solver_host_sync_count: 0,
         diagnostics,
+        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         fields: Vec::new(),
     };
 

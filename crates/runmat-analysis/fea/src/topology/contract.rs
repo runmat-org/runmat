@@ -56,6 +56,98 @@ impl AnalysisProjection {
                 .any(|entity| entity.matches_analysis_selection(selector))
         })
     }
+
+    pub fn visit_element_quadrature(
+        &self,
+        element: &ProjectedElement,
+        visit: impl FnMut(VolumeQuadraturePoint),
+    ) -> Result<(), AnalysisProjectionError> {
+        let expected_node_count = match element.order {
+            ElementOrder::Tet4 => 4,
+            ElementOrder::Tet10 => 10,
+        };
+        if element.node_indices.len() != expected_node_count {
+            return Err(AnalysisProjectionError::InvalidElementGeometry {
+                element_id: element.element_id,
+            });
+        }
+        let mut coordinates = [[0.0; 3]; 10];
+        for (local_node, &node_index) in element.node_indices.iter().enumerate() {
+            let coordinate = coordinates.get_mut(local_node).ok_or(
+                AnalysisProjectionError::InvalidElementGeometry {
+                    element_id: element.element_id,
+                },
+            )?;
+            *coordinate = self
+                .nodes
+                .get(node_index)
+                .ok_or(AnalysisProjectionError::InvalidElementGeometry {
+                    element_id: element.element_id,
+                })?
+                .coordinates_m;
+        }
+        super::quadrature::visit_volume_quadrature(
+            element.order,
+            &coordinates[..element.node_indices.len()],
+            visit,
+        )
+        .ok_or(AnalysisProjectionError::InvalidElementGeometry {
+            element_id: element.element_id,
+        })
+    }
+
+    pub fn visit_boundary_quadrature(
+        &self,
+        face: &ProjectedBoundaryFace,
+        mut visit: impl FnMut(BoundaryQuadraturePoint),
+    ) -> Result<(), AnalysisProjectionError> {
+        let expected_node_count = match face.order {
+            BoundaryTriangleOrder::Tri3 => 3,
+            BoundaryTriangleOrder::Tri6 => 6,
+        };
+        if face.node_indices.len() != expected_node_count {
+            return Err(AnalysisProjectionError::InvalidBoundaryGeometry {
+                face_id: face.face_id,
+            });
+        }
+        let mut coordinates = [[0.0; 3]; 6];
+        for (local_node, &node_index) in face.node_indices.iter().enumerate() {
+            let coordinate = coordinates.get_mut(local_node).ok_or(
+                AnalysisProjectionError::InvalidBoundaryGeometry {
+                    face_id: face.face_id,
+                },
+            )?;
+            *coordinate = self
+                .nodes
+                .get(node_index)
+                .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+                    face_id: face.face_id,
+                })?
+                .coordinates_m;
+        }
+        let raw_normal = super::element::cross(
+            super::element::subtract(coordinates[1], coordinates[0]),
+            super::element::subtract(coordinates[2], coordinates[0]),
+        );
+        let orientation = if super::element::dot(raw_normal, face.oriented_area_vector_m2) >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        super::quadrature::visit_boundary_quadrature(
+            face.order,
+            &coordinates[..face.node_indices.len()],
+            |mut point| {
+                point.area_vector_weight_m2 = point
+                    .area_vector_weight_m2
+                    .map(|component| component * orientation);
+                visit(point);
+            },
+        )
+        .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+            face_id: face.face_id,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +169,20 @@ pub struct ProjectedElement {
     pub characteristic_length_m: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeQuadraturePoint {
+    pub position_m: [f64; 3],
+    pub volume_weight_m3: f64,
+    pub(super) shape_values: [f64; 10],
+    pub(super) node_count: usize,
+}
+
+impl VolumeQuadraturePoint {
+    pub fn shape_values(&self) -> &[f64] {
+        &self.shape_values[..self.node_count]
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProjectedBoundaryFace {
     pub face_id: u64,
@@ -90,6 +196,21 @@ pub struct ProjectedBoundaryFace {
     pub oriented_area_vector_m2: [f64; 3],
     pub normal_orientation: BoundaryNormalOrientation,
     pub area_m2: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BoundaryQuadraturePoint {
+    pub position_m: [f64; 3],
+    pub area_vector_weight_m2: [f64; 3],
+    pub area_weight_m2: f64,
+    pub(super) shape_values: [f64; 6],
+    pub(super) node_count: usize,
+}
+
+impl BoundaryQuadraturePoint {
+    pub fn shape_values(&self) -> &[f64] {
+        &self.shape_values[..self.node_count]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
