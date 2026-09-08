@@ -1,9 +1,5 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn cell_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell()
-}
-
 pub fn cell2mat_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Cell {
@@ -110,14 +106,6 @@ fn squash_union(mut options: Vec<Type>) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cell_type_returns_cell() {
-        assert_eq!(
-            cell_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell()
-        );
-    }
 
     #[test]
     fn cell2mat_type_numeric_cells_return_tensor() {

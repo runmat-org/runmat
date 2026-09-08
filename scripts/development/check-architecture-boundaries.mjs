@@ -2399,6 +2399,45 @@ for (const { path: sourcePath, text } of allRust) {
   }
 }
 enforceMigratedBuiltinFamily({
+  name: "cell catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/cells/core/cell"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/cells/core/cell/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/cells/core/cell/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/cell.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/cell.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "cell runtime",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/cell"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/cell/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cell/arguments/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cell/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/cells/core/cell.rs"],
+  testLineCeiling: 160,
+});
+const cellRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/cells/core/cell/mod.rs"
+);
+if (
+  /\b(?:category|summary|keywords|accel|type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(
+    cellRuntimeMacro
+  )
+) {
+  fail("cell runtime registration must not duplicate catalog-owned contracts");
+}
+for (const { path: sourcePath, text } of allRust) {
+  if (/\bcell_type\b/.test(text)) {
+    fail(`${sourcePath} retains the obsolete cell type resolver`);
+  }
+}
+enforceMigratedBuiltinFamily({
   name: "num2cell catalog",
   roots: ["crates/runmat-builtins/src/catalog/entries/cells/core/num2cell"],
   compositionFiles: [
