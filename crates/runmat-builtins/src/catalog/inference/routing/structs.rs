@@ -7,6 +7,9 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        StructInferenceRule::Fieldnames => {
+            crate::catalog::entries::structs::core::fieldnames::infer(request, entry)
+        }
         StructInferenceRule::Structfun => {
             crate::catalog::entries::structs::core::structfun::infer(request, entry)
         }

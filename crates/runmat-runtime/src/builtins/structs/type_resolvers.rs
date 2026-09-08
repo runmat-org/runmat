@@ -1,9 +1,5 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn fieldnames_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell_of(Type::String)
-}
-
 pub fn getfield_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
@@ -80,14 +76,6 @@ fn drop_struct_fields(ty: Type) -> Type {
 mod tests {
     use super::*;
     use runmat_builtins::ResolveContext;
-
-    #[test]
-    fn fieldnames_type_is_string_cell() {
-        assert_eq!(
-            fieldnames_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
-    }
 
     #[test]
     fn getfield_type_is_unknown() {
