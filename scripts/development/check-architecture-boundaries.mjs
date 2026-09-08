@@ -2372,6 +2372,31 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "fieldnames catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/structs/core/fieldnames"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/structs/core/fieldnames/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/fieldnames/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/fieldnames/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/fieldnames.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/fieldnames.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "fieldnames runtime",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/fieldnames"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/fieldnames/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/fieldnames/names/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/fieldnames/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
   name: "uniform scalar output runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/uniform_scalar_output"],
   compositionFiles: [
@@ -2400,6 +2425,15 @@ if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(st
 }
 if (/\bstructfun_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
   fail("structfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+const fieldnamesRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/structs/core/fieldnames/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_audit)\s*=/.test(fieldnamesRuntimeMacro)) {
+  fail("fieldnames runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\bfieldnames_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+  fail("fieldnames must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/structs/core/structfun"

@@ -1,5 +1,11 @@
+pub(in crate::catalog) mod fieldnames;
 pub(in crate::catalog) mod structfun;
 
+pub use fieldnames::{
+    FIELDNAMES_CATALOG_ENTRY, FIELDNAMES_DESCRIPTOR, FIELDNAMES_ERROR_INTERNAL,
+    FIELDNAMES_ERROR_INVALID_TARGET, FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS, FIELDNAMES_EXTENSIONS,
+    FIELDNAMES_INTEGER_AUDIT, FIELDNAMES_OBJECT_FAMILY_EXTENSION,
+};
 pub use structfun::{
     STRUCTFUN_CATALOG_ENTRY, STRUCTFUN_DESCRIPTOR, STRUCTFUN_ERROR_FUNCTION_ERROR,
     STRUCTFUN_ERROR_INTERNAL, STRUCTFUN_ERROR_INVALID_INPUT, STRUCTFUN_ERROR_NOT_SCALAR_STRUCT,
@@ -8,5 +14,5 @@ pub use structfun::{
 };
 
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    super::super::extend_groups(entries, &[structfun::ENTRIES]);
+    super::super::extend_groups(entries, &[fieldnames::ENTRIES, structfun::ENTRIES]);
 }
