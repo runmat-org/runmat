@@ -10,6 +10,9 @@ pub(in crate::catalog::inference) fn infer(
         StructInferenceRule::Fieldnames => {
             crate::catalog::entries::structs::core::fieldnames::infer(request, entry)
         }
+        StructInferenceRule::Isfield => {
+            crate::catalog::entries::structs::core::isfield::infer(request, entry)
+        }
         StructInferenceRule::Structfun => {
             crate::catalog::entries::structs::core::structfun::infer(request, entry)
         }

@@ -2397,6 +2397,30 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "isfield catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/structs/core/isfield"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/structs/core/isfield/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/isfield/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/isfield/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/isfield.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/isfield.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "isfield runtime",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/isfield"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/isfield/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/isfield/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/isfield.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
   name: "uniform scalar output runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/uniform_scalar_output"],
   compositionFiles: [
@@ -2434,6 +2458,15 @@ if (/\b(?:type_resolver|descriptor|extensions|integer_audit)\s*=/.test(fieldname
 }
 if (/\bfieldnames_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
   fail("fieldnames must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+const isfieldRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/structs/core/isfield/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|integer_audit)\s*=/.test(isfieldRuntimeMacro)) {
+  fail("isfield runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\bisfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+  fail("isfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/structs/core/structfun"
