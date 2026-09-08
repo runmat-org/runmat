@@ -41,7 +41,7 @@ pub enum TemporalImplementation {
     StructuralSubspaceIteration,
     StructuralFirstOrderRelaxation,
     StructuralScalarResidualIteration,
-    ThermalTransientRelaxation,
+    ThermalSteadyLinearSolve,
     ThermalBackwardEuler,
     ElectromagneticReducedEdgeGraphHarmonicSolve,
     AcousticDomainGraphHarmonicSolve,

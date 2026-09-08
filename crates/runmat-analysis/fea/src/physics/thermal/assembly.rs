@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::{
     excitation::{
+        sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
         RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
         ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
     },
@@ -33,7 +34,6 @@ pub(crate) struct ThermalOperatorAssembly {
 }
 
 impl ThermalOperatorAssembly {
-    #[cfg(test)]
     pub(crate) fn steady_operator(&self) -> OperatorSystem {
         let stiffness_csr = self.conductivity.clone();
         let mut rhs = self.source.clone();
@@ -112,8 +112,15 @@ pub(crate) enum ThermalAssemblyError {
         relative_error: f64,
         relative_tolerance: f64,
     },
-    #[error("thermal boundary or constraint {operator_id} requires a constant value for this assembly request")]
-    NonConstantValue { operator_id: String },
+    #[error(
+        "thermal boundary or constraint {operator_id} signal could not be realized: {message}"
+    )]
+    SignalRealization {
+        operator_id: String,
+        message: String,
+    },
+    #[error("thermal boundary or constraint {operator_id} uses an unsupported complex ordinate")]
+    ComplexBoundary { operator_id: String },
     #[error("thermal boundary or constraint {operator_id} does not resolve any boundary faces")]
     UnmappedBoundary { operator_id: String },
     #[error("thermal constraints prescribe conflicting temperatures at solver node {node_id}")]
@@ -124,6 +131,7 @@ pub(crate) fn assemble(
     model: &AnalysisModel,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     excitations: &RealizedExcitations,
+    sample: ExcitationSamplePoint<'_>,
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
@@ -276,11 +284,18 @@ pub(crate) fn assemble(
         let ThermalConstraintKind::Prescribed { target, value } = &constraint.kind else {
             continue;
         };
-        let temperature = value.study_constant(&model.signals).ok_or_else(|| {
-            ThermalAssemblyError::NonConstantValue {
+        let temperature =
+            sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
+                ThermalAssemblyError::SignalRealization {
+                    operator_id: constraint.constraint_id.clone(),
+                    message: error.to_string(),
+                }
+            })?;
+        if temperature.imaginary != 0.0 {
+            return Err(ThermalAssemblyError::ComplexBoundary {
                 operator_id: constraint.constraint_id.clone(),
-            }
-        })?;
+            });
+        }
         let faces = projection
             .boundary_faces_matching(&target.region_id)
             .collect::<Vec<_>>();
@@ -292,13 +307,13 @@ pub(crate) fn assemble(
         for face in faces {
             for &node_index in &face.node_indices {
                 if let Some(existing) = prescribed_temperature_k[node_index] {
-                    if existing != temperature.kelvin {
+                    if existing != temperature.real {
                         return Err(ThermalAssemblyError::ConflictingTemperature {
                             node_id: projection.nodes[node_index].node_id,
                         });
                     }
                 }
-                prescribed_temperature_k[node_index] = Some(temperature.kelvin);
+                prescribed_temperature_k[node_index] = Some(temperature.real);
             }
         }
     }
@@ -309,11 +324,16 @@ pub(crate) fn assemble(
             .collect::<Vec<_>>();
         match &boundary.operator {
             BoundaryOperator::ThermalHeatFlux { value } => {
-                let heat_flux = value.study_constant(&model.signals).ok_or_else(|| {
-                    ThermalAssemblyError::NonConstantValue {
+                let heat_flux = sample_prescribed_heat_flux(value, &model.signals, sample)
+                    .map_err(|error| ThermalAssemblyError::SignalRealization {
                         operator_id: boundary.boundary_id.clone(),
-                    }
-                })?;
+                        message: error.to_string(),
+                    })?;
+                if heat_flux.imaginary != 0.0 {
+                    return Err(ThermalAssemblyError::ComplexBoundary {
+                        operator_id: boundary.boundary_id.clone(),
+                    });
+                }
                 if faces.is_empty() {
                     return Err(ThermalAssemblyError::UnmappedBoundary {
                         operator_id: boundary.boundary_id.clone(),
@@ -322,7 +342,7 @@ pub(crate) fn assemble(
                 for face in faces {
                     projection
                         .visit_boundary_quadrature(face, |point| {
-                            let power = heat_flux.watts_per_square_meter * point.area_weight_m2;
+                            let power = heat_flux.real * point.area_weight_m2;
                             for (&node, &shape) in
                                 face.node_indices.iter().zip(point.shape_values())
                             {
@@ -338,11 +358,17 @@ pub(crate) fn assemble(
                 ambient_temperature,
                 coefficient,
             } => {
-                let ambient = ambient_temperature
-                    .study_constant(&model.signals)
-                    .ok_or_else(|| ThermalAssemblyError::NonConstantValue {
+                let ambient =
+                    sample_prescribed_temperature(ambient_temperature, &model.signals, sample)
+                        .map_err(|error| ThermalAssemblyError::SignalRealization {
+                            operator_id: boundary.boundary_id.clone(),
+                            message: error.to_string(),
+                        })?;
+                if ambient.imaginary != 0.0 {
+                    return Err(ThermalAssemblyError::ComplexBoundary {
                         operator_id: boundary.boundary_id.clone(),
-                    })?;
+                    });
+                }
                 if faces.is_empty() {
                     return Err(ThermalAssemblyError::UnmappedBoundary {
                         operator_id: boundary.boundary_id.clone(),
@@ -354,10 +380,8 @@ pub(crate) fn assemble(
                         .visit_boundary_quadrature(face, |point| {
                             for (local_row, &row) in face.node_indices.iter().enumerate() {
                                 let row_shape = point.shape_values()[local_row];
-                                source[row] += heat_transfer
-                                    * ambient.kelvin
-                                    * row_shape
-                                    * point.area_weight_m2;
+                                source[row] +=
+                                    heat_transfer * ambient.real * row_shape * point.area_weight_m2;
                                 for (local_column, &column) in face.node_indices.iter().enumerate()
                                 {
                                     conductivity.add(
@@ -492,8 +516,11 @@ mod tests {
     use runmat_analysis_core::{
         AnalysisBoundary, AnalysisConstraint, CoordinateFrame, ExcitationCaseId,
         ExcitationDistribution, ExcitationId, ExcitationKinematics, HeatFlux,
-        HeatTransferCoefficient, PhysicalQuantityKind, PrescribedValue, ProjectionRequirement,
-        RegionTarget, SignalId, Temperature, ThermalConstraint, ThermalConstraintKind,
+        HeatTransferCoefficient, PhysicalQuantityKind, PhysicalSignal, PrescribedValue,
+        ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalAxis,
+        SignalExtrapolation, SignalId, SignalInterpolation, SignalOrdinate, SignalPrecision,
+        SignalProvenance, SignalRepresentation, SignalShape, SignalValue, TabulatedSignal,
+        Temperature, ThermalConstraint, ThermalConstraintKind,
     };
     use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind};
 
@@ -601,12 +628,160 @@ mod tests {
             }));
     }
 
+    fn temperature_signal(signal_id: &str, values: [f64; 2]) -> PhysicalSignal {
+        PhysicalSignal::Temperature(Signal {
+            signal_id: SignalId(signal_id.into()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation: SignalRepresentation::Tabulated(TabulatedSignal {
+                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0]),
+                values: values
+                    .map(|value| SignalOrdinate::Real(SignalValue::Scalar(Temperature::new(value))))
+                    .into(),
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
+                breakpoints: Vec::new(),
+            }),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 2,
+            },
+            provenance: SignalProvenance::Authored,
+        })
+    }
+
+    fn heat_flux_signal(signal_id: &str, values: [f64; 2]) -> PhysicalSignal {
+        PhysicalSignal::HeatFlux(Signal {
+            signal_id: SignalId(signal_id.into()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation: SignalRepresentation::Tabulated(TabulatedSignal {
+                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0]),
+                values: values
+                    .map(|value| SignalOrdinate::Real(SignalValue::Scalar(HeatFlux::new(value))))
+                    .into(),
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
+                breakpoints: Vec::new(),
+            }),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 2,
+            },
+            provenance: SignalProvenance::Authored,
+        })
+    }
+
+    #[test]
+    fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
+        let (mut model, mesh, _, base_region) = thermal_reference_model();
+        let flux_region = mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .flat_map(|face| &face.provenance)
+            .find(|region| region.source_topology_id != base_region)
+            .expect("reference mesh has a second boundary region")
+            .source_topology_id
+            .clone();
+        model.signals = vec![
+            temperature_signal("prescribed_temperature", [300.0, 320.0]),
+            heat_flux_signal("boundary_flux", [100.0, 200.0]),
+            temperature_signal("ambient_temperature", [280.0, 340.0]),
+        ];
+        model
+            .constraints
+            .push(AnalysisConstraint::Thermal(ThermalConstraint {
+                constraint_id: "time_prescribed_temperature".into(),
+                kind: ThermalConstraintKind::Prescribed {
+                    target: RegionTarget::boundary(base_region),
+                    value: PrescribedValue::Signal(SignalId("prescribed_temperature".into())),
+                },
+            }));
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "time_heat_flux".into(),
+            target: RegionTarget::boundary(flux_region.clone()),
+            operator: BoundaryOperator::ThermalHeatFlux {
+                value: PrescribedValue::Signal(SignalId("boundary_flux".into())),
+            },
+        });
+
+        let at_start = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::TimeSeconds(0.0),
+        )
+        .unwrap();
+        let at_end = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::TimeSeconds(1.0),
+        )
+        .unwrap();
+        assert!(at_start
+            .prescribed_temperature_k
+            .iter()
+            .flatten()
+            .all(|value| *value == 300.0));
+        assert!(at_end
+            .prescribed_temperature_k
+            .iter()
+            .flatten()
+            .all(|value| *value == 320.0));
+        let start_flux_power = at_start.source.iter().sum::<f64>();
+        let end_flux_power = at_end.source.iter().sum::<f64>();
+        assert!((end_flux_power - 2.0 * start_flux_power).abs() <= 1.0e-12);
+
+        model.boundaries = vec![AnalysisBoundary {
+            boundary_id: "time_convection".into(),
+            target: RegionTarget::boundary(flux_region),
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: PrescribedValue::Signal(SignalId(
+                    "ambient_temperature".into(),
+                )),
+                coefficient: HeatTransferCoefficient::new(5.0),
+            },
+        }];
+        let cold = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::TimeSeconds(0.0),
+        )
+        .unwrap();
+        let hot = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::TimeSeconds(1.0),
+        )
+        .unwrap();
+        let cold_ambient_power = cold.source.iter().sum::<f64>();
+        let hot_ambient_power = hot.source.iter().sum::<f64>();
+        assert!((hot_ambient_power / cold_ambient_power - 340.0 / 280.0).abs() <= 1.0e-12);
+        assert_eq!(cold.conductivity, hot.conductivity);
+    }
+
     #[test]
     fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let mesh =
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-        let assembly = assemble(&model, &mesh, &RealizedExcitations::new(Vec::new())).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::new(Vec::new()),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let conductivity_sum = assembly.conductivity.values.iter().sum::<f64>();
         let conductivity_scale = assembly
             .conductivity
@@ -652,7 +827,13 @@ mod tests {
         let mesh =
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let density = 1200.0;
-        let assembly = assemble(&model, &mesh, &heat_generation(density)).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &heat_generation(density),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let expected_source = density * assembly.projection.elements[0].signed_volume_m3;
         let projected_source = assembly.source.iter().sum::<f64>();
         assert!((projected_source - expected_source).abs() <= expected_source * 1.0e-12);
@@ -675,7 +856,13 @@ mod tests {
                 <= 1.0e-10
         );
 
-        let no_source = assemble(&model, &mesh, &RealizedExcitations::new(Vec::new())).unwrap();
+        let no_source = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::new(Vec::new()),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let initial = vec![315.0; no_source.projection.nodes.len()];
         let operator = no_source.transient_operator(0.25, &initial);
         let solved = solve_operator_system(
@@ -706,7 +893,13 @@ mod tests {
                 value: PrescribedValue::Constant(HeatFlux::new(240.0)),
             },
         }];
-        let flux = assemble(&model, &mesh, &RealizedExcitations::new(Vec::new())).unwrap();
+        let flux = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::new(Vec::new()),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let expected_power = 240.0 * face.area_m2;
         assert!(
             (flux.source.iter().sum::<f64>() - expected_power).abs() <= expected_power * 1.0e-12
@@ -720,7 +913,13 @@ mod tests {
                 coefficient: HeatTransferCoefficient::new(18.0),
             },
         }];
-        let convection = assemble(&model, &mesh, &RealizedExcitations::new(Vec::new())).unwrap();
+        let convection = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::new(Vec::new()),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let initial = vec![305.0; convection.projection.nodes.len()];
         let operator = convection.transient_operator(0.25, &initial);
         let solved = solve_operator_system(
@@ -760,7 +959,13 @@ mod tests {
                     value: PrescribedValue::Constant(Temperature::new(290.0)),
                 },
             }));
-        let assembly = assemble(&model, &mesh, &RealizedExcitations::new(Vec::new())).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::new(Vec::new()),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let initial = vec![315.0; assembly.projection.nodes.len()];
         let operator = assembly.transient_operator(0.25, &initial);
         let solved = solve_operator_system(
@@ -786,7 +991,13 @@ mod tests {
     fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode() {
         let (mut model, mesh, free_node, base_region) = thermal_reference_model();
         prescribe_base(&mut model, base_region, 300.0);
-        let assembly = assemble(&model, &mesh, &RealizedExcitations::default()).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let final_time_s = 0.2;
         let exact = 300.0 + 100.0 * (-10.0_f64 * final_time_s).exp();
         let mut errors = Vec::new();
@@ -858,7 +1069,13 @@ mod tests {
             },
         });
 
-        let assembly = assemble(&model, &mesh, &RealizedExcitations::default()).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let side_area_m2 = assembly
             .projection
             .boundary_faces

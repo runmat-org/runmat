@@ -68,15 +68,16 @@ pub fn registered_formulations(
 }
 
 fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
-    match procedure {
-        AnalysisProcedure::TransientResponse => {}
+    let temporal = match procedure {
+        AnalysisProcedure::Static => TemporalImplementation::ThermalSteadyLinearSolve,
+        AnalysisProcedure::TransientResponse => TemporalImplementation::ThermalBackwardEuler,
         _ => return Vec::new(),
-    }
+    };
     [
         (
             SpatialOperatorImplementation::ThermalGalerkinConduction,
             ConstitutiveImplementation::IsotropicThermalConduction,
-            TemporalImplementation::ThermalBackwardEuler,
+            temporal,
             vec![TopologyImplementation::CanonicalSolverMeshTet4],
             RecoveryImplementation::ThermalSolverMeshGradient,
             vec![SourceImplementation::CanonicalVolumeProjection],
@@ -85,7 +86,7 @@ fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRea
         (
             SpatialOperatorImplementation::ThermalGalerkinConduction,
             ConstitutiveImplementation::IsotropicThermalConduction,
-            TemporalImplementation::ThermalBackwardEuler,
+            temporal,
             vec![TopologyImplementation::CanonicalSolverMeshTet10],
             RecoveryImplementation::ThermalSolverMeshGradient,
             vec![SourceImplementation::CanonicalVolumeProjection],

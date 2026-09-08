@@ -194,11 +194,19 @@ wall = geometry.region(geom, "name:Cooling_Wall");
 ambient = fea.Temperature.celsius(22);
 h = fea.HeatTransferCoefficient.wattsPerSquareMeterKelvin(18);
 cooling = fea.ThermalBoundary.convection("ambient_cooling", wall, ambient, h);
+step = fea.ThermalStep.steady("thermal_equilibrium");
 
 thermalModel = fea.model("cooled_bracket", geom, ...
-    "Template", "thermal_transient", ...
-    "Boundaries", {cooling});
+    "Template", "thermal_steady", ...
+    "Boundaries", {cooling}, ...
+    "Steps", {step});
 ```
+
+Use `fea.ThermalStep.transient(...)` and the `thermal_transient` template when temperature must
+evolve over time. Transient procedures sample typed temperature, heat-flux, and
+ambient-temperature histories at each physical solution time. The steady procedure accepts typed
+constants (including constant signals) and solves the equilibrium operator without a heat-capacity
+term; it does not silently select a point from a time history.
 
 Use `Constraints` for prescribed values and kinematic relations, and `Boundaries` for natural or Robin operators. For fluid models, inlet velocity and wall motion are constraints; outlet pressure is a boundary. For thermal models, prescribed temperature is a constraint; heat flux and convection are boundaries.
 

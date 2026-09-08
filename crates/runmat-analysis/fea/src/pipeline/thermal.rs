@@ -1,7 +1,10 @@
 use runmat_analysis_core::{validate_model, AnalysisModel, PhysicsFamily};
 
 use crate::{
-    contracts::{ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalSolveOptions},
+    contracts::{
+        ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalProcedureControl,
+        ThermalSolveOptions,
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
 };
 
@@ -15,7 +18,7 @@ pub fn run_thermal_with_options(
     validate_controls(&options)?;
     super::admission::require_nonstructural(
         PhysicsFamily::Thermal,
-        options.procedure,
+        options.procedure.procedure(),
         options.formulation_requirement,
     )?;
     emit_phase(
@@ -46,15 +49,21 @@ pub fn run_thermal_with_options(
 }
 
 fn validate_controls(options: &ThermalSolveOptions) -> Result<(), FeaRunError> {
-    if options.step_count < 2 {
-        return Err(FeaRunError::InvalidModel(
-            "transient thermal solve requires at least two snapshots".into(),
-        ));
-    }
-    if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
-        return Err(FeaRunError::InvalidModel(
-            "thermal time step must be finite and positive".into(),
-        ));
+    if let ThermalProcedureControl::BackwardEuler {
+        step_count,
+        time_step_s,
+    } = options.procedure
+    {
+        if step_count < 2 {
+            return Err(FeaRunError::InvalidModel(
+                "transient thermal solve requires at least two snapshots".into(),
+            ));
+        }
+        if !time_step_s.is_finite() || time_step_s <= 0.0 {
+            return Err(FeaRunError::InvalidModel(
+                "thermal time step must be finite and positive".into(),
+            ));
+        }
     }
     if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
         return Err(FeaRunError::InvalidModel(

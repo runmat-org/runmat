@@ -619,12 +619,25 @@ impl Default for ElectromagneticSolveOptions {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThermalProcedureControl {
+    Steady,
+    BackwardEuler { step_count: usize, time_step_s: f64 },
+}
+
+impl ThermalProcedureControl {
+    pub const fn procedure(&self) -> AnalysisProcedure {
+        match self {
+            Self::Steady => AnalysisProcedure::Static,
+            Self::BackwardEuler { .. } => AnalysisProcedure::TransientResponse,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
     pub formulation_requirement: FormulationRequirement,
-    pub procedure: AnalysisProcedure,
-    pub step_count: usize,
-    pub time_step_s: f64,
+    pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
     pub solver_mesh: Option<SolverMeshArtifact>,
 }
@@ -633,9 +646,10 @@ impl Default for ThermalSolveOptions {
     fn default() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Production,
-            procedure: AnalysisProcedure::TransientResponse,
-            step_count: 10,
-            time_step_s: 1.0e-2,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 10,
+                time_step_s: 1.0e-2,
+            },
             residual_target: 1.0e-4,
             solver_mesh: None,
         }

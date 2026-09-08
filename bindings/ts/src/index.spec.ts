@@ -147,6 +147,7 @@ describe("FEA study document contracts", () => {
     expect(FEA_MODEL_TEMPLATES).toEqual([
       "linear_static_structural",
       "thermo_mechanical_coupled",
+      "thermal_steady",
       "thermal_transient",
       "modal_structural",
       "acoustic_harmonic",
@@ -167,14 +168,22 @@ describe("FEA study document contracts", () => {
   });
 
   it("describes thermal and electromagnetic templates by their admitted procedures", () => {
-    const thermal = FEA_SUPPORTED_MODEL_TEMPLATES.find(
+    const thermalSteady = FEA_SUPPORTED_MODEL_TEMPLATES.find(
+      (entry) => entry.template === "thermal_steady"
+    );
+    const thermalTransient = FEA_SUPPORTED_MODEL_TEMPLATES.find(
       (entry) => entry.template === "thermal_transient"
     );
     const electromagnetic = FEA_SUPPORTED_MODEL_TEMPLATES.find(
       (entry) => entry.template === "electromagnetic_harmonic"
     );
 
-    expect(thermal).toMatchObject({
+    expect(thermalSteady).toMatchObject({
+      label: "Thermal steady",
+      family: "thermal",
+      value: "equilibrium temperature and heat flux",
+    });
+    expect(thermalTransient).toMatchObject({
       label: "Thermal transient",
       family: "thermal",
       value: "time-dependent temperature and heat flux",

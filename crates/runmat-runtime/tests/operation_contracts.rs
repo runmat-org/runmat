@@ -336,6 +336,26 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
     for element in &mut mesh.topology.volume_elements {
         element.region_id = volume_region.clone();
     }
+    if let Some(boundary_region_id) = model.constraints.iter().find_map(|constraint| {
+        let runmat_analysis_core::AnalysisConstraint::Thermal(constraint) = constraint else {
+            return None;
+        };
+        let runmat_analysis_core::ThermalConstraintKind::Prescribed { target, .. } =
+            &constraint.kind
+        else {
+            return None;
+        };
+        Some(target.region_id.as_str())
+    }) {
+        mesh.topology.boundary_faces[0]
+            .provenance
+            .push(PersistentEntityId {
+                kind: PersistentEntityKind::Face,
+                source_topology_id: boundary_region_id.to_string(),
+                assembly_path: vec!["root".to_owned()],
+            });
+        mesh.topology.boundary_faces[0].provenance.sort();
+    }
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest()
         .expect("seal canonical contract solver mesh");
@@ -1631,7 +1651,7 @@ fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
 }
 
 #[test]
-fn analysis_run_thermal_contract_uses_transient_identity_and_rejects_static() {
+fn analysis_run_thermal_contract_preserves_steady_and_transient_identities() {
     let geometry = geometry_load_op(
         "/part.stl",
         TRIANGLE_STL.as_bytes(),
@@ -1668,19 +1688,38 @@ fn analysis_run_thermal_contract_uses_transient_identity_and_rejects_static() {
         AnalysisProcedure::TransientResponse,
     );
 
-    let mut unsupported_static = model.data;
-    unsupported_static.sequence.steps[0].procedure = AnalysisProcedure::Static;
-    let error = analysis_run_thermal_with_options_op(
-        &unsupported_static,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
+    let steady_model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_steady_thermal_model".to_string(),
+            template: AnalysisModelTemplate::ThermalSteady,
+        },
         OperationContext::new(Some("trace-contract-thermal-4".to_string()), None),
     )
-    .expect_err("thermal static must not dispatch to transient thermal math");
-    assert_eq!(error.operation, "fea.run_thermal");
-    assert_eq!(error.op_version, "fea.run_thermal/v1");
-    assert_eq!(error.error_code, "RM.FEA.RUN_THERMAL.INVALID_MODEL");
+    .expect("steady thermal model should be created");
+    let (_steady_artifact_root, steady_mesh_path) = write_model_solver_mesh(&steady_model.data);
+    let steady = analysis_run_thermal_with_options_op(
+        &steady_model.data,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        runmat_runtime::analysis::AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(steady_mesh_path.display().to_string()),
+            ..Default::default()
+        },
+        OperationContext::new(Some("trace-contract-thermal-5".to_string()), None),
+    )
+    .expect("steady thermal run should succeed");
+    assert_experimental_result_identity(
+        &steady.data,
+        PhysicsFamily::Thermal,
+        AnalysisProcedure::Static,
+    );
+    let steady_payload = steady
+        .data
+        .thermal_results
+        .expect("steady run should publish thermal results");
+    assert_eq!(steady_payload.time_points_s, vec![0.0]);
+    assert_eq!(steady_payload.temperature_snapshots.len(), 1);
 }
 
 #[test]

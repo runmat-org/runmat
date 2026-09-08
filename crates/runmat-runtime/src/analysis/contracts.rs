@@ -30,6 +30,7 @@ pub struct AnalysisCreateModelIntentSpec {
 pub enum AnalysisModelTemplate {
     LinearStaticStructural,
     ThermoMechanicalCoupled,
+    ThermalSteady,
     ThermalTransient,
     ModalStructural,
     AcousticHarmonic,
@@ -111,6 +112,23 @@ pub const ANALYSIS_MODEL_TEMPLATE_CATALOG: &[AnalysisModelTemplateCatalogEntry] 
             },
             AnalysisModelTemplateDefaultObservation {
                 field: "structural.von_mises",
+                location: "elements",
+            },
+        ],
+    },
+    AnalysisModelTemplateCatalogEntry {
+        template: AnalysisModelTemplate::ThermalSteady,
+        label: "Thermal steady",
+        family: "thermal",
+        target: "steady heat transfer",
+        value: "equilibrium temperature and heat flux",
+        default_observations: &[
+            AnalysisModelTemplateDefaultObservation {
+                field: "thermal.temperature",
+                location: "nodes",
+            },
+            AnalysisModelTemplateDefaultObservation {
+                field: "thermal.heat_flux",
                 location: "elements",
             },
         ],
@@ -2135,7 +2153,7 @@ impl AnalysisSolverOptions {
             (Acoustic, HarmonicResponse) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),
             )),
-            (Thermal, TransientResponse) => Ok(Self::ThermalDiffusion(
+            (Thermal, Static | TransientResponse) => Ok(Self::ThermalDiffusion(
                 AnalysisThermalRunOptions::default(),
             )),
             (Structural, TransientResponse)
@@ -2621,6 +2639,7 @@ impl AnalysisModelTemplate {
         match self {
             AnalysisModelTemplate::LinearStaticStructural => "linear_static_structural",
             AnalysisModelTemplate::ThermoMechanicalCoupled => "thermo_mechanical_coupled",
+            AnalysisModelTemplate::ThermalSteady => "thermal_steady",
             AnalysisModelTemplate::ThermalTransient => "thermal_transient",
             AnalysisModelTemplate::ModalStructural => "modal_structural",
             AnalysisModelTemplate::AcousticHarmonic => "acoustic_harmonic",
@@ -2918,6 +2937,7 @@ mod tests {
         let expected_profiles = [
             AnalysisModelTemplate::LinearStaticStructural,
             AnalysisModelTemplate::ThermoMechanicalCoupled,
+            AnalysisModelTemplate::ThermalSteady,
             AnalysisModelTemplate::ThermalTransient,
             AnalysisModelTemplate::ModalStructural,
             AnalysisModelTemplate::AcousticHarmonic,
@@ -2976,6 +2996,10 @@ mod tests {
     #[test]
     fn model_template_names_are_truthful_and_do_not_accept_retired_aliases() {
         assert_eq!(
+            AnalysisModelTemplate::from_snake_case("thermal_steady"),
+            Some(AnalysisModelTemplate::ThermalSteady)
+        );
+        assert_eq!(
             AnalysisModelTemplate::from_snake_case("thermal_transient"),
             Some(AnalysisModelTemplate::ThermalTransient)
         );
@@ -3030,14 +3054,16 @@ mod tests {
     }
 
     #[test]
-    fn solver_defaults_reject_unimplemented_exact_procedures() {
+    fn solver_defaults_admit_only_implemented_exact_procedures() {
         let mut prestressed_modal = ProcedureStep::structural_modal("prestressed_modal");
         prestressed_modal.procedure = AnalysisProcedure::PrestressedModalExtraction;
         assert!(AnalysisSolverOptions::defaults_for(&prestressed_modal).is_err());
 
-        let mut thermal_static = ProcedureStep::thermal_transient("thermal_static");
-        thermal_static.procedure = AnalysisProcedure::Static;
-        assert!(AnalysisSolverOptions::defaults_for(&thermal_static).is_err());
+        let thermal_static = ProcedureStep::thermal_steady("thermal_static");
+        assert!(matches!(
+            AnalysisSolverOptions::defaults_for(&thermal_static),
+            Ok(AnalysisSolverOptions::ThermalDiffusion(_))
+        ));
 
         let mut electromagnetic_static =
             ProcedureStep::electromagnetic_harmonic("electromagnetic_static");

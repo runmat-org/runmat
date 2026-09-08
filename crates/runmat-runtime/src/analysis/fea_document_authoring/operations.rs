@@ -374,6 +374,7 @@ fn default_sequence(template: AnalysisModelTemplate, id: &str) -> AnalysisSequen
             CoupledPhysicsFamily::Thermomechanical,
             AnalysisProcedure::TransientResponse,
         ),
+        AnalysisModelTemplate::ThermalSteady => ProcedureStep::thermal_steady("solve"),
         AnalysisModelTemplate::ThermalTransient => ProcedureStep::thermal_transient("solve"),
         AnalysisModelTemplate::ModalStructural => ProcedureStep::structural_modal("solve"),
         AnalysisModelTemplate::AcousticHarmonic => ProcedureStep::acoustic_harmonic("solve"),

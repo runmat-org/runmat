@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    Direction, Signal, SignalAxis, SignalExtrapolation, SignalInterpolation, SignalOrdinate,
-    SignalRepresentation, SignalValue,
+    Direction, HeatFlux, PhysicalSignal, PrescribedValue, Signal, SignalAxis, SignalExtrapolation,
+    SignalInterpolation, SignalOrdinate, SignalRepresentation, SignalValue, Temperature,
 };
 
 use super::{
@@ -60,6 +60,65 @@ pub(crate) fn sample_signal<Q>(
                 "artifact and generator signals must be materialized before FEA excitation realization",
             ),
         ),
+    }
+}
+
+pub(crate) fn sample_prescribed_temperature(
+    value: &PrescribedValue<Temperature>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::Temperature(signal) => Some(signal),
+            _ => None,
+        },
+        |temperature| temperature.kelvin,
+    )
+}
+
+pub(crate) fn sample_prescribed_heat_flux(
+    value: &PrescribedValue<HeatFlux>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::HeatFlux(signal) => Some(signal),
+            _ => None,
+        },
+        |heat_flux| heat_flux.watts_per_square_meter,
+    )
+}
+
+fn sample_prescribed_scalar<'a, Q>(
+    value: &'a PrescribedValue<Q>,
+    signals: &'a [PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+    typed_signal: impl Fn(&'a PhysicalSignal) -> Option<&'a Signal<Q>>,
+    component: impl Fn(&Q) -> f64,
+) -> Result<ComplexScalar, RealizationError> {
+    match value {
+        PrescribedValue::Constant(value) => Ok(ComplexScalar::real(component(value))),
+        PrescribedValue::Signal(signal_id) => {
+            let signal = signals
+                .iter()
+                .find(|candidate| candidate.signal_id() == signal_id)
+                .and_then(typed_signal)
+                .ok_or_else(|| {
+                    RealizationError::new(format!(
+                        "prescribed value references missing or incompatible signal {}",
+                        signal_id.0
+                    ))
+                })?;
+            expect_scalar(sample_signal(signal, sample, component)?)
+        }
     }
 }
 

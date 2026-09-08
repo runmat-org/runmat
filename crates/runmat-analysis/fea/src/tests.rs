@@ -20,7 +20,7 @@ use crate::{
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
     ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext,
     FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
+    ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
     FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
     FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
     FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
@@ -49,7 +49,7 @@ fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisCon
     )
 }
 use runmat_analysis_core::{
-    ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
+    AnalysisProcedure, ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
 };
 use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
@@ -291,7 +291,10 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         &thermal_model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            step_count: 2,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 2,
+                time_step_s: 1.0e-2,
+            },
             solver_mesh: Some(mesh.clone()),
             ..experimental_thermal_options()
         },
@@ -1739,7 +1742,10 @@ fn thermal_solver_emits_heat_transfer_fields() {
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            step_count: 4,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 4,
+                time_step_s: 1.0e-2,
+            },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -1795,6 +1801,150 @@ fn thermal_solver_emits_heat_transfer_fields() {
 }
 
 #[test]
+fn steady_thermal_solver_is_a_distinct_static_procedure() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "steady_thermal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_steady(
+            "steady_thermal_step",
+        )],
+    );
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let fixed_selector = projection.boundary_faces[0].provenance[0]
+        .analysis_selection_id()
+        .unwrap();
+    model
+        .constraints
+        .push(runmat_analysis_core::AnalysisConstraint::Thermal(
+            runmat_analysis_core::ThermalConstraint {
+                constraint_id: "steady_temperature".into(),
+                kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+                    target: runmat_analysis_core::RegionTarget::boundary(fixed_selector),
+                    value: runmat_analysis_core::PrescribedValue::Constant(
+                        runmat_analysis_core::Temperature::new(315.0),
+                    ),
+                },
+            },
+        ));
+
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            procedure: ThermalProcedureControl::Steady,
+            solver_mesh: Some(mesh),
+            ..experimental_thermal_options()
+        },
+    )
+    .expect("steady thermal solve should succeed");
+
+    assert_eq!(result.run.identity.procedure(), AnalysisProcedure::Static);
+    assert_eq!(result.time_points_s, vec![0.0]);
+    assert_eq!(result.temperature_snapshots.len(), 1);
+    assert_eq!(result.residual_norms.len(), 1);
+    assert!(result.temperature_snapshots[0]
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .all(|temperature| (*temperature - 315.0).abs() <= 1.0e-9));
+}
+
+#[test]
+fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "thermal_signal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            "thermal_signal_step",
+        )],
+    );
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let prescribed_face = &projection.boundary_faces[0];
+    let prescribed_selector = prescribed_face.provenance[0]
+        .analysis_selection_id()
+        .unwrap();
+    let signal_id = runmat_analysis_core::SignalId("prescribed_temperature_history".into());
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Temperature(
+            runmat_analysis_core::Signal {
+                signal_id: signal_id.clone(),
+                shape: runmat_analysis_core::SignalShape::Scalar,
+                frame: None,
+                representation: runmat_analysis_core::SignalRepresentation::Tabulated(
+                    runmat_analysis_core::TabulatedSignal {
+                        axis: runmat_analysis_core::SignalAxis::TimeSeconds(vec![0.0, 1.0]),
+                        values: vec![300.0, 320.0]
+                            .into_iter()
+                            .map(|temperature_k| {
+                                runmat_analysis_core::SignalOrdinate::Real(
+                                    runmat_analysis_core::SignalValue::Scalar(
+                                        runmat_analysis_core::Temperature::new(temperature_k),
+                                    ),
+                                )
+                            })
+                            .collect(),
+                        interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                        extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
+                        breakpoints: Vec::new(),
+                    },
+                ),
+                precision: runmat_analysis_core::SignalPrecision::Real64,
+                evidence: runmat_analysis_core::SignalApproximationEvidence {
+                    max_absolute_error: Some(0.0),
+                    max_relative_error: Some(0.0),
+                    derivative_max_absolute_error: None,
+                    sample_count: 2,
+                },
+                provenance: runmat_analysis_core::SignalProvenance::Authored,
+            },
+        ));
+    model
+        .constraints
+        .push(runmat_analysis_core::AnalysisConstraint::Thermal(
+            runmat_analysis_core::ThermalConstraint {
+                constraint_id: "time_temperature".into(),
+                kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+                    target: runmat_analysis_core::RegionTarget::boundary(prescribed_selector),
+                    value: runmat_analysis_core::PrescribedValue::Signal(signal_id),
+                },
+            },
+        ));
+
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 2,
+                time_step_s: 1.0,
+            },
+            solver_mesh: Some(mesh),
+            ..experimental_thermal_options()
+        },
+    )
+    .expect("time-dependent prescribed temperature should solve");
+
+    assert_eq!(result.time_points_s, vec![0.0, 1.0]);
+    for (snapshot, expected_temperature_k) in
+        result.temperature_snapshots.iter().zip([300.0, 320.0])
+    {
+        let values = snapshot.as_host_f64().unwrap();
+        for &node in &prescribed_face.node_indices {
+            assert!((values[node] - expected_temperature_k).abs() <= 1.0e-12);
+        }
+    }
+}
+
+#[test]
 fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_closure() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
@@ -1841,8 +1991,10 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            step_count: 3,
-            time_step_s: 0.1,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 3,
+                time_step_s: 0.1,
+            },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -1925,8 +2077,10 @@ fn canonical_mesh_thermal_pipeline_starts_from_the_authored_temperature_state() 
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            step_count: 3,
-            time_step_s: 0.1,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: 3,
+                time_step_s: 0.1,
+            },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },

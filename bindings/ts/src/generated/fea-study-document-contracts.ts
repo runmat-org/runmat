@@ -16,6 +16,7 @@ export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
 export const FEA_MODEL_TEMPLATES = [
   "linear_static_structural",
   "thermo_mechanical_coupled",
+  "thermal_steady",
   "thermal_transient",
   "modal_structural",
   "acoustic_harmonic",
@@ -28,7 +29,7 @@ export const FEA_MODEL_TEMPLATES = [
   "fsi_coupled",
 ] as const;
 
-export type FeaModelTemplate = "linear_static_structural" | "thermo_mechanical_coupled" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
+export type FeaModelTemplate = "linear_static_structural" | "thermo_mechanical_coupled" | "thermal_steady" | "thermal_transient" | "modal_structural" | "acoustic_harmonic" | "transient_structural" | "nonlinear_structural" | "electromagnetic_harmonic" | "cfd_steady_state" | "cfd_transient" | "cht_coupled" | "fsi_coupled";
 
 export type FeaDocumentKind = "study" | "sweep";
 
@@ -155,6 +156,17 @@ export const FEA_SUPPORTED_MODEL_TEMPLATES: readonly FeaModelTemplateCatalogEntr
       { field: "thermal.temperature", location: "nodes" },
       { field: "structural.displacement", location: "nodes" },
       { field: "structural.von_mises", location: "elements" },
+    ],
+  },
+  {
+    template: "thermal_steady",
+    label: "Thermal steady",
+    family: "thermal",
+    target: "steady heat transfer",
+    value: "equilibrium temperature and heat flux",
+    defaultObservations: [
+      { field: "thermal.temperature", location: "nodes" },
+      { field: "thermal.heat_flux", location: "elements" },
     ],
   },
   {

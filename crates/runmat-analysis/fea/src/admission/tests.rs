@@ -20,6 +20,7 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
             AnalysisProcedure::TransientResponse,
         ),
         (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
+        (PhysicsFamily::Thermal, AnalysisProcedure::Static),
         (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),
         (
             PhysicsFamily::Electromagnetic,
@@ -56,7 +57,7 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
 }
 
 #[test]
-fn static_labels_cannot_wrap_transient_thermal_or_harmonic_em_math() {
+fn procedure_labels_cannot_wrap_incompatible_thermal_or_harmonic_em_math() {
     let cases = [
         (
             PhysicsFamily::Thermal,
@@ -65,6 +66,9 @@ fn static_labels_cannot_wrap_transient_thermal_or_harmonic_em_math() {
                 .remove(0)
                 .realization()
                 .clone(),
+            FormulationAdmissionRejectionReason::IncompatibleAxis(
+                runmat_analysis_core::FormulationAxis::Temporal,
+            ),
         ),
         (
             PhysicsFamily::Electromagnetic,
@@ -76,10 +80,11 @@ fn static_labels_cannot_wrap_transient_thermal_or_harmonic_em_math() {
             .remove(0)
             .realization()
             .clone(),
+            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure,
         ),
     ];
 
-    for (family, procedure, realization) in cases {
+    for (family, procedure, realization, expected_reason) in cases {
         let rejection = admit_formulation(FormulationAdmissionRequest {
             family,
             procedure,
@@ -88,10 +93,7 @@ fn static_labels_cannot_wrap_transient_thermal_or_harmonic_em_math() {
             realization,
         })
         .expect_err("a static identity must not relabel non-static mathematics");
-        assert_eq!(
-            rejection.reason,
-            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
-        );
+        assert_eq!(rejection.reason, expected_reason);
     }
 }
 

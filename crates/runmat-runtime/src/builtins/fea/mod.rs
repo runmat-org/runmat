@@ -952,6 +952,7 @@ async fn resolve_document_input(
     match input {
         Value::Object(ref object) if object.class_name == FEA_STUDY_CLASS => {
             modeling::study_from_value_with_generators(builtin, &input)
+                .map(Box::new)
                 .map(RuntimeResolvedDocument::Study)
         }
         Value::Object(ref object) if object.class_name == FEA_SWEEP_CLASS => {
@@ -980,7 +981,7 @@ async fn resolve_document_input(
 }
 
 enum RuntimeResolvedDocument {
-    Study(modeling::ComposedStudy),
+    Study(Box<modeling::ComposedStudy>),
     Sweep(modeling::ComposedSweep),
 }
 
@@ -996,10 +997,12 @@ fn resolved_runtime_document_from_file(
                 .unwrap_or_default();
             let frozen_generators =
                 signals::bindings::FrozenGeneratorInventory::new(LOAD_NAME, signals, Vec::new())?;
-            Ok(RuntimeResolvedDocument::Study(modeling::ComposedStudy {
-                study: *study,
-                frozen_generators,
-            }))
+            Ok(RuntimeResolvedDocument::Study(Box::new(
+                modeling::ComposedStudy {
+                    study: *study,
+                    frozen_generators,
+                },
+            )))
         }
         FeaResolvedDocument::Sweep(sweep) => {
             let composed = sweep

@@ -224,7 +224,7 @@ fn run_operation_for_procedure(
         }
         (Structural, ModalExtraction) => Some(AnalysisOperation::Modal),
         (Acoustic, HarmonicResponse) => Some(AnalysisOperation::Acoustic),
-        (Thermal, TransientResponse) => Some(AnalysisOperation::Thermal),
+        (Thermal, Static | TransientResponse) => Some(AnalysisOperation::Thermal),
         (Structural, TransientResponse)
         | (Coupled(CoupledPhysicsFamily::Thermomechanical), TransientResponse) => {
             Some(AnalysisOperation::Transient)

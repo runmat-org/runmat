@@ -399,6 +399,17 @@ impl ProcedureStep {
         )
     }
 
+    pub fn thermal_steady(step_id: impl Into<String>) -> Self {
+        Self::experimental(
+            step_id,
+            PhysicsFamily::Thermal,
+            AnalysisProcedure::Static,
+            SolutionSpace::Direct,
+            IndependentDomain::Static,
+            vec![state("thermal", StateKind::Thermal)],
+        )
+    }
+
     pub fn structural_nonlinear(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
@@ -542,6 +553,15 @@ mod tests {
                 end: 1.0,
             }
         );
+        assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);
+    }
+
+    #[test]
+    fn thermal_steady_template_names_equilibrium_and_static_domain() {
+        let step = ProcedureStep::thermal_steady("thermal_equilibrium");
+        assert_eq!(step.family, PhysicsFamily::Thermal);
+        assert_eq!(step.procedure, AnalysisProcedure::Static);
+        assert_eq!(step.independent_domain, IndependentDomain::Static);
         assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);
     }
 

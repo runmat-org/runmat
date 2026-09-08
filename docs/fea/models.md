@@ -28,6 +28,7 @@ not the template name, determine what is solved:
 | `linear_static_structural` | Structural solid model with a static procedure scaffold |
 | `modal_structural` | Structural model with a modal-extraction scaffold |
 | `acoustic_harmonic` | Acoustic frequency-domain model |
+| `thermal_steady` | Steady thermal equilibrium model |
 | `thermal_transient` | Transient thermal model |
 | `transient_structural` | Transient structural model |
 | `nonlinear_structural` | Nonlinear structural model |

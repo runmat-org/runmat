@@ -52,6 +52,11 @@ step_descriptor!(
     "step = fea.StructuralStep.nonlinear(id)"
 );
 step_descriptor!(
+    THERMAL_STEADY_DESCRIPTOR,
+    THERMAL_STEADY_SIGNATURES,
+    "step = fea.ThermalStep.steady(id)"
+);
+step_descriptor!(
     THERMAL_TRANSIENT_DESCRIPTOR,
     THERMAL_TRANSIENT_SIGNATURES,
     "step = fea.ThermalStep.transient(id)"
@@ -136,9 +141,11 @@ pub(super) fn require_step_class(
             | AnalysisProcedure::Nonlinear,
             SolutionSpace::Direct,
         ) => Some(FEA_STRUCTURAL_STEP_CLASS),
-        (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse, SolutionSpace::Direct) => {
-            Some(FEA_THERMAL_STEP_CLASS)
-        }
+        (
+            PhysicsFamily::Thermal,
+            AnalysisProcedure::Static | AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct,
+        ) => Some(FEA_THERMAL_STEP_CLASS),
         (
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::HarmonicResponse,
@@ -238,6 +245,14 @@ step_builtin!(
     FEA_STRUCTURAL_STEP_CLASS,
     "Create a direct structural nonlinear step.",
     ProcedureStep::structural_nonlinear
+);
+step_builtin!(
+    thermal_steady_builtin,
+    THERMAL_STEADY_DESCRIPTOR,
+    "fea.ThermalStep.steady",
+    FEA_THERMAL_STEP_CLASS,
+    "Create a direct steady thermal step.",
+    ProcedureStep::thermal_steady
 );
 step_builtin!(
     thermal_transient_builtin,
@@ -381,6 +396,11 @@ mod tests {
                 .unwrap(),
                 FEA_STRUCTURAL_STEP_CLASS,
                 AnalysisProcedure::Nonlinear,
+            ),
+            (
+                block_on(thermal_steady_builtin(step_id("thermal_steady"))).unwrap(),
+                FEA_THERMAL_STEP_CLASS,
+                AnalysisProcedure::Static,
             ),
             (
                 block_on(thermal_transient_builtin(step_id("thermal"))).unwrap(),

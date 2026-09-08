@@ -20,6 +20,7 @@ pub fn is_exposed_analysis_identity(
                 AnalysisProcedure::TransientResponse
             )
             | (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear)
+            | (PhysicsFamily::Thermal, AnalysisProcedure::Static)
             | (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse)
             | (
                 PhysicsFamily::Electromagnetic,
@@ -72,6 +73,7 @@ mod tests {
                 AnalysisProcedure::TransientResponse,
             ),
             (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
+            (PhysicsFamily::Thermal, AnalysisProcedure::Static),
             (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),
             (
                 PhysicsFamily::Electromagnetic,

@@ -13,7 +13,7 @@ use runmat_meshing_core::{
 
 use super::assemble;
 use crate::{
-    excitation::RealizedExcitations,
+    excitation::{ExcitationSamplePoint, RealizedExcitations},
     fixtures::{fixture_model, FixtureId},
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
@@ -55,7 +55,13 @@ fn transient_slab_has_second_order_spatial_convergence() {
                     },
                 }));
         }
-        let assembly = assemble(&model, &mesh, &RealizedExcitations::default()).unwrap();
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
         let mut temperature = assembly
             .projection
             .nodes

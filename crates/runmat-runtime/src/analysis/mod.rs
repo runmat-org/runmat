@@ -14,7 +14,8 @@ use runmat_analysis_core::{
     FluidConstraintKind, MagneticConstraint, MagneticConstraintKind, MaterialAssignment,
     MaterialMechanicalModel, MaterialModel, MaterialThermalModel, PhysicsFamily, PrescribedValue,
     Pressure, ProcedureStep, ProcedureStepId, RegionTarget, StructuralConstraint,
-    StructuralConstraintKind, Temperature, ThermalInterfaceTransfer, Velocity,
+    StructuralConstraintKind, Temperature, ThermalConstraint, ThermalConstraintKind,
+    ThermalInterfaceTransfer, Velocity,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, SequenceIdentity, SolverResultIdentity,
@@ -34,11 +35,11 @@ use runmat_analysis_fea::{
     run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
     AnalysisRunIdentity, ComputeBackend, ElectromagneticSolveOptions, ExecutionBackend,
     FeaProgressHandler, FeaRunResult, LinearStaticSolveOptions, ModalSolveOptions, SolverMethod,
-    SolverPreconditioner, ThermalSolveOptions, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PHASE, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB, FEA_FIELD_CFD_PRESSURE,
-    FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PHASE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_ACOUSTIC_SOUND_PRESSURE_LEVEL_DB,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
     FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
     FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
 };
@@ -439,6 +440,20 @@ fn fixed_condition(id: &str, region_id: String) -> ModelCondition {
     }))
 }
 
+fn prescribed_temperature_condition(
+    id: &str,
+    region_id: String,
+    temperature_k: f64,
+) -> ModelCondition {
+    ModelCondition::Constraint(AnalysisConstraint::Thermal(ThermalConstraint {
+        constraint_id: id.to_string(),
+        kind: ThermalConstraintKind::Prescribed {
+            target: RegionTarget::boundary(region_id),
+            value: PrescribedValue::Constant(Temperature::new(temperature_k)),
+        },
+    }))
+}
+
 fn magnetic_ground_condition(id: &str, region_id: String) -> ModelCondition {
     ModelCondition::Constraint(AnalysisConstraint::Magnetic(MagneticConstraint {
         constraint_id: id.to_string(),
@@ -572,8 +587,18 @@ pub fn analysis_create_model_op(
                 AnalysisProcedure::TransientResponse,
             )],
         ),
+        AnalysisModelTemplate::ThermalSteady => (
+            prescribed_temperature_condition("bc_default_temperature", fixed_region_id, 293.15),
+            Some((
+                "excitation_default_heat_generation",
+                ConstantExcitation::HeatGeneration(1.0),
+            )),
+            vec![ProcedureStep::thermal_steady(
+                "step_default_thermal_steady".to_string(),
+            )],
+        ),
         AnalysisModelTemplate::ThermalTransient => (
-            fixed_condition("bc_default_fixed", fixed_region_id),
+            prescribed_temperature_condition("bc_default_temperature", fixed_region_id, 293.15),
             Some((
                 "excitation_default_heat_generation",
                 ConstantExcitation::HeatGeneration(1.0),
@@ -712,11 +737,11 @@ pub fn analysis_create_model_op(
         _ => None,
     };
     let thermal = match intent.template {
-        AnalysisModelTemplate::ThermalTransient | AnalysisModelTemplate::ChtCoupled => {
-            Some(runmat_analysis_core::ThermalDomain {
-                reference_temperature: Temperature::new(293.15),
-            })
-        }
+        AnalysisModelTemplate::ThermalSteady
+        | AnalysisModelTemplate::ThermalTransient
+        | AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::ThermalDomain {
+            reference_temperature: Temperature::new(293.15),
+        }),
         _ => None,
     };
     let electro_thermal = None;
@@ -6544,9 +6569,10 @@ pub fn analysis_run_cht_with_options_op(
         backend,
         ThermalSolveOptions {
             formulation_requirement,
-            procedure: AnalysisProcedure::TransientResponse,
-            step_count: options.step_count,
-            time_step_s: options.time_step_s,
+            procedure: ThermalProcedureControl::BackwardEuler {
+                step_count: options.step_count,
+                time_step_s: options.time_step_s,
+            },
             residual_target: options.residual_warn_threshold,
             solver_mesh: Some(solver_mesh.clone()),
         },
@@ -7467,12 +7493,7 @@ pub fn analysis_run_thermal_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    if options.step_count < 2
-        || !options.time_step_s.is_finite()
-        || options.time_step_s <= 0.0
-        || !options.residual_warn_threshold.is_finite()
-        || options.residual_warn_threshold <= 0.0
-    {
+    if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
             AnalysisOperation::Thermal.version(),
@@ -7483,7 +7504,7 @@ pub fn analysis_run_thermal_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_thermal requires at least two snapshots and finite positive time-step and residual controls",
+            "fea.run_thermal requires a finite positive residual control",
             BTreeMap::from([
                 ("step_count".into(), options.step_count.to_string()),
                 ("time_step_s".into(), options.time_step_s.to_string()),
@@ -7500,7 +7521,10 @@ pub fn analysis_run_thermal_with_options_op(
         .iter()
         .filter(|step| {
             step.family == PhysicsFamily::Thermal
-                && step.procedure == AnalysisProcedure::TransientResponse
+                && matches!(
+                    step.procedure,
+                    AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
+                )
         })
         .collect::<Vec<_>>();
     let [thermal_step] = thermal_steps.as_slice() else {
@@ -7522,6 +7546,28 @@ pub fn analysis_run_thermal_with_options_op(
         ));
     };
     let thermal_procedure = thermal_step.procedure;
+    if thermal_procedure == AnalysisProcedure::TransientResponse
+        && (options.step_count < 2
+            || !options.time_step_s.is_finite()
+            || options.time_step_s <= 0.0)
+    {
+        return Err(operation_error(
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "transient fea.run_thermal requires at least two snapshots and a finite positive time step",
+            BTreeMap::from([
+                ("step_count".into(), options.step_count.to_string()),
+                ("time_step_s".into(), options.time_step_s.to_string()),
+            ]),
+        ));
+    }
     validate_thermal_run_model(model, &context)?;
 
     if model.thermal.is_none() {
@@ -7568,9 +7614,14 @@ pub fn analysis_run_thermal_with_options_op(
         backend,
         ThermalSolveOptions {
             formulation_requirement,
-            procedure: thermal_procedure,
-            step_count: options.step_count,
-            time_step_s: options.time_step_s,
+            procedure: match thermal_procedure {
+                AnalysisProcedure::Static => ThermalProcedureControl::Steady,
+                AnalysisProcedure::TransientResponse => ThermalProcedureControl::BackwardEuler {
+                    step_count: options.step_count,
+                    time_step_s: options.time_step_s,
+                },
+                _ => unreachable!("thermal procedure was validated before execution"),
+            },
             residual_target: options.residual_warn_threshold,
             solver_mesh: Some(solver_mesh.clone()),
         },
