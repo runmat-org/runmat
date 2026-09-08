@@ -43,6 +43,9 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/signal.rs"]
+mod signal;
+
 fn main() {
     let mode = std::env::args_os().nth(1);
     if mode.as_deref() == Some(std::ffi::OsStr::new("--child")) {
@@ -201,6 +204,7 @@ async fn parent() {
 
     remote_conformance(process_payload).await;
     durable_conformance(inline_payload).await;
+    signal::run().await;
 }
 
 async fn wait_for_native_task(task: NativeProgramTask) -> runmat_execution_runner::AttemptSuccess {

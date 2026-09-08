@@ -413,9 +413,16 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
 }
 
 fn signal_realization(values: Vec<f64>) -> CanonicalSignalRealization {
+    signal_realization_with_precision(values, runmat_analysis_core::SignalPrecision::Real64)
+}
+
+fn signal_realization_with_precision(
+    values: Vec<f64>,
+    precision: runmat_analysis_core::SignalPrecision,
+) -> CanonicalSignalRealization {
     use runmat_analysis_core::{
         GeneratorDomain, GeneratorProvenance, PhysicalQuantityKind, SignalApproximationEvidence,
-        SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
+        SignalExtrapolation, SignalId, SignalInterpolation, SignalShape,
     };
 
     let generator = GeneratorIdentity::new(
@@ -439,7 +446,7 @@ fn signal_realization(values: Vec<f64>) -> CanonicalSignalRealization {
         topology_entity_count: None,
         domain: GeneratorDomain::TimeSeconds,
         sample_points: vec![0.0, 0.5, 1.0],
-        precision: SignalPrecision::Real64,
+        precision,
         values: CanonicalSignalValues::real(values),
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::Reject,
@@ -474,6 +481,27 @@ fn canonical_signal_realization_round_trips_and_layers_content_identity() {
     let mut tampered = first;
     tampered.values = CanonicalSignalValues::real([0.0, f64::NAN, 0.0]);
     assert!(tampered.validate().is_err());
+}
+
+#[test]
+fn canonical_signal_realization_normalizes_signed_zero() {
+    let positive = signal_realization(vec![0.0, 4.0, 0.0]);
+    let negative = signal_realization(vec![-0.0, 4.0, -0.0]);
+    assert_eq!(negative.values, positive.values);
+    assert_eq!(negative.content_digest, positive.content_digest);
+    assert_eq!(negative.identity, positive.identity);
+}
+
+#[test]
+fn canonical_signal_realization_enforces_declared_precision() {
+    let noncanonical = 1.0 / 3.0;
+    let canonical = f64::from(noncanonical as f32);
+    let mut realization = signal_realization_with_precision(
+        vec![0.0, canonical, 0.0],
+        runmat_analysis_core::SignalPrecision::Real32,
+    );
+    realization.values = CanonicalSignalValues::real([0.0, noncanonical, 0.0]);
+    assert!(realization.validate().is_err());
 }
 
 #[test]

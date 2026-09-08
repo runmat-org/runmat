@@ -28,8 +28,8 @@ pub use object::{
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 pub use signal::{
-    CanonicalSignalRealization, CanonicalSignalRealizationInput, CanonicalSignalValues,
-    SignalInputAdmission,
+    CanonicalSignalContent, CanonicalSignalRealization, CanonicalSignalRealizationInput,
+    CanonicalSignalValues, SignalInputAdmission,
 };
 pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
 pub use state::{

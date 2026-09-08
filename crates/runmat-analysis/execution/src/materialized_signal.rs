@@ -2,9 +2,200 @@ use runmat_analysis_core::{
     CanonicalQuantity, GeneratorDomain, PhysicalSignal, Signal, SignalAxis, SignalOrdinate,
     SignalProvenance, SignalRepresentation, SignalShape, SignalValue, TabulatedSignal,
 };
-use runmat_analysis_fea::execution::{CanonicalSignalRealization, CanonicalSignalValues};
+use runmat_analysis_fea::execution::{
+    CanonicalSignalContent, CanonicalSignalRealization, CanonicalSignalValues,
+};
+use runmat_execution::Digest;
 
 use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
+
+/// Derive the same provider-neutral numerical content identity used by generated realizations.
+///
+/// Authorship and callable provenance deliberately do not enter this digest. Breakpoints are not
+/// silently discarded: generated tables currently cannot encode them, so a table with authored
+/// breakpoint semantics is outside this equivalence contract.
+pub fn canonical_tabulated_signal_content_digest(
+    signal: &PhysicalSignal,
+) -> AnalysisBridgeResult<Digest> {
+    macro_rules! canonicalize {
+        ($signal:expr) => {
+            canonicalize_typed_table(signal.quantity(), $signal)
+        };
+    }
+    match signal {
+        PhysicalSignal::Displacement(value) => canonicalize!(value),
+        PhysicalSignal::Rotation(value) => canonicalize!(value),
+        PhysicalSignal::Velocity(value) => canonicalize!(value),
+        PhysicalSignal::Acceleration(value) => canonicalize!(value),
+        PhysicalSignal::AngularVelocity(value) => canonicalize!(value),
+        PhysicalSignal::AngularAcceleration(value) => canonicalize!(value),
+        PhysicalSignal::Force(value) => canonicalize!(value),
+        PhysicalSignal::Moment(value) => canonicalize!(value),
+        PhysicalSignal::Traction(value) => canonicalize!(value),
+        PhysicalSignal::Pressure(value) => canonicalize!(value),
+        PhysicalSignal::BodyForceDensity(value) => canonicalize!(value),
+        PhysicalSignal::Temperature(value) => canonicalize!(value),
+        PhysicalSignal::TemperatureDifference(value) => canonicalize!(value),
+        PhysicalSignal::HeatFlux(value) => canonicalize!(value),
+        PhysicalSignal::HeatGenerationDensity(value) => canonicalize!(value),
+        PhysicalSignal::ElectricPotential(value) => canonicalize!(value),
+        PhysicalSignal::ElectricCurrent(value) => canonicalize!(value),
+        PhysicalSignal::ElectricCharge(value) => canonicalize!(value),
+        PhysicalSignal::ElectricCurrentDensity(value) => canonicalize!(value),
+        PhysicalSignal::ElectricChargeDensity(value) => canonicalize!(value),
+        PhysicalSignal::MagneticVectorPotential(value) => canonicalize!(value),
+        PhysicalSignal::MassFlowRate(value) => canonicalize!(value),
+    }
+}
+
+fn canonicalize_typed_table<Q: CanonicalQuantity>(
+    quantity: runmat_analysis_core::PhysicalQuantityKind,
+    signal: &Signal<Q>,
+) -> AnalysisBridgeResult<Digest> {
+    let SignalRepresentation::Tabulated(table) = &signal.representation else {
+        return Err(AnalysisBridgeError::Invalid(
+            "canonical table content requires a tabulated signal".into(),
+        ));
+    };
+    if !table.breakpoints.is_empty() {
+        return Err(AnalysisBridgeError::Invalid(
+            "a table with authored breakpoints is not equivalent to a generated realization".into(),
+        ));
+    }
+    let (domain, sample_points) = match &table.axis {
+        SignalAxis::TimeSeconds(points) => (GeneratorDomain::TimeSeconds, points),
+        SignalAxis::FrequencyHertz(points) => (GeneratorDomain::FrequencyHertz, points),
+        SignalAxis::StudyParameter {
+            parameter_id,
+            canonical_values,
+        } => (
+            GeneratorDomain::StudyParameter {
+                parameter_id: parameter_id.clone(),
+            },
+            canonical_values,
+        ),
+    };
+    let sample_point_bits = sample_points
+        .iter()
+        .copied()
+        .map(f64::to_bits)
+        .collect::<Vec<_>>();
+    let values = canonical_table_values(&signal.shape, &table.values, signal.precision)?;
+    CanonicalSignalContent {
+        quantity,
+        shape: &signal.shape,
+        topology_entity_count: None,
+        domain: &domain,
+        sample_points: &sample_point_bits,
+        precision: signal.precision,
+        values: &values,
+        interpolation: table.interpolation,
+        extrapolation: table.extrapolation,
+        evidence: &signal.evidence,
+    }
+    .digest()
+    .map_err(Into::into)
+}
+
+fn canonical_table_values<Q: CanonicalQuantity>(
+    shape: &SignalShape,
+    ordinates: &[SignalOrdinate<Q>],
+    precision: runmat_analysis_core::SignalPrecision,
+) -> AnalysisBridgeResult<CanonicalSignalValues> {
+    let mut real = Vec::new();
+    let mut imaginary = Vec::new();
+    for ordinate in ordinates {
+        match ordinate {
+            SignalOrdinate::Real(value) if imaginary.is_empty() => {
+                append_signal_value(shape, value, precision, &mut real)?;
+            }
+            SignalOrdinate::Complex {
+                real: real_value,
+                imaginary: imaginary_value,
+            } if real.is_empty() || !imaginary.is_empty() => {
+                append_signal_value(shape, real_value, precision, &mut real)?;
+                append_signal_value(shape, imaginary_value, precision, &mut imaginary)?;
+            }
+            _ => {
+                return Err(AnalysisBridgeError::Invalid(
+                    "tabulated signal mixes real and complex ordinates".into(),
+                ))
+            }
+        }
+    }
+    match precision {
+        runmat_analysis_core::SignalPrecision::Real32
+        | runmat_analysis_core::SignalPrecision::Real64
+            if imaginary.is_empty() =>
+        {
+            Ok(CanonicalSignalValues::Real { values: real })
+        }
+        runmat_analysis_core::SignalPrecision::Complex64
+        | runmat_analysis_core::SignalPrecision::Complex128
+            if !imaginary.is_empty() =>
+        {
+            Ok(CanonicalSignalValues::Complex { real, imaginary })
+        }
+        _ => Err(AnalysisBridgeError::Invalid(
+            "tabulated ordinates differ from the declared signal precision".into(),
+        )),
+    }
+}
+
+fn append_signal_value<Q: CanonicalQuantity>(
+    declared_shape: &SignalShape,
+    value: &SignalValue<Q>,
+    precision: runmat_analysis_core::SignalPrecision,
+    output: &mut Vec<u64>,
+) -> AnalysisBridgeResult<()> {
+    match (declared_shape, value) {
+        (SignalShape::Scalar, SignalValue::Scalar(value)) => {
+            output.push(canonical_component_bits(*value, precision)?);
+        }
+        (SignalShape::Vector3, SignalValue::Vector3(values)) => {
+            for value in values {
+                output.push(canonical_component_bits(*value, precision)?);
+            }
+        }
+        (SignalShape::Tensor(declared), SignalValue::Tensor { shape, values })
+            if declared == shape =>
+        {
+            for value in values {
+                output.push(canonical_component_bits(*value, precision)?);
+            }
+        }
+        (SignalShape::TopologyField { .. }, _) => {
+            return Err(AnalysisBridgeError::Invalid(
+                "topology-field tables require mesh-aware canonicalization".into(),
+            ))
+        }
+        _ => {
+            return Err(AnalysisBridgeError::Invalid(
+                "tabulated ordinate differs from the declared signal shape".into(),
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn canonical_component_bits<Q: CanonicalQuantity>(
+    value: Q,
+    precision: runmat_analysis_core::SignalPrecision,
+) -> AnalysisBridgeResult<u64> {
+    let value = value.canonical_value();
+    if !value.is_finite() {
+        return Err(AnalysisBridgeError::Invalid(
+            "tabulated signal contains a non-finite ordinate".into(),
+        ));
+    }
+    let canonical = if value == 0.0 { 0.0 } else { value };
+    Ok(match precision {
+        runmat_analysis_core::SignalPrecision::Real32
+        | runmat_analysis_core::SignalPrecision::Complex64 => f64::from(canonical as f32).to_bits(),
+        runmat_analysis_core::SignalPrecision::Real64
+        | runmat_analysis_core::SignalPrecision::Complex128 => canonical.to_bits(),
+    })
+}
 
 /// Convert a verified canonical realization into the typed table consumed by solver admission.
 ///

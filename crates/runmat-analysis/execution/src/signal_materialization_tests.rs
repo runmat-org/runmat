@@ -19,7 +19,10 @@ use runmat_types::{
     StorageFact, ValueFact, ValueKindFact,
 };
 
-use crate::{materialize_signal_for_solver, validate_signal_input_payload};
+use crate::{
+    canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
+    validate_signal_input_payload,
+};
 
 use super::*;
 
@@ -452,6 +455,11 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
         canonicalize_signal_generator_outputs(&authored, &admitted, None, &[], &chunks, &outputs)
             .unwrap();
     let materialized = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
+    assert_eq!(
+        canonical_tabulated_signal_content_digest(&materialized).unwrap(),
+        realization.content_digest,
+        "generated and tabulated forms must share one numerical content identity"
+    );
     let PhysicalSignal::Force(signal) = materialized else {
         panic!("expected force signal")
     };
@@ -478,4 +486,47 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
     )
     .unwrap();
     assert!(materialize_signal_for_solver(&authored, &substituted, &realization).is_err());
+}
+
+#[test]
+fn table_content_identity_rejects_semantics_a_generator_cannot_represent() {
+    let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);
+    let admitted = admitted();
+    let chunks = plan_signal_generator_chunks(
+        &authored,
+        &admitted,
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 16,
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap()
+    .chunks;
+    let realization = canonicalize_signal_generator_outputs(
+        &authored,
+        &admitted,
+        None,
+        &[],
+        &chunks,
+        &[output(
+            &chunks[0],
+            dense_f64(vec![5, 1], &[10.0, 20.0, 30.0, 40.0, 50.0]),
+        )],
+    )
+    .unwrap();
+    let mut table = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
+    let PhysicalSignal::Force(signal) = &mut table else {
+        unreachable!()
+    };
+    let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+        unreachable!()
+    };
+    table
+        .breakpoints
+        .push(runmat_analysis_core::SignalBreakpoint {
+            abscissa: 0.5,
+            side: runmat_analysis_core::BreakpointSide::Both,
+        });
+    assert!(
+        canonical_tabulated_signal_content_digest(&PhysicalSignal::Force(signal.clone())).is_err()
+    );
 }

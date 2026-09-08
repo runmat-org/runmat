@@ -30,7 +30,9 @@ pub use host::{
     ANALYSIS_HOST_INVOCATION_MEDIA_TYPE, ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
     ANALYSIS_HOST_TARGET_PROFILE,
 };
-pub use materialized_signal::materialize_signal_for_solver;
+pub use materialized_signal::{
+    canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
+};
 pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};
 pub use response::AnalysisHostResponse;
 pub use runmat_analysis_fea::execution::SignalInputAdmission;

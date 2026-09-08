@@ -77,13 +77,27 @@ impl CanonicalSignalValues {
         self.len() == 0
     }
 
+    fn normalize_signed_zero(&mut self) {
+        let normalize = |value: &mut u64| {
+            if f64::from_bits(*value) == 0.0 {
+                *value = 0.0_f64.to_bits();
+            }
+        };
+        match self {
+            Self::Real { values } => values.iter_mut().for_each(normalize),
+            Self::Complex { real, imaginary } => {
+                real.iter_mut().for_each(normalize);
+                imaginary.iter_mut().for_each(normalize);
+            }
+        }
+    }
+
     fn validate(&self, precision: SignalPrecision) -> AnalysisExecutionResult<()> {
+        let canonical = |value| canonical_finite_bits(value, precision);
         let valid = match self {
             Self::Real { values } => {
                 matches!(precision, SignalPrecision::Real32 | SignalPrecision::Real64)
-                    && values
-                        .iter()
-                        .all(|value| f64::from_bits(*value).is_finite())
+                    && values.iter().copied().all(canonical)
             }
             Self::Complex { real, imaginary } => {
                 matches!(
@@ -91,10 +105,7 @@ impl CanonicalSignalValues {
                     SignalPrecision::Complex64 | SignalPrecision::Complex128
                 ) && !real.is_empty()
                     && real.len() == imaginary.len()
-                    && real
-                        .iter()
-                        .chain(imaginary)
-                        .all(|value| f64::from_bits(*value).is_finite())
+                    && real.iter().chain(imaginary).copied().all(canonical)
             }
         };
         if !valid {
@@ -150,6 +161,86 @@ pub struct CanonicalSignalRealizationInput {
     pub input_admissions: Vec<SignalInputAdmission>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CanonicalSignalContent<'a> {
+    pub quantity: PhysicalQuantityKind,
+    pub shape: &'a SignalShape,
+    pub topology_entity_count: Option<u64>,
+    pub domain: &'a GeneratorDomain,
+    pub sample_points: &'a [u64],
+    pub precision: SignalPrecision,
+    pub values: &'a CanonicalSignalValues,
+    pub interpolation: SignalInterpolation,
+    pub extrapolation: SignalExtrapolation,
+    pub evidence: &'a SignalApproximationEvidence,
+}
+
+impl CanonicalSignalContent<'_> {
+    pub fn digest(&self) -> AnalysisExecutionResult<Digest> {
+        self.validate()?;
+        Ok(Digest::sha256(encode_contract(
+            REALIZATION_PREFIX,
+            CONTENT_DOMAIN,
+            self,
+            REALIZATION_LIMITS,
+        )?))
+    }
+
+    fn validate(&self) -> AnalysisExecutionResult<()> {
+        if self.sample_points.len() < 2 || self.evidence.sample_count != self.sample_points.len() {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal content sample metadata is incomplete or inconsistent".into(),
+            ));
+        }
+        if matches!(
+            self.domain,
+            GeneratorDomain::StudyParameter { parameter_id } if parameter_id.trim().is_empty()
+        ) {
+            return Err(AnalysisExecutionError::Invalid(
+                "study-parameter signal content requires a parameter id".into(),
+            ));
+        }
+        for value in [
+            self.evidence.max_absolute_error,
+            self.evidence.max_relative_error,
+            self.evidence.derivative_max_absolute_error,
+        ] {
+            if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
+                return Err(AnalysisExecutionError::Invalid(
+                    "signal approximation error evidence must be finite and non-negative".into(),
+                ));
+            }
+        }
+        let points = self
+            .sample_points
+            .iter()
+            .map(|point| f64::from_bits(*point))
+            .collect::<Vec<_>>();
+        if points.iter().any(|point| !point.is_finite())
+            || points.windows(2).any(|pair| pair[0] >= pair[1])
+            || (self.domain == &GeneratorDomain::FrequencyHertz
+                && points.first().is_some_and(|point| *point < 0.0))
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal content points must be finite, strictly increasing, and valid for their domain"
+                    .into(),
+            ));
+        }
+        self.values.validate(self.precision)?;
+        let expected_values = self
+            .sample_points
+            .len()
+            .checked_mul(component_count(self.shape, self.topology_entity_count)?)
+            .ok_or(AnalysisExecutionError::Limit("signal content value count"))?;
+        if self.values.len() != expected_values {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal content values do not match its sample and component shape".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl CanonicalSignalRealization {
     pub fn new(input: CanonicalSignalRealizationInput) -> AnalysisExecutionResult<Self> {
         let mut realization = Self {
@@ -171,6 +262,7 @@ impl CanonicalSignalRealization {
             provenance: input.provenance,
             input_admissions: input.input_admissions,
         };
+        realization.values.normalize_signed_zero();
         realization.content_digest = realization.derive_content_digest()?;
         realization.identity = SignalRealizationIdentity::new(
             realization.materialization,
@@ -189,8 +281,6 @@ impl CanonicalSignalRealization {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         if self.schema_version != 1
             || self.signal_id.0.trim().is_empty()
-            || self.sample_points.len() < 2
-            || self.evidence.sample_count != self.sample_points.len()
             || self.provenance.project_revision.trim().is_empty()
             || self.provenance.callable_id.trim().is_empty()
             || self.provenance.frozen_input_digest.trim().is_empty()
@@ -199,18 +289,8 @@ impl CanonicalSignalRealization {
                 "signal realization metadata is incomplete or inconsistent".into(),
             ));
         }
-        let points = self.sample_points().collect::<Vec<_>>();
-        if points.iter().any(|point| !point.is_finite())
-            || points.windows(2).any(|pair| pair[0] >= pair[1])
-            || (self.domain == GeneratorDomain::FrequencyHertz
-                && points.first().is_some_and(|point| *point < 0.0))
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "signal realization points must be finite, strictly increasing, and valid for their domain"
-                    .into(),
-            ));
-        }
-        self.values.validate(self.precision)?;
+        let content = self.content();
+        content.validate()?;
         let mut admission_keys = std::collections::BTreeSet::new();
         for admission in &self.input_admissions {
             admission.validate()?;
@@ -220,20 +300,7 @@ impl CanonicalSignalRealization {
                 ));
             }
         }
-        let component_count = component_count(&self.shape, self.topology_entity_count)?;
-        let expected_values = self
-            .sample_points
-            .len()
-            .checked_mul(component_count)
-            .ok_or(AnalysisExecutionError::Limit(
-                "signal realization value count",
-            ))?;
-        if self.values.len() != expected_values {
-            return Err(AnalysisExecutionError::Invalid(
-                "signal realization values do not match its sample and component shape".into(),
-            ));
-        }
-        let content_digest = self.derive_content_digest()?;
+        let content_digest = content.digest()?;
         if self.content_digest != content_digest
             || self.identity
                 != SignalRealizationIdentity::new(self.materialization, content_digest)?
@@ -267,24 +334,35 @@ impl CanonicalSignalRealization {
     }
 
     fn derive_content_digest(&self) -> AnalysisExecutionResult<Digest> {
-        Ok(Digest::sha256(encode_contract(
-            REALIZATION_PREFIX,
-            CONTENT_DOMAIN,
-            &(
-                self.quantity,
-                &self.shape,
-                self.topology_entity_count,
-                &self.domain,
-                &self.sample_points,
-                self.precision,
-                &self.values,
-                self.interpolation,
-                self.extrapolation,
-                &self.evidence,
-            ),
-            REALIZATION_LIMITS,
-        )?))
+        self.content().digest()
     }
+
+    fn content(&self) -> CanonicalSignalContent<'_> {
+        CanonicalSignalContent {
+            quantity: self.quantity,
+            shape: &self.shape,
+            topology_entity_count: self.topology_entity_count,
+            domain: &self.domain,
+            sample_points: &self.sample_points,
+            precision: self.precision,
+            values: &self.values,
+            interpolation: self.interpolation,
+            extrapolation: self.extrapolation,
+            evidence: &self.evidence,
+        }
+    }
+}
+
+fn canonical_finite_bits(bits: u64, precision: SignalPrecision) -> bool {
+    let value = f64::from_bits(bits);
+    value.is_finite()
+        && (value != 0.0 || bits == 0.0_f64.to_bits())
+        && match precision {
+            SignalPrecision::Real32 | SignalPrecision::Complex64 => {
+                f64::from(value as f32).to_bits() == bits
+            }
+            SignalPrecision::Real64 | SignalPrecision::Complex128 => true,
+        }
 }
 
 fn component_count(

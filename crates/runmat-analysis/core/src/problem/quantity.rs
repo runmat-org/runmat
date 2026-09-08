@@ -7,6 +7,8 @@ pub trait FiniteQuantity {
 /// A scalar physical quantity expressed in the canonical unit named by its concrete type.
 pub trait CanonicalQuantity: FiniteQuantity + Copy {
     fn from_canonical_value(value: f64) -> Self;
+
+    fn canonical_value(self) -> f64;
 }
 
 macro_rules! scalar_quantity {
@@ -36,6 +38,10 @@ macro_rules! scalar_quantity {
         impl CanonicalQuantity for $name {
             fn from_canonical_value(value: f64) -> Self {
                 Self::new(value)
+            }
+
+            fn canonical_value(self) -> f64 {
+                self.$field
             }
         }
     };
