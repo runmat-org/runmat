@@ -174,12 +174,17 @@ pub struct VolumeQuadraturePoint {
     pub position_m: [f64; 3],
     pub volume_weight_m3: f64,
     pub(super) shape_values: [f64; 10],
+    pub(super) physical_shape_gradients: [[f64; 3]; 10],
     pub(super) node_count: usize,
 }
 
 impl VolumeQuadraturePoint {
     pub fn shape_values(&self) -> &[f64] {
         &self.shape_values[..self.node_count]
+    }
+
+    pub fn physical_shape_gradients(&self) -> &[[f64; 3]] {
+        &self.physical_shape_gradients[..self.node_count]
     }
 }
 

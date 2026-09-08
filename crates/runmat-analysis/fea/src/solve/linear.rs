@@ -4,13 +4,13 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, csr_stiffness, dense_stiffness},
+    operator::{apply_k, csr_stiffness, dense_stiffness, OperatorSystem},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         affine::solve_affine_constraint_system,
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         multiplier::solve_multiplier_constraint_system,
-        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
+        runtime_tensor_solver::solve_operator_system_runtime_tensor_with_initial_guess,
     },
 };
 
@@ -54,11 +54,27 @@ pub fn solve_linear_system(
             initial_guess,
         );
     }
+    solve_operator_system(
+        &summary.operator,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+    )
+}
+
+pub fn solve_operator_system(
+    operator: &OperatorSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+) -> LinearSolveResult {
     let mut effective_backend_kind = backend_kind;
     let mut runtime_tensor_fallback = false;
     if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
-        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
-            summary,
+        if let Some(result) = solve_operator_system_runtime_tensor_with_initial_guess(
+            operator,
             preconditioner_kind,
             initial_guess,
         ) {
@@ -68,7 +84,7 @@ pub fn solve_linear_system(
         runtime_tensor_fallback = true;
     }
 
-    let has_dofs = summary.dof_count > 0;
+    let has_dofs = operator.dof_count > 0;
     if !has_dofs {
         return LinearSolveResult {
             iterations: 0,
@@ -99,11 +115,11 @@ pub fn solve_linear_system(
                 .to_string(),
         });
     }
-    if let Some(dense) = dense_stiffness(&summary.operator) {
-        match solve_dense_direct(summary, dense) {
+    if let Some(dense) = dense_stiffness(operator) {
+        match solve_dense_direct(operator, dense) {
             Ok(solution) => {
-                let b = &summary.operator.rhs;
-                let residual = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &solution));
+                let b = &operator.rhs;
+                let residual = algebra_backend.vec_sub(b, &apply_k(operator, &solution));
                 let residual_norm = algebra_backend.dot(&residual, &residual).sqrt();
                 let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
                 let converged = residual_norm / b_norm <= tol;
@@ -147,15 +163,13 @@ pub fn solve_linear_system(
                 });
                 return LinearSolveResult {
                     iterations: 0,
-                    residual_norm: algebra_backend
-                        .dot(&summary.operator.rhs, &summary.operator.rhs)
-                        .sqrt(),
+                    residual_norm: algebra_backend.dot(&operator.rhs, &operator.rhs).sqrt(),
                     converged: false,
                     host_sync_count: 0,
                     solver_backend: effective_backend_kind,
                     device_apply_k_count: 0,
                     device_apply_k_attempt_count: 0,
-                    solution: vec![0.0; summary.dof_count],
+                    solution: vec![0.0; operator.dof_count],
                     solver_method: SolverMethod::DenseDirect,
                     preconditioner: SolverPreconditioner::None,
                     diagnostics: initial_diagnostics,
@@ -171,16 +185,16 @@ pub fn solve_linear_system(
         }
     }
 
-    let tuned_preconditioner_kind = graph_tuned_preconditioner(summary, preconditioner_kind);
-    let max_iters = graph_tuned_max_iters(summary, 64);
-    let preconditioner = build_spd_preconditioner(summary, tuned_preconditioner_kind);
-    let traversal_order = graph_solver_traversal_order(summary);
-    let b = &summary.operator.rhs;
+    let tuned_preconditioner_kind = graph_tuned_preconditioner(operator, preconditioner_kind);
+    let max_iters = graph_tuned_max_iters(operator, 64);
+    let preconditioner = build_spd_preconditioner(operator, tuned_preconditioner_kind);
+    let traversal_order = graph_solver_traversal_order(operator);
+    let b = &operator.rhs;
     let mut x = initial_guess
         .map(<[f64]>::to_vec)
-        .unwrap_or_else(|| vec![0.0; summary.dof_count]);
+        .unwrap_or_else(|| vec![0.0; operator.dof_count]);
 
-    let mut r = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &x));
+    let mut r = algebra_backend.vec_sub(b, &apply_k(operator, &x));
     let mut z = preconditioner.apply(&r);
     let mut p = z.clone();
     let mut rz_old = algebra_backend.dot(&r, &z);
@@ -229,7 +243,7 @@ pub fn solve_linear_system(
         if crate::is_fea_cancelled() {
             break;
         }
-        let ap = apply_k(&summary.operator, &p);
+        let ap = apply_k(operator, &p);
         let denom = algebra_backend.dot(&p, &ap);
         if denom.abs() <= 1.0e-18 {
             break;
@@ -288,22 +302,22 @@ enum DenseSolveError {
 }
 
 fn solve_dense_direct(
-    summary: &AssemblySummary,
+    operator: &OperatorSystem,
     dense: &[f64],
 ) -> Result<Vec<f64>, DenseSolveError> {
-    let n = summary.dof_count;
-    if dense.len() != n.saturating_mul(n) || summary.operator.rhs.len() != n {
+    let n = operator.dof_count;
+    if dense.len() != n.saturating_mul(n) || operator.rhs.len() != n {
         return Err(DenseSolveError::Numerical(
             "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
         ));
     }
     let free_dofs = (0..n)
-        .filter(|idx| !summary.operator.constrained[*idx])
+        .filter(|idx| !operator.constrained[*idx])
         .collect::<Vec<_>>();
     let mut x = vec![0.0_f64; n];
     for (row, value) in x.iter_mut().enumerate().take(n) {
-        if summary.operator.constrained[row] {
-            *value = summary.operator.rhs[row];
+        if operator.constrained[row] {
+            *value = operator.rhs[row];
         }
     }
     if free_dofs.is_empty() {
@@ -314,7 +328,7 @@ fn solve_dense_direct(
     let mut a = vec![0.0_f64; free_n * free_n];
     let mut b = vec![0.0_f64; free_n];
     for (local_row, &global_row) in free_dofs.iter().enumerate() {
-        b[local_row] = summary.operator.rhs[global_row];
+        b[local_row] = operator.rhs[global_row];
         for (local_col, &global_col) in free_dofs.iter().enumerate() {
             a[local_row * free_n + local_col] = dense[global_row * n + global_col];
         }
@@ -457,26 +471,26 @@ fn dense_residual(a: &[f64], x: &[f64], b: &[f64]) -> Vec<f64> {
 }
 
 fn graph_tuned_preconditioner(
-    summary: &AssemblySummary,
+    operator: &OperatorSystem,
     requested: SpdPreconditionerKind,
 ) -> SpdPreconditionerKind {
-    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
+    if dense_stiffness(operator).is_some() || csr_stiffness(operator).is_some() {
         return SpdPreconditionerKind::Jacobi;
     }
     requested
 }
 
-fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> usize {
-    if dense_stiffness(&summary.operator).is_some() || csr_stiffness(&summary.operator).is_some() {
+fn graph_tuned_max_iters(operator: &OperatorSystem, base_max_iters: usize) -> usize {
+    if dense_stiffness(operator).is_some() || csr_stiffness(operator).is_some() {
         return base_max_iters
-            .max(summary.dof_count.saturating_mul(2))
+            .max(operator.dof_count.saturating_mul(2))
             .max(256);
     }
     base_max_iters
 }
 
-fn graph_solver_traversal_order(summary: &AssemblySummary) -> Vec<usize> {
-    (0..summary.dof_count).collect()
+fn graph_solver_traversal_order(operator: &OperatorSystem) -> Vec<usize> {
+    (0..operator.dof_count).collect()
 }
 
 #[cfg(test)]
@@ -544,7 +558,7 @@ mod tests {
     fn dense_stiffness_max_iterations_scale_with_dof_count() {
         let summary = dense_summary(144);
 
-        assert_eq!(graph_tuned_max_iters(&summary, 64), 288);
+        assert_eq!(graph_tuned_max_iters(&summary.operator, 64), 288);
     }
 
     #[test]
@@ -573,6 +587,32 @@ mod tests {
             .iter()
             .any(|diag| diag.code == "FEA_SOLVER_METHOD"
                 && diag.message.contains("solver=dense_direct")));
+    }
+
+    #[test]
+    fn assembly_metadata_does_not_change_the_unconstrained_operator_solve() {
+        let mut summary = dense_summary(2);
+        summary.operator.stiffness_dense = Some(vec![4.0, 1.0, 1.0, 3.0]);
+        summary.operator.stiffness_diag = vec![4.0, 3.0];
+        summary.operator.rhs = vec![1.0, 2.0];
+        let backend = CpuReferenceBackend;
+
+        let assembled = solve_linear_system(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &backend,
+            None,
+        );
+        let operator = solve_operator_system(
+            &summary.operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &backend,
+            None,
+        );
+
+        assert_eq!(operator, assembled);
     }
 
     #[test]

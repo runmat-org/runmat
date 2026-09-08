@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5,6 +7,43 @@ pub struct CsrMatrix {
     pub row_offsets: Vec<usize>,
     pub column_indices: Vec<usize>,
     pub values: Vec<f64>,
+}
+
+pub(crate) struct CsrAssembler {
+    rows: Vec<BTreeMap<usize, f64>>,
+}
+
+impl CsrAssembler {
+    pub(crate) fn new(row_count: usize) -> Self {
+        Self {
+            rows: (0..row_count).map(|_| BTreeMap::new()).collect(),
+        }
+    }
+
+    pub(crate) fn add(&mut self, row: usize, column: usize, value: f64) {
+        *self.rows[row].entry(column).or_insert(0.0) += value;
+    }
+
+    pub(crate) fn finish(self) -> CsrMatrix {
+        let mut row_offsets = Vec::with_capacity(self.rows.len() + 1);
+        let mut column_indices = Vec::new();
+        let mut values = Vec::new();
+        row_offsets.push(0);
+        for row in self.rows {
+            for (column, value) in row {
+                if value != 0.0 {
+                    column_indices.push(column);
+                    values.push(value);
+                }
+            }
+            row_offsets.push(values.len());
+        }
+        CsrMatrix {
+            row_offsets,
+            column_indices,
+            values,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

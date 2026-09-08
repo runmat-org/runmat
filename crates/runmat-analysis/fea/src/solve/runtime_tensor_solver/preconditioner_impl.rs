@@ -1,7 +1,7 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;
 
-use crate::{assembly::AssemblySummary, solve::preconditioner::SpdPreconditionerKind};
+use crate::{operator::OperatorSystem, solve::preconditioner::SpdPreconditionerKind};
 
 use super::RuntimeTensorWorkspace;
 
@@ -134,9 +134,9 @@ fn ensure_workspace_slot(
     Some(handle)
 }
 
-pub(super) fn build_ilu0_factors(summary: &AssemblySummary) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let n = summary.dof_count;
-    let constrained = &summary.operator.constrained;
+pub(super) fn build_ilu0_factors(operator: &OperatorSystem) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let n = operator.dof_count;
+    let constrained = &operator.constrained;
 
     let mut lower = vec![0.0; n.saturating_sub(1)];
     let mut upper = vec![0.0; n.saturating_sub(1)];
@@ -144,7 +144,7 @@ pub(super) fn build_ilu0_factors(summary: &AssemblySummary) -> (Vec<f64>, Vec<f6
         if constrained[i] || constrained[i + 1] {
             continue;
         }
-        let coupling = summary.operator.stiffness_upper[i];
+        let coupling = operator.stiffness_upper[i];
         lower[i] = -coupling;
         upper[i] = -coupling;
     }
@@ -154,7 +154,7 @@ pub(super) fn build_ilu0_factors(summary: &AssemblySummary) -> (Vec<f64>, Vec<f6
         u_diag[0] = if constrained[0] {
             1.0
         } else {
-            summary.operator.stiffness_diag[0].max(1.0e-12)
+            operator.stiffness_diag[0].max(1.0e-12)
         };
     }
 
@@ -171,7 +171,7 @@ pub(super) fn build_ilu0_factors(summary: &AssemblySummary) -> (Vec<f64>, Vec<f6
         } else {
             lower[i - 1] / prev_u
         };
-        let mut value = summary.operator.stiffness_diag[i] - l * upper[i - 1];
+        let mut value = operator.stiffness_diag[i] - l * upper[i - 1];
         if value.abs() < 1.0e-12 {
             value = 1.0e-12;
         }

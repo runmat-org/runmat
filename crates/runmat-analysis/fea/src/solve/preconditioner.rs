@@ -1,4 +1,4 @@
-use crate::assembly::AssemblySummary;
+use crate::operator::OperatorSystem;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,9 +28,8 @@ pub struct JacobiPreconditioner {
 }
 
 impl JacobiPreconditioner {
-    pub fn from_summary(summary: &AssemblySummary) -> Self {
-        let inv_diag = summary
-            .operator
+    pub fn from_operator(operator: &OperatorSystem) -> Self {
+        let inv_diag = operator
             .stiffness_diag
             .iter()
             .map(|value| 1.0 / value.abs().max(1.0e-12))
@@ -38,7 +37,7 @@ impl JacobiPreconditioner {
 
         Self {
             inv_diag,
-            constrained: summary.operator.constrained.clone(),
+            constrained: operator.constrained.clone(),
         }
     }
 }
@@ -51,9 +50,9 @@ pub struct Ilu0TridiagonalPreconditioner {
 }
 
 impl Ilu0TridiagonalPreconditioner {
-    pub fn from_summary(summary: &AssemblySummary) -> Self {
-        let n = summary.dof_count;
-        let constrained = summary.operator.constrained.clone();
+    pub fn from_operator(operator: &OperatorSystem) -> Self {
+        let n = operator.dof_count;
+        let constrained = operator.constrained.clone();
 
         let mut lower = vec![0.0; n.saturating_sub(1)];
         let mut upper = vec![0.0; n.saturating_sub(1)];
@@ -61,7 +60,7 @@ impl Ilu0TridiagonalPreconditioner {
             if constrained[i] || constrained[i + 1] {
                 continue;
             }
-            let coupling = summary.operator.stiffness_upper[i];
+            let coupling = operator.stiffness_upper[i];
             lower[i] = -coupling;
             upper[i] = -coupling;
         }
@@ -71,7 +70,7 @@ impl Ilu0TridiagonalPreconditioner {
             u_diag[0] = if constrained[0] {
                 1.0
             } else {
-                summary.operator.stiffness_diag[0].max(1.0e-12)
+                operator.stiffness_diag[0].max(1.0e-12)
             };
         }
 
@@ -86,7 +85,7 @@ impl Ilu0TridiagonalPreconditioner {
             } else {
                 lower[i - 1] / prev_u
             };
-            let mut value = summary.operator.stiffness_diag[i] - l * upper[i - 1];
+            let mut value = operator.stiffness_diag[i] - l * upper[i - 1];
             if value.abs() < 1.0e-12 {
                 value = value.signum() * 1.0e-12;
                 if value == 0.0 {
@@ -165,13 +164,13 @@ impl SpdPreconditioner for JacobiPreconditioner {
 }
 
 pub fn build_spd_preconditioner(
-    summary: &AssemblySummary,
+    operator: &OperatorSystem,
     kind: SpdPreconditionerKind,
 ) -> Box<dyn SpdPreconditioner> {
     match kind {
-        SpdPreconditionerKind::Jacobi => Box::new(JacobiPreconditioner::from_summary(summary)),
+        SpdPreconditionerKind::Jacobi => Box::new(JacobiPreconditioner::from_operator(operator)),
         SpdPreconditionerKind::Ilu0 => {
-            Box::new(Ilu0TridiagonalPreconditioner::from_summary(summary))
+            Box::new(Ilu0TridiagonalPreconditioner::from_operator(operator))
         }
     }
 }
@@ -197,7 +196,7 @@ mod tests {
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .expect("test system should assemble");
-        let pc = build_spd_preconditioner(&summary, SpdPreconditionerKind::Ilu0);
+        let pc = build_spd_preconditioner(&summary.operator, SpdPreconditionerKind::Ilu0);
         let z = pc.apply(&summary.operator.rhs);
         assert_eq!(z.len(), summary.dof_count);
         assert!(z.iter().all(|v| v.is_finite()));

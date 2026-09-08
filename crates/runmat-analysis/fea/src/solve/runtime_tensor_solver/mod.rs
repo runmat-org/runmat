@@ -5,7 +5,7 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{csr_stiffness, dense_stiffness, CsrMatrix},
+    operator::{csr_stiffness, dense_stiffness, CsrMatrix, OperatorSystem},
     solve::{
         backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult,
         preconditioner::SpdPreconditionerKind,
@@ -81,10 +81,22 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
+    solve_operator_system_runtime_tensor_with_initial_guess(
+        &summary.operator,
+        preconditioner_kind,
+        initial_guess,
+    )
+}
+
+pub fn solve_operator_system_runtime_tensor_with_initial_guess(
+    operator: &OperatorSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    initial_guess: Option<&[f64]>,
+) -> Option<LinearSolveResult> {
     solve_runtime_tensor_linear_system_internal(
-        summary,
+        operator,
         None,
-        &summary.operator.rhs,
+        &operator.rhs,
         preconditioner_kind,
         initial_guess,
     )
@@ -93,40 +105,44 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
 pub fn prepare_runtime_tensor_linear_system(
     summary: &AssemblySummary,
 ) -> Option<RuntimeTensorPreparedLinearSystem> {
-    let n = summary.dof_count;
-    if n == 0 || dense_stiffness(&summary.operator).is_some() {
+    prepare_runtime_tensor_operator_system(&summary.operator)
+}
+
+pub fn prepare_runtime_tensor_operator_system(
+    operator: &OperatorSystem,
+) -> Option<RuntimeTensorPreparedLinearSystem> {
+    let n = operator.dof_count;
+    if n == 0 || dense_stiffness(operator).is_some() {
         return None;
     }
 
     let inv_diag: Vec<f64> = (0..n)
         .map(|i| {
-            if summary.operator.constrained[i] {
+            if operator.constrained[i] {
                 1.0
             } else {
-                1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
+                1.0 / operator.stiffness_diag[i].abs().max(1.0e-12)
             }
         })
         .collect();
-    let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = build_ilu0_factors(summary);
-    let diag = summary.operator.stiffness_diag.clone();
+    let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = build_ilu0_factors(operator);
+    let diag = operator.stiffness_diag.clone();
     let mut upper_left = vec![0.0; n];
     let mut upper_right = vec![0.0; n];
     for i in 0..n {
-        if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i] {
-            upper_left[i] = summary.operator.stiffness_upper[i - 1];
+        if i > 0 && !operator.constrained[i - 1] && !operator.constrained[i] {
+            upper_left[i] = operator.stiffness_upper[i - 1];
         }
-        if i + 1 < n && !summary.operator.constrained[i + 1] && !summary.operator.constrained[i] {
-            upper_right[i] = summary.operator.stiffness_upper[i];
+        if i + 1 < n && !operator.constrained[i + 1] && !operator.constrained[i] {
+            upper_right[i] = operator.stiffness_upper[i];
         }
     }
-    let constrained_mask: Vec<f64> = summary
-        .operator
+    let constrained_mask: Vec<f64> = operator
         .constrained
         .iter()
         .map(|&value| if value { 1.0 } else { 0.0 })
         .collect();
-    let unconstrained_mask: Vec<f64> = summary
-        .operator
+    let unconstrained_mask: Vec<f64> = operator
         .constrained
         .iter()
         .map(|&value| if value { 0.0 } else { 1.0 })
@@ -140,9 +156,9 @@ pub fn prepare_runtime_tensor_linear_system(
         diag,
         upper_left,
         upper_right,
-        stiffness_csr: csr_stiffness(&summary.operator)
+        stiffness_csr: csr_stiffness(operator)
             .cloned()
-            .and_then(|csr| normalize_csr_constraints(csr, &summary.operator.constrained)),
+            .and_then(|csr| normalize_csr_constraints(csr, &operator.constrained)),
         inv_diag,
         ilu_l_subdiag,
         ilu_upper_superdiag,
@@ -162,7 +178,7 @@ pub fn solve_prepared_linear_system_runtime_tensor(
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
     solve_runtime_tensor_linear_system_internal(
-        summary,
+        &summary.operator,
         Some(prepared),
         rhs,
         preconditioner_kind,
@@ -171,7 +187,7 @@ pub fn solve_prepared_linear_system_runtime_tensor(
 }
 
 fn solve_runtime_tensor_linear_system_internal(
-    summary: &AssemblySummary,
+    operator: &OperatorSystem,
     prepared: Option<&RuntimeTensorPreparedLinearSystem>,
     rhs: &[f64],
     preconditioner_kind: SpdPreconditionerKind,
@@ -180,7 +196,7 @@ fn solve_runtime_tensor_linear_system_internal(
     let provider = provider()?;
     let dof_count = prepared
         .map(|value| value.dof_count)
-        .unwrap_or(summary.dof_count);
+        .unwrap_or(operator.dof_count);
     if dof_count == 0 || rhs.len() != dof_count {
         return None;
     }
@@ -195,10 +211,10 @@ fn solve_runtime_tensor_linear_system_internal(
         .unwrap_or_else(|| {
             (0..dof_count)
                 .map(|i| {
-                    if summary.operator.constrained[i] {
+                    if operator.constrained[i] {
                         1.0
                     } else {
-                        1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
+                        1.0 / operator.stiffness_diag[i].abs().max(1.0e-12)
                     }
                 })
                 .collect()
@@ -211,7 +227,7 @@ fn solve_runtime_tensor_linear_system_internal(
                 value.ilu_inv_u_diag.clone(),
             )
         })
-        .unwrap_or_else(|| build_ilu0_factors(summary));
+        .unwrap_or_else(|| build_ilu0_factors(operator));
     let (diag, upper_left, upper_right) = prepared
         .map(|value| {
             (
@@ -221,19 +237,15 @@ fn solve_runtime_tensor_linear_system_internal(
             )
         })
         .unwrap_or_else(|| {
-            let diag = summary.operator.stiffness_diag.clone();
+            let diag = operator.stiffness_diag.clone();
             let mut upper_left = vec![0.0; dof_count];
             let mut upper_right = vec![0.0; dof_count];
             for i in 0..dof_count {
-                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i]
-                {
-                    upper_left[i] = summary.operator.stiffness_upper[i - 1];
+                if i > 0 && !operator.constrained[i - 1] && !operator.constrained[i] {
+                    upper_left[i] = operator.stiffness_upper[i - 1];
                 }
-                if i + 1 < dof_count
-                    && !summary.operator.constrained[i + 1]
-                    && !summary.operator.constrained[i]
-                {
-                    upper_right[i] = summary.operator.stiffness_upper[i];
+                if i + 1 < dof_count && !operator.constrained[i + 1] && !operator.constrained[i] {
+                    upper_right[i] = operator.stiffness_upper[i];
                 }
             }
             (diag, upper_left, upper_right)
@@ -241,9 +253,9 @@ fn solve_runtime_tensor_linear_system_internal(
     let stiffness_csr = prepared
         .and_then(|value| value.stiffness_csr.clone())
         .or_else(|| {
-            csr_stiffness(&summary.operator)
+            csr_stiffness(operator)
                 .cloned()
-                .and_then(|csr| normalize_csr_constraints(csr, &summary.operator.constrained))
+                .and_then(|csr| normalize_csr_constraints(csr, &operator.constrained))
         });
     let (constrained_mask, unconstrained_mask) = prepared
         .map(|value| {
@@ -253,14 +265,12 @@ fn solve_runtime_tensor_linear_system_internal(
             )
         })
         .unwrap_or_else(|| {
-            let constrained_mask: Vec<f64> = summary
-                .operator
+            let constrained_mask: Vec<f64> = operator
                 .constrained
                 .iter()
                 .map(|&value| if value { 1.0 } else { 0.0 })
                 .collect();
-            let unconstrained_mask: Vec<f64> = summary
-                .operator
+            let unconstrained_mask: Vec<f64> = operator
                 .constrained
                 .iter()
                 .map(|&value| if value { 0.0 } else { 1.0 })

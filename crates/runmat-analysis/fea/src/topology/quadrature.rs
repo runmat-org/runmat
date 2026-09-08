@@ -2,7 +2,7 @@ use runmat_meshing_core::{BoundaryTriangleOrder, ElementOrder, TETRAHEDRON_MIDSI
 
 use super::{
     contract::{BoundaryQuadraturePoint, VolumeQuadraturePoint},
-    element::{cross, dot, norm},
+    element::{cross, dot, invert, norm},
 };
 
 const TETRAHEDRON_DERIVATIVES: [[f64; 3]; 4] = [
@@ -240,10 +240,22 @@ pub(super) fn visit_volume_quadrature(
         if !determinant.is_finite() || determinant <= 0.0 {
             return None;
         }
+        let inverse = invert(jacobian)?;
+        let mut physical_shape_gradients = [[0.0; 3]; 10];
+        for node in 0..node_count {
+            physical_shape_gradients[node] = std::array::from_fn(|physical_axis| {
+                (0..3)
+                    .map(|reference_axis| {
+                        inverse[physical_axis][reference_axis] * derivatives[node][reference_axis]
+                    })
+                    .sum()
+            });
+        }
         visit(VolumeQuadraturePoint {
             position_m: weighted_position(coordinates, &shape_values[..node_count]),
             volume_weight_m3: reference_weight * determinant,
             shape_values,
+            physical_shape_gradients,
             node_count,
         });
     }

@@ -26,6 +26,33 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
             for (node, &shape) in point.shape_values().iter().enumerate() {
                 integrated_shapes[node] += shape * point.volume_weight_m3;
             }
+            let gradient_sum =
+                point
+                    .physical_shape_gradients()
+                    .iter()
+                    .fold([0.0; 3], |mut sum, gradient| {
+                        for axis in 0..3 {
+                            sum[axis] += gradient[axis];
+                        }
+                        sum
+                    });
+            let reproduced_x_gradient = point
+                .physical_shape_gradients()
+                .iter()
+                .zip(&projection.elements[0].node_indices)
+                .fold([0.0; 3], |mut sum, (gradient, &node_index)| {
+                    let x = projection.nodes[node_index].coordinates_m[0];
+                    for axis in 0..3 {
+                        sum[axis] += gradient[axis] * x;
+                    }
+                    sum
+                });
+            for component in gradient_sum {
+                assert!(component.abs() <= 1.0e-12);
+            }
+            assert!((reproduced_x_gradient[0] - 1.0).abs() <= 1.0e-12);
+            assert!(reproduced_x_gradient[1].abs() <= 1.0e-12);
+            assert!(reproduced_x_gradient[2].abs() <= 1.0e-12);
         })
         .unwrap();
     assert!((integrated_volume - projection.elements[0].signed_volume_m3).abs() <= 1.0e-12);
