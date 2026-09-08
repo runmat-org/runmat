@@ -21,7 +21,7 @@
 //! validation rejects missing or unexpected bindings, and catalog-backed
 //! implementations must not redeclare contract metadata.
 
-mod acceleration;
+pub(in crate::catalog) mod acceleration;
 mod aggregate;
 mod array;
 mod introspection;

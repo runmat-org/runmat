@@ -14,9 +14,21 @@ pub(crate) fn infer_builtin_callback(
     arguments: Vec<ValueFact>,
     requested_outputs: usize,
 ) -> Option<CallInference> {
-    let identity = resolved_builtin_identity(callable)?;
+    let identity = resolved_builtin_catalog_identity(callable)?;
+    Some(infer_builtin_identity_callback(
+        identity,
+        arguments,
+        requested_outputs,
+    ))
+}
+
+pub(crate) fn infer_builtin_identity_callback(
+    identity: runmat_builtins::BuiltinCatalogIdentity,
+    arguments: Vec<ValueFact>,
+    requested_outputs: usize,
+) -> CallInference {
     let fact = CallableFact {
-        identity: Some(CallableIdentity::Builtin(identity)),
+        identity: Some(CallableIdentity::Builtin(BuiltinId(identity.name.into()))),
         capabilities: CapabilitySet::default(),
         parameters: Vec::new(),
         parameters_complete: false,
@@ -27,22 +39,24 @@ pub(crate) fn infer_builtin_callback(
         captures: Vec::new(),
         captures_complete: false,
     };
-    Some(runmat_builtins::infer_callable_call(
+    runmat_builtins::infer_callable_call(
         &fact,
         &CallRequest {
             arguments,
             literals: LiteralContext::default(),
             outputs: OutputSelection::new(RequestedOutputCount::Exactly(requested_outputs)),
         },
-    ))
+    )
 }
 
-fn resolved_builtin_identity(callable: &Value) -> Option<BuiltinId> {
+pub(crate) fn resolved_builtin_catalog_identity(
+    callable: &Value,
+) -> Option<runmat_builtins::BuiltinCatalogIdentity> {
     let name = callable_name(callable)?;
     if crate::user_functions::resolve_semantic_function_by_name(&name).is_some() {
         return None;
     }
-    runmat_builtins::builtin_name_is_known(&name).then_some(BuiltinId(name))
+    runmat_builtins::builtin_catalog_entry_by_name(&name).map(|entry| entry.identity)
 }
 
 fn callable_name(callable: &Value) -> Option<String> {
