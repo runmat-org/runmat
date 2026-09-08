@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use runmat_analysis_core::{
-    AnalysisModel, ExcitationAction, ExcitationCaseActivation, ExcitationTarget, PhysicalSignal,
-    Signal, SignalAxis, SignalExtrapolation, SignalInterpolation, SignalOrdinate,
+    AnalysisModel, ExcitationAction, ExcitationCaseActivation, ExcitationTarget, IndependentDomain,
+    PhysicalSignal, Signal, SignalAxis, SignalExtrapolation, SignalInterpolation, SignalOrdinate,
     SignalRepresentation, SignalValue,
 };
 
@@ -13,19 +13,43 @@ use super::model::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ExcitationSamplePoint {
-    Initial,
+pub(crate) enum ExcitationSamplePoint<'a> {
+    Static,
+    TimeSeconds(f64),
     FrequencyHertz(f64),
+    StudyParameter {
+        parameter_id: &'a str,
+        canonical_value: f64,
+    },
 }
 
 pub(crate) fn realize_model_excitations(
     model: &AnalysisModel,
 ) -> Result<RealizedExcitations, RealizationError> {
-    let sample = model
-        .electromagnetic
-        .as_ref()
-        .map(|domain| ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz))
-        .unwrap_or(ExcitationSamplePoint::Initial);
+    let sample = if let Some(domain) = &model.electromagnetic {
+        ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz)
+    } else {
+        match model
+            .sequence
+            .steps
+            .first()
+            .map(|step| &step.independent_domain)
+        {
+            Some(IndependentDomain::TimeSeconds { start, .. }) => {
+                ExcitationSamplePoint::TimeSeconds(*start)
+            }
+            Some(IndependentDomain::StudyParameter {
+                parameter_id,
+                canonical_values,
+            }) => ExcitationSamplePoint::StudyParameter {
+                parameter_id,
+                canonical_value: canonical_values.first().copied().ok_or_else(|| {
+                    RealizationError::new("study-parameter procedure has no canonical values")
+                })?,
+            },
+            _ => ExcitationSamplePoint::Static,
+        }
+    };
     let step_id = model
         .sequence
         .steps
@@ -58,14 +82,14 @@ impl std::error::Error for RealizationError {}
 pub(crate) fn realize_excitations(
     model: &AnalysisModel,
     step_id: Option<&str>,
-    sample: ExcitationSamplePoint,
+    sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
     let signals = model
         .signals
         .iter()
         .map(|signal| (signal.signal_id().0.as_str(), signal))
         .collect::<HashMap<_, _>>();
-    let active_cases = active_case_ids(model, step_id);
+    let active_cases = active_case_ids(model, step_id)?;
     let mut entries = Vec::new();
     for action in &model.excitations {
         let excitation = action.excitation();
@@ -100,19 +124,30 @@ pub(crate) fn realize_excitations(
     Ok(RealizedExcitations::new(coalesce_wrenches(entries)))
 }
 
-fn active_case_ids<'a>(model: &'a AnalysisModel, step_id: Option<&str>) -> HashSet<&'a str> {
-    model
-        .excitation_cases
-        .iter()
-        .filter(|case| match &case.activation {
-            ExcitationCaseActivation::Always => true,
-            ExcitationCaseActivation::Steps(steps) => {
-                step_id.is_some_and(|step| steps.iter().any(|active| active == step))
+fn active_case_ids<'a>(
+    model: &'a AnalysisModel,
+    step_id: Option<&str>,
+) -> Result<HashSet<&'a str>, RealizationError> {
+    let mut active = HashSet::new();
+    for case in &model.excitation_cases {
+        match &case.activation {
+            ExcitationCaseActivation::Always => {
+                active.insert(case.case_id.0.as_str());
             }
-            ExcitationCaseActivation::MutuallyExclusiveGroup { .. } => false,
-        })
-        .map(|case| case.case_id.0.as_str())
-        .collect()
+            ExcitationCaseActivation::Steps(steps) => {
+                if step_id.is_some_and(|step| steps.iter().any(|candidate| candidate == step)) {
+                    active.insert(case.case_id.0.as_str());
+                }
+            }
+            ExcitationCaseActivation::MutuallyExclusiveGroup { group_id } => {
+                return Err(RealizationError::new(format!(
+                    "excitation case {} belongs to mutually exclusive group {} but no case selection was supplied",
+                    case.case_id.0, group_id
+                )));
+            }
+        }
+    }
+    Ok(active)
 }
 
 fn realize_target(target: &ExcitationTarget) -> RealizedExcitationTarget {
@@ -170,7 +205,7 @@ macro_rules! directional_vector_action {
 fn realize_kind(
     action: &ExcitationAction,
     signal: &PhysicalSignal,
-    sample: ExcitationSamplePoint,
+    sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitationKind, RealizationError> {
     Ok(match action {
         ExcitationAction::Force(_) => RealizedExcitationKind::Force(directional_vector_action!(
@@ -318,7 +353,7 @@ enum SampledValue {
 
 fn sample_signal<Q>(
     signal: &Signal<Q>,
-    sample: ExcitationSamplePoint,
+    sample: ExcitationSamplePoint<'_>,
     component: impl Fn(&Q) -> f64,
 ) -> Result<SampledValue, RealizationError> {
     match &signal.representation {
@@ -355,18 +390,34 @@ fn axis_values(axis: &SignalAxis) -> &[f64] {
 }
 
 fn sample_abscissa(
-    sample: ExcitationSamplePoint,
+    sample: ExcitationSamplePoint<'_>,
     axis: &SignalAxis,
 ) -> Result<f64, RealizationError> {
-    match (sample, axis) {
-        (ExcitationSamplePoint::FrequencyHertz(value), SignalAxis::FrequencyHertz(_)) => Ok(value),
-        (ExcitationSamplePoint::Initial, axis) => axis_values(axis)
-            .first()
-            .copied()
-            .ok_or_else(|| RealizationError::new("tabulated signal has no samples")),
-        _ => Err(RealizationError::new(
-            "excitation sample point does not match the signal domain",
-        )),
+    let value = match (sample, axis) {
+        (ExcitationSamplePoint::TimeSeconds(value), SignalAxis::TimeSeconds(_)) => value,
+        (ExcitationSamplePoint::FrequencyHertz(value), SignalAxis::FrequencyHertz(_)) => value,
+        (
+            ExcitationSamplePoint::StudyParameter {
+                parameter_id,
+                canonical_value,
+            },
+            SignalAxis::StudyParameter {
+                parameter_id: axis_parameter,
+                ..
+            },
+        ) if parameter_id == axis_parameter => canonical_value,
+        _ => {
+            return Err(RealizationError::new(
+                "excitation sample point does not match the signal domain",
+            ))
+        }
+    };
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(RealizationError::new(
+            "excitation sample point must be finite",
+        ))
     }
 }
 
@@ -390,6 +441,14 @@ fn sample_table<Q>(
     extrapolation: SignalExtrapolation,
     component: impl Fn(&Q) -> f64,
 ) -> Result<SampledValue, RealizationError> {
+    if axis.len() != values.len()
+        || axis.iter().any(|value| !value.is_finite())
+        || axis.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(RealizationError::new(
+            "tabulated axis must be finite, strictly increasing, and match values",
+        ));
+    }
     let (left, right, weight) = sample_interval(axis, x, interpolation, extrapolation)?;
     let left = ordinate_value(&values[left], &component)?;
     let right = ordinate_value(&values[right], &component)?;

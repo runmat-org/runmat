@@ -2,7 +2,39 @@ use crate::fixtures::{
     fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind, FixtureId,
 };
 
-use super::{realize_model_excitations, RealizedExcitationKind};
+use super::{
+    realize::{realize_excitations, ExcitationSamplePoint},
+    realize_model_excitations, RealizedExcitationKind,
+};
+
+fn tabulated_force_model(
+    axis: runmat_analysis_core::SignalAxis,
+) -> runmat_analysis_core::AnalysisModel {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        panic!("cantilever fixture should carry a force signal");
+    };
+    signal.representation = runmat_analysis_core::SignalRepresentation::Tabulated(
+        runmat_analysis_core::TabulatedSignal {
+            axis,
+            values: [[0.0, 0.0, 0.0], [20.0, 40.0, 60.0]]
+                .into_iter()
+                .map(|value| {
+                    runmat_analysis_core::SignalOrdinate::Real(
+                        runmat_analysis_core::SignalValue::Vector3(
+                            value.map(runmat_analysis_core::Force::new),
+                        ),
+                    )
+                })
+                .collect(),
+            interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+            extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
+            breakpoints: Vec::new(),
+        },
+    );
+    signal.evidence.sample_count = 2;
+    model
+}
 
 #[test]
 fn realizes_typed_force_signal() {
@@ -15,6 +47,90 @@ fn realizes_typed_force_signal() {
         excitation.kind,
         RealizedExcitationKind::Force(value)
             if value.real == [0.0, -1000.0, 0.0] && value.imaginary == [0.0; 3]
+    ));
+}
+
+#[test]
+fn static_realization_does_not_implicitly_take_the_first_time_sample() {
+    let model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 1.0,
+    ]));
+
+    let error = realize_model_excitations(&model).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "excitation sample point does not match the signal domain"
+    );
+}
+
+#[test]
+fn mutually_exclusive_cases_require_an_explicit_selection() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.excitation_cases[0].activation =
+        runmat_analysis_core::ExcitationCaseActivation::MutuallyExclusiveGroup {
+            group_id: "load_variant".into(),
+        };
+
+    let error = realize_model_excitations(&model).unwrap_err();
+
+    assert!(error.to_string().contains("no case selection was supplied"));
+}
+
+#[test]
+fn malformed_tabulated_shape_fails_before_ordinate_indexing() {
+    let model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 0.5, 1.0,
+    ]));
+    let step = model.sequence.steps[0].step_id.clone();
+
+    let error = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(0.25),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "tabulated axis must be finite, strictly increasing, and match values"
+    );
+}
+
+#[test]
+fn explicit_time_and_parameter_samples_use_the_matching_domain() {
+    let time_model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 1.0,
+    ]));
+    let time_step = time_model.sequence.steps[0].step_id.clone();
+    let time = realize_excitations(
+        &time_model,
+        Some(&time_step.0),
+        ExcitationSamplePoint::TimeSeconds(0.25),
+    )
+    .unwrap();
+    assert!(matches!(
+        time.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [5.0, 10.0, 15.0]
+    ));
+
+    let parameter_model = tabulated_force_model(runmat_analysis_core::SignalAxis::StudyParameter {
+        parameter_id: "load_scale".into(),
+        canonical_values: vec![0.0, 1.0],
+    });
+    let parameter_step = parameter_model.sequence.steps[0].step_id.clone();
+    let parameter = realize_excitations(
+        &parameter_model,
+        Some(&parameter_step.0),
+        ExcitationSamplePoint::StudyParameter {
+            parameter_id: "load_scale",
+            canonical_value: 0.5,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        parameter.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [10.0, 20.0, 30.0]
     ));
 }
 
