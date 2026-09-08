@@ -2339,6 +2339,28 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "cell2struct catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/cells/core/cell2struct"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/cells/core/cell2struct/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/cell2struct.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/cell2struct.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "cell2struct runtime",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/cell2struct"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/cell2struct/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cell2struct/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/cells/core/cell2struct.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
   name: "mapped callable runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/mapped_callable"],
   compositionFiles: ["crates/runmat-runtime/src/builtins/common/mapped_callable/mod.rs"],
@@ -2497,6 +2519,15 @@ if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(ce
 if (/\bcellfun_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
   fail("cellfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
+const cell2structRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/cells/core/cell2struct/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities|category|summary|keywords|accel)\s*=/.test(cell2structRuntimeMacro)) {
+  fail("cell2struct runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\bcell2struct_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
+  fail("cell2struct must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
 const structfunRuntimeMacro = read(
   "crates/runmat-runtime/src/builtins/structs/core/structfun/mod.rs"
 );
@@ -2543,6 +2574,8 @@ if (/\borderfields_type\b/.test(read("crates/runmat-runtime/src/builtins/structs
   fail("orderfields must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 for (const obsoletePath of [
+  "crates/runmat-builtins/src/catalog/contract/cells.rs",
+  "crates/runmat-builtins/src/catalog/inference/routing/cells.rs",
   "crates/runmat-builtins/src/catalog/contract/structs.rs",
   "crates/runmat-builtins/src/catalog/inference/routing/structs.rs",
   "crates/runmat-builtins/src/catalog/entries/structs/core/inference.rs",
@@ -2563,8 +2596,20 @@ if (identityInferenceContractLines > 96) {
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-builtins/src/catalog"
 )) {
-  if (/\b(?:StructInferenceRule|CoreStructInferenceRule)\b/.test(text)) {
-    fail(`${sourcePath} must not restore count-proportional structure inference identities`);
+  if (/\b(?:CellInferenceRule|StructInferenceRule|CoreStructInferenceRule)\b/.test(text)) {
+    fail(`${sourcePath} must not restore count-proportional builtin inference identities`);
+  }
+}
+for (const entryPath of [
+  "crates/runmat-builtins/src/catalog/entries/cells/cellfun/entry.rs",
+  "crates/runmat-builtins/src/catalog/entries/cells/core/cell2struct/entry.rs",
+]) {
+  const entrySource = read(entryPath);
+  if (!/BuiltinInferenceRule::Identity\(IdentityInferenceRule::new\(super::infer\)\)/.test(entrySource)) {
+    fail(`${entryPath} must bind its inference implementation directly from its identity package`);
+  }
+  if (/CellInferenceRule/.test(entrySource)) {
+    fail(`${entryPath} must not depend on count-proportional cell inference enums`);
   }
 }
 for (const identity of ["fieldnames", "isfield", "orderfields", "rmfield", "structfun"]) {

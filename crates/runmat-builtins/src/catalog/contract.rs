@@ -9,7 +9,6 @@ use crate::{
 mod acceleration;
 mod aggregate;
 mod array;
-mod cells;
 mod inference;
 mod introspection;
 mod io;
@@ -21,7 +20,6 @@ mod stats;
 pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
-pub use cells::*;
 pub use inference::*;
 pub use introspection::*;
 pub use io::*;
