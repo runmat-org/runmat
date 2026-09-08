@@ -1081,6 +1081,7 @@ mod tests {
     use super::*;
     use crate::{
         assembly::{assemble_structural_system, StructuralFormulationRequirement},
+        excitation::{realize_step_excitations, ExcitationSamplePoint, RealizedExcitations},
         fixtures::{fixture_model, FixtureId},
     };
     use runmat_analysis_core::{
@@ -1090,6 +1091,15 @@ mod tests {
     };
     use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
+    fn static_excitations(model: &runmat_analysis_core::AnalysisModel) -> RealizedExcitations {
+        realize_step_excitations(
+            model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .expect("field-recovery fixture excitations should realize")
+    }
+
     #[test]
     fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -1097,6 +1107,7 @@ mod tests {
         model.constraints.clear();
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(tetrahedron4_mesh()),
             None,
             None,
@@ -1171,6 +1182,7 @@ mod tests {
             .expect("fixture contains node 2");
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(mesh),
             None,
             None,
@@ -1210,6 +1222,7 @@ mod tests {
         model.constraints.clear();
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(tetrahedron4_mesh()),
             None,
             None,

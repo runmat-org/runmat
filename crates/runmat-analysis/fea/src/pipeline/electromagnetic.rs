@@ -20,7 +20,9 @@ use crate::{
         FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    excitation::{realize_model_excitations, ComplexVector3, RealizedExcitationKind},
+    excitation::{
+        realize_step_excitations, ComplexVector3, ExcitationSamplePoint, RealizedExcitationKind,
+    },
     operator::{apply_k, OperatorSystem},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::backend::kind::LinearAlgebraBackendKind,
@@ -77,6 +79,28 @@ pub fn run_electromagnetic_with_options(
             "electromagnetic solve requires a finite positive reference frequency".to_string(),
         ));
     }
+    let mut electromagnetic_steps = model.sequence.steps.iter().filter(|step| {
+        step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
+            && step.procedure == options.procedure
+    });
+    let electromagnetic_step = electromagnetic_steps.next().ok_or_else(|| {
+        FeaRunError::InvalidModel(
+            "electromagnetic execution requires exactly one matching procedure step, but none was found"
+                .into(),
+        )
+    })?;
+    if electromagnetic_steps.next().is_some() {
+        return Err(FeaRunError::InvalidModel(
+            "electromagnetic execution requires exactly one matching procedure step, but multiple were found"
+                .into(),
+        ));
+    }
+    let excitations = realize_step_excitations(
+        model,
+        electromagnetic_step,
+        ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
 
     emit_phase(
         "fea.run_electromagnetic",
@@ -87,8 +111,9 @@ pub fn run_electromagnetic_with_options(
         Some(5),
     );
     let solver_mesh = options.solver_mesh.as_ref();
-    let mut summary = assemble_linear_system(model, options.solver_mesh.clone(), None, None)
-        .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let mut summary =
+        assemble_linear_system(model, &excitations, options.solver_mesh.clone(), None, None)
+            .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,
@@ -164,8 +189,6 @@ pub fn run_electromagnetic_with_options(
         mapped_boundary_condition_count as f64 / electromagnetic_boundary_count as f64
     };
 
-    let excitations = realize_model_excitations(model)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let applied_current_a = excitations
         .iter()
         .filter_map(|excitation| match excitation.kind {

@@ -11,6 +11,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
     operator::{apply_k, apply_m},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
@@ -53,6 +54,10 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
 
+    let excitations =
+        realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::ModelAssembly,
@@ -63,6 +68,7 @@ pub fn run_modal_with_options(
     );
     let summary = assemble_structural_system(
         model,
+        &excitations,
         options.solver_mesh,
         options.thermo_mechanical_context,
         options.electro_thermal_context,

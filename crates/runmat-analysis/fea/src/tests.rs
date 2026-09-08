@@ -48,6 +48,17 @@ fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisCon
         },
     )
 }
+
+fn static_excitations(
+    model: &runmat_analysis_core::AnalysisModel,
+) -> crate::excitation::RealizedExcitations {
+    crate::excitation::realize_step_excitations(
+        model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .expect("test model excitations should realize at the static sample")
+}
 use runmat_analysis_core::{
     AnalysisProcedure, ElectromagneticDomain, Frequency, MaterialElectricalModel, ProcedureStep,
 };
@@ -335,6 +346,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     electromagnetic_model.electromagnetic = Some(ElectromagneticDomain {
         reference_frequency: Frequency::new(60.0),
     });
+    electromagnetic_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
     for material in &mut electromagnetic_model.materials {
         material.electrical = Some(MaterialElectricalModel::default());
     }
@@ -431,6 +443,7 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
     let inline_model = fixture_model(FixtureId::TransientShock);
     let inline = crate::assembly::assemble_structural_system(
         &inline_model,
+        &static_excitations(&inline_model),
         None,
         None,
         None,
@@ -479,6 +492,7 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
 
     let referenced = crate::assembly::assemble_structural_system(
         &signal_model,
+        &static_excitations(&signal_model),
         None,
         None,
         None,
@@ -494,6 +508,7 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let summary = crate::assembly::assemble_structural_system(
         &model,
+        &static_excitations(&model),
         None,
         None,
         None,
@@ -518,6 +533,7 @@ fn beam_assembly_uses_lumped_rotational_inertia() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let summary = crate::assembly::assemble_structural_system(
         &model,
+        &static_excitations(&model),
         None,
         None,
         None,
@@ -1486,12 +1502,37 @@ fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
 }
 
 #[test]
+fn electromagnetic_pipeline_rejects_a_model_without_the_requested_step() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
+    model.electromagnetic = Some(ElectromagneticDomain {
+        reference_frequency: Frequency::new(60.0),
+    });
+    model.sequence.steps = vec![ProcedureStep::structural_static("structural")];
+    for material in &mut model.materials {
+        material.electrical = Some(MaterialElectricalModel::default());
+    }
+
+    let error = crate::run_electromagnetic_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_electromagnetic_options(),
+    )
+    .expect_err("electromagnetic execution must select its exact procedure step");
+
+    assert!(error
+        .to_string()
+        .contains("exactly one matching procedure step, but none was found"));
+}
+
+#[test]
 fn electromagnetic_pipeline_consumes_electric_current_without_structural_admission() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
     model.electromagnetic = Some(ElectromagneticDomain {
         reference_frequency: Frequency::new(60.0),
     });
+    model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
     for material in &mut model.materials {
         material.electrical = Some(MaterialElectricalModel::default());
     }

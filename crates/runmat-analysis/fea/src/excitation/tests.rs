@@ -3,9 +3,20 @@ use crate::fixtures::{
 };
 
 use super::{
-    realize::realize_excitations, realize_model_excitations, sample::ExcitationSamplePoint,
-    RealizedExcitationKind,
+    realize::{realize_excitations, realize_step_excitations, RealizationError},
+    sample::ExcitationSamplePoint,
+    RealizedExcitationKind, RealizedExcitations,
 };
+
+fn realize_static(
+    model: &runmat_analysis_core::AnalysisModel,
+) -> Result<RealizedExcitations, RealizationError> {
+    realize_step_excitations(
+        model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+}
 
 fn tabulated_force_model(
     axis: runmat_analysis_core::SignalAxis,
@@ -55,7 +66,7 @@ fn set_table_policy(
 #[test]
 fn realizes_typed_force_signal() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let realized = realize_model_excitations(&model).expect("typed force should realize");
+    let realized = realize_static(&model).expect("typed force should realize");
     let excitation = realized.iter().next().expect("one excitation");
 
     assert_eq!(excitation.excitation_id.0, "tip_load");
@@ -72,7 +83,7 @@ fn static_realization_does_not_implicitly_take_the_first_time_sample() {
         0.0, 1.0,
     ]));
 
-    let error = realize_model_excitations(&model).unwrap_err();
+    let error = realize_static(&model).unwrap_err();
 
     assert_eq!(
         error.to_string(),
@@ -88,7 +99,7 @@ fn mutually_exclusive_cases_require_an_explicit_selection() {
             group_id: "load_variant".into(),
         };
 
-    let error = realize_model_excitations(&model).unwrap_err();
+    let error = realize_static(&model).unwrap_err();
 
     assert!(error.to_string().contains("no case selection was supplied"));
 }
@@ -289,7 +300,7 @@ fn projects_scalar_force_along_its_typed_direction() {
         vector: [0.0, -1.0, 0.0],
     });
 
-    let realized = realize_model_excitations(&model).expect("directional scalar should realize");
+    let realized = realize_static(&model).expect("directional scalar should realize");
 
     assert!(matches!(
         realized.iter().next().expect("one force").kind,
@@ -310,7 +321,7 @@ fn rejects_scalar_force_without_a_direction() {
     );
     model.excitations[0].excitation_mut().direction = None;
 
-    let error = realize_model_excitations(&model).expect_err("direction should be required");
+    let error = realize_static(&model).expect_err("direction should be required");
 
     assert_eq!(
         error.to_string(),
@@ -334,7 +345,7 @@ fn preserves_reference_point_force_and_moment_action_identity() {
         }],
     );
 
-    let realized = realize_model_excitations(&model).expect("wrench should realize");
+    let realized = realize_static(&model).expect("wrench should realize");
     assert_eq!(realized.len(), 2);
     let entries = realized.iter().collect::<Vec<_>>();
     assert_eq!(entries[0].excitation_id.0, "tip_wrench");
@@ -398,7 +409,12 @@ fn preserves_complex_frequency_domain_current_density() {
         action,
     )];
 
-    let realized = realize_model_excitations(&model).expect("complex current should realize");
+    let realized = realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::FrequencyHertz(60.0),
+    )
+    .expect("complex current should realize");
     assert!(matches!(
         realized.iter().next().expect("one current").kind,
         RealizedExcitationKind::CurrentDensity(value)

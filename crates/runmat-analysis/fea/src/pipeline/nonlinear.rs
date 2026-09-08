@@ -13,6 +13,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
@@ -58,6 +59,9 @@ pub fn run_nonlinear_with_options(
         Some(5),
     );
     check_cancelled("fea.run_nonlinear")?;
+    let excitations =
+        realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
@@ -71,6 +75,7 @@ pub fn run_nonlinear_with_options(
     );
     let summary = assemble_structural_system(
         model,
+        &excitations,
         options.solver_mesh.clone(),
         thermo_context,
         electro_context,

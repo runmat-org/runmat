@@ -19,7 +19,10 @@ use crate::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    excitation::{realize_model_excitations, RealizedExcitationKind},
+    excitation::{
+        realize_step_excitations, ExcitationSamplePoint, RealizedExcitationKind,
+        RealizedExcitations,
+    },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::fields::{
@@ -90,6 +93,10 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let excitations =
+        realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
@@ -101,6 +108,7 @@ fn run_linear_static_with_constraint_plan(
     let summary = match constraint_plan {
         Some(plan) => assemble_structural_system_with_constraint_plan(
             model,
+            &excitations,
             options.solver_mesh.clone().ok_or_else(|| {
                 FeaRunError::InvalidModel(
                     "a prepared constraint plan requires its canonical solver mesh".into(),
@@ -113,6 +121,7 @@ fn run_linear_static_with_constraint_plan(
         ),
         None => assemble_structural_system(
             model,
+            &excitations,
             options.solver_mesh.clone(),
             options.thermo_mechanical_context.clone(),
             options.electro_thermal_context.clone(),
@@ -339,10 +348,13 @@ fn run_linear_static_with_constraint_plan(
             recovery_metrics.element_geometry_coverage_ratio
         ),
     });
-    if let Some(moment_balance) = structural_moment_balance_diagnostic(model, &fields) {
+    if let Some(moment_balance) = structural_moment_balance_diagnostic(model, &excitations, &fields)
+    {
         diagnostics.push(moment_balance);
     }
-    if let Some(beam_closed_form) = structural_beam_closed_form_diagnostic(model, &fields) {
+    if let Some(beam_closed_form) =
+        structural_beam_closed_form_diagnostic(model, &excitations, &fields)
+    {
         diagnostics.push(beam_closed_form);
     }
     extend_common_run_diagnostics(
@@ -580,6 +592,7 @@ fn structural_reference_kinematics_diagnostic(
 
 fn structural_beam_closed_form_diagnostic(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     fields: &[AnalysisField],
 ) -> Option<FeaDiagnostic> {
     let case = match model.model_id.0.as_str() {
@@ -608,7 +621,6 @@ fn structural_beam_closed_form_diagnostic(
     let mut tip_force_y_n = 0.0_f64;
     let mut tip_torque_x_n_m = 0.0_f64;
     let mut tip_moment_z_n_m = 0.0_f64;
-    let excitations = realize_model_excitations(model).ok()?;
     for load in excitations.iter() {
         if load.target.solver_region_id() != Some("node:2") {
             continue;
@@ -690,9 +702,10 @@ fn structural_beam_closed_form_diagnostic(
 
 fn structural_moment_balance_diagnostic(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     fields: &[AnalysisField],
 ) -> Option<FeaDiagnostic> {
-    let requested = requested_moment_vector(model);
+    let requested = requested_moment_vector(model, excitations);
     let requested_norm = vector3_norm(requested);
     if requested_norm <= 0.0 {
         return None;
@@ -728,11 +741,8 @@ fn structural_moment_balance_diagnostic(
     })
 }
 
-fn requested_moment_vector(model: &AnalysisModel) -> [f64; 3] {
+fn requested_moment_vector(model: &AnalysisModel, excitations: &RealizedExcitations) -> [f64; 3] {
     let mut out = [0.0_f64; 3];
-    let Ok(excitations) = realize_model_excitations(model) else {
-        return out;
-    };
     for load in excitations.iter() {
         match load.kind {
             RealizedExcitationKind::Moment(value) => {

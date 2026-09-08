@@ -49,7 +49,7 @@ use crate::constraints::{
     CanonicalStructuralDofOwner, ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery,
     ResolvedConstraintMatrix,
 };
-use crate::excitation::{realize_model_excitations, RealizedExcitationKind, RealizedExcitations};
+use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::physics::coupling::thermo_mechanical;
 use crate::{FeaElectroThermalContext, FeaThermoMechanicalContext};
@@ -111,7 +111,6 @@ pub struct AssemblySummary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinearAssemblyError {
-    ExcitationRealization(String),
     ConstraintPlan(ConstraintPlanError),
     ConstraintAlgebra(ConstraintAlgebraError),
     Structural(StructuralAssemblyError),
@@ -122,7 +121,6 @@ pub enum LinearAssemblyError {
 impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LinearAssemblyError::ExcitationRealization(err) => write!(f, "{err}"),
             LinearAssemblyError::ConstraintPlan(err) => {
                 write!(f, "constraint planning failed: {err}")
             }
@@ -554,12 +552,14 @@ pub struct ElectroThermalAssemblySummary {
 /// Structural callers must use [`assemble_structural_system`] so synthetic admission is explicit.
 pub(crate) fn assemble_linear_system(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_linear_system_impl(
         model,
+        excitations,
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
@@ -568,8 +568,9 @@ pub(crate) fn assemble_linear_system(
     )
 }
 
-pub fn assemble_structural_system(
+pub(crate) fn assemble_structural_system(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
@@ -577,6 +578,7 @@ pub fn assemble_structural_system(
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_linear_system_impl(
         model,
+        excitations,
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
@@ -585,8 +587,9 @@ pub fn assemble_structural_system(
     )
 }
 
-pub fn assemble_structural_system_with_constraint_plan(
+pub(crate) fn assemble_structural_system_with_constraint_plan(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     solver_mesh: SolverMeshArtifact,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
@@ -595,6 +598,7 @@ pub fn assemble_structural_system_with_constraint_plan(
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_linear_system_impl(
         model,
+        excitations,
         Some(solver_mesh),
         thermo_mechanical_context,
         electro_thermal_context,
@@ -605,15 +609,13 @@ pub fn assemble_structural_system_with_constraint_plan(
 
 fn assemble_linear_system_impl(
     model: &AnalysisModel,
+    excitations: &RealizedExcitations,
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
     structural_requirement: Option<StructuralFormulationRequirement>,
     supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
-    let excitations = realize_model_excitations(model)
-        .map_err(|error| LinearAssemblyError::ExcitationRealization(error.to_string()))?;
-
     let explicit_element_count = model
         .structural
         .as_ref()
@@ -634,7 +636,7 @@ fn assemble_linear_system_impl(
                 ),
             ));
         }
-        return assemble_explicit_structural_system(model, &excitations)
+        return assemble_explicit_structural_system(model, excitations)
             .map_err(LinearAssemblyError::Structural);
     }
     if solver_mesh.is_none()
@@ -654,7 +656,7 @@ fn assemble_linear_system_impl(
     if structural_requirement.is_some() {
         validate_structural_inputs(
             model,
-            &excitations,
+            excitations,
             if solid_topology.is_some() {
                 StructuralProjectionBasis::CanonicalSolid
             } else {
@@ -759,9 +761,9 @@ fn assemble_linear_system_impl(
     if structural_requirement
         == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
     {
-        apply_synthetic_structural_rhs(&excitations, &mut rhs);
+        apply_synthetic_structural_rhs(excitations, &mut rhs);
     } else if structural_requirement.is_none() {
-        apply_reduced_multiphysics_rhs(&excitations, &mut rhs);
+        apply_reduced_multiphysics_rhs(excitations, &mut rhs);
     }
 
     let structural_dof_layout = StructuralDofLayout::reduced_translational_rows(mesh_dof_count)
@@ -770,7 +772,7 @@ fn assemble_linear_system_impl(
         .iter()
         .filter(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
         .count();
-    let structural_requested_moment_norm_n_m = requested_moment_norm(&excitations);
+    let structural_requested_moment_norm_n_m = requested_moment_norm(excitations);
     let structural_direct_rotational_moment_load_count =
         if structural_dof_layout.has_rotational_dofs() {
             structural_moment_load_count
@@ -807,7 +809,7 @@ fn assemble_linear_system_impl(
                 ))
             })?;
             let source_projection = apply_solver_mesh_structural_loads(
-                &excitations,
+                excitations,
                 mesh,
                 constraint_plan,
                 &structural_dof_layout,
@@ -1116,7 +1118,7 @@ fn assemble_linear_system_impl(
             || vec![SourceImplementation::NotApplicable],
             |_| {
                 structural_source_implementations(
-                    &excitations,
+                    excitations,
                     if solid_topology.is_some() {
                         StructuralProjectionBasis::CanonicalSolid
                     } else {
@@ -2395,12 +2397,42 @@ mod tests {
         )
     }
 
+    fn static_excitations(model: &AnalysisModel) -> RealizedExcitations {
+        crate::excitation::realize_step_excitations(
+            model,
+            &model.sequence.steps[0],
+            crate::excitation::ExcitationSamplePoint::Static,
+        )
+        .expect("test model excitations should realize at the static sample")
+    }
+
+    fn scaled_force_excitations(
+        excitations: &RealizedExcitations,
+        scale: f64,
+    ) -> RealizedExcitations {
+        RealizedExcitations::new(
+            excitations
+                .iter()
+                .cloned()
+                .map(|mut excitation| {
+                    if let RealizedExcitationKind::Force(force) = &mut excitation.kind {
+                        force.real.iter_mut().for_each(|value| *value *= scale);
+                        force.imaginary.iter_mut().for_each(|value| *value *= scale);
+                    }
+                    excitation
+                })
+                .collect(),
+        )
+    }
+
     fn assemble_physical_structural_system(
         model: &AnalysisModel,
         solver_mesh: Option<SolverMeshArtifact>,
     ) -> Result<AssemblySummary, LinearAssemblyError> {
+        let excitations = static_excitations(model);
         assemble_structural_system(
             model,
+            &excitations,
             solver_mesh,
             None,
             None,
@@ -2498,6 +2530,7 @@ mod tests {
 
         let error = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(tetrahedron4_mesh()),
             None,
             None,
@@ -2593,6 +2626,7 @@ mod tests {
 
             let error = assemble_structural_system(
                 &model,
+                &static_excitations(&model),
                 Some(mesh),
                 None,
                 None,
@@ -2746,6 +2780,7 @@ mod tests {
 
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(mesh),
             None,
             None,
@@ -2990,6 +3025,7 @@ mod tests {
 
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(mesh),
             None,
             None,
@@ -3154,6 +3190,7 @@ mod tests {
         for (name, model, expected) in cases {
             let error = assemble_structural_system(
                 &model,
+                &static_excitations(&model),
                 None,
                 None,
                 None,
@@ -3180,6 +3217,7 @@ mod tests {
 
         let error = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             None,
             None,
             None,
@@ -3201,6 +3239,7 @@ mod tests {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let error = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             None,
             None,
             None,
@@ -3238,6 +3277,7 @@ mod tests {
             );
             let error = assemble_structural_system(
                 &model,
+                &static_excitations(&model),
                 None,
                 None,
                 None,
@@ -3309,12 +3349,32 @@ mod tests {
     }
 
     #[test]
+    fn assembly_consumes_the_caller_selected_excitation_sample() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let first_sample = static_excitations(&model);
+        let second_sample = scaled_force_excitations(&first_sample, 2.0);
+
+        let first = assemble_linear_system(&model, &first_sample, None, None, None)
+            .expect("first sampled load should assemble");
+        let second = assemble_linear_system(&model, &second_sample, None, None, None)
+            .expect("second sampled load should assemble");
+
+        assert_eq!(first.operator.stiffness_csr, second.operator.stiffness_csr);
+        assert_eq!(first.operator.rhs.len(), second.operator.rhs.len());
+        assert!(first.operator.rhs.iter().any(|value| value.abs() > 0.0));
+        for (first_value, second_value) in first.operator.rhs.iter().zip(&second.operator.rhs) {
+            assert!((second_value - 2.0 * first_value).abs() <= 1.0e-12);
+        }
+    }
+
+    #[test]
     fn nonstructural_scaffolding_ignores_explicit_structural_connectivity() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
         model.constraints.clear();
 
-        let summary = assemble_linear_system(&model, None, None, None)
+        let excitations = static_excitations(&model);
+        let summary = assemble_linear_system(&model, &excitations, None, None, None)
             .expect("nonstructural scaffolding must not select explicit structural assembly");
 
         assert_eq!(summary.load_count, 1);
@@ -3322,8 +3382,9 @@ mod tests {
         assert!(summary.structural_formulation.is_none());
         assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
 
-        let mesh_summary = assemble_linear_system(&model, Some(tetrahedron4_mesh()), None, None)
-            .expect("a solver mesh must not route a nonstructural source through mechanics");
+        let mesh_summary =
+            assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()), None, None)
+                .expect("a solver mesh must not route a nonstructural source through mechanics");
         assert!(mesh_summary.structural_formulation.is_none());
         assert_eq!(
             mesh_summary.structural_sources,
@@ -3353,6 +3414,7 @@ mod tests {
         );
         let error = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             None,
             None,
             None,
@@ -3391,6 +3453,7 @@ mod tests {
         )];
         let error = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             None,
             None,
             None,
@@ -3425,6 +3488,7 @@ mod tests {
         reseal(&mut mesh);
         let summary = assemble_structural_system(
             &model,
+            &static_excitations(&model),
             Some(mesh),
             None,
             None,
@@ -3448,6 +3512,7 @@ mod tests {
         solid_model.constraints.clear();
         let tet4 = assemble_structural_system(
             &solid_model,
+            &static_excitations(&solid_model),
             Some(crate::assembly::solver_solid::tests::artifact(
                 ElementOrder::Tet4,
             )),
@@ -3458,6 +3523,7 @@ mod tests {
         .expect("Tet4 assembly should succeed");
         let tet10 = assemble_structural_system(
             &solid_model,
+            &static_excitations(&solid_model),
             Some(crate::assembly::solver_solid::tests::artifact(
                 ElementOrder::Tet10,
             )),
@@ -3466,24 +3532,30 @@ mod tests {
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("Tet10 assembly should succeed");
+        let beam_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         let beam = assemble_structural_system(
-            &fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference),
+            &beam_model,
+            &static_excitations(&beam_model),
             None,
             None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("beam assembly should succeed");
+        let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         let shell = assemble_structural_system(
-            &fixture_model(FixtureId::StructuralShellPlateMomentReference),
+            &shell_model,
+            &static_excitations(&shell_model),
             None,
             None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("shell assembly should succeed");
+        let synthetic_model = fixture_model(FixtureId::CantileverLinearStatic);
         let synthetic = assemble_structural_system(
-            &fixture_model(FixtureId::CantileverLinearStatic),
+            &synthetic_model,
+            &static_excitations(&synthetic_model),
             None,
             None,
             None,

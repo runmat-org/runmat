@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-use runmat_analysis_core::{AnalysisModel, IndependentDomain};
+use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 
 use super::{
     action::realize_kind,
@@ -10,39 +10,12 @@ use super::{
     target::realize_target,
 };
 
-pub(crate) fn realize_model_excitations(
+pub(crate) fn realize_step_excitations(
     model: &AnalysisModel,
+    step: &ProcedureStep,
+    sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
-    let sample = if let Some(domain) = &model.electromagnetic {
-        ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz)
-    } else {
-        match model
-            .sequence
-            .steps
-            .first()
-            .map(|step| &step.independent_domain)
-        {
-            Some(IndependentDomain::TimeSeconds { start, .. }) => {
-                ExcitationSamplePoint::TimeSeconds(*start)
-            }
-            Some(IndependentDomain::StudyParameter {
-                parameter_id,
-                canonical_values,
-            }) => ExcitationSamplePoint::StudyParameter {
-                parameter_id,
-                canonical_value: canonical_values.first().copied().ok_or_else(|| {
-                    RealizationError::new("study-parameter procedure has no canonical values")
-                })?,
-            },
-            _ => ExcitationSamplePoint::Static,
-        }
-    };
-    let step_id = model
-        .sequence
-        .steps
-        .first()
-        .map(|step| step.step_id.as_str());
-    realize_excitations(model, step_id, sample)
+    realize_excitations(model, Some(step.step_id.as_str()), sample)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

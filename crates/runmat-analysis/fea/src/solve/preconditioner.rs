@@ -178,6 +178,7 @@ pub fn build_spd_preconditioner(
 #[cfg(test)]
 mod tests {
     use crate::assembly::{assemble_structural_system, StructuralFormulationRequirement};
+    use crate::excitation::{realize_step_excitations, ExcitationSamplePoint};
     use crate::fixtures::{fixture_model, FixtureId};
 
     use super::*;
@@ -188,8 +189,16 @@ mod tests {
 
     #[test]
     fn ilu0_preconditioner_is_buildable_and_finite() {
+        let model = model();
+        let excitations = realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .expect("preconditioner fixture excitations should realize");
         let summary = assemble_structural_system(
-            &model(),
+            &model,
+            &excitations,
             None,
             None,
             None,

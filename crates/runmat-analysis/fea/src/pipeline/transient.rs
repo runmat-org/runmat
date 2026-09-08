@@ -1,4 +1,6 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, IndependentDomain,
+};
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
@@ -16,6 +18,7 @@ use crate::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
     operator::{apply_k_unconstrained, apply_m},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
@@ -61,6 +64,20 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
+    let start_time_s = match &execution_step.independent_domain {
+        IndependentDomain::TimeSeconds { start, .. } => *start,
+        _ => {
+            return Err(FeaRunError::InvalidModel(
+                "structural transient execution requires a time-domain procedure step".into(),
+            ));
+        }
+    };
+    let excitations = realize_step_excitations(
+        model,
+        execution_step,
+        ExcitationSamplePoint::TimeSeconds(start_time_s),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let thermo_context = options.thermo_mechanical_context.clone();
     let electro_context = options.electro_thermal_context.clone();
 
@@ -74,6 +91,7 @@ pub fn run_transient_with_options(
     );
     let summary = assemble_structural_system(
         model,
+        &excitations,
         options.solver_mesh.clone(),
         thermo_context,
         electro_context,

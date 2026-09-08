@@ -18,6 +18,7 @@ use crate::fixtures::{
 };
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    excitation::{realize_step_excitations, ExcitationSamplePoint, RealizedExcitations},
     post::fields::recover_result_fields,
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
@@ -25,6 +26,15 @@ use crate::{
         preconditioner::SpdPreconditionerKind,
     },
 };
+
+fn static_excitations(model: &AnalysisModel) -> RealizedExcitations {
+    realize_step_excitations(
+        model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+    .expect("constraint fixture excitations should realize")
+}
 
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -738,6 +748,7 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     ];
     let summary = assemble_structural_system(
         &model,
+        &static_excitations(&model),
         Some(mesh.clone()),
         None,
         None,
@@ -801,6 +812,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
     ];
     let mut summary = assemble_structural_system(
         &model,
+        &static_excitations(&model),
         Some(mesh.clone()),
         None,
         None,
@@ -887,6 +899,7 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
 
     let summary = assemble_structural_system(
         &model,
+        &static_excitations(&model),
         Some(mesh.clone()),
         None,
         None,

@@ -12,7 +12,7 @@ use crate::{
     diagnostics::{
         builders::material_assignment_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    excitation::{realize_excitations, ExcitationSamplePoint},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
     physics::thermal::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
         constitutive_stats, initial_state,
@@ -390,7 +390,7 @@ fn realize_excitations_for_step(
     step: &runmat_analysis_core::ProcedureStep,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<crate::excitation::RealizedExcitations, FeaRunError> {
-    realize_excitations(model, Some(step.step_id.as_str()), sample)
+    realize_step_excitations(model, step, sample)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))
 }
 

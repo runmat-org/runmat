@@ -10,14 +10,13 @@ pub mod transient;
 mod admission;
 
 use runmat_analysis_core::{
-    AnalysisModel, StructuralConstraint, StructuralConstraintKind, StructuralElementKind,
-    StructuralModel,
+    AnalysisModel, ExcitationAction, ExcitationTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralElementKind, StructuralModel,
 };
 
 use crate::{
     assembly::{dofs::StructuralDofKind, AssemblySummary},
     contracts::FeaRunError,
-    excitation::{realize_model_excitations, RealizedExcitationKind},
 };
 
 const ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
@@ -63,19 +62,23 @@ pub(crate) fn reject_moment_loads_for_nonstructural_pipeline(
     model: &AnalysisModel,
     family: &str,
 ) -> Result<(), FeaRunError> {
-    let excitations = realize_model_excitations(model)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let Some(load) = excitations
+    let Some(action) = model
+        .excitations
         .iter()
-        .find(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
+        .find(|action| matches!(action, ExcitationAction::Moment(_)))
     else {
         return Ok(());
+    };
+    let excitation = action.excitation();
+    let region_id = match &excitation.target {
+        ExcitationTarget::Region(target) => target.region_id.as_str(),
+        _ => "<non-region target>",
     };
 
     Err(FeaRunError::InvalidModel(format!(
         "moment loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
-        load.excitation_id.0,
-        load.target.solver_region_id().unwrap_or("<non-region target>")
+        excitation.excitation_id.0,
+        region_id,
     )))
 }
 
