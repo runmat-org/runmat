@@ -356,19 +356,19 @@ fn validate_artifact(artifact: &SignalArtifactRef) -> Result<(), String> {
 }
 
 fn validate_generator(generator: &SignalGenerator) -> Result<(), String> {
-    let parts = generator.qualified_function.split('.').collect::<Vec<_>>();
-    let project_function = parts.len() >= 2 && parts.iter().all(|part| is_identifier(part));
-    let semantic_anonymous = generator
-        .qualified_function
-        .strip_prefix("anonymous#")
-        .is_some_and(|ordinal| {
-            !ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-        });
-    if !project_function && !semantic_anonymous {
-        return Err(
-            "generator requires a project-qualified function or frozen semantic closure identity"
-                .to_string(),
-        );
+    match &generator.callable {
+        crate::GeneratorCallable::ProjectFunction { qualified_name } => {
+            let parts = qualified_name.split('.').collect::<Vec<_>>();
+            if parts.len() < 2 || !parts.iter().all(|part| is_identifier(part)) {
+                return Err("project generator requires a qualified function name".to_string());
+            }
+        }
+        crate::GeneratorCallable::BoundFunction { display_name, .. }
+            if display_name.trim().is_empty() =>
+        {
+            return Err("bound generator requires a display name".to_string())
+        }
+        crate::GeneratorCallable::BoundFunction { .. } => {}
     }
     if matches!(
         &generator.domain,
@@ -459,7 +459,9 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Generator(SignalGenerator {
-                qualified_function: "loads.launch_force".to_string(),
+                callable: crate::GeneratorCallable::ProjectFunction {
+                    qualified_name: "loads.launch_force".to_string(),
+                },
                 arguments: Vec::new(),
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
@@ -490,25 +492,26 @@ mod tests {
     }
 
     #[test]
-    fn frozen_semantic_closure_identity_is_valid_but_malformed_labels_are_not() {
+    fn bound_function_identity_is_typed_and_requires_a_display_name() {
         let mut signal = generated_force(SignalProvenance::Authored);
-        set_generator_name(&mut signal, "anonymous#17");
-        validate_signals(&[signal.clone()]).expect("semantic closure identity should validate");
+        set_bound_generator(&mut signal, 17, "pressureHistory");
+        validate_signals(&[signal.clone()]).expect("semantic callable identity should validate");
 
-        for invalid in ["anonymous#", "anonymous#x", "workspace_function"] {
-            set_generator_name(&mut signal, invalid);
-            assert!(validate_signals(&[signal.clone()]).is_err());
-        }
+        set_bound_generator(&mut signal, 17, "");
+        assert!(validate_signals(&[signal.clone()]).is_err());
     }
 
-    fn set_generator_name(signal: &mut PhysicalSignal, name: &str) {
+    fn set_bound_generator(signal: &mut PhysicalSignal, function: u32, display_name: &str) {
         let PhysicalSignal::Force(signal) = signal else {
             unreachable!()
         };
         let SignalRepresentation::Generator(generator) = &mut signal.representation else {
             unreachable!()
         };
-        generator.qualified_function = name.into();
+        generator.callable = crate::GeneratorCallable::BoundFunction {
+            function: runmat_types::ProgramFunctionId(function),
+            display_name: display_name.into(),
+        };
     }
 
     #[test]

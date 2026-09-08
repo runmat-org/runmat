@@ -30,6 +30,10 @@ impl RunMatSession {
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        let program_service = std::rc::Rc::new(super::program::SessionProgramService::default());
+        #[cfg(not(target_arch = "wasm32"))]
+        let runtime_services = runtime_services.with_program(program_service.clone());
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),
@@ -54,6 +58,8 @@ impl RunMatSession {
             )
             .with_search_path(search_path)
             .with_service_ports(runtime_services),
+            #[cfg(not(target_arch = "wasm32"))]
+            program_service,
             placement_session: placement,
             is_executing: false,
             async_input_handler: None,

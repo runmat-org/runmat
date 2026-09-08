@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use super::*;
 use runmat_analysis_core::{
-    GeneratorArgument, GeneratorDomain, GeneratorEffectPolicy, SignalGenerator,
+    GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy, SignalGenerator,
     SignalSamplingPolicy,
 };
 use runmat_execution::value::{CallableValue, InlineValue, ValuePayload};
@@ -349,7 +349,10 @@ fn callable_signal<Q>(
         shape,
         frame,
         representation: SignalRepresentation::Generator(SignalGenerator {
-            qualified_function: callable.qualified_name.clone(),
+            callable: GeneratorCallable::BoundFunction {
+                function: bound_function_id(builtin, &callable)?,
+                display_name: callable.qualified_name.clone(),
+            },
             arguments,
             domain,
             sampling,
@@ -367,6 +370,31 @@ fn callable_signal<Q>(
         provenance: SignalProvenance::Authored,
     });
     callable_signal_object(builtin, class_name, signal, callable)
+}
+
+fn bound_function_id(
+    builtin: &'static str,
+    callable: &CallableValue,
+) -> BuiltinResult<runmat_types::ProgramFunctionId> {
+    let function = callable
+        .owner_identity
+        .strip_prefix("bound:")
+        .ok_or_else(|| {
+            builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                "signal callable is not semantically bound",
+            )
+        })?
+        .parse::<u32>()
+        .map_err(|_| {
+            builtin_error(
+                builtin,
+                &ERROR_INPUT,
+                "signal callable has an invalid function identity",
+            )
+        })?;
+    Ok(runmat_types::ProgramFunctionId(function))
 }
 
 fn portable_bound_callable(builtin: &'static str, value: &Value) -> BuiltinResult<CallableValue> {
@@ -551,7 +579,13 @@ mod tests {
         .unwrap();
         let runtime = runtime_signal_from_value("test", &signal).unwrap();
         let generator = runtime.signal.generator().unwrap();
-        assert_eq!(generator.qualified_function, "anonymous#7");
+        assert_eq!(
+            generator.callable,
+            GeneratorCallable::BoundFunction {
+                function: runmat_types::ProgramFunctionId(7),
+                display_name: "anonymous#7".into(),
+            }
+        );
         assert_eq!(
             generator.arguments,
             vec![

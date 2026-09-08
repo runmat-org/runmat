@@ -92,12 +92,13 @@ pub use problem::response_spectrum::{
     SpectrumInterpolation, SpectrumResponse,
 };
 pub use problem::signal::{
-    BreakpointSide, GeneratorArgument, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance,
-    PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal, SignalApproximationEvidence,
-    SignalArtifactDomain, SignalArtifactRef, SignalAxis, SignalBreakpoint, SignalDomainKind,
-    SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalOrdinate,
-    SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
-    SignalValue, StandardWaveform, StandardWaveformKind, TabulatedSignal,
+    BreakpointSide, GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
+    GeneratorProvenance, PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal,
+    SignalApproximationEvidence, SignalArtifactDomain, SignalArtifactRef, SignalAxis,
+    SignalBreakpoint, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
+    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
+    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
+    TabulatedSignal,
 };
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
@@ -552,7 +553,9 @@ mod tests {
         model.signals = vec![force_signal(
             "generated_force",
             SignalRepresentation::Generator(SignalGenerator {
-                qualified_function: "anonymousScript".to_string(),
+                callable: GeneratorCallable::ProjectFunction {
+                    qualified_name: "anonymousScript".to_string(),
+                },
                 arguments: Vec::new(),
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {

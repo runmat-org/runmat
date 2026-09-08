@@ -538,13 +538,34 @@ pub struct GeneratorProvenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SignalGenerator {
-    pub qualified_function: String,
+    pub callable: GeneratorCallable,
     pub arguments: Vec<GeneratorArgument>,
     pub domain: GeneratorDomain,
     pub sampling: SignalSamplingPolicy,
     pub interpolation: SignalInterpolation,
     pub extrapolation: SignalExtrapolation,
     pub effects: GeneratorEffectPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeneratorCallable {
+    ProjectFunction {
+        qualified_name: String,
+    },
+    BoundFunction {
+        function: runmat_types::ProgramFunctionId,
+        display_name: String,
+    },
+}
+
+impl GeneratorCallable {
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::ProjectFunction { qualified_name } => qualified_name,
+            Self::BoundFunction { display_name, .. } => display_name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

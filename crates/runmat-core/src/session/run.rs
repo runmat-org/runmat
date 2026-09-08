@@ -719,6 +719,8 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
         #[cfg(not(target_arch = "wasm32"))]
+        let _program_guard = self.program_service.enter(&interactive_unit);
+        #[cfg(not(target_arch = "wasm32"))]
         let mut bytecode = interactive_unit.bytecode().clone();
         #[cfg(target_arch = "wasm32")]
         let _ = mir;

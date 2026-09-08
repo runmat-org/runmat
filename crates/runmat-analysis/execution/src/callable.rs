@@ -57,6 +57,17 @@ pub fn admit_named_signal_generator(
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let generator = signal.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
+    })?;
+    if !matches!(
+        &generator.callable,
+        runmat_analysis_core::GeneratorCallable::ProjectFunction { .. }
+    ) {
+        return Err(AnalysisBridgeError::Identity(
+            "named project admission requires a project-function generator identity",
+        ));
+    }
     admit_signal_generator(
         signal,
         program_revision,
@@ -83,6 +94,18 @@ pub fn admit_callable_signal_generator(
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
     frozen_callable.validate_identity()?;
+    let generator = signal.generator().ok_or_else(|| {
+        AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
+    })?;
+    if !matches!(
+        &generator.callable,
+        runmat_analysis_core::GeneratorCallable::BoundFunction { function: bound, .. }
+            if *bound == function.function
+    ) {
+        return Err(AnalysisBridgeError::Identity(
+            "runtime callable function differs from the authored bound identity",
+        ));
+    }
     let expected_owner = format!("bound:{}", function.function.0);
     if frozen_callable.owner_identity != expected_owner
         || frozen_callable.qualified_name != callable.qualified_name
@@ -127,7 +150,7 @@ fn admit_signal_generator(
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
     if callable.owner_identity.trim().is_empty()
-        || callable.qualified_name != generator.qualified_function
+        || callable.qualified_name != generator.callable.display_name()
     {
         return Err(AnalysisBridgeError::Identity(
             "resolved callable differs from the authored generator",
@@ -162,7 +185,7 @@ fn admit_signal_generator(
     let generator_contract_digest = contract_digest(
         "generator-invocation",
         &(
-            &generator.qualified_function,
+            generator.callable.display_name(),
             &generator.arguments,
             &generator.domain,
             &generator.effects,
@@ -239,7 +262,7 @@ fn validate_static_contract(
     {
         return Err(AnalysisBridgeError::Invalid(format!(
             "generator `{}` requires an exact, non-variadic ({expected_inputs} inputs, 1 output) static signature",
-            generator.qualified_function
+            generator.callable.display_name()
         )));
     }
     if !callable.captures_complete || callable.captures.len() != capture_count {
@@ -483,7 +506,9 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Generator(SignalGenerator {
-                qualified_function: "loads.pulse".into(),
+                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                    qualified_name: "loads.pulse".into(),
+                },
                 arguments: vec![GeneratorArgument::Real(4.0)],
                 domain: GeneratorDomain::TimeSeconds,
                 sampling: SignalSamplingPolicy::Uniform {
@@ -673,6 +698,17 @@ mod tests {
     fn admits_only_semantically_bound_portable_closures_and_hashes_capture_values() {
         let mut facts = analysis();
         facts.callable.captures = vec![numeric()];
+        let mut bound_signal = signal();
+        let PhysicalSignal::Force(signal) = &mut bound_signal else {
+            unreachable!()
+        };
+        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+            unreachable!()
+        };
+        generator.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
+            function: runmat_types::ProgramFunctionId(7),
+            display_name: "loads.pulse".into(),
+        };
         let frozen = |capture: f64| CallableValue {
             owner_identity: "bound:7".into(),
             qualified_name: "loads.pulse".into(),
@@ -682,7 +718,7 @@ mod tests {
             )))],
         };
         let first = admit_callable_signal_generator(
-            &signal(),
+            &bound_signal,
             revision(),
             callable(),
             digest("executable-source"),
@@ -692,7 +728,7 @@ mod tests {
         )
         .unwrap();
         let changed_capture = admit_callable_signal_generator(
-            &signal(),
+            &bound_signal,
             revision(),
             callable(),
             digest("executable-source"),
@@ -713,7 +749,7 @@ mod tests {
         unresolved.callable_digest =
             CallableValue::identity_digest(&unresolved.owner_identity, &unresolved.qualified_name);
         assert!(admit_callable_signal_generator(
-            &signal(),
+            &bound_signal,
             revision(),
             callable(),
             digest("executable-source"),
@@ -728,7 +764,7 @@ mod tests {
             "not numeric".into(),
         )))];
         assert!(admit_callable_signal_generator(
-            &signal(),
+            &bound_signal,
             revision(),
             callable(),
             digest("executable-source"),

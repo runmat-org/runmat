@@ -438,6 +438,8 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<Value, RunError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _program_guard = self.program_service.enter(unit);
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,

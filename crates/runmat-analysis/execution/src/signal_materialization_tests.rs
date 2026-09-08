@@ -36,7 +36,9 @@ fn signal(shape: SignalShape, precision: SignalPrecision) -> PhysicalSignal {
         shape,
         frame: None,
         representation: SignalRepresentation::Generator(SignalGenerator {
-            qualified_function: "loads.pulse".into(),
+            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                qualified_name: "loads.pulse".into(),
+            },
             arguments: vec![GeneratorArgument::Real(2.0)],
             domain: GeneratorDomain::TimeSeconds,
             sampling: SignalSamplingPolicy::Uniform {

@@ -32,19 +32,6 @@ impl ExecutableUnit {
         &self,
         preferred_function: Option<&str>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
-        let payloads = self.component_payloads()?;
-        let revisions = self.component_revisions()?;
-        let components = payloads
-            .iter()
-            .map(|payload| {
-                runmat_execution::ExecutableComponentDescriptor::from_payload(
-                    payload.kind,
-                    payload.kind.schema_version(&revisions),
-                    &payload.bytes,
-                )
-                .map_err(|error| error.to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         let source_stem = std::path::Path::new(&self.source().relative_path)
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -60,6 +47,41 @@ impl ExecutableUnit {
                 self.native_function_id(source_stem)
                     .map(|function| (source_stem.to_string(), function))
             });
+        self.portable_envelope_for_selection(selected)
+    }
+
+    /// Build the complete product with an exact semantic function selected as its entrypoint.
+    pub fn portable_envelope_for_function(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let function_index = usize::try_from(function.0)
+            .map_err(|_| "function identity exceeds this host".to_string())?;
+        let function_id = runmat_hir::FunctionId(function_index);
+        let bytecode = self
+            .functions()
+            .get(function_id)
+            .ok_or_else(|| format!("executable does not define function {}", function.0))?;
+        self.portable_envelope_for_selection(Some((bytecode.display_name.clone(), function_id)))
+    }
+
+    fn portable_envelope_for_selection(
+        &self,
+        selected: Option<(String, runmat_hir::FunctionId)>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let payloads = self.component_payloads()?;
+        let revisions = self.component_revisions()?;
+        let components = payloads
+            .iter()
+            .map(|payload| {
+                runmat_execution::ExecutableComponentDescriptor::from_payload(
+                    payload.kind,
+                    payload.kind.schema_version(&revisions),
+                    &payload.bytes,
+                )
+                .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let (entrypoint, entrypoint_function, entrypoint_kind) = if let Some((name, function)) =
             selected
         {

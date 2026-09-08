@@ -1236,7 +1236,9 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: Some(CoordinateFrame::Global),
             representation: SignalRepresentation::Generator(SignalGenerator {
-                qualified_function: "loads.scaled_force".into(),
+                callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                    qualified_name: "loads.scaled_force".into(),
+                },
                 arguments: vec![GeneratorArgument::Artifact(SignalArtifactRef {
                     artifact_id: "magnitudes".into(),
                     content_digest: logical_digest.to_string(),

@@ -40,6 +40,19 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
     }
 
+    /// Install the host that executes admitted generated analysis inputs.
+    pub fn install_analysis_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeAnalysisService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_analysis(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
     /// Return the bounded, portable feedback profile owned by this session.
     /// The profile contains operation/candidate identities, digests, and
     /// aggregate counts/timings only; persistence remains an explicit host

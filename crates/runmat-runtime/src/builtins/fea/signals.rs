@@ -511,6 +511,7 @@ scalar_signal!(
 
 pub(super) mod bindings;
 pub(super) mod callable;
+pub(super) mod materialize;
 pub(crate) mod time_samples;
 
 pub(super) fn physical_signal_from_value(
@@ -612,7 +613,7 @@ fn frozen_generator_from_value(
             "only callable-backed signals may retain a frozen generator",
         )
     })?;
-    if generator.qualified_function != callable.qualified_name {
+    if generator.callable.display_name() != callable.qualified_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

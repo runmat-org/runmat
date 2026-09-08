@@ -837,24 +837,20 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     match resolve_document_input(input, RUN_NAME).await? {
-        RuntimeResolvedDocument::Study(composed) => {
-            if !composed.frozen_generators.is_empty() {
-                return Err(builtin_error(
-                    RUN_NAME,
-                    &ERROR_OPERATION,
-                    "callable-backed signals require the analysis materialization host before solve",
-                ));
-            }
+        RuntimeResolvedDocument::Study(mut composed) => {
+            signals::materialize::materialize_study(
+                &mut composed.study,
+                &composed.frozen_generators,
+            )
+            .await?;
             run_study_result_to_object(&composed.study)
         }
-        RuntimeResolvedDocument::Sweep(composed) => {
-            if !composed.frozen_generators.is_empty() {
-                return Err(builtin_error(
-                    RUN_NAME,
-                    &ERROR_OPERATION,
-                    "callable-backed signals require the analysis materialization host before solve",
-                ));
-            }
+        RuntimeResolvedDocument::Sweep(mut composed) => {
+            signals::materialize::materialize_sweep(
+                &mut composed.sweep,
+                &composed.frozen_generators,
+            )
+            .await?;
             sweep_run_result_to_object(analysis_run_study_sweep_op(
                 &composed.sweep,
                 OperationContext::new(None, None),
@@ -3831,6 +3827,21 @@ execution:
         ]))
         .expect("callable force signal should build");
 
+        let scaffold_with_replaced_materials = block_on(fea_model_builtin(vec![
+            Value::String("scaffold_with_replaced_materials".to_string()),
+            geometry.clone(),
+            Value::String("Template".to_string()),
+            Value::String("linear_static_structural".to_string()),
+            Value::String("Materials".to_string()),
+            cell(vec![material.clone()]),
+            Value::String("Constraints".to_string()),
+            cell(vec![fixed.clone()]),
+        ]))
+        .expect("scaffold model should accept replacement materials");
+        let scaffold = modeling::model_from_value("test", &scaffold_with_replaced_materials)
+            .expect("scaffold model should decode");
+        assert!(scaffold.model.material_assignments.is_empty());
+
         let model = block_on(fea_model_builtin(vec![
             Value::String("bracket_static_model".to_string()),
             geometry.clone(),
@@ -3926,7 +3937,7 @@ execution:
         assert_eq!(composed_study.frozen_generators.bindings().len(), 1);
         let error = block_on(fea_run_builtin(study.clone()))
             .expect_err("unmaterialized callable must not enter a solver");
-        assert!(error.message().contains("materialization host"));
+        assert!(error.message().contains("active RunMat runtime context"));
 
         let sweep = block_on(fea_sweep_builtin(vec![
             Value::String("bracket_sweep".to_string()),

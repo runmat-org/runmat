@@ -1935,6 +1935,28 @@ fn analysis_validate_study_reports_invalid_study_id() {
 }
 
 #[test]
+fn analysis_validate_study_preserves_typed_model_failure_detail() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_linear_static_study_spec();
+    let mut model = sample_model();
+    model.materials.clear();
+    spec.model = Some(model);
+
+    let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
+        .expect("study validation should return typed output");
+
+    let issue = envelope
+        .data
+        .issues
+        .iter()
+        .find(|issue| issue.code == "RM.FEA.STUDY.MODEL_INVALID")
+        .expect("model validation issue");
+    assert!(issue
+        .message
+        .contains("ANALYSIS_VALIDATION_MISSING_MATERIALS"));
+}
+
+#[test]
 fn analysis_validate_study_rejects_solver_options_for_a_different_procedure() {
     let _guard = analysis_test_guard();
     let mut spec = sample_linear_static_study_spec();

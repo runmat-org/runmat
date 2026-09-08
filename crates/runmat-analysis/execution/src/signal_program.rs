@@ -61,7 +61,7 @@ impl SignalMaterializationExpectation {
                 "signal materialization expectation is not callable-backed".into(),
             )
         })?;
-        if generator.qualified_function != self.admitted.callable.qualified_name
+        if generator.callable.display_name() != self.admitted.callable.qualified_name
             || self.admitted.sample_points.len() < 2
             || self
                 .admitted

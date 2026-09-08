@@ -20,6 +20,26 @@ pub(super) mod callables;
 pub(crate) mod remote;
 mod signal_materialization;
 
+#[derive(Debug, Default)]
+pub(crate) struct NativeAnalysisService;
+
+impl runmat_runtime::context::RuntimeAnalysisService for NativeAnalysisService {
+    fn materialize_signal(
+        &self,
+        request: runmat_runtime::context::RuntimeSignalMaterializationRequest,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<runmat_analysis_core::PhysicalSignal, runmat_runtime::RuntimeError>,
+    > {
+        Box::pin(async move {
+            signal_materialization::materialize_runtime_signal(request).map_err(|error| {
+                runmat_runtime::build_runtime_error(error.to_string())
+                    .with_identifier("RunMat:FEA:SignalMaterialization")
+                    .build()
+            })
+        })
+    }
+}
+
 pub async fn execute_fea_path(
     path: PathBuf,
     cli: &Cli,

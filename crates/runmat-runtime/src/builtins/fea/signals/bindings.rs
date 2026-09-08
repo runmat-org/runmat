@@ -114,7 +114,7 @@ impl FrozenGeneratorInventory {
                 .validate_identity()
                 .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
             if !binding.callable.owner_identity.starts_with("bound:")
-                || binding.callable.qualified_name != generator.qualified_function
+                || binding.callable.qualified_name != generator.callable.display_name()
             {
                 return Err(builtin_error(
                     builtin,
@@ -136,10 +136,6 @@ pub(in crate::builtins::fea) struct FrozenStudyGeneratorInventory {
 }
 
 impl FrozenStudyGeneratorInventory {
-    pub(in crate::builtins::fea) fn is_empty(&self) -> bool {
-        self.studies.is_empty()
-    }
-
     pub(in crate::builtins::fea) fn new(
         builtin: &'static str,
         studies: &[(crate::analysis::AnalysisStudySpec, FrozenGeneratorInventory)],
@@ -293,7 +289,6 @@ impl FrozenStudyGeneratorInventory {
         Self::remove_from(builtin, &mut carrier, studies)
     }
 
-    #[cfg(test)]
     pub(in crate::builtins::fea) fn for_study(&self, study_id: &str) -> FrozenGeneratorInventory {
         self.studies
             .iter()

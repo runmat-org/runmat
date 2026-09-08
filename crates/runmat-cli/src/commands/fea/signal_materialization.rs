@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use runmat_analysis_core::{AnalysisModel, PhysicalSignal};
 use runmat_analysis_execution::{
-    build_signal_generator_task_submission, canonicalize_signal_generator_outputs,
-    materialize_signal_for_solver, plan_signal_generator_chunks, prepare_analysis_objects,
-    prepare_signal_materialization, PreparedSignalMaterialization, SignalGeneratorChunkOutput,
-    SignalGeneratorExecutionContext,
+    admit_callable_signal_generator, build_signal_generator_task_submission,
+    canonicalize_signal_generator_outputs, materialize_signal_for_solver,
+    plan_signal_generator_chunks, prepare_analysis_objects, prepare_signal_materialization,
+    PreparedSignalMaterialization, SignalGeneratorChunkOutput, SignalGeneratorExecutionContext,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, SignalMaterializationIdentity, DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -20,8 +20,8 @@ use runmat_execution::{CancellationReason, Digest};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
-    ArtifactAccess, ObjectNamespace, ProgramExecutionObject, EXTERNALIZED_VALUE_SCHEMA,
-    MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
+    ArtifactAccess, BundleCallable, ObjectNamespace, ProgramExecutionObject,
+    EXTERNALIZED_VALUE_SCHEMA, MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
 };
 use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeExecutionConfig, NativeProgramSession,
@@ -136,6 +136,24 @@ async fn materialize_signals(
     if compiled.len() != generator_signals.len() {
         bail!("compiled signal generator inventory is incomplete");
     }
+    execute_compiled_materializations(
+        document_path,
+        signals,
+        &generator_signals,
+        &compiled,
+        immutable_values,
+        maximum_wall_millis,
+    )
+}
+
+fn execute_compiled_materializations(
+    document_path: &std::path::Path,
+    signals: &[PhysicalSignal],
+    generator_signals: &[PhysicalSignal],
+    compiled: &[CompiledSignalGenerator],
+    immutable_values: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
+    maximum_wall_millis: u64,
+) -> Result<Vec<PhysicalSignal>> {
     let mut native_config = NativeExecutionConfig::for_current_executable()?;
     native_config
         .worker_capabilities
@@ -284,6 +302,51 @@ async fn materialize_signals(
         .collect()
 }
 
+pub(crate) fn materialize_runtime_signal(
+    request: runmat_runtime::context::RuntimeSignalMaterializationRequest,
+) -> Result<PhysicalSignal> {
+    let program = request.program;
+    program.executable.validate()?;
+    let identity = &program.executable.manifest.identity;
+    if identity.root_package != program.owner_identity
+        || identity.entrypoint != program.display_name
+        || identity.entrypoint_function != program.function.function
+        || identity.source_digest != program.executable_source_digest
+    {
+        bail!("runtime signal callable differs from its frozen executable product");
+    }
+    let admission = admit_callable_signal_generator(
+        &request.signal,
+        identity.program.clone(),
+        BundleCallable {
+            owner_identity: program.owner_identity,
+            qualified_name: program.display_name,
+            source_digest: program.source_digest,
+        },
+        program.executable_source_digest,
+        &program.function,
+        request.callable,
+        &BTreeSet::new(),
+    )?;
+    let compiled = CompiledSignalGenerator {
+        signal_id: request.signal.signal_id().clone(),
+        admission,
+        executable: program.executable,
+    };
+    let materialized = execute_compiled_materializations(
+        std::path::Path::new("."),
+        std::slice::from_ref(&request.signal),
+        std::slice::from_ref(&request.signal),
+        std::slice::from_ref(&compiled),
+        &[],
+        request.maximum_wall_millis,
+    )?;
+    materialized
+        .into_iter()
+        .next()
+        .context("runtime signal materialization returned no signal")
+}
+
 pub(super) async fn prepare_signal_materializations_in_frozen(
     document_path: &std::path::Path,
     signals: &[PhysicalSignal],
@@ -388,6 +451,9 @@ fn load_immutable_values(
     declarations: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
     artifact_access: &ArtifactAccess,
 ) -> Result<ImmutableValueInventory> {
+    if declarations.is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let document_root = document_path
         .parent()
         .context("FEA document has no containing directory")?

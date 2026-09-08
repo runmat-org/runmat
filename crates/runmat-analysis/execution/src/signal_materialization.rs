@@ -303,7 +303,7 @@ fn matching_generator<'a>(
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
-    if generator.qualified_function != admitted.callable.qualified_name {
+    if generator.callable.display_name() != admitted.callable.qualified_name {
         return Err(AnalysisBridgeError::Identity(
             "signal generator differs from its admitted callable",
         ));

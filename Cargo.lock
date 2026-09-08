@@ -6324,6 +6324,7 @@ name = "runmat-analysis-core"
 version = "0.6.2"
 dependencies = [
  "runmat-geometry-core",
+ "runmat-types",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -7176,6 +7177,7 @@ dependencies = [
  "runmat-geometry-ops",
  "runmat-macros",
  "runmat-meshing-core",
+ "runmat-mir",
  "runmat-plot",
  "runmat-test",
  "runmat-thread-local",

@@ -476,7 +476,9 @@ fn generated_signal() -> PhysicalSignal {
         shape: SignalShape::Vector3,
         frame: Some(CoordinateFrame::Global),
         representation: SignalRepresentation::Generator(SignalGenerator {
-            qualified_function: "loads.pulse".into(),
+            callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+                qualified_name: "loads.pulse".into(),
+            },
             arguments: Vec::new(),
             domain: GeneratorDomain::TimeSeconds,
             sampling: SignalSamplingPolicy::Uniform {

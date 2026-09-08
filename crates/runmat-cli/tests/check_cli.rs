@@ -108,7 +108,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
         )
         .replace(
             "        constant:\n          scalar: { newtons: 1000.0 }",
-            "        generator:\n          qualified_function: loads.pulse\n          arguments:\n            - real: 1000.0\n          domain: time_seconds\n          sampling:\n            uniform: { start: 0.0, end: 1.0, sample_count: 5 }\n          interpolation: linear\n          extrapolation: reject\n          effects: pure",
+            "        generator:\n          callable:\n            project_function: { qualified_name: loads.pulse }\n          arguments:\n            - real: 1000.0\n          domain: time_seconds\n          sampling:\n            uniform: { start: 0.0, end: 1.0, sample_count: 5 }\n          interpolation: linear\n          extrapolation: reject\n          effects: pure",
         )
         .replace("        sample_count: 1", "        sample_count: 0");
     fs::write(temp.path().join("study.fea"), document).unwrap();

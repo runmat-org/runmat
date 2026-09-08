@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use runmat_analysis_core::{PhysicalSignal, SignalId};
+use runmat_analysis_core::{GeneratorCallable, PhysicalSignal, SignalId};
 use runmat_analysis_execution::{admit_named_signal_generator, AdmittedSignalGenerator};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::{Digest, ExecutableUnitEnvelope, ProgramRevision};
@@ -57,14 +57,7 @@ pub(super) async fn compile_signal_generators(
     config: &RunMatRuntimeConfig,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> Result<Vec<CompiledSignalGenerator>> {
-    let requested = signals
-        .iter()
-        .filter_map(|signal| {
-            signal
-                .generator()
-                .map(|generator| (signal, generator.qualified_function.as_str()))
-        })
-        .collect::<Vec<_>>();
+    let requested = project_generators(signals)?;
     if requested.is_empty() {
         return Ok(Vec::new());
     }
@@ -88,14 +81,7 @@ pub(super) async fn compile_signal_generators_in_frozen(
     config: &RunMatRuntimeConfig,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> Result<Vec<CompiledSignalGenerator>> {
-    let requested = signals
-        .iter()
-        .filter_map(|signal| {
-            signal
-                .generator()
-                .map(|generator| (signal, generator.qualified_function.as_str()))
-        })
-        .collect::<Vec<_>>();
+    let requested = project_generators(signals)?;
     if requested.is_empty() {
         return Ok(Vec::new());
     }
@@ -216,6 +202,27 @@ pub(super) async fn compile_signal_generators_in_frozen(
             })
         })
         .collect()
+}
+
+fn project_generators(signals: &[PhysicalSignal]) -> Result<Vec<(&PhysicalSignal, &str)>> {
+    let mut requested = Vec::new();
+    for signal in signals {
+        let Some(generator) = signal.generator() else {
+            continue;
+        };
+        match &generator.callable {
+            GeneratorCallable::ProjectFunction { qualified_name } => {
+                requested.push((signal, qualified_name.as_str()));
+            }
+            GeneratorCallable::BoundFunction { .. } => {
+                bail!(
+                    "signal `{}` contains a runtime-bound callable that cannot be loaded from a .fea document",
+                    signal.signal_id().0
+                );
+            }
+        }
+    }
+    Ok(requested)
 }
 
 pub(crate) async fn validate_signal_generators(

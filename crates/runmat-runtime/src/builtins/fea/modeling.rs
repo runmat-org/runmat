@@ -750,6 +750,9 @@ fn build_model_from_parts(
     }
     if !materials.is_empty() {
         model.materials = materials;
+        if material_assignments.is_empty() {
+            model.material_assignments.clear();
+        }
     }
     if !material_assignments.is_empty() {
         model.material_assignments = material_assignments

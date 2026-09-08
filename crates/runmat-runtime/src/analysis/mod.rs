@@ -834,6 +834,11 @@ pub fn analysis_validate_study_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let mut issue_codes = validate_study_issue_codes(spec);
+    let model_validation_detail = spec.model.as_ref().and_then(|model| {
+        validate_model_against_geometry(model, spec.geometry.units, &CoordinateFrame::Global)
+            .err()
+            .map(|error| error.to_string())
+    });
     if spec.model.is_none()
         && !issue_codes.iter().any(|code| {
             matches!(
@@ -855,7 +860,14 @@ pub fn analysis_validate_study_op(
         .iter()
         .map(|code| AnalysisStudyIssue {
             code: code.clone(),
-            message: study_issue_message(code).to_string(),
+            message: if code == "RM.FEA.STUDY.MODEL_INVALID" {
+                model_validation_detail
+                    .as_ref()
+                    .map(|detail| format!("resolved model failed FEA validation: {detail}"))
+                    .unwrap_or_else(|| study_issue_message(code).to_string())
+            } else {
+                study_issue_message(code).to_string()
+            },
         })
         .collect();
     let study_fingerprint = study_fingerprint(spec);

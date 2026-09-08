@@ -561,7 +561,9 @@ async fn generated_box_workload(
     )
     .unwrap();
     force.representation = SignalRepresentation::Generator(SignalGenerator {
-        qualified_function: "loads.pulse".into(),
+        callable: runmat_analysis_core::GeneratorCallable::ProjectFunction {
+            qualified_name: "loads.pulse".into(),
+        },
         arguments: vec![runmat_analysis_core::GeneratorArgument::Artifact(
             runmat_analysis_core::SignalArtifactRef {
                 artifact_id: "magnitude".into(),

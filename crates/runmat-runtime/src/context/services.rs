@@ -158,6 +158,49 @@ pub trait RuntimeParallelService {
     }
 }
 
+/// Immutable analyzed callable selected from the executable active in this invocation.
+///
+/// The product contains everything a portable execution adapter needs to prove callable identity,
+/// validate static facts, and execute the exact frozen program without rediscovering source.
+#[derive(Clone, Debug)]
+pub struct RuntimeProgramCallable {
+    pub owner_identity: String,
+    pub display_name: String,
+    pub source_digest: runmat_execution::Digest,
+    pub executable_source_digest: runmat_execution::Digest,
+    pub function: runmat_mir::analysis::FunctionAnalysis,
+    pub executable: runmat_execution::ExecutableUnitEnvelope,
+}
+
+#[derive(Clone, Debug)]
+pub struct RuntimeSignalMaterializationRequest {
+    pub signal: runmat_analysis_core::PhysicalSignal,
+    pub callable: runmat_execution::value::CallableValue,
+    pub program: RuntimeProgramCallable,
+    pub maximum_wall_millis: u64,
+}
+
+/// Host-owned execution of an admitted generated physical input.
+///
+/// The runtime owns language values and the active program product. The host owns process,
+/// accelerator, and distributed execution. The returned signal is canonical solver data and
+/// contains no callback or runtime handle.
+pub trait RuntimeAnalysisService {
+    fn materialize_signal(
+        &self,
+        request: RuntimeSignalMaterializationRequest,
+    ) -> RuntimeServiceFuture<Result<runmat_analysis_core::PhysicalSignal, crate::RuntimeError>>;
+}
+
+/// Session-owned authority over the exact immutable executable active in an invocation.
+pub trait RuntimeProgramService {
+    fn freeze_bound_callable(
+        &self,
+        function: runmat_types::ProgramFunctionId,
+        display_name: &str,
+    ) -> Result<RuntimeProgramCallable, crate::RuntimeError>;
+}
+
 /// Narrow, typed ports composed by the host. An absent port is meaningful and
 /// produces a stable capability error through the corresponding `require_*`
 /// accessor; there is no string-keyed service locator.
@@ -174,6 +217,8 @@ pub struct RuntimeServicePorts {
     native: Option<Rc<dyn RuntimeNativeService>>,
     foreign: Option<Rc<dyn RuntimeForeignService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
+    program: Option<Rc<dyn RuntimeProgramService>>,
+    analysis: Option<Rc<dyn RuntimeAnalysisService>>,
 }
 
 impl std::fmt::Debug for RuntimeServicePorts {
@@ -191,6 +236,8 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("native", &self.native.is_some())
             .field("foreign", &self.foreign.is_some())
             .field("parallel", &self.parallel.is_some())
+            .field("program", &self.program.is_some())
+            .field("analysis", &self.analysis.is_some())
             .finish()
     }
 }
@@ -314,6 +361,22 @@ impl RuntimeServicePorts {
         RuntimeParallelService,
         Parallel
     );
+    port_accessors!(
+        with_program,
+        program,
+        require_program,
+        program,
+        RuntimeProgramService,
+        Program
+    );
+    port_accessors!(
+        with_analysis,
+        analysis,
+        require_analysis,
+        analysis,
+        RuntimeAnalysisService,
+        Analysis
+    );
 }
 
 #[cfg(test)]
@@ -341,6 +404,8 @@ mod tests {
             missing(ports.require_native("load library")),
             missing(ports.require_foreign("foreign call")),
             missing(ports.require_parallel("parfor")),
+            missing(ports.require_program("freeze callable")),
+            missing(ports.require_analysis("materialize signal")),
         ];
         assert_eq!(
             failures
@@ -359,6 +424,8 @@ mod tests {
                 RuntimeCapability::Native,
                 RuntimeCapability::Foreign,
                 RuntimeCapability::Parallel,
+                RuntimeCapability::Program,
+                RuntimeCapability::Analysis,
             ]
         );
         assert!(failures.iter().all(|failure| {

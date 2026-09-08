@@ -53,6 +53,7 @@ mod compile;
 mod config;
 mod executable;
 mod init;
+mod program;
 mod project;
 mod run;
 mod workspace;
@@ -91,6 +92,8 @@ pub struct RunMatSession {
     interrupt_flag: Arc<AtomicBool>,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
+    #[cfg(not(target_arch = "wasm32"))]
+    program_service: std::rc::Rc<program::SessionProgramService>,
     /// Typed handle retained alongside the executor-neutral runtime port so a
     /// host may explicitly persist or restore this session's bounded profile.
     placement_session: std::rc::Rc<runmat_accelerate::placement::PlacementSession>,
