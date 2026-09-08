@@ -4,19 +4,6 @@ pub fn getfield_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn isfield_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let Some(name_type) = args.get(1) else {
-        return Type::Unknown;
-    };
-
-    match name_type {
-        Type::String => Type::Bool,
-        Type::Cell { .. } => Type::logical(),
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 pub fn orderfields_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first()
         .and_then(struct_container_type)
@@ -82,17 +69,6 @@ mod tests {
         assert_eq!(
             getfield_type(&[], &ResolveContext::new(Vec::new())),
             Type::Unknown
-        );
-    }
-
-    #[test]
-    fn isfield_type_string_scalar_returns_bool() {
-        assert_eq!(
-            isfield_type(
-                &[Type::Struct { known_fields: None }, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
         );
     }
 
