@@ -234,7 +234,9 @@ pub(super) fn validate_structural_inputs(
         .iter()
         .filter_map(|value| value.structural())
     {
-        if constraint.frame != CoordinateFrame::Global {
+        if basis != StructuralProjectionBasis::CanonicalSolid
+            && constraint.frame != CoordinateFrame::Global
+        {
             return Err(StructuralAssemblyError::UnsupportedConstraintFrame {
                 constraint_id: constraint.constraint_id.clone(),
                 frame: constraint.frame.context_label(),
@@ -245,6 +247,9 @@ pub(super) fn validate_structural_inputs(
                 constraint.kind,
                 StructuralConstraintKind::Fixed { .. }
                     | StructuralConstraintKind::Prescribed(_)
+                    | StructuralConstraintKind::NormalDisplacement { .. }
+                    | StructuralConstraintKind::Symmetry { .. }
+                    | StructuralConstraintKind::Antisymmetry { .. }
                     | StructuralConstraintKind::Equation(_)
             ),
             StructuralProjectionBasis::ExplicitConnectivity => matches!(

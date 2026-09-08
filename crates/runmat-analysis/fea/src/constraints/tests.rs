@@ -95,6 +95,14 @@ fn unsupported_frame_fails_and_equivalent_overlaps_are_evidenced() {
     let structural = model.constraints[0].structural().unwrap().clone();
     let mut framed = structural.clone();
     framed.frame = CoordinateFrame::Material;
+    framed.kind = StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+        target: RegionTarget::boundary("root"),
+        translations: vec![TranslationDofValue {
+            dof: StructuralTranslationDof::Ux,
+            value: PrescribedValue::Constant(Displacement::new(0.0)),
+        }],
+        rotations: Vec::new(),
+    });
     model.constraints = vec![AnalysisConstraint::Structural(framed)];
     assert!(matches!(
         CanonicalStructuralConstraintPlan::compile(&model, &mesh),
@@ -138,8 +146,145 @@ fn unsupported_frame_fails_and_equivalent_overlaps_are_evidenced() {
         .find(|row| row.reaction_recovery == ReactionRecovery::UnconstrainedEquilibriumResidual)
         .unwrap();
     active.reaction_recovery = ReactionRecovery::RedundantEquation;
-    active.identity = super::plan::row_identity(active).unwrap();
+    active.identity = super::row::row_identity(active).unwrap();
     assert!(substituted.validate().is_err());
+}
+
+#[test]
+fn cartesian_prescription_compiles_frame_axis_into_global_sparse_terms() {
+    let (mut model, mesh) = model_and_mesh();
+    let root_two = 2.0_f64.sqrt().recip();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "diagonal_guide".into(),
+        frame: CoordinateFrame::Cartesian(runmat_analysis_core::CartesianFrame {
+            frame_id: "diagonal".into(),
+            origin: runmat_analysis_core::Position::new([0.0; 3]),
+            x_axis: [root_two, root_two, 0.0],
+            y_axis: [-root_two, root_two, 0.0],
+        }),
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::point("node:1"),
+            translations: vec![TranslationDofValue {
+                dof: StructuralTranslationDof::Ux,
+                value: PrescribedValue::Constant(Displacement::new(0.01)),
+            }],
+            rotations: Vec::new(),
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.rows.len(), 1);
+    assert_eq!(plan.rows[0].terms.len(), 2);
+    assert!((plan.rows[0].terms[0].coefficient - root_two).abs() <= 1.0e-12);
+    assert!((plan.rows[0].terms[1].coefficient - root_two).abs() <= 1.0e-12);
+    assert_eq!(
+        plan.groups[0].enforcement,
+        ConstraintEnforcement::AffineReduction
+    );
+}
+
+#[test]
+fn symmetry_uses_outward_geometry_normals_on_one_persistent_face() {
+    let (mut model, mesh) = model_and_mesh();
+    let face_entity = mesh.topology.boundary_faces[0]
+        .provenance
+        .iter()
+        .find(|entity| entity.source_topology_id != "root")
+        .unwrap()
+        .source_topology_id
+        .clone();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "symmetry_plane".into(),
+        frame: CoordinateFrame::BoundaryNormalTangent,
+        kind: StructuralConstraintKind::Symmetry {
+            target: RegionTarget::boundary(face_entity),
+        },
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(
+        plan.rows.len(),
+        mesh.topology.boundary_faces[0].node_ids.len()
+    );
+    for row in &plan.rows {
+        let norm = row
+            .terms
+            .iter()
+            .map(|term| term.coefficient * term.coefficient)
+            .sum::<f64>()
+            .sqrt();
+        assert!((norm - 1.0).abs() <= 1.0e-12);
+        assert_eq!(row.right_hand_side, 0.0);
+    }
+}
+
+#[test]
+fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces() {
+    let (mut model, mesh) = model_and_mesh();
+    let face_entity = mesh.topology.boundary_faces[0]
+        .provenance
+        .iter()
+        .find(|entity| entity.source_topology_id != "root")
+        .unwrap()
+        .source_topology_id
+        .clone();
+    let target = RegionTarget::boundary(face_entity);
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "normal_offset".into(),
+        frame: CoordinateFrame::BoundaryNormalTangent,
+        kind: StructuralConstraintKind::NormalDisplacement {
+            target: target.clone(),
+            value: PrescribedValue::Constant(Displacement::new(0.002)),
+        },
+    })];
+    let normal = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    assert_eq!(
+        normal.rows.len(),
+        mesh.topology.boundary_faces[0].node_ids.len()
+    );
+    assert!(normal.rows.iter().all(|row| row.right_hand_side == 0.002));
+
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "antisymmetry_plane".into(),
+        frame: CoordinateFrame::BoundaryNormalTangent,
+        kind: StructuralConstraintKind::Antisymmetry { target },
+    })];
+    let antisymmetry = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    assert_eq!(antisymmetry.rows.len(), normal.rows.len() * 2);
+    for normal_row in &normal.rows {
+        let normal_vector = row_vector(normal_row);
+        let tangent_rows = antisymmetry
+            .rows
+            .iter()
+            .filter(|row| row.terms[0].node_identity == normal_row.terms[0].node_identity)
+            .collect::<Vec<_>>();
+        assert_eq!(tangent_rows.len(), 2);
+        for tangent in tangent_rows {
+            let tangent_vector = row_vector(tangent);
+            let dot = normal_vector
+                .into_iter()
+                .zip(tangent_vector)
+                .map(|(normal, tangent)| normal * tangent)
+                .sum::<f64>();
+            assert!(dot.abs() <= 1.0e-12);
+        }
+    }
+}
+
+fn row_vector(row: &CanonicalStructuralConstraintRow) -> [f64; 3] {
+    let mut vector = [0.0; 3];
+    for term in &row.terms {
+        let component = match term.dof {
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => 0,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => 1,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => 2,
+            CanonicalStructuralDof::Rotation(_) => unreachable!(),
+        };
+        vector[component] = term.coefficient;
+    }
+    vector
 }
 
 #[test]

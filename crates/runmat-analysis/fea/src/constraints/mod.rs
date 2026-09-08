@@ -5,11 +5,16 @@
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
 mod algebra;
+mod compile;
 mod contract;
+mod frame;
+mod normal;
 mod plan;
 mod rank;
 mod result;
+mod row;
 mod target;
+mod vector;
 
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,

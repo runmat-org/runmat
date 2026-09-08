@@ -121,6 +121,15 @@ pub enum ConstraintPlanError {
         constraint_id: String,
         frame: String,
     },
+    #[error("constraint `{constraint_id}` defines a degenerate coordinate frame")]
+    DegenerateFrame { constraint_id: String },
+    #[error("constraint `{constraint_id}` requires an unambiguous boundary normal but resolved {entity_count} entities")]
+    AmbiguousNormal {
+        constraint_id: String,
+        entity_count: usize,
+    },
+    #[error("constraint `{constraint_id}` boundary normal could not be recovered")]
+    NormalUnavailable { constraint_id: String },
     #[error("constraint `{constraint_id}` targets unsupported topology: {reason}")]
     UnsupportedTarget {
         constraint_id: String,
