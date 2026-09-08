@@ -13,6 +13,9 @@ pub(in crate::catalog::inference) fn infer(
         StructInferenceRule::Isfield => {
             crate::catalog::entries::structs::core::isfield::infer(request, entry)
         }
+        StructInferenceRule::Rmfield => {
+            crate::catalog::entries::structs::core::rmfield::infer(request, entry)
+        }
         StructInferenceRule::Structfun => {
             crate::catalog::entries::structs::core::structfun::infer(request, entry)
         }

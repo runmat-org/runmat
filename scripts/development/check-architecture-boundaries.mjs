@@ -2421,6 +2421,37 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "rmfield catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/structs/core/rmfield"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/structs/core/rmfield/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/rmfield/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/rmfield/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/rmfield.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/rmfield.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "rmfield runtime",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/rmfield"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/rmfield/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/rmfield/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/rmfield.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "structure field-name representation service",
+  roots: ["crates/runmat-runtime/src/builtins/structs/field_name"],
+  compositionFiles: ["crates/runmat-runtime/src/builtins/structs/field_name/mod.rs"],
+  obsoletePaths: [],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
   name: "uniform scalar output runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/uniform_scalar_output"],
   compositionFiles: [
@@ -2467,6 +2498,15 @@ if (/\b(?:type_resolver|descriptor|integer_audit)\s*=/.test(isfieldRuntimeMacro)
 }
 if (/\bisfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
   fail("isfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+const rmfieldRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/structs/core/rmfield/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(rmfieldRuntimeMacro)) {
+  fail("rmfield runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\brmfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+  fail("rmfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/structs/core/structfun"

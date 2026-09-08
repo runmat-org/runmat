@@ -1,5 +1,6 @@
 pub(in crate::catalog) mod fieldnames;
 pub(in crate::catalog) mod isfield;
+pub(in crate::catalog) mod rmfield;
 pub(in crate::catalog) mod structfun;
 
 pub use fieldnames::{
@@ -11,6 +12,12 @@ pub use isfield::{
     ISFIELD_CATALOG_ENTRY, ISFIELD_DESCRIPTOR, ISFIELD_ERROR_CELL_ELEMENT_TYPE,
     ISFIELD_ERROR_FIELD_NAME_TYPE, ISFIELD_ERROR_INTERNAL, ISFIELD_INTEGER_AUDIT,
 };
+pub use rmfield::{
+    RMFIELD_CATALOG_ENTRY, RMFIELD_DESCRIPTOR, RMFIELD_ERROR_FIELD_NAME_EMPTY,
+    RMFIELD_ERROR_FIELD_NAME_TYPE, RMFIELD_ERROR_INVALID_TARGET, RMFIELD_ERROR_MISSING_FIELD,
+    RMFIELD_ERROR_NOT_ENOUGH_INPUTS, RMFIELD_ERROR_REBUILD_FAILED, RMFIELD_EXTENSIONS,
+    RMFIELD_INTEGER_CAPABILITIES, RMFIELD_VARIADIC_EXTENSION,
+};
 pub use structfun::{
     STRUCTFUN_CATALOG_ENTRY, STRUCTFUN_DESCRIPTOR, STRUCTFUN_ERROR_FUNCTION_ERROR,
     STRUCTFUN_ERROR_INTERNAL, STRUCTFUN_ERROR_INVALID_INPUT, STRUCTFUN_ERROR_NOT_SCALAR_STRUCT,
@@ -21,6 +28,11 @@ pub use structfun::{
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     super::super::extend_groups(
         entries,
-        &[fieldnames::ENTRIES, isfield::ENTRIES, structfun::ENTRIES],
+        &[
+            fieldnames::ENTRIES,
+            isfield::ENTRIES,
+            rmfield::ENTRIES,
+            structfun::ENTRIES,
+        ],
     );
 }

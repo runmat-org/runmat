@@ -1,5 +1,7 @@
 use runmat_value::{CellArray, Value};
 
+use crate::builtins::structs::field_name;
+
 pub(super) enum Query {
     Scalar(String),
     Collection {
@@ -40,11 +42,11 @@ fn cell_names(array: &CellArray) -> crate::BuiltinResult<Vec<String>> {
 }
 
 fn cell_name(value: &Value) -> crate::BuiltinResult<String> {
-    match value {
-        Value::String(name) => Ok(name.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(_) | Value::StringArray(_) => Err(super::error::field_name_type()),
-        other => Err(super::error::cell_element(other)),
+    match field_name::decode(value) {
+        Ok(name) => Ok(name),
+        Err(_) if matches!(value, Value::CharArray(_) | Value::StringArray(_)) => {
+            Err(super::error::field_name_type())
+        }
+        Err(_) => Err(super::error::cell_element(value)),
     }
 }

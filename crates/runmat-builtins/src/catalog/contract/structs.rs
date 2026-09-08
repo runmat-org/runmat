@@ -4,5 +4,6 @@ use serde::Serialize;
 pub enum StructInferenceRule {
     Fieldnames,
     Isfield,
+    Rmfield,
     Structfun,
 }
