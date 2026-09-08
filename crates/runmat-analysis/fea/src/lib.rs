@@ -16,6 +16,7 @@ pub mod pipeline;
 pub mod post;
 pub mod progress;
 pub mod solve;
+pub mod topology;
 
 pub use admission::AnalysisRunIdentity;
 pub use contracts::*;

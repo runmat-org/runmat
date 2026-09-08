@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::SolverMeshArtifact;
+
+use crate::topology::AnalysisProjection;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThermalMeshTopology {
@@ -16,59 +18,22 @@ pub(super) struct ThermalMeshTopology {
 
 impl ThermalMeshTopology {
     pub(super) fn derive(mesh: &SolverMeshArtifact) -> Option<Self> {
-        let node_indices = mesh
-            .topology
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.node_id, index))
-            .collect::<BTreeMap<_, _>>();
-        let coordinates_m = mesh
-            .topology
+        let projection = AnalysisProjection::derive(mesh).ok()?;
+        let coordinates_m = projection
             .nodes
             .iter()
             .map(|node| node.coordinates_m)
             .collect::<Vec<_>>();
-        let elements = mesh
-            .topology
-            .volume_elements
+        let elements = projection
+            .elements
             .iter()
-            .map(|element| {
-                element
-                    .node_ids
-                    .iter()
-                    .map(|node_id| node_indices.get(node_id).copied())
-                    .collect::<Option<Vec<_>>>()
-            })
-            .collect::<Option<Vec<_>>>()?;
+            .map(|element| element.node_indices.clone())
+            .collect::<Vec<_>>();
         if coordinates_m.is_empty() || elements.is_empty() {
             return None;
         }
-
-        let mut neighbor_sets = vec![BTreeSet::new(); coordinates_m.len()];
-        for element in &elements {
-            for left in 0..element.len() {
-                for right in (left + 1)..element.len() {
-                    neighbor_sets[element[left]].insert(element[right]);
-                    neighbor_sets[element[right]].insert(element[left]);
-                }
-            }
-        }
-        let neighbors = neighbor_sets
-            .into_iter()
-            .map(|neighbors| neighbors.into_iter().collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-        let axis_bounds_m = std::array::from_fn(|axis| {
-            let min = coordinates_m
-                .iter()
-                .map(|point| point[axis])
-                .fold(f64::INFINITY, f64::min);
-            let max = coordinates_m
-                .iter()
-                .map(|point| point[axis])
-                .fold(f64::NEG_INFINITY, f64::max);
-            [min, max]
-        });
+        let neighbors = projection.node_neighbors;
+        let axis_bounds_m = projection.bounds_m;
         let coordinate_counts = std::array::from_fn(|axis| {
             let mut values = coordinates_m
                 .iter()
@@ -82,11 +47,7 @@ impl ThermalMeshTopology {
             .iter()
             .filter(|bounds| bounds[1] - bounds[0] > 1.0e-12)
             .count();
-        let characteristic_length_m = axis_bounds_m
-            .iter()
-            .map(|bounds| (bounds[1] - bounds[0]).powi(2))
-            .sum::<f64>()
-            .sqrt();
+        let characteristic_length_m = projection.characteristic_length_m;
 
         Some(Self {
             coordinates_m,
@@ -96,7 +57,7 @@ impl ThermalMeshTopology {
             coordinate_counts,
             active_dimension_count,
             characteristic_length_m,
-            boundary_face_count: mesh.topology.boundary_faces.len(),
+            boundary_face_count: projection.boundary_faces.len(),
         })
     }
 

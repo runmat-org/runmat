@@ -388,6 +388,7 @@ pub enum StructuralFormulationRequirement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverMeshRegionMappingError {
+    InvalidAnalysisProjection(String),
     UnmappedLoadRegion {
         load_id: String,
         region_id: String,
@@ -410,6 +411,9 @@ pub enum SolverMeshRegionMappingError {
 impl fmt::Display for SolverMeshRegionMappingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SolverMeshRegionMappingError::InvalidAnalysisProjection(reason) => {
+                write!(f, "solver mesh analysis projection failed: {reason}")
+            }
             SolverMeshRegionMappingError::UnmappedLoadRegion {
                 load_id,
                 region_id,
@@ -2678,7 +2682,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_solver_mesh_assembly_rejects_invalid_tetrahedron4_stiffness() {
+    fn strict_solver_mesh_assembly_rejects_inverted_projection_geometry() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let mut mesh = tetrahedron4_mesh();
         mesh.topology.volume_elements[0].node_ids = vec![1, 3, 2, 4];
@@ -2690,7 +2694,12 @@ mod tests {
             "strict solver mesh assembly should reject inverted Tetrahedron4 stiffness",
         );
 
-        assert!(matches!(err, LinearAssemblyError::SolidStiffness(_)));
+        assert!(matches!(
+            err,
+            LinearAssemblyError::SolverMeshRegionMapping(
+                SolverMeshRegionMappingError::InvalidAnalysisProjection(_)
+            )
+        ));
     }
 
     #[test]

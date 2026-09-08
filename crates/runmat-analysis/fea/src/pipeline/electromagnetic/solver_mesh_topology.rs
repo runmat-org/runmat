@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::SolverMeshArtifact;
 
+use crate::topology::AnalysisProjection;
+
 pub(super) struct MaxwellMeshTopology {
     pub(super) edges: Vec<MaxwellMeshEdge>,
     pub(super) elements: Vec<MaxwellMeshElement>,
@@ -22,28 +24,17 @@ pub(super) struct MaxwellMeshElement {
 
 impl MaxwellMeshTopology {
     pub(super) fn derive(mesh: &SolverMeshArtifact) -> Option<Self> {
-        let node_indices = mesh
-            .topology
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.node_id, index))
-            .collect::<BTreeMap<_, _>>();
-        let coordinates = mesh
-            .topology
+        let projection = AnalysisProjection::derive(mesh).ok()?;
+        let coordinates = projection
             .nodes
             .iter()
             .map(|node| node.coordinates_m)
             .collect::<Vec<_>>();
         let mut edge_indices = BTreeMap::<[usize; 2], usize>::new();
-        let mut elements = Vec::with_capacity(mesh.topology.volume_elements.len());
+        let mut elements = Vec::with_capacity(projection.elements.len());
 
-        for element in &mesh.topology.volume_elements {
-            let corners = element.node_ids.get(..4)?;
-            let nodes = corners
-                .iter()
-                .map(|node_id| node_indices.get(node_id).copied())
-                .collect::<Option<Vec<_>>>()?;
+        for element in &projection.elements {
+            let nodes = element.node_indices.get(..4)?;
             let mut local_indices = Vec::with_capacity(6);
             let mut orientations = Vec::with_capacity(6);
             for (left, right) in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)] {
@@ -88,14 +79,10 @@ pub(super) fn boundary_node_indices<'a>(
     selector_ids: impl IntoIterator<Item = &'a str>,
 ) -> Vec<usize> {
     let selector_ids = selector_ids.into_iter().collect::<BTreeSet<_>>();
-    let node_indices = mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-    mesh.topology
+    let Ok(projection) = AnalysisProjection::derive(mesh) else {
+        return Vec::new();
+    };
+    projection
         .boundary_faces
         .iter()
         .filter(|face| {
@@ -105,8 +92,7 @@ pub(super) fn boundary_node_indices<'a>(
                     .any(|selector| entity.matches_analysis_selection(selector))
             })
         })
-        .flat_map(|face| face.node_ids.iter())
-        .filter_map(|node_id| node_indices.get(node_id).copied())
+        .flat_map(|face| face.node_indices.iter().copied())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
@@ -150,6 +136,8 @@ mod tests {
     fn boundary_selector_resolves_canonical_node_indices() {
         let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         mesh.topology.boundary_faces[0].provenance[0].source_topology_id = "ground".to_owned();
+        mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+        mesh.seal_canonical_digest().unwrap();
 
         assert_eq!(boundary_node_indices(&mesh, ["ground"]), vec![0, 1, 2]);
         assert!(boundary_node_indices(&mesh, ["missing"]).is_empty());
@@ -169,6 +157,8 @@ mod tests {
         };
         mesh.topology.boundary_faces[0].provenance = vec![first.clone()];
         mesh.topology.boundary_faces[1].provenance = vec![second];
+        mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+        mesh.seal_canonical_digest().unwrap();
 
         let first_selection = first.analysis_selection_id().unwrap();
         assert_eq!(

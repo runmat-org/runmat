@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::SolverMeshArtifact;
+
+use crate::topology::AnalysisProjection;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MeshConductanceEdge {
@@ -20,15 +22,8 @@ pub(super) struct MeshConductanceTopology {
 
 impl MeshConductanceTopology {
     pub(super) fn derive(mesh: &SolverMeshArtifact) -> Option<Self> {
-        let node_indices = mesh
-            .topology
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.node_id, index))
-            .collect::<BTreeMap<_, _>>();
-        let coordinates = mesh
-            .topology
+        let projection = AnalysisProjection::derive(mesh).ok()?;
+        let coordinates = projection
             .nodes
             .iter()
             .map(|node| node.coordinates_m)
@@ -38,12 +33,8 @@ impl MeshConductanceTopology {
         }
 
         let mut edge_nodes = BTreeSet::new();
-        for element in &mesh.topology.volume_elements {
-            let corners = element.node_ids.get(..4)?;
-            let indices = corners
-                .iter()
-                .map(|node_id| node_indices.get(node_id).copied())
-                .collect::<Option<Vec<_>>>()?;
+        for element in &projection.elements {
+            let indices = element.node_indices.get(..4)?;
             for left in 0..indices.len() {
                 for right in (left + 1)..indices.len() {
                     edge_nodes.insert([

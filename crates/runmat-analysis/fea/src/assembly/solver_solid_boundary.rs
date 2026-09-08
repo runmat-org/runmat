@@ -6,6 +6,7 @@ use super::{
 };
 use crate::constraints::CanonicalStructuralConstraintPlan;
 use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
+use crate::topology::AnalysisProjection;
 
 pub(super) fn apply_solver_mesh_structural_loads(
     excitations: &RealizedExcitations,
@@ -15,6 +16,9 @@ pub(super) fn apply_solver_mesh_structural_loads(
     strict_region_mapping: bool,
 ) -> Result<Vec<MomentProjectionSummary>, SolverMeshRegionMappingError> {
     rhs.fill(0.0);
+    let projection = AnalysisProjection::derive(mesh).map_err(|error| {
+        SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
+    })?;
 
     let mut moment_projection = Vec::new();
     for load in excitations.iter() {
@@ -24,7 +28,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
         let Some(region_id) = load.target.solver_region_id() else {
             continue;
         };
-        let target_nodes = solver_mesh_region_node_indices(mesh, region_id);
+        let target_nodes = projection_region_node_indices(&projection, region_id);
         match load.kind {
             RealizedExcitationKind::Force(value) => {
                 let [fx, fy, fz] = value.real;
@@ -57,7 +61,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     continue;
                 }
                 let summary = add_solver_mesh_moment_projection_rhs(
-                    mesh,
+                    &projection,
                     layout,
                     rhs,
                     &target_nodes,
@@ -71,10 +75,9 @@ pub(super) fn apply_solver_mesh_structural_loads(
             }
             RealizedExcitationKind::Pressure(value) => {
                 if strict_region_mapping
-                    && !mesh.topology.boundary_faces.iter().any(|face| {
-                        boundary_face_matches_region(face, region_id)
-                            && matches!(face.node_ids.len(), 3 | 6)
-                    })
+                    && !projection
+                        .boundary_faces_matching(region_id)
+                        .any(|face| matches!(face.node_indices.len(), 3 | 6))
                 {
                     return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                         load_id: load.excitation_id.0.clone(),
@@ -82,7 +85,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
                         load_kind: StructuralLoadKind::Pressure,
                     });
                 }
-                apply_solver_mesh_pressure(mesh, layout, rhs, region_id, value.real);
+                apply_projected_pressure(&projection, layout, rhs, region_id, value.real);
             }
             RealizedExcitationKind::BodyForce(value) => {
                 let [gx, gy, gz] = value.real;
@@ -178,58 +181,30 @@ fn add_reference_vector(
     }
 }
 
-fn solver_mesh_region_node_indices(mesh: &SolverMeshArtifact, region_id: &str) -> Vec<usize> {
-    let mut node_ids = Vec::<u64>::new();
-    for face in &mesh.topology.boundary_faces {
-        if !boundary_face_matches_region(face, region_id) {
-            continue;
-        }
-        for node_id in &face.node_ids {
-            if !node_ids.contains(node_id) {
-                node_ids.push(*node_id);
-            }
-        }
-    }
-    node_ids
-        .into_iter()
-        .filter_map(|node_id| {
-            mesh.topology
-                .nodes
-                .iter()
-                .position(|node| node.node_id == node_id)
-        })
-        .collect()
+fn projection_region_node_indices(projection: &AnalysisProjection, region_id: &str) -> Vec<usize> {
+    let mut node_indices = projection
+        .boundary_faces_matching(region_id)
+        .flat_map(|face| face.node_indices.iter().copied())
+        .collect::<Vec<_>>();
+    node_indices.sort_unstable();
+    node_indices.dedup();
+    node_indices
 }
 
-fn boundary_face_matches_region(
-    face: &runmat_meshing_core::SolverBoundaryFace,
-    region_id: &str,
-) -> bool {
-    face.provenance
-        .iter()
-        .any(|entity| entity.matches_analysis_selection(region_id))
-}
-
-fn apply_solver_mesh_pressure(
-    mesh: &SolverMeshArtifact,
+fn apply_projected_pressure(
+    projection: &AnalysisProjection,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     region_id: &str,
     magnitude_pa: f64,
 ) {
-    for face in &mesh.topology.boundary_faces {
-        if !boundary_face_matches_region(face, region_id) || !matches!(face.node_ids.len(), 3 | 6) {
-            continue;
-        }
-        let Some(indices) = solver_mesh_face_node_indices(mesh, &face.node_ids) else {
-            continue;
-        };
-        let coordinates = [
-            mesh.topology.nodes[indices[0]].coordinates_m,
-            mesh.topology.nodes[indices[1]].coordinates_m,
-            mesh.topology.nodes[indices[2]].coordinates_m,
+    for face in projection.boundary_faces_matching(region_id) {
+        let indices = [
+            face.node_indices[0],
+            face.node_indices[1],
+            face.node_indices[2],
         ];
-        let force = scale_vec(triangle_area_normal(coordinates), magnitude_pa);
+        let force = scale_vec(face.oriented_area_vector_m2, magnitude_pa);
         let nodal_force = scale_vec(force, 1.0 / 3.0);
         for node_index in indices {
             add_translational_rhs(layout, rhs, node_index, nodal_force);
@@ -238,7 +213,7 @@ fn apply_solver_mesh_pressure(
 }
 
 fn add_solver_mesh_moment_projection_rhs(
-    mesh: &SolverMeshArtifact,
+    projection: &AnalysisProjection,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     target_nodes: &[usize],
@@ -258,7 +233,7 @@ fn add_solver_mesh_moment_projection_rhs(
         };
     }
 
-    let centroid = solver_mesh_target_centroid(mesh, target_nodes);
+    let centroid = projected_target_centroid(projection, target_nodes);
     let mut nodal_forces = vec![[0.0; 3]; target_nodes.len()];
     let mut projection_applied = false;
 
@@ -270,7 +245,7 @@ fn add_solver_mesh_moment_projection_rhs(
         let offsets = target_nodes
             .iter()
             .map(|&node_index| {
-                let node = mesh.topology.nodes[node_index].coordinates_m;
+                let node = projection.nodes[node_index].coordinates_m;
                 [
                     node[0] - centroid[0],
                     node[1] - centroid[1],
@@ -306,7 +281,7 @@ fn add_solver_mesh_moment_projection_rhs(
     }
 
     let (applied_force, applied_moment) =
-        solver_mesh_projected_resultants(mesh, target_nodes, &nodal_forces, centroid);
+        projected_resultants(projection, target_nodes, &nodal_forces, centroid);
     MomentProjectionSummary {
         load_id: String::new(),
         region_id: String::new(),
@@ -324,33 +299,10 @@ fn add_solver_mesh_moment_projection_rhs(
     }
 }
 
-fn solver_mesh_face_node_indices(
-    mesh: &SolverMeshArtifact,
-    node_ids: &[u64],
-) -> Option<[usize; 3]> {
-    if !matches!(node_ids.len(), 3 | 6) {
-        return None;
-    }
-    Some([
-        mesh.topology
-            .nodes
-            .iter()
-            .position(|node| node.node_id == node_ids[0])?,
-        mesh.topology
-            .nodes
-            .iter()
-            .position(|node| node.node_id == node_ids[1])?,
-        mesh.topology
-            .nodes
-            .iter()
-            .position(|node| node.node_id == node_ids[2])?,
-    ])
-}
-
-fn solver_mesh_target_centroid(mesh: &SolverMeshArtifact, target_nodes: &[usize]) -> [f64; 3] {
+fn projected_target_centroid(projection: &AnalysisProjection, target_nodes: &[usize]) -> [f64; 3] {
     let mut centroid = [0.0_f64; 3];
     for &node_index in target_nodes {
-        let node = mesh.topology.nodes[node_index].coordinates_m;
+        let node = projection.nodes[node_index].coordinates_m;
         centroid[0] += node[0];
         centroid[1] += node[1];
         centroid[2] += node[2];
@@ -358,8 +310,8 @@ fn solver_mesh_target_centroid(mesh: &SolverMeshArtifact, target_nodes: &[usize]
     scale_vec(centroid, 1.0 / target_nodes.len() as f64)
 }
 
-fn solver_mesh_projected_resultants(
-    mesh: &SolverMeshArtifact,
+fn projected_resultants(
+    projection: &AnalysisProjection,
     target_nodes: &[usize],
     nodal_forces: &[[f64; 3]],
     point_m: [f64; 3],
@@ -370,7 +322,7 @@ fn solver_mesh_projected_resultants(
         applied_force[0] += force[0];
         applied_force[1] += force[1];
         applied_force[2] += force[2];
-        let node = mesh.topology.nodes[node_index].coordinates_m;
+        let node = projection.nodes[node_index].coordinates_m;
         let arm = [
             node[0] - point_m[0],
             node[1] - point_m[1],
@@ -405,24 +357,6 @@ fn add_translational_rhs(
     add_rhs(layout, rhs, node_index, StructuralDofKind::Ux, force[0]);
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uy, force[1]);
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
-}
-
-fn triangle_area_normal(nodes: [[f64; 3]; 3]) -> [f64; 3] {
-    scale_vec(
-        cross(
-            [
-                nodes[1][0] - nodes[0][0],
-                nodes[1][1] - nodes[0][1],
-                nodes[1][2] - nodes[0][2],
-            ],
-            [
-                nodes[2][0] - nodes[0][0],
-                nodes[2][1] - nodes[0][1],
-                nodes[2][2] - nodes[0][2],
-            ],
-        ),
-        0.5,
-    )
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
