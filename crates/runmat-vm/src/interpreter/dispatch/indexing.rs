@@ -329,13 +329,8 @@ fn apply_cell_end_offsets_for_base(
                 "Cell end selector position is out of bounds",
             ));
         }
-        let len = if adjusted.len() == 1 {
-            ca.rows * ca.cols
-        } else if *position == 0 {
-            ca.rows
-        } else {
-            ca.cols
-        };
+        let len =
+            runmat_runtime::object::cell::cell_selector_extent(ca, adjusted.len(), *position)?;
         let resolved = (len as isize) + *offset;
         if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > len) {
             return Err(crate::interpreter::errors::mex(
@@ -384,13 +379,8 @@ async fn apply_cell_end_exprs_for_base(
                 "Cell end selector position is out of bounds",
             ));
         }
-        let dim_len = if adjusted.len() == 1 {
-            ca.rows * ca.cols
-        } else if *position == 0 {
-            ca.rows
-        } else {
-            ca.cols
-        };
+        let dim_len =
+            runmat_runtime::object::cell::cell_selector_extent(ca, adjusted.len(), *position)?;
         let resolved = resolve_end_expr_index(dim_len, end_expr, vars).await?;
         if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > dim_len) {
             return Err(crate::interpreter::errors::mex(

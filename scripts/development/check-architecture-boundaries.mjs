@@ -2477,6 +2477,57 @@ if (/Vec\s*<\s*Vec\s*<\s*usize\s*>\s*>/.test(num2cellPartitionPlan)) {
   fail("num2cell partition planning must stream source groups instead of retaining one allocation per output cell");
 }
 enforceMigratedBuiltinFamily({
+  name: "cell block layout runtime service",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/block_layout"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/block_layout/mod.rs",
+  ],
+  obsoletePaths: [],
+  testLineCeiling: 160,
+});
+for (const identity of ["cell2mat", "mat2cell"]) {
+  enforceMigratedBuiltinFamily({
+    name: `${identity} catalog`,
+    roots: [`crates/runmat-builtins/src/catalog/entries/cells/core/${identity}`],
+    compositionFiles: [
+      `crates/runmat-builtins/src/catalog/entries/cells/core/${identity}/mod.rs`,
+      `crates/runmat-builtins/src/catalog/entries/cells/core/${identity}/tests/mod.rs`,
+    ],
+    obsoletePaths: [
+      `docs/builtins/reference/${identity}.json`,
+      `crates/runmat-runtime/src/builtins/builtins-json/${identity}.json`,
+    ],
+    testLineCeiling: 160,
+  });
+  enforceMigratedBuiltinFamily({
+    name: `${identity} runtime`,
+    roots: [`crates/runmat-runtime/src/builtins/cells/core/${identity}`],
+    compositionFiles: [
+      `crates/runmat-runtime/src/builtins/cells/core/${identity}/mod.rs`,
+      `crates/runmat-runtime/src/builtins/cells/core/${identity}/tests/mod.rs`,
+    ],
+    obsoletePaths: [
+      `crates/runmat-runtime/src/builtins/cells/core/${identity}.rs`,
+    ],
+    testLineCeiling: 160,
+  });
+  const runtimeRegistration = read(
+    `crates/runmat-runtime/src/builtins/cells/core/${identity}/mod.rs`
+  );
+  if (
+    /\b(?:category|summary|keywords|accel|type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(
+      runtimeRegistration
+    )
+  ) {
+    fail(`${identity} runtime registration duplicates catalog-owned contracts`);
+  }
+}
+for (const { path: sourcePath, text } of allRust) {
+  if (/\b(?:cell2mat_type|mat2cell_type)\b/.test(text)) {
+    fail(`${sourcePath} retains an obsolete cell conversion type resolver`);
+  }
+}
+enforceMigratedBuiltinFamily({
   name: "mapped callable runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/mapped_callable"],
   compositionFiles: ["crates/runmat-runtime/src/builtins/common/mapped_callable/mod.rs"],
@@ -2632,7 +2683,7 @@ const cellfunRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(cellfunRuntimeMacro)) {
   fail("cellfun runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\bcellfun_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\bcellfun_type\b/.test(text))) {
   fail("cellfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const cell2structRuntimeMacro = read(
@@ -2641,7 +2692,7 @@ const cell2structRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities|category|summary|keywords|accel)\s*=/.test(cell2structRuntimeMacro)) {
   fail("cell2struct runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\bcell2struct_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\bcell2struct_type\b/.test(text))) {
   fail("cell2struct must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const structfunRuntimeMacro = read(

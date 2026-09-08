@@ -1621,6 +1621,13 @@ async function runHeadlessChrome(options) {
             ? ["ignore", "inherit", "inherit"]
             : "ignore"
     });
+    chrome.once("error", (error) => {
+        rejectResults(new Error(`Unable to start headless Chrome: ${error.message}`));
+    });
+    chrome.once("exit", (code, signal) => {
+        const outcome = signal ? `signal ${signal}` : `status ${code ?? "unknown"}`;
+        rejectResults(new Error(`Headless Chrome exited before returning results (${outcome})`));
+    });
 
     const timeoutMs = options.overallTimeoutMs ?? 600000;
     const timeout = setTimeout(() => {

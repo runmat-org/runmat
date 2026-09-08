@@ -4,6 +4,10 @@ use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
 
+mod selection;
+
+use selection::{expand_cell_subscripts, linear_index_from_subscripts, row_major_pos_from_linear};
+
 const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
 const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
@@ -160,22 +164,19 @@ fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.is_empty() || t.rows == 0 || t.cols == 0)
 }
 
-fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, RuntimeError> {
-    if idx == 0 || idx > ca.data.len() {
-        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-    }
-    if ca.rows <= 1 || ca.cols <= 1 {
-        return Ok(idx - 1);
-    }
-    let zero = idx - 1;
-    let row = zero % ca.rows;
-    let col = zero / ca.rows;
-    Ok(row * ca.cols + col)
-}
-
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
     crate::make_cell_with_shape(values, vec![rows, cols])
         .map_err(|e| map_cell_shape_error("cell creation error", e))
+}
+
+/// Return the MATLAB-visible extent used by one selector in a cell indexing
+/// expression. The final selector collapses any remaining trailing dimensions.
+pub fn cell_selector_extent(
+    cell: &CellArray,
+    selector_count: usize,
+    position: usize,
+) -> Result<usize, RuntimeError> {
+    selection::cell_selector_extent(cell, selector_count, position)
 }
 
 pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, RuntimeError> {
@@ -184,21 +185,14 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
             let i = indices[0];
             Ok(ca.data[row_major_pos_from_linear(ca, i)?].clone())
         }
-        2 => {
-            let r = indices[0];
-            let c = indices[1];
-            if r == 0 || r > ca.rows || c == 0 || c > ca.cols {
-                return Err(mex(
-                    "CellSubscriptOutOfBounds",
-                    "Cell subscript out of bounds",
-                ));
-            }
-            Ok(ca.data[(r - 1) * ca.cols + (c - 1)].clone())
-        }
-        _ => Err(mex(
+        0 => Err(mex(
             "UnsupportedCellIndexCount",
             "Unsupported number of cell indices",
         )),
+        _ => {
+            let linear = linear_index_from_subscripts(ca, indices)?;
+            Ok(ca.data[row_major_pos_from_linear(ca, linear)?].clone())
+        }
     }
 }
 
@@ -355,33 +349,8 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             }
             _ => Err(mex("CellIndexType", "Unsupported cell index type")),
         },
-        2 => {
-            let row_colon = is_colon_selector(&indices[0]);
-            let col_colon = is_colon_selector(&indices[1]);
-            if row_colon && col_colon {
-                return expand_all_cell_values(ca);
-            }
-            if row_colon {
-                let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
-                let mut values = Vec::with_capacity(ca.rows);
-                for r in 1..=ca.rows {
-                    values.push(index_cell_value(ca, &[r, c])?);
-                }
-                return Ok(values);
-            }
-            if col_colon {
-                let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
-                let mut values = Vec::with_capacity(ca.cols);
-                for c in 1..=ca.cols {
-                    values.push(index_cell_value(ca, &[r, c])?);
-                }
-                return Ok(values);
-            }
-            let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
-            let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
-            Ok(vec![index_cell_value(ca, &[r, c])?])
-        }
-        _ => Err(mex("CellIndexType", "Unsupported cell index type")),
+        0 => Err(mex("CellIndexType", "Unsupported cell index type")),
+        _ => expand_cell_subscripts(ca, indices),
     }
 }
 
@@ -475,10 +444,19 @@ where
             ca.data[lin] = rhs;
             Ok(Value::Cell(ca))
         }
-        _ => Err(mex(
+        0 => Err(mex(
             "UnsupportedCellIndexCount",
             "Unsupported number of cell indices",
         )),
+        _ => {
+            let linear = linear_index_from_subscripts(&ca, indices)?;
+            let position = row_major_pos_from_linear(&ca, linear)?;
+            if let Some(old_value) = ca.data.get(position) {
+                on_write(old_value, &rhs);
+            }
+            ca.data[position] = rhs;
+            Ok(Value::Cell(ca))
+        }
     }
 }
 
@@ -697,11 +675,15 @@ fn assign_cell_paren_from_cell(
             }
             (i - 1) * ca.cols + (j - 1)
         }
-        _ => {
+        0 => {
             return Err(mex(
                 "UnsupportedCellIndexCount",
                 "Unsupported number of cell indices",
             ))
+        }
+        _ => {
+            let linear = linear_index_from_subscripts(&ca, indices)?;
+            row_major_pos_from_linear(&ca, linear)?
         }
     };
     if let Some(oldv) = ca.data.get(lin) {

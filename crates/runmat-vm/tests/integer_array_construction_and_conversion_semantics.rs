@@ -60,6 +60,20 @@ fn compiled_mat2cell_mat2str_and_native2unicode_keep_exact_integer_boundaries() 
 }
 
 #[test]
+fn compiled_mat2cell_supports_nd_cell_subscripts() {
+    let values = execute_source(
+        "a = reshape(1:24, [3 4 2]); c = mat2cell(a, [1 2], [2 2], [1 1]); block = c{2,1,2};",
+    )
+    .expect("compiled N-D cell subscript");
+    assert!(
+        values.iter().any(|value| {
+            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2, 1] && tensor.materialize_f64() == vec![14.0, 15.0, 17.0, 18.0])
+        }),
+        "unexpected compiled values: {values:?}"
+    );
+}
+
+#[test]
 fn matlab_mode_rejects_only_the_evidence_bounded_typed_control_extensions() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let partition_error = execute_source("c = mat2cell(uint64(1),uint8(1));")

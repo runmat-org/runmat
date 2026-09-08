@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+CHROME_LOGGING_ARGS=(--enable-logging=stderr --v=0)
 if [[ ${RUNMAT_HEADLESS_DEBUG:-0} == "1" ]]; then
   set -x
-  DEBUG_ARGS=(--enable-logging=stderr --v=0)
-else
-  DEBUG_ARGS=()
 fi
 
 if [[ -n "${RUNMAT_CHROME_BIN:-}" ]]; then
@@ -31,12 +29,25 @@ if [[ ! -x "${CHROME_BIN}" ]]; then
   exit 1
 fi
 
+PROFILE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/runmat-chrome-headless.XXXXXX")"
+cleanup() {
+  rm -rf -- "${PROFILE_DIR}"
+}
+trap cleanup EXIT
+
+COMMON_ARGS=(
+  --headless=new
+  --user-data-dir="${PROFILE_DIR}"
+  --no-first-run
+  --no-default-browser-check
+)
+
 if [[ "$(uname -s)" == "Linux" ]]; then
   # ubuntu-latest CI runners have no real GPU or Vulkan; use SwiftShader
   # (CPU-based software renderer) so Chrome doesn't hang on init.
   # --no-sandbox and --disable-dev-shm-usage are required in containers.
-  exec "${CHROME_BIN}" \
-    --headless=new \
+  "${CHROME_BIN}" \
+    "${COMMON_ARGS[@]}" \
     --no-sandbox \
     --disable-dev-shm-usage \
     --use-gl=angle \
@@ -44,16 +55,16 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     --enable-unsafe-webgpu \
     --disable-gpu-sandbox \
     --disable-webgpu-vsync \
-    "${DEBUG_ARGS[@]}" \
+    "${CHROME_LOGGING_ARGS[@]}" \
     "$@"
 else
-  exec "${CHROME_BIN}" \
-    --headless=new \
+  "${CHROME_BIN}" \
+    "${COMMON_ARGS[@]}" \
     --use-angle=metal \
     --enable-features=Vulkan,UseSkiaRenderer,WebGPUService \
     --enable-unsafe-webgpu \
     --disable-gpu-sandbox \
     --disable-webgpu-vsync \
-    "${DEBUG_ARGS[@]}" \
+    "${CHROME_LOGGING_ARGS[@]}" \
     "$@"
 fi
