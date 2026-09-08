@@ -207,25 +207,11 @@ impl SignalMaterializationIdentity {
     pub fn new(
         authored_signal_digest: Digest,
         generator: Option<GeneratorIdentity>,
-        sampling_policy_digest: Digest,
-        mut frozen_input_digests: Vec<Digest>,
+        realization_policy_digest: Digest,
     ) -> AnalysisExecutionResult<Self> {
-        frozen_input_digests.sort_unstable();
-        let count = frozen_input_digests.len();
-        frozen_input_digests.dedup();
-        if frozen_input_digests.len() != count {
-            return Err(AnalysisExecutionError::Invalid(
-                "signal materialization contains duplicate frozen inputs".into(),
-            ));
-        }
         Self::derive(
             "signal-materialization",
-            &(
-                authored_signal_digest,
-                generator,
-                sampling_policy_digest,
-                frozen_input_digests,
-            ),
+            &(authored_signal_digest, generator, realization_policy_digest),
         )
     }
 }

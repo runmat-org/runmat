@@ -427,7 +427,6 @@ fn derive_identities(
                 authored,
                 None,
                 contract_digest("static-sampling", &step_contract.independent_domain)?,
-                Vec::new(),
             )?;
             let signal = SignalRealizationIdentity::new(materialization, authored)?;
             SolverExcitationIdentity::new(

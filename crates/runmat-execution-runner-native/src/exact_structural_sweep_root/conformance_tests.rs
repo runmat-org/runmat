@@ -360,7 +360,6 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
             Digest::sha256(b"substituted signal"),
             None,
             Digest::sha256(b"substituted sampling"),
-            Vec::new(),
         )
         .unwrap();
         assert!(import_exact_structural_sweep_result(

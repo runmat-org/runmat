@@ -1019,7 +1019,7 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     };
     pool.add_worker(Arc::new(FakeWorker {
         node: "node-stale-result".into(),
-        spec: replacement_worker,
+        spec: replacement_worker.clone(),
         installs: Arc::new(AtomicUsize::new(0)),
         active: Arc::new(AtomicUsize::new(0)),
         maximum_active: Arc::new(AtomicUsize::new(0)),
@@ -1033,7 +1033,14 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
     }))
     .await
     .unwrap();
-    completion.wait().await.unwrap();
+    let success = completion.wait().await.unwrap();
+    assert_eq!(
+        success.outputs,
+        vec![ValuePayload::Inline(Box::new(InlineValue::String(
+            replacement_worker.id.to_string(),
+        )))],
+        "the retry result must come from the replacement route"
+    );
     let committed_attempt = pool.snapshot().tasks[&task_id]
         .committed
         .as_ref()

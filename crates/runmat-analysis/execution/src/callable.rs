@@ -57,6 +57,14 @@ pub fn admit_named_signal_generator(
         ));
     }
     validate_static_contract(generator, function, available_capabilities)?;
+    for argument in &generator.arguments {
+        if let GeneratorArgument::Artifact(artifact) = argument {
+            artifact
+                .content_digest
+                .parse::<Digest>()
+                .map_err(AnalysisBridgeError::Platform)?;
+        }
+    }
 
     let callable_digest = contract_digest(
         "callable",
@@ -70,29 +78,41 @@ pub fn admit_named_signal_generator(
         ),
     )?;
     let capture_digest = contract_digest("named-captures", &function.callable.captures)?;
-    let generator_contract_digest = contract_digest("generator", generator)?;
+    // Generator provenance identifies the executable calculation and every immutable value it
+    // closes over. Sampling and interpolation describe a requested realization, not the callable.
+    let generator_contract_digest = contract_digest(
+        "generator-invocation",
+        &(
+            &generator.qualified_function,
+            &generator.arguments,
+            &generator.domain,
+            &generator.effects,
+        ),
+    )?;
     let generator_identity =
         GeneratorIdentity::new(callable_digest, capture_digest, generator_contract_digest)?;
-    let authored_signal_digest = contract_digest("authored-signal", signal)?;
-    let sampling_policy_digest = contract_digest("sampling", &generator.sampling)?;
-    let frozen_input_digests = generator
-        .arguments
-        .iter()
-        .filter_map(|argument| match argument {
-            GeneratorArgument::Artifact(artifact) => Some(
-                artifact
-                    .content_digest
-                    .parse::<Digest>()
-                    .map_err(AnalysisBridgeError::Platform),
-            ),
-            _ => None,
-        })
-        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    let authored_signal_digest = contract_digest(
+        "authored-signal-contract",
+        &(
+            signal.signal_id(),
+            signal.quantity(),
+            signal.shape(),
+            signal.frame(),
+            signal.precision(),
+        ),
+    )?;
+    let realization_policy_digest = contract_digest(
+        "realization-policy",
+        &(
+            &generator.sampling,
+            generator.interpolation,
+            generator.extrapolation,
+        ),
+    )?;
     let materialization_identity = SignalMaterializationIdentity::new(
         authored_signal_digest,
         Some(generator_identity),
-        sampling_policy_digest,
-        frozen_input_digests,
+        realization_policy_digest,
     )?;
     let frozen_input_digest = contract_digest("frozen-inputs", &generator.arguments)?;
 
@@ -460,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn admission_identity_changes_with_frozen_source_or_authored_arguments() {
+    fn admission_identity_invalidates_only_the_affected_layers() {
         let baseline = admit_named_signal_generator(
             &signal(),
             revision(),
@@ -498,13 +518,72 @@ mod tests {
             &BTreeSet::new(),
         )
         .unwrap();
+        let mut changed_sampling_signal = signal();
+        let PhysicalSignal::Force(value) = &mut changed_sampling_signal else {
+            unreachable!()
+        };
+        let SignalRepresentation::Generator(generator) = &mut value.representation else {
+            unreachable!()
+        };
+        generator.sampling = SignalSamplingPolicy::Uniform {
+            start: 0.0,
+            end: 1.0,
+            sample_count: 9,
+        };
+        let changed_sampling = admit_named_signal_generator(
+            &changed_sampling_signal,
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &analysis(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let mut renamed_signal = signal();
+        let PhysicalSignal::Force(value) = &mut renamed_signal else {
+            unreachable!()
+        };
+        value.signal_id = SignalId("renamed-pulse".into());
+        let renamed = admit_named_signal_generator(
+            &renamed_signal,
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &analysis(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
         assert_ne!(
             baseline.generator_identity,
             changed_source.generator_identity
         );
         assert_ne!(
             baseline.materialization_identity,
+            changed_source.materialization_identity
+        );
+        assert_ne!(
+            baseline.generator_identity,
+            changed_argument.generator_identity
+        );
+        assert_ne!(
+            baseline.materialization_identity,
             changed_argument.materialization_identity
+        );
+        assert_eq!(
+            baseline.generator_identity, changed_sampling.generator_identity,
+            "sampling is a realization policy, not callable provenance"
+        );
+        assert_ne!(
+            baseline.materialization_identity,
+            changed_sampling.materialization_identity
+        );
+        assert_eq!(
+            baseline.generator_identity, renamed.generator_identity,
+            "the authored signal label does not change the callable"
+        );
+        assert_ne!(
+            baseline.materialization_identity,
+            renamed.materialization_identity
         );
     }
 

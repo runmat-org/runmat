@@ -85,7 +85,6 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("signal"),
             None,
             digest("sampling"),
-            Vec::new(),
         )
         .unwrap(),
         sample_points: vec![0.0, 0.25, 0.5, 0.75, 1.0],
@@ -478,13 +477,9 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
     assert!(matches!(signal.provenance, SignalProvenance::Generated(_)));
 
     let mut substituted = admitted.clone();
-    substituted.materialization_identity = SignalMaterializationIdentity::new(
-        digest("different-signal"),
-        None,
-        digest("sampling"),
-        Vec::new(),
-    )
-    .unwrap();
+    substituted.materialization_identity =
+        SignalMaterializationIdentity::new(digest("different-signal"), None, digest("sampling"))
+            .unwrap();
     assert!(materialize_signal_for_solver(&authored, &substituted, &realization).is_err());
 }
 

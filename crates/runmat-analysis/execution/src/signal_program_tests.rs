@@ -51,7 +51,6 @@ fn admitted() -> AdmittedSignalGenerator {
             digest("signal"),
             None,
             digest("sampling"),
-            Vec::new(),
         )
         .unwrap(),
         sample_points: vec![0.0, 1.0],
@@ -139,6 +138,27 @@ fn external_input(scope: &str) -> ProgramExecutionObject {
     .unwrap()
 }
 
+fn task_context(scope: &[u8], pool: &[u8]) -> SignalGeneratorExecutionContext {
+    SignalGeneratorExecutionContext {
+        scope_id: ExecutionScopeId::derive(&[scope]),
+        pool_id: PoolId::derive(&[pool]),
+        resources: ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 64 * 1024 * 1024,
+            scratch_bytes: 0,
+            max_wall_millis: 10_000,
+            max_artifact_bytes: 64 * 1024 * 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: Vec::new(),
+            required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+        },
+        retry: RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    }
+}
+
 #[test]
 fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let admitted = admitted();
@@ -195,32 +215,11 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
     let admitted = admitted();
     let prepared =
         prepare_signal_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
-    let context = |scope, pool| SignalGeneratorExecutionContext {
-        scope_id: scope,
-        pool_id: pool,
-        resources: ResourceRequest {
-            cpu_millicores: 1000,
-            memory_bytes: 64 * 1024 * 1024,
-            scratch_bytes: 0,
-            max_wall_millis: 10_000,
-            max_artifact_bytes: 64 * 1024 * 1024,
-            max_egress_bytes: 0,
-            max_relay_bytes: 0,
-            accelerators: Vec::new(),
-            required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-        },
-        retry: RetryPolicy::IdempotentInfrastructure,
-        deadline_unix_millis: None,
-        priority: 0,
-    };
     let first = build_signal_generator_task_submission(
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
-        context(
-            ExecutionScopeId::derive(&[b"scope-a"]),
-            PoolId::derive(&[b"pool-a"]),
-        ),
+        task_context(b"scope-a", b"pool-a"),
     )
     .unwrap();
     assert_eq!(first.request.callable.qualified_name, "loads.pulse");
@@ -228,13 +227,61 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
         &admitted,
         &prepared.chunks[0],
         BTreeSet::new(),
-        context(
-            ExecutionScopeId::derive(&[b"scope-b"]),
-            PoolId::derive(&[b"pool-b"]),
-        ),
+        task_context(b"scope-b", b"pool-b"),
     )
     .unwrap();
     assert_eq!(first.request.id, second.request.id);
     assert_ne!(first.request.scope_id, second.request.scope_id);
     assert_ne!(first.request.pool_id, second.request.pool_id);
+}
+
+#[test]
+fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
+    let baseline = admitted();
+    let prepared =
+        prepare_signal_generator_program(&baseline, executable(&baseline), chunks(), &[]).unwrap();
+    let submit = |admitted: &AdmittedSignalGenerator| {
+        build_signal_generator_task_submission(
+            admitted,
+            &prepared.chunks[0],
+            BTreeSet::new(),
+            task_context(b"scope", b"pool"),
+        )
+        .unwrap()
+    };
+    let baseline_task = submit(&baseline);
+
+    let mut sampling_change = baseline.clone();
+    sampling_change.materialization_identity = SignalMaterializationIdentity::new(
+        digest("signal"),
+        Some(baseline.generator_identity),
+        digest("changed-sampling"),
+    )
+    .unwrap();
+    let sampling_task = submit(&sampling_change);
+    assert_ne!(baseline_task.request.id, sampling_task.request.id);
+    assert_eq!(
+        baseline_task.request.callable.entrypoint_digest,
+        sampling_task.request.callable.entrypoint_digest
+    );
+
+    let mut generator_change = baseline.clone();
+    generator_change.generator_identity = GeneratorIdentity::new(
+        digest("changed-callable"),
+        digest("captures"),
+        digest("contract"),
+    )
+    .unwrap();
+    generator_change.materialization_identity = SignalMaterializationIdentity::new(
+        digest("signal"),
+        Some(generator_change.generator_identity),
+        digest("sampling"),
+    )
+    .unwrap();
+    let generator_task = submit(&generator_change);
+    assert_ne!(baseline_task.request.id, generator_task.request.id);
+    assert_ne!(
+        baseline_task.request.callable.entrypoint_digest,
+        generator_task.request.callable.entrypoint_digest
+    );
 }

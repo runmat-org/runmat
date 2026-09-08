@@ -23,13 +23,9 @@ fn identity_graph() -> (
     let generator =
         GeneratorIdentity::new(digest("callable"), digest("captures"), digest("generator"))
             .unwrap();
-    let materialization = SignalMaterializationIdentity::new(
-        digest("signal"),
-        Some(generator),
-        digest("sampling"),
-        vec![digest("frozen-input")],
-    )
-    .unwrap();
+    let materialization =
+        SignalMaterializationIdentity::new(digest("signal"), Some(generator), digest("sampling"))
+            .unwrap();
     let signal = SignalRealizationIdentity::new(materialization, digest("samples")).unwrap();
     let excitation =
         SolverExcitationIdentity::new(step, signal, digest("target"), digest("projection"))
@@ -88,13 +84,9 @@ fn generator_capture_and_realized_content_invalidate_the_realization() {
         digest("generator"),
     )
     .unwrap();
-    let changed_materialization = SignalMaterializationIdentity::new(
-        digest("signal"),
-        Some(generator),
-        digest("sampling"),
-        vec![digest("frozen-input")],
-    )
-    .unwrap();
+    let changed_materialization =
+        SignalMaterializationIdentity::new(digest("signal"), Some(generator), digest("sampling"))
+            .unwrap();
     let changed_capture =
         SignalRealizationIdentity::new(changed_materialization, digest("samples")).unwrap();
     let baseline_materialization = SignalMaterializationIdentity::new(
@@ -104,20 +96,21 @@ fn generator_capture_and_realized_content_invalidate_the_realization() {
                 .unwrap(),
         ),
         digest("sampling"),
-        vec![digest("frozen-input")],
     )
     .unwrap();
     let changed_content =
         SignalRealizationIdentity::new(baseline_materialization, digest("changed-samples"))
             .unwrap();
+    let changed_input_generator = GeneratorIdentity::new(
+        digest("callable"),
+        digest("captures"),
+        digest("changed-generator-inputs"),
+    )
+    .unwrap();
     let changed_input_materialization = SignalMaterializationIdentity::new(
         digest("signal"),
-        Some(
-            GeneratorIdentity::new(digest("callable"), digest("captures"), digest("generator"))
-                .unwrap(),
-        ),
+        Some(changed_input_generator),
         digest("sampling"),
-        vec![digest("changed-frozen-input")],
     )
     .unwrap();
     let changed_input =
@@ -435,7 +428,6 @@ fn signal_realization_with_precision(
         digest("authored-signal"),
         Some(generator),
         digest("sampling"),
-        vec![digest("frozen-input")],
     )
     .unwrap();
     CanonicalSignalRealization::new(CanonicalSignalRealizationInput {
@@ -511,13 +503,9 @@ fn topology_signal_realization_requires_exact_entity_shape() {
         SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
     };
 
-    let materialization = SignalMaterializationIdentity::new(
-        digest("field-signal"),
-        None,
-        digest("field-sampling"),
-        Vec::new(),
-    )
-    .unwrap();
+    let materialization =
+        SignalMaterializationIdentity::new(digest("field-signal"), None, digest("field-sampling"))
+            .unwrap();
     let input = CanonicalSignalRealizationInput {
         materialization,
         signal_id: SignalId("thermal.field".into()),
