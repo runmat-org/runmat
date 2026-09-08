@@ -2,7 +2,7 @@ use runmat_types::{CallInference, CallRequest};
 use serde::Serialize;
 
 use super::{
-    AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule, CellInferenceRule,
+    AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule,
     IntrospectionInferenceRule, IoInferenceRule, LogicalInferenceRule, MathInferenceRule,
     ParallelInferenceRule, StatsInferenceRule,
 };
@@ -51,7 +51,6 @@ pub enum BuiltinInferenceRule {
     Acceleration(AccelerationInferenceRule),
     Aggregate(AggregateInferenceRule),
     Array(ArrayInferenceRule),
-    Cells(CellInferenceRule),
     Introspection(IntrospectionInferenceRule),
     Io(IoInferenceRule),
     Logical(LogicalInferenceRule),

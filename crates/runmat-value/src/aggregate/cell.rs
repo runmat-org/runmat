@@ -78,6 +78,29 @@ impl CellArray {
         self.iter_column_major().cloned().collect()
     }
 
+    /// Move values into MATLAB-visible linear order without cloning payloads.
+    pub fn into_column_major(self) -> Result<Vec<Value>, String> {
+        if self.data.is_empty() || self.rows <= 1 || self.cols <= 1 {
+            return Ok(self.data);
+        }
+        let page_len = self.rows * self.cols;
+        let mut source = self.data.into_iter().map(Some).collect::<Vec<_>>();
+        let mut ordered = Vec::with_capacity(source.len());
+        for page_offset in (0..source.len()).step_by(page_len) {
+            for column in 0..self.cols {
+                for row in 0..self.rows {
+                    let index = page_offset + row * self.cols + column;
+                    let value = source
+                        .get_mut(index)
+                        .and_then(Option::take)
+                        .ok_or_else(|| "cell storage does not match its shape".to_string())?;
+                    ordered.push(value);
+                }
+            }
+        }
+        Ok(ordered)
+    }
+
     /// Iterate in MATLAB-visible linear order without cloning cell payloads.
     pub fn iter_column_major(&self) -> impl Iterator<Item = &Value> {
         let page_len = self.rows * self.cols;
@@ -167,5 +190,17 @@ mod tests {
     fn borrowed_column_major_iteration_handles_empty_shape() {
         let array = CellArray::new(Vec::new(), 0, 0).unwrap();
         assert_eq!(array.iter_column_major().count(), 0);
+    }
+
+    #[test]
+    fn owned_column_major_projection_moves_the_same_values() {
+        let expected = vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ];
+        let array = CellArray::from_column_major(expected.clone(), vec![2, 2]).unwrap();
+        assert_eq!(array.into_column_major().unwrap(), expected);
     }
 }

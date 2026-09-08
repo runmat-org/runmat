@@ -3,7 +3,7 @@ use crate::{
     BuiltinCompatibility, BuiltinContractDeclaration, BuiltinContractMaturity,
     BuiltinDistributedPolicy, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinLinkContract,
     BuiltinLinkPolicy, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, CellInferenceRule,
+    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, IdentityInferenceRule,
     REQUIRED_DEFAULT_BINDING,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
@@ -24,7 +24,7 @@ pub const CELLFUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &CELLFUN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Cells(CellInferenceRule::Cellfun),
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(super::infer)),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,
