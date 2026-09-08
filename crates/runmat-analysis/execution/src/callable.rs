@@ -1,11 +1,16 @@
 use std::collections::BTreeSet;
 
+mod capture;
+
+use capture::validate_capture_contract;
+
 use runmat_analysis_core::{
     GeneratorArgument, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal,
     SignalSamplingPolicy,
 };
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_execution::value::{CallableValue, ValueLimits, ValuePayload};
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::BundleCallable;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
@@ -26,11 +31,18 @@ pub struct AdmittedSignalGenerator {
     pub callable: BundleCallable,
     pub executable_source_digest: Digest,
     pub function: runmat_types::ProgramFunctionId,
+    pub captures: Vec<ValuePayload>,
     pub generator_identity: GeneratorIdentity,
     pub materialization_identity: SignalMaterializationIdentity,
     pub sample_points: Vec<f64>,
     pub required_capabilities: BTreeSet<CapabilityRequirement>,
     pub provenance: GeneratorProvenance,
+}
+
+#[derive(Default)]
+struct FrozenCallableBinding {
+    captures: Vec<ValuePayload>,
+    callable_value_digest: Option<Digest>,
 }
 
 /// Admits one named project function against the exact static facts embedded in its executable.
@@ -45,6 +57,71 @@ pub fn admit_named_signal_generator(
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    admit_signal_generator(
+        signal,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        FrozenCallableBinding::default(),
+        available_capabilities,
+    )
+}
+
+/// Admit a semantically bound RunMat function handle or anonymous closure.
+///
+/// The runtime freezes the closure through its ordinary portable value codec before calling this
+/// boundary. Dynamic workspace handles are deliberately excluded: the callable must name the exact
+/// function in the frozen executable, and every capture must be a closed portable value.
+pub fn admit_callable_signal_generator(
+    signal: &PhysicalSignal,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    frozen_callable: CallableValue,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    frozen_callable.validate_identity()?;
+    let expected_owner = format!("bound:{}", function.function.0);
+    if frozen_callable.owner_identity != expected_owner
+        || frozen_callable.qualified_name != callable.qualified_name
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "runtime callable is not bound to the frozen executable function",
+        ));
+    }
+    for capture in &frozen_callable.captures {
+        capture.validate(ValueLimits::default())?;
+    }
+    let callable_value_digest = frozen_callable.callable_digest;
+    admit_signal_generator(
+        signal,
+        program_revision,
+        callable,
+        executable_source_digest,
+        function,
+        FrozenCallableBinding {
+            captures: frozen_callable.captures,
+            callable_value_digest: Some(callable_value_digest),
+        },
+        available_capabilities,
+    )
+}
+
+fn admit_signal_generator(
+    signal: &PhysicalSignal,
+    program_revision: ProgramRevision,
+    callable: BundleCallable,
+    executable_source_digest: Digest,
+    function: &FunctionAnalysis,
+    binding: FrozenCallableBinding,
+    available_capabilities: &BTreeSet<CapabilityRequirement>,
+) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let FrozenCallableBinding {
+        captures,
+        callable_value_digest,
+    } = binding;
     program_revision.validate()?;
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
@@ -56,7 +133,8 @@ pub fn admit_named_signal_generator(
             "resolved callable differs from the authored generator",
         ));
     }
-    validate_static_contract(generator, function, available_capabilities)?;
+    validate_static_contract(generator, function, captures.len(), available_capabilities)?;
+    validate_capture_contract(&captures, &function.callable.captures)?;
     for argument in &generator.arguments {
         if let GeneratorArgument::Artifact(artifact) = argument {
             artifact
@@ -75,9 +153,10 @@ pub fn admit_named_signal_generator(
             callable.source_digest,
             executable_source_digest,
             function.function,
+            callable_value_digest,
         ),
     )?;
-    let capture_digest = contract_digest("named-captures", &function.callable.captures)?;
+    let capture_digest = contract_digest("captures", &captures)?;
     // Generator provenance identifies the executable calculation and every immutable value it
     // closes over. Sampling and interpolation describe a requested realization, not the callable.
     let generator_contract_digest = contract_digest(
@@ -114,13 +193,14 @@ pub fn admit_named_signal_generator(
         Some(generator_identity),
         realization_policy_digest,
     )?;
-    let frozen_input_digest = contract_digest("frozen-inputs", &generator.arguments)?;
+    let frozen_input_digest = contract_digest("frozen-inputs", &(&captures, &generator.arguments))?;
 
     Ok(AdmittedSignalGenerator {
         program_revision: program_revision.clone(),
         callable,
         executable_source_digest,
         function: function.function,
+        captures,
         generator_identity,
         materialization_identity,
         sample_points: sample_points(&generator.sampling)?,
@@ -136,6 +216,7 @@ pub fn admit_named_signal_generator(
 fn validate_static_contract(
     generator: &runmat_analysis_core::SignalGenerator,
     function: &FunctionAnalysis,
+    capture_count: usize,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<()> {
     let callable = &function.callable;
@@ -161,9 +242,9 @@ fn validate_static_contract(
             generator.qualified_function
         )));
     }
-    if !callable.captures_complete || !callable.captures.is_empty() {
+    if !callable.captures_complete || callable.captures.len() != capture_count {
         return Err(AnalysisBridgeError::Invalid(
-            "named project generators cannot carry lexical captures".into(),
+            "frozen callable capture values do not match its exact static capture contract".into(),
         ));
     }
     if !matches!(function.outputs[0].kind, ValueKindFact::Numeric(_)) {
@@ -359,6 +440,7 @@ mod tests {
         SignalGenerator, SignalId, SignalInterpolation, SignalPrecision, SignalProvenance,
         SignalRepresentation, SignalShape,
     };
+    use runmat_execution::value::InlineValue;
     use runmat_execution::ProgramEnvironment;
     use runmat_types::{
         CallableFact, CapabilitySet, EffectSet, NumericClass, NumericDomain, NumericFact,
@@ -585,6 +667,76 @@ mod tests {
             baseline.materialization_identity,
             renamed.materialization_identity
         );
+    }
+
+    #[test]
+    fn admits_only_semantically_bound_portable_closures_and_hashes_capture_values() {
+        let mut facts = analysis();
+        facts.callable.captures = vec![numeric()];
+        let frozen = |capture: f64| CallableValue {
+            owner_identity: "bound:7".into(),
+            qualified_name: "loads.pulse".into(),
+            callable_digest: CallableValue::identity_digest("bound:7", "loads.pulse"),
+            captures: vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
+                capture.to_bits(),
+            )))],
+        };
+        let first = admit_callable_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &facts,
+            frozen(2.0),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let changed_capture = admit_callable_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &facts,
+            frozen(3.0),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert_eq!(first.captures, frozen(2.0).captures);
+        assert_ne!(first.generator_identity, changed_capture.generator_identity);
+        assert_ne!(
+            first.materialization_identity,
+            changed_capture.materialization_identity
+        );
+
+        let mut unresolved = frozen(2.0);
+        unresolved.owner_identity = "workspace".into();
+        unresolved.callable_digest =
+            CallableValue::identity_digest(&unresolved.owner_identity, &unresolved.qualified_name);
+        assert!(admit_callable_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &facts,
+            unresolved,
+            &BTreeSet::new(),
+        )
+        .is_err());
+
+        let mut wrong_capture_type = frozen(2.0);
+        wrong_capture_type.captures = vec![ValuePayload::Inline(Box::new(InlineValue::String(
+            "not numeric".into(),
+        )))];
+        assert!(admit_callable_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            digest("executable-source"),
+            &facts,
+            wrong_capture_type,
+            &BTreeSet::new(),
+        )
+        .is_err());
     }
 
     #[test]

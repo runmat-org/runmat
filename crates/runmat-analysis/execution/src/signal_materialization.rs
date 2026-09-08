@@ -107,7 +107,9 @@ pub fn plan_signal_generator_chunks(
             .iter()
             .map(|point| point.to_bits())
             .collect::<Vec<_>>();
-        let mut arguments = Vec::with_capacity(authored_arguments.len() + 1);
+        let mut arguments =
+            Vec::with_capacity(admitted.captures.len() + authored_arguments.len() + 1);
+        arguments.extend(admitted.captures.iter().cloned());
         arguments.push(axis_argument(points)?);
         arguments.extend(authored_arguments.iter().cloned());
         for argument in &arguments {
@@ -249,6 +251,7 @@ pub fn validate_signal_generator_chunks(
             .ok_or(AnalysisBridgeError::Identity(
                 "signal chunks exceed the admitted sample axis",
             ))?;
+        let axis_index = admitted.captures.len();
         if chunk.ordinal != expected_ordinal
             || chunk.first_sample != expected_first_sample
             || chunk.sample_points
@@ -256,14 +259,19 @@ pub fn validate_signal_generator_chunks(
                     .iter()
                     .map(|point| point.to_bits())
                     .collect::<Vec<_>>()
-            || chunk.arguments.first() != Some(&axis_argument(expected_points)?)
-            || chunk.arguments.len() != generator.arguments.len() + 1
+            || chunk.arguments.get(..axis_index) != Some(admitted.captures.as_slice())
+            || chunk.arguments.get(axis_index) != Some(&axis_argument(expected_points)?)
+            || chunk.arguments.len() != axis_index + generator.arguments.len() + 1
         {
             return Err(AnalysisBridgeError::Identity(
                 "signal chunk differs from its admitted sample or argument layout",
             ));
         }
-        for (declared, encoded) in generator.arguments.iter().zip(&chunk.arguments[1..]) {
+        for (declared, encoded) in generator
+            .arguments
+            .iter()
+            .zip(&chunk.arguments[axis_index + 1..])
+        {
             validate_encoded_argument(declared, encoded)?;
         }
         let identity = chunk_identity(

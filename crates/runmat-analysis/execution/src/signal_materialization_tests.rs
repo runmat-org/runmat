@@ -75,6 +75,7 @@ fn admitted() -> AdmittedSignalGenerator {
         },
         executable_source_digest: digest("executable-source"),
         function: ProgramFunctionId(7),
+        captures: Vec::new(),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),
@@ -163,6 +164,31 @@ fn planning_chunks_large_histories_and_preserves_typed_argument_order() {
             if matches!(value.as_ref(), InlineValue::F64Bits(bits) if f64::from_bits(*bits) == 2.0)
     ));
     assert_ne!(chunks[0].identity, chunks[1].identity);
+}
+
+#[test]
+fn planning_places_frozen_closure_captures_before_the_sample_axis() {
+    let signal = signal(SignalShape::Scalar, SignalPrecision::Real64);
+    let mut admitted = admitted();
+    admitted.captures = vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
+        7.0_f64.to_bits(),
+    )))];
+    let chunks = plan_signal_generator_chunks(
+        &signal,
+        &admitted,
+        None,
+        RESULT_ENVELOPE_BYTES + 16 * 8,
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap();
+    assert!(chunks.chunks.iter().all(|chunk| {
+        chunk.arguments.first() == admitted.captures.first()
+            && matches!(
+                chunk.arguments.get(1),
+                Some(ValuePayload::Inline(value)) if matches!(value.as_ref(), InlineValue::Dense(_))
+            )
+    }));
+    validate_signal_generator_chunks(&signal, &admitted, &chunks.chunks).unwrap();
 }
 
 #[test]

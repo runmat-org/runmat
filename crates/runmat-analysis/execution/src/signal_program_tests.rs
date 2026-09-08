@@ -41,6 +41,7 @@ fn admitted() -> AdmittedSignalGenerator {
         },
         executable_source_digest: digest("executable-source"),
         function: ProgramFunctionId(3),
+        captures: Vec::new(),
         generator_identity: GeneratorIdentity::new(
             digest("callable"),
             digest("captures"),

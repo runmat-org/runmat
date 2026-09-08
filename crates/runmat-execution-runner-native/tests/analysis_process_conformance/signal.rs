@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     SignalSamplingPolicy, SignalShape, SignalValue, TabulatedSignal,
 };
 use runmat_analysis_execution::{
-    admit_named_signal_generator, build_signal_generator_task_submission,
+    admit_callable_signal_generator, build_signal_generator_task_submission,
     canonical_tabulated_signal_content_digest, canonicalize_signal_generator_outputs,
     materialize_signal_for_solver, plan_signal_generator_chunks, prepare_signal_materialization,
     PreparedSignalMaterialization, SignalGeneratorChunkOutput, SignalGeneratorExecutionContext,
@@ -18,6 +18,7 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::CanonicalSignalRealization;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
+use runmat_execution::value::{CallableValue, DenseValue, ElementType, ValuePayload};
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{BundleCallable, ExecutionBundleBuilder, ProgramExecutionResponse};
@@ -63,8 +64,7 @@ impl SignalFixture {
             "[package]\nname = \"signal-placement-conformance\"\n[sources]\nroots = [\"src\"]\n",
         )
         .unwrap();
-        let source =
-            "function y = pulse(t)\narguments\n    t (:,1) double\nend\ny = t * [1, -2, 3];\nend\n";
+        let source = "function pulse = makePulse()\nscale = [1, -2, 3];\npulse = @sample;\n    function y = sample(t)\n    arguments\n        t (:,1) double\n    end\n    y = t * scale;\n    end\nend\n";
         let source_path = project_root.path().join("src/pulse.m");
         std::fs::write(&source_path, source).unwrap();
         let project = runmat_package::build_frozen_project(
@@ -104,12 +104,39 @@ impl SignalFixture {
             )
             .await
             .unwrap();
-        let executable = unit.portable_envelope_for(Some("pulse")).unwrap();
+        let anonymous = unit
+            .mir()
+            .functions
+            .values()
+            .find(|function| !function.captures.is_empty())
+            .expect("fixture must compile one capturing anonymous function");
+        let anonymous_name = anonymous.name.0.clone();
+        let executable = unit.portable_envelope_for(Some(&anonymous_name)).unwrap();
         let function = unit
             .function_analysis(executable.manifest.identity.entrypoint_function)
             .cloned()
             .unwrap();
-        let admitted = admit_named_signal_generator(
+        let capture = ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Dense(
+            DenseValue {
+                element_type: ElementType::F64,
+                shape: vec![1, 3],
+                little_endian_data: [1.0_f64, -2.0, 3.0]
+                    .into_iter()
+                    .flat_map(|value| value.to_bits().to_le_bytes())
+                    .collect(),
+            },
+        )));
+        let function_id = function.function.0;
+        let frozen_callable = CallableValue {
+            owner_identity: format!("bound:{function_id}"),
+            qualified_name: "loads.pulse".into(),
+            callable_digest: CallableValue::identity_digest(
+                &format!("bound:{function_id}"),
+                "loads.pulse",
+            ),
+            captures: vec![capture],
+        };
+        let admitted = admit_callable_signal_generator(
             &authored,
             revision.clone(),
             BundleCallable {
@@ -119,6 +146,7 @@ impl SignalFixture {
             },
             unit.revision().source_digest.parse::<Digest>().unwrap(),
             &function,
+            frozen_callable,
             &BTreeSet::new(),
         )
         .unwrap();

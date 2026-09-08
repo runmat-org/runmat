@@ -18,7 +18,9 @@ mod task;
 mod transport;
 mod workload;
 
-pub use callable::{admit_named_signal_generator, AdmittedSignalGenerator};
+pub use callable::{
+    admit_callable_signal_generator, admit_named_signal_generator, AdmittedSignalGenerator,
+};
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
