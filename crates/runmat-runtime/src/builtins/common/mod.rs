@@ -21,6 +21,7 @@ pub(crate) mod integer_conversion;
 pub(crate) mod integer_value;
 pub mod json;
 pub mod linalg;
+pub(crate) mod mapped_callable;
 pub mod matrix;
 pub mod path_search;
 pub mod path_state;

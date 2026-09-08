@@ -24,6 +24,7 @@
 pub(in crate::catalog) mod acceleration;
 mod aggregate;
 mod array;
+pub(in crate::catalog) mod cells;
 mod introspection;
 pub(in crate::catalog) mod io;
 mod logical;
@@ -34,6 +35,7 @@ mod stats;
 pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
+pub use cells::*;
 pub use introspection::*;
 pub use io::*;
 pub use logical::*;
@@ -45,6 +47,7 @@ pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCa
     acceleration::extend_entries(entries);
     aggregate::extend_entries(entries);
     array::extend_entries(entries);
+    cells::extend_entries(entries);
     introspection::extend_entries(entries);
     io::extend_entries(entries);
     logical::extend_entries(entries);

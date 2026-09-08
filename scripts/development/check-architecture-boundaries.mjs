@@ -2313,6 +2313,49 @@ const arrayfunRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(arrayfunRuntimeMacro)) {
   fail("arrayfun runtime registration must not duplicate catalog-owned contracts");
 }
+enforceMigratedBuiltinFamily({
+  name: "cellfun catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/cells/cellfun"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/cells/cellfun/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/cells/cellfun/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/cells/cellfun/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/cellfun.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/cellfun.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "cellfun runtime",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/cellfun"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/callback/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/output/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/cellfun/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/cells/core/cellfun.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "mapped callable runtime service",
+  roots: ["crates/runmat-runtime/src/builtins/common/mapped_callable"],
+  compositionFiles: ["crates/runmat-runtime/src/builtins/common/mapped_callable/mod.rs"],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/callback/parse.rs",
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/callback/invoke.rs",
+  ],
+});
+const cellfunRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/cells/core/cellfun/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(cellfunRuntimeMacro)) {
+  fail("cellfun runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\bcellfun_type\b/.test(read("crates/runmat-runtime/src/builtins/cells/type_resolvers.rs"))) {
+  fail("cellfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun"
 )) {

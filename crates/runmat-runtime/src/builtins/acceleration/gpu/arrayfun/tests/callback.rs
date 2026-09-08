@@ -84,12 +84,9 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
 
 #[test]
 fn arrayfun_qualified_text_callback_classifies_as_external_name() {
-    let callable =
-        Callable::from_text("pkg.callback").expect("qualified arrayfun callback should parse");
-    assert!(matches!(
-        callable,
-        Callable::ExternalName { name } if name == "pkg.callback"
-    ));
+    let callable = Callable::from_function(Value::String("pkg.callback".into()))
+        .expect("qualified arrayfun callback should parse");
+    assert_eq!(callable.builtin_identity(), None);
 }
 
 #[test]

@@ -39,17 +39,19 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "pkg.callback").then_some(87)
         })));
-    let callable =
-        Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".to_string()))
-            .expect("external handle should parse");
-    assert!(matches!(
-        callable,
-        Callable::Closure(Closure {
-            function_name,
-            bound_function: Some(87),
-            ..
-        }) if function_name == "pkg.callback"
-    ));
+    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |function, arguments, _| {
+            assert_eq!(function, 87);
+            assert_eq!(arguments, &[Value::Num(4.0)]);
+            Box::pin(async { Ok(Value::Num(8.0)) })
+        },
+    )));
+    let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
+        .expect("external handle should parse");
+    assert_eq!(
+        block_on(callable.call(&[Value::Num(4.0)])).unwrap(),
+        Value::Num(8.0)
+    );
 }
 
 #[test]
@@ -58,20 +60,23 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "pkg.callback").then_some(187)
         })));
+    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        |function, arguments, _| {
+            assert_eq!(function, 187);
+            assert_eq!(arguments, &[Value::Num(5.0), Value::Num(4.0)]);
+            Box::pin(async { Ok(Value::Num(9.0)) })
+        },
+    )));
     let callable = Callable::from_function(Value::Closure(Closure {
         function_name: "pkg.callback".into(),
         bound_function: None,
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");
-    assert!(matches!(
-        callable,
-        Callable::Closure(Closure {
-            function_name,
-            bound_function: Some(187),
-            captures
-        }) if function_name == "pkg.callback" && captures == vec![Value::Num(5.0)]
-    ));
+    assert_eq!(
+        block_on(callable.call(&[Value::Num(4.0)])).unwrap(),
+        Value::Num(9.0)
+    );
 }
 
 #[test]
@@ -88,11 +93,12 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             Box::pin(async { Ok(Value::Num(9.0)) })
         },
     )));
-    let callable = Callable::Closure(Closure {
+    let callable = Callable::from_function(Value::Closure(Closure {
         function_name: "pkg.callback".into(),
         bound_function: None,
         captures: vec![Value::Num(5.0)],
-    });
+    }))
+    .expect("closure callback should parse");
     let value = block_on(callable.call(&[Value::Num(4.0)])).expect("closure call");
     assert_eq!(value, Value::Num(9.0));
 }

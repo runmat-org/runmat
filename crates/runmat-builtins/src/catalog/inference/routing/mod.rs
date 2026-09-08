@@ -1,6 +1,7 @@
 pub(super) mod acceleration;
 pub(super) mod aggregate;
 pub(super) mod array;
+pub(super) mod cells;
 mod distributed;
 pub(super) mod introspection;
 pub(super) mod io;
