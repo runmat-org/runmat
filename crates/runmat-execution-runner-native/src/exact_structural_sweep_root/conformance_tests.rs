@@ -10,7 +10,7 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_execution::{
     admit_named_signal_generator, analysis_worker_capabilities, plan_signal_generator_chunks,
-    prepare_signal_materialization, PreparedSignalMaterialization,
+    prepare_signal_materialization, PreparedSignalMaterialization, ResolvedSignalArtifact,
 };
 use runmat_analysis_fea::execution::{
     SignalMaterializationIdentity, StructuralLinearWorkload, StudyIdentity, SweepIdentity,
@@ -549,13 +549,12 @@ async fn generated_box_workload(
     let PhysicalSignal::Force(force) = signal else {
         panic!("cantilever fixture signal must be force")
     };
-    let immutable_value = runmat_execution::value::ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::Dense(runmat_execution::value::DenseValue {
-            element_type: runmat_execution::value::ElementType::F64,
-            shape: vec![1, 1],
-            little_endian_data: (-1_000.0_f64).to_bits().to_le_bytes().to_vec(),
-        }),
-    ));
+    let admitted_input = runmat_runtime::analysis::value_admission::admit_owned_real64(
+        runmat_value::Value::Tensor(runmat_value::Tensor::new(vec![-1_000.0], vec![1, 1]).unwrap()),
+        runmat_runtime::analysis::value_admission::AnalysisValueAdmissionPolicy::exact_host(),
+    )
+    .unwrap();
+    let (immutable_value, input_admission) = admitted_input.into_value_payload().unwrap();
     let immutable_object = runmat_execution_artifact::ProgramExecutionObject::externalized_value(
         access,
         runmat_execution::value::ValueRefKind::DriverObject,
@@ -633,15 +632,18 @@ async fn generated_box_workload(
         &BTreeSet::new(),
     )
     .unwrap();
-    let chunks = plan_signal_generator_chunks(
+    let plan = plan_signal_generator_chunks(
         &authored,
         &admitted,
         None,
         usize::try_from(ValueLimits::default().max_inline_bytes).unwrap(),
         |_| {
-            Ok(runmat_execution::value::ValuePayload::Object(Box::new(
-                immutable_object.reference.clone(),
-            )))
+            Ok(ResolvedSignalArtifact {
+                value: runmat_execution::value::ValuePayload::Object(Box::new(
+                    immutable_object.reference.clone(),
+                )),
+                admission: input_admission.clone(),
+            })
         },
     )
     .unwrap();
@@ -649,8 +651,9 @@ async fn generated_box_workload(
         authored,
         admitted,
         executable,
-        chunks,
+        plan.chunks,
         vec![immutable_object],
+        plan.input_admissions,
     )
     .unwrap();
     (workload, prepared)

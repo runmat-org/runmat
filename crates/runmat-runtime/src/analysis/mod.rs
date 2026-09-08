@@ -255,29 +255,29 @@ pub use contracts::{
     AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor,
     AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
     AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldStorage,
-    AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisModelTemplate,
-    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRenderMesh,
-    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
-    AnalysisRenderTriangleRange, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
-    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
-    AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
-    AnalysisRunOptions, AnalysisRunResult, AnalysisRuntimeCapabilities,
-    AnalysisRuntimeModelTemplateCatalogEntry, AnalysisRuntimeModelTemplateDefaultObservation,
-    AnalysisSolverOptions, AnalysisStudyIssue, AnalysisStudyPlanData, AnalysisStudyPlanStepData,
-    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyStatePublicationData,
-    AnalysisStudyStepRunData, AnalysisStudySweepData, AnalysisStudySweepFailureEntry,
-    AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
-    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactEnforcementOptions, ElectroThermalCouplingOptions,
-    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
-    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
-    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermalResultsData, ThermoMechanicalCouplingOptions,
-    ThermoRegionTemperatureDelta, TransientIntegrationMethod, TransientResultsData,
-    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    AnalysisFieldStorageRef, AnalysisFsiRunOptions, AnalysisImmutableValueSpec,
+    AnalysisModalRunOptions, AnalysisModelTemplate, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRenderMesh, AnalysisRenderRegion,
+    AnalysisRenderTopology, AnalysisRenderTopologySource, AnalysisRenderTriangleRange,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
+    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunDatasetFieldPagingPolicy,
+    AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef, AnalysisRunOptions, AnalysisRunResult,
+    AnalysisRuntimeCapabilities, AnalysisRuntimeModelTemplateCatalogEntry,
+    AnalysisRuntimeModelTemplateDefaultObservation, AnalysisSolverOptions, AnalysisStudyIssue,
+    AnalysisStudyPlanData, AnalysisStudyPlanStepData, AnalysisStudyRunData, AnalysisStudySpec,
+    AnalysisStudyStatePublicationData, AnalysisStudyStepRunData, AnalysisStudySweepData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepFailureKind, AnalysisStudySweepPlanData,
+    AnalysisStudySweepPlanEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
+    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactEnforcementOptions,
+    ElectroThermalCouplingOptions, ElectromagneticResultsData, FallbackEvent, FallbackReason,
+    FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
+    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
+    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
+    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, TransientIntegrationMethod,
+    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
     ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
@@ -10242,6 +10242,9 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     if spec.execution.steps.is_empty() {
         issue_codes.push("RM.FEA.STUDY.EXECUTION_EMPTY".to_string());
     }
+    if !immutable_value_inventory_is_exact(spec) {
+        issue_codes.push("RM.FEA.STUDY.IMMUTABLE_VALUES_INVALID".to_string());
+    }
     if let Some(model) = &spec.model {
         if model.geometry_id != spec.geometry.geometry_id
             || model.geometry_revision != spec.geometry.revision
@@ -10288,6 +10291,17 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     issue_codes
 }
 
+fn immutable_value_inventory_is_exact(spec: &AnalysisStudySpec) -> bool {
+    contracts::validate_immutable_value_inventory(
+        &spec.immutable_values,
+        spec.model
+            .as_ref()
+            .map(|model| model.signals.as_slice())
+            .unwrap_or_default(),
+    )
+    .is_ok()
+}
+
 fn study_issue_message(code: &str) -> &'static str {
     match code {
         "RM.FEA.STUDY.ID_EMPTY" => "study_id must be non-empty",
@@ -10297,6 +10311,9 @@ fn study_issue_message(code: &str) -> &'static str {
             "geometry.units must be specified (not unspecified)"
         }
         "RM.FEA.STUDY.EXECUTION_EMPTY" => "execution must contain at least one typed procedure step",
+        "RM.FEA.STUDY.IMMUTABLE_VALUES_INVALID" => {
+            "immutable values must be unique, normalized, content-bound, and referenced exactly by generator arguments"
+        }
         "RM.FEA.STUDY.EXECUTION_PLAN_INVALID" => {
             "execution must map each canonical model procedure step to exactly one compatible solver"
         }
@@ -10329,6 +10346,9 @@ pub fn analysis_study_content_digest(spec: &AnalysisStudySpec) -> runmat_executi
     semantic_spec.geometry.source.path.clear();
     semantic_spec.solver_mesh_artifact_path = None;
     semantic_spec.meshing_evidence_artifact_path = None;
+    for value in &mut semantic_spec.immutable_values {
+        value.relative_path.clear();
+    }
     for execution in &mut semantic_spec.execution.steps {
         execution.solver_options.clear_solver_mesh_artifact_path();
     }

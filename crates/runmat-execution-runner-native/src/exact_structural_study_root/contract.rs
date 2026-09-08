@@ -100,6 +100,7 @@ struct ExactSignalMaterializationRequest {
     descriptor: ProgramExecutionDescriptor,
     chunks: Vec<runmat_analysis_execution::SignalGeneratorChunk>,
     input_references: Vec<ValueRef>,
+    input_admissions: Vec<runmat_analysis_execution::SignalInputAdmission>,
 }
 
 impl ExactSignalMaterializationRequest {
@@ -116,6 +117,7 @@ impl ExactSignalMaterializationRequest {
                 .map(|chunk| chunk.plan.clone())
                 .collect(),
             input_references: prepared.program.input_references.clone(),
+            input_admissions: prepared.input_admissions.clone(),
         })
     }
 
@@ -145,6 +147,7 @@ impl ExactSignalMaterializationRequest {
                 input_references: self.input_references.clone(),
             },
             input_objects: Vec::new(),
+            input_admissions: self.input_admissions.clone(),
         };
         prepared.validate().map_err(protocol)?;
         Ok(prepared)
@@ -489,7 +492,17 @@ pub fn decode_exact_structural_study_root(
     let transported_signal_references = signal_arguments
         .iter()
         .map(|argument| match argument {
-            ValuePayload::Object(reference) => Ok((reference.id, reference.as_ref())),
+            ValuePayload::Object(reference) => {
+                artifact_access
+                    .validate_reference(
+                        reference,
+                        ValueRefKind::DriverObject,
+                        runmat_execution::value::EXTERNALIZED_VALUE_MEDIA_TYPE,
+                        runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA,
+                    )
+                    .map_err(protocol)?;
+                Ok((reference.id, reference.as_ref()))
+            }
             ValuePayload::Inline(_) => Err(protocol("signal input value is not externalized")),
         })
         .collect::<NativeExecutionResult<BTreeMap<_, _>>>()?;

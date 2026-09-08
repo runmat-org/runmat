@@ -15,9 +15,10 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner::TaskSubmission;
 
+use crate::signal_input::validate_signal_input_payload;
 use crate::{
     validate_signal_generator_chunks, AdmittedSignalGenerator, AnalysisBridgeError,
-    AnalysisBridgeResult, SignalGeneratorChunk,
+    AnalysisBridgeResult, SignalGeneratorChunk, SignalInputAdmission,
 };
 
 pub const SIGNAL_GENERATOR_EXECUTION_MODE: &str = "analysis-signal-generator";
@@ -42,6 +43,7 @@ pub struct PreparedSignalMaterialization {
     pub admitted: AdmittedSignalGenerator,
     pub program: PreparedSignalGeneratorProgram,
     pub input_objects: Vec<ProgramExecutionObject>,
+    pub input_admissions: Vec<SignalInputAdmission>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -123,6 +125,42 @@ impl PreparedSignalMaterialization {
                 ));
             }
         }
+        self.validate_input_admissions()?;
+        Ok(())
+    }
+
+    fn validate_input_admissions(&self) -> AnalysisBridgeResult<()> {
+        let declared_admissions = self
+            .authored
+            .generator()
+            .into_iter()
+            .flat_map(|generator| generator.arguments.iter())
+            .filter_map(|argument| match argument {
+                runmat_analysis_core::GeneratorArgument::Artifact(artifact) => Some(
+                    artifact
+                        .content_digest
+                        .parse::<Digest>()
+                        .map(|digest| (artifact.artifact_id.clone(), digest))
+                        .map_err(AnalysisBridgeError::Platform),
+                ),
+                _ => None,
+            })
+            .collect::<AnalysisBridgeResult<BTreeSet<_>>>()?;
+        let admitted_inputs = self
+            .input_admissions
+            .iter()
+            .map(|admission| {
+                admission.validate()?;
+                Ok((admission.artifact_id.clone(), admission.logical_digest))
+            })
+            .collect::<AnalysisBridgeResult<BTreeSet<_>>>()?;
+        if declared_admissions.len() != self.input_admissions.len()
+            || declared_admissions != admitted_inputs
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "signal input admissions differ from authored artifact arguments",
+            ));
+        }
         Ok(())
     }
 
@@ -144,6 +182,26 @@ impl PreparedSignalMaterialization {
                     "signal input object differs from its immutable value reference",
                 ));
             }
+        }
+        let objects = self
+            .input_objects
+            .iter()
+            .map(|object| (object.reference.logical_digest, object))
+            .collect::<BTreeMap<_, _>>();
+        for admission in &self.input_admissions {
+            let object =
+                objects
+                    .get(&admission.logical_digest)
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "signal input admission has no immutable value object",
+                    ))?;
+            let value =
+                object
+                    .decode_externalized_value()?
+                    .ok_or(AnalysisBridgeError::Identity(
+                        "signal input admission refers to a non-value object",
+                    ))?;
+            validate_signal_input_payload(admission, &value)?;
         }
         Ok(())
     }
@@ -318,14 +376,19 @@ pub fn prepare_signal_materialization(
     executable: ExecutableUnitEnvelope,
     chunks: Vec<SignalGeneratorChunk>,
     mut input_objects: Vec<ProgramExecutionObject>,
+    mut input_admissions: Vec<SignalInputAdmission>,
 ) -> AnalysisBridgeResult<PreparedSignalMaterialization> {
     input_objects.sort_by_key(|object| object.reference.logical_digest);
+    input_admissions.sort_by(|left, right| {
+        (&left.artifact_id, left.logical_digest).cmp(&(&right.artifact_id, right.logical_digest))
+    });
     let program = prepare_signal_generator_program(&admitted, executable, chunks, &input_objects)?;
     let prepared = PreparedSignalMaterialization {
         authored,
         admitted,
         program,
         input_objects,
+        input_admissions,
     };
     prepared.validate_closed()?;
     Ok(prepared)

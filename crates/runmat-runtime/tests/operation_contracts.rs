@@ -357,6 +357,7 @@ fn contract_study_spec(
             }],
         },
         meshing_settings: None,
+        immutable_values: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
     }

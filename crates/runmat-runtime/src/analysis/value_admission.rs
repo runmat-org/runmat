@@ -7,6 +7,11 @@
 
 use std::borrow::Cow;
 
+use runmat_execution::value::{
+    DenseValue, ElementType, InlineValue, ValueAdmissionOwnership, ValueAdmissionReceipt,
+    ValueAdmissionTransfer, ValueConversionFidelity, ValueCopyAccounting, ValueNumericConversion,
+    ValuePayload, VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+};
 use runmat_types::{
     AliasFact, CertaintyFact, ContiguityFact, LayoutFact, MutationFact, NumericClass,
     NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
@@ -67,56 +72,6 @@ impl AnalysisValueAdmissionPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisValueOwnership {
-    Borrowed,
-    Moved,
-    Materialized,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NumericConversionFidelity {
-    Exact,
-    PotentiallyRounded,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NumericConversionReceipt {
-    pub source: NumericClass,
-    pub target: NumericClass,
-    pub fidelity: NumericConversionFidelity,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisValueTransfer {
-    None,
-    DeviceToHost { device_id: u32 },
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisValueCopyAccounting {
-    /// Bytes allocated and written to change the host numeric representation or ownership.
-    pub host_materialization_bytes: u64,
-    /// Physical numeric bytes copied from a provider-owned device buffer to host storage.
-    pub device_to_host_bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AnalysisValueAdmissionReceipt {
-    pub source: ValueFact,
-    pub target: ValueFact,
-    pub ownership: AnalysisValueOwnership,
-    pub conversion: Option<NumericConversionReceipt>,
-    pub transfer: AnalysisValueTransfer,
-    pub copies: AnalysisValueCopyAccounting,
-}
-
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum AnalysisValueAdmissionError {
     #[error("analysis admission requires a real numeric value, got {kind:?}")]
@@ -159,13 +114,15 @@ pub enum AnalysisValueAdmissionError {
     },
     #[error("numeric storage is inconsistent with its shape: {detail}")]
     InvalidStorage { detail: String },
+    #[error("portable analysis input is invalid: {detail}")]
+    InvalidPortableValue { detail: String },
 }
 
 #[derive(Debug)]
 pub struct AdmittedReal64Array<'a> {
     values: Cow<'a, [f64]>,
     shape: Cow<'a, [usize]>,
-    receipt: AnalysisValueAdmissionReceipt,
+    receipt: ValueAdmissionReceipt,
 }
 
 impl<'a> AdmittedReal64Array<'a> {
@@ -177,7 +134,7 @@ impl<'a> AdmittedReal64Array<'a> {
         self.shape.as_ref()
     }
 
-    pub fn receipt(&self) -> &AnalysisValueAdmissionReceipt {
+    pub fn receipt(&self) -> &ValueAdmissionReceipt {
         &self.receipt
     }
 
@@ -185,7 +142,7 @@ impl<'a> AdmittedReal64Array<'a> {
         let was_borrowed = matches!(self.values, Cow::Borrowed(_));
         let values = self.values.into_owned();
         if was_borrowed {
-            self.receipt.ownership = AnalysisValueOwnership::Materialized;
+            self.receipt.ownership = ValueAdmissionOwnership::Materialized;
             self.receipt.copies.host_materialization_bytes = byte_len(values.len(), 8)
                 .expect("an admitted array already has a validated element count");
             self.receipt.target.view = ViewFact::Materialized;
@@ -203,7 +160,7 @@ impl<'a> AdmittedReal64Array<'a> {
 pub struct OwnedAdmittedReal64Array {
     values: Vec<f64>,
     shape: Vec<usize>,
-    receipt: AnalysisValueAdmissionReceipt,
+    receipt: ValueAdmissionReceipt,
 }
 
 impl OwnedAdmittedReal64Array {
@@ -215,12 +172,52 @@ impl OwnedAdmittedReal64Array {
         &self.shape
     }
 
-    pub fn receipt(&self) -> &AnalysisValueAdmissionReceipt {
+    pub fn receipt(&self) -> &ValueAdmissionReceipt {
         &self.receipt
     }
 
-    pub fn into_parts(self) -> (Vec<f64>, Vec<usize>, AnalysisValueAdmissionReceipt) {
+    pub fn into_parts(self) -> (Vec<f64>, Vec<usize>, ValueAdmissionReceipt) {
         (self.values, self.shape, self.receipt)
+    }
+
+    /// Close the admitted array into the provider-neutral execution value representation.
+    pub fn into_value_payload(
+        self,
+    ) -> Result<(ValuePayload, ValueAdmissionReceipt), AnalysisValueAdmissionError> {
+        let payload = match self.receipt.target.storage {
+            StorageFact::Scalar if self.values.len() == 1 => {
+                ValuePayload::Inline(Box::new(InlineValue::F64Bits(self.values[0].to_bits())))
+            }
+            StorageFact::Dense => {
+                let source_shape = self.shape.clone();
+                let shape = self
+                    .shape
+                    .into_iter()
+                    .map(|dimension| {
+                        u64::try_from(dimension).map_err(|_| {
+                            AnalysisValueAdmissionError::ShapeOverflow {
+                                shape: source_shape.clone(),
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+                    element_type: ElementType::F64,
+                    shape,
+                    little_endian_data: self
+                        .values
+                        .into_iter()
+                        .flat_map(|value| value.to_bits().to_le_bytes())
+                        .collect(),
+                })))
+            }
+            _ => {
+                return Err(AnalysisValueAdmissionError::InvalidStorage {
+                    detail: "admission receipt storage differs from its owned value".into(),
+                });
+            }
+        };
+        Ok((payload, self.receipt))
     }
 }
 
@@ -365,12 +362,65 @@ pub async fn admit_owned_real64_async(
         },
     )?;
     admitted.receipt.source = source;
-    admitted.receipt.ownership = AnalysisValueOwnership::Materialized;
-    admitted.receipt.transfer = AnalysisValueTransfer::DeviceToHost {
+    admitted.receipt.ownership = ValueAdmissionOwnership::Materialized;
+    admitted.receipt.transfer = ValueAdmissionTransfer::DeviceToHost {
         device_id: handle.device_id,
     };
     admitted.receipt.copies.device_to_host_bytes = transfer_bytes;
     Ok(admitted)
+}
+
+/// Admit an already-portable scalar or dense real64 value through the same runtime boundary.
+pub fn admit_portable_real64(
+    value: ValuePayload,
+    policy: AnalysisValueAdmissionPolicy,
+) -> Result<OwnedAdmittedReal64Array, AnalysisValueAdmissionError> {
+    value
+        .validate(runmat_execution::value::ValueLimits::default())
+        .map_err(|error| AnalysisValueAdmissionError::InvalidPortableValue {
+            detail: error.to_string(),
+        })?;
+    let runtime_value = match value {
+        ValuePayload::Inline(value) => match *value {
+            InlineValue::F64Bits(bits) => Value::Num(f64::from_bits(bits)),
+            InlineValue::Dense(value) if value.element_type == ElementType::F64 => {
+                let shape = value
+                    .shape
+                    .into_iter()
+                    .map(|dimension| {
+                        usize::try_from(dimension).map_err(|_| {
+                            AnalysisValueAdmissionError::InvalidPortableValue {
+                                detail: "array shape exceeds this host".into(),
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let values = value
+                    .little_endian_data
+                    .chunks_exact(8)
+                    .map(|bytes| {
+                        let mut word = [0_u8; 8];
+                        word.copy_from_slice(bytes);
+                        f64::from_bits(u64::from_le_bytes(word))
+                    })
+                    .collect::<Vec<_>>();
+                Value::Tensor(Tensor::new(values, shape).map_err(|detail| {
+                    AnalysisValueAdmissionError::InvalidPortableValue { detail }
+                })?)
+            }
+            _ => {
+                return Err(AnalysisValueAdmissionError::InvalidPortableValue {
+                    detail: "expected a real64 scalar or dense array".into(),
+                })
+            }
+        },
+        ValuePayload::Object(_) => {
+            return Err(AnalysisValueAdmissionError::InvalidPortableValue {
+                detail: "portable input must be a closed inline value".into(),
+            })
+        }
+    };
+    admit_owned_real64(runtime_value, policy)
 }
 
 fn admit_borrowed_tensor<'a>(
@@ -400,7 +450,7 @@ fn admit_owned_tensor(
         NumericStorage::F64(values) => Ok(OwnedAdmittedReal64Array {
             values,
             shape,
-            receipt: receipt(source, AnalysisValueOwnership::Moved, None, 0),
+            receipt: receipt(source, ValueAdmissionOwnership::Moved, None, 0),
         }),
         storage => {
             let conversion = dtype_conversion(storage.numeric_dtype());
@@ -418,7 +468,7 @@ fn borrowed<'a>(
     AdmittedReal64Array {
         values: Cow::Borrowed(values),
         shape: Cow::Borrowed(shape),
-        receipt: receipt(source, AnalysisValueOwnership::Borrowed, None, 0),
+        receipt: receipt(source, ValueAdmissionOwnership::Borrowed, None, 0),
     }
 }
 
@@ -426,7 +476,7 @@ fn materialized(
     values: Vec<f64>,
     shape: Vec<usize>,
     source: ValueFact,
-    conversion: Option<NumericConversionReceipt>,
+    conversion: Option<ValueNumericConversion>,
 ) -> Result<AdmittedReal64Array<'static>, AnalysisValueAdmissionError> {
     let bytes = byte_len(values.len(), 8)?;
     Ok(AdmittedReal64Array {
@@ -434,7 +484,7 @@ fn materialized(
         shape: Cow::Owned(shape),
         receipt: receipt(
             source,
-            AnalysisValueOwnership::Materialized,
+            ValueAdmissionOwnership::Materialized,
             conversion,
             bytes,
         ),
@@ -445,7 +495,7 @@ fn materialized_owned(
     values: Vec<f64>,
     shape: Vec<usize>,
     source: ValueFact,
-    conversion: Option<NumericConversionReceipt>,
+    conversion: Option<ValueNumericConversion>,
 ) -> Result<OwnedAdmittedReal64Array, AnalysisValueAdmissionError> {
     let bytes = byte_len(values.len(), 8)?;
     Ok(OwnedAdmittedReal64Array {
@@ -453,7 +503,7 @@ fn materialized_owned(
         shape,
         receipt: receipt(
             source,
-            AnalysisValueOwnership::Materialized,
+            ValueAdmissionOwnership::Materialized,
             conversion,
             bytes,
         ),
@@ -462,10 +512,10 @@ fn materialized_owned(
 
 fn receipt(
     source: ValueFact,
-    ownership: AnalysisValueOwnership,
-    conversion: Option<NumericConversionReceipt>,
+    ownership: ValueAdmissionOwnership,
+    conversion: Option<ValueNumericConversion>,
     host_materialization_bytes: u64,
-) -> AnalysisValueAdmissionReceipt {
+) -> ValueAdmissionReceipt {
     let mut target = source.clone();
     target.kind = ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
@@ -478,38 +528,39 @@ fn receipt(
     };
     target.layout = LayoutFact::ColumnMajor;
     target.contiguity = ContiguityFact::Contiguous;
-    target.view = if ownership == AnalysisValueOwnership::Borrowed {
+    target.view = if ownership == ValueAdmissionOwnership::Borrowed {
         ViewFact::ReadOnlyView
     } else {
         ViewFact::Materialized
     };
     target.residency = ResidencyFact::Host;
-    target.alias = if ownership == AnalysisValueOwnership::Borrowed {
+    target.alias = if ownership == ValueAdmissionOwnership::Borrowed {
         AliasFact::Shared
     } else {
         AliasFact::Unique
     };
     target.mutation = MutationFact::Immutable;
     target.certainty = CertaintyFact::Proven;
-    AnalysisValueAdmissionReceipt {
+    ValueAdmissionReceipt {
+        schema_version: VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
         source,
         target,
         ownership,
         conversion,
-        transfer: AnalysisValueTransfer::None,
-        copies: AnalysisValueCopyAccounting {
+        transfer: ValueAdmissionTransfer::None,
+        copies: ValueCopyAccounting {
             host_materialization_bytes,
             device_to_host_bytes: 0,
         },
     }
 }
 
-fn dtype_conversion(source: NumericDType) -> NumericConversionReceipt {
-    NumericConversionReceipt {
+fn dtype_conversion(source: NumericDType) -> ValueNumericConversion {
+    ValueNumericConversion {
         source: numeric_class(source),
         target: NumericClass::Double,
         fidelity: match source {
-            NumericDType::I64 | NumericDType::U64 => NumericConversionFidelity::PotentiallyRounded,
+            NumericDType::I64 | NumericDType::U64 => ValueConversionFidelity::PotentiallyRounded,
             NumericDType::F64
             | NumericDType::F32
             | NumericDType::I8
@@ -517,12 +568,12 @@ fn dtype_conversion(source: NumericDType) -> NumericConversionReceipt {
             | NumericDType::I32
             | NumericDType::U8
             | NumericDType::U16
-            | NumericDType::U32 => NumericConversionFidelity::Exact,
+            | NumericDType::U32 => ValueConversionFidelity::Exact,
         },
     }
 }
 
-fn integer_conversion(source: &IntValue) -> NumericConversionReceipt {
+fn integer_conversion(source: &IntValue) -> ValueNumericConversion {
     dtype_conversion(match source {
         IntValue::I8(_) => NumericDType::I8,
         IntValue::I16(_) => NumericDType::I16,
@@ -592,12 +643,9 @@ mod tests {
         assert_eq!(borrowed.shape(), &[3, 1]);
         assert_eq!(
             borrowed.receipt().ownership,
-            AnalysisValueOwnership::Borrowed
+            ValueAdmissionOwnership::Borrowed
         );
-        assert_eq!(
-            borrowed.receipt().copies,
-            AnalysisValueCopyAccounting::default()
-        );
+        assert_eq!(borrowed.receipt().copies, ValueCopyAccounting::default());
 
         let materialized_borrow =
             admit_borrowed_real64(&value, AnalysisValueAdmissionPolicy::exact_host())
@@ -605,7 +653,7 @@ mod tests {
                 .into_owned();
         assert_eq!(
             materialized_borrow.receipt().ownership,
-            AnalysisValueOwnership::Materialized
+            ValueAdmissionOwnership::Materialized
         );
         assert_eq!(
             materialized_borrow
@@ -621,11 +669,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(moved.values(), &[1.0, 2.0, 3.0]);
-        assert_eq!(moved.receipt().ownership, AnalysisValueOwnership::Moved);
-        assert_eq!(
-            moved.receipt().copies,
-            AnalysisValueCopyAccounting::default()
-        );
+        assert_eq!(moved.receipt().ownership, ValueAdmissionOwnership::Moved);
+        assert_eq!(moved.receipt().copies, ValueCopyAccounting::default());
+    }
+
+    #[test]
+    fn portable_real64_uses_the_same_owned_admission_and_receipt() {
+        let payload = ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+            element_type: ElementType::F64,
+            shape: vec![2, 1],
+            little_endian_data: [3.0_f64, 5.0]
+                .into_iter()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect(),
+        })));
+        let admitted =
+            admit_portable_real64(payload.clone(), AnalysisValueAdmissionPolicy::exact_host())
+                .unwrap();
+        assert_eq!(admitted.values(), &[3.0, 5.0]);
+        assert_eq!(admitted.shape(), &[2, 1]);
+        assert_eq!(admitted.receipt().ownership, ValueAdmissionOwnership::Moved);
+        admitted.receipt().validate().unwrap();
+        let (closed, receipt) = admitted.into_value_payload().unwrap();
+        assert_eq!(closed, payload);
+        receipt.validate().unwrap();
+
+        let mut wrong_schema = receipt;
+        wrong_schema.schema_version = 0;
+        assert!(wrong_schema.validate().is_err());
+
+        let scalar = ValuePayload::Inline(Box::new(InlineValue::F64Bits(7.0_f64.to_bits())));
+        let admitted =
+            admit_portable_real64(scalar.clone(), AnalysisValueAdmissionPolicy::exact_host())
+                .unwrap();
+        assert_eq!(admitted.receipt().target.storage, StorageFact::Scalar);
+        assert_eq!(admitted.into_value_payload().unwrap().0, scalar);
     }
 
     #[test]
@@ -649,10 +727,10 @@ mod tests {
         assert_eq!(admitted.receipt().copies.host_materialization_bytes, 16);
         assert_eq!(
             admitted.receipt().conversion,
-            Some(NumericConversionReceipt {
+            Some(ValueNumericConversion {
                 source: NumericClass::Single,
                 target: NumericClass::Double,
-                fidelity: NumericConversionFidelity::Exact,
+                fidelity: ValueConversionFidelity::Exact,
             })
         );
     }
@@ -775,7 +853,7 @@ mod tests {
         assert_eq!(admitted.values(), &[4.0, 5.0]);
         assert_eq!(
             admitted.receipt().transfer,
-            AnalysisValueTransfer::DeviceToHost {
+            ValueAdmissionTransfer::DeviceToHost {
                 device_id: PROVIDER.device_id()
             }
         );
@@ -783,7 +861,7 @@ mod tests {
         assert_eq!(admitted.receipt().copies.host_materialization_bytes, 0);
         assert_eq!(
             admitted.receipt().ownership,
-            AnalysisValueOwnership::Materialized
+            ValueAdmissionOwnership::Materialized
         );
 
         assert_eq!(handle.device_id, PROVIDER.device_id());

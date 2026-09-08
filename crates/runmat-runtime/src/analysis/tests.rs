@@ -906,6 +906,7 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             }],
         },
         meshing_settings: Some(runmat_meshing_core::MeshingRequestSettings::default()),
+        immutable_values: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
     }
@@ -930,6 +931,7 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             }],
         },
         meshing_settings: None,
+        immutable_values: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
     }

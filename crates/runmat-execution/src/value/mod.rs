@@ -3,8 +3,18 @@ use serde::{Deserialize, Serialize};
 use crate::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use crate::ContractError;
 
+mod admission;
 mod identity;
 mod validation;
+
+pub use admission::{
+    ValueAdmissionOwnership, ValueAdmissionReceipt, ValueAdmissionTransfer,
+    ValueConversionFidelity, ValueCopyAccounting, ValueNumericConversion,
+    VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+};
+
+pub const EXTERNALIZED_VALUE_MEDIA_TYPE: &str = "application/vnd.runmat.value+json";
+pub const EXTERNALIZED_VALUE_SCHEMA: &str = "runmat-value-payload-v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValueLimits {

@@ -7,12 +7,19 @@ use runmat_analysis_core::{
     SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
 };
 use runmat_analysis_fea::execution::{GeneratorIdentity, SignalMaterializationIdentity};
-use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValuePayload};
+use runmat_execution::value::{
+    DenseValue, ElementType, InlineValue, ValueAdmissionOwnership, ValueAdmissionReceipt,
+    ValueAdmissionTransfer, ValueCopyAccounting, ValuePayload,
+    VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+};
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{ArtifactAccess, BundleCallable, ProgramExecutionObject};
-use runmat_types::ProgramFunctionId;
+use runmat_types::{
+    MutationFact, NumericClass, NumericDomain, NumericFact, ProgramFunctionId, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
+};
 
-use crate::materialize_signal_for_solver;
+use crate::{materialize_signal_for_solver, validate_signal_input_payload};
 
 use super::*;
 
@@ -99,6 +106,27 @@ fn dense_f64(shape: Vec<u64>, values: &[f64]) -> ValuePayload {
     })))
 }
 
+fn moved_real64_receipt(shape: Vec<Option<usize>>) -> ValueAdmissionReceipt {
+    let mut target = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(shape),
+        StorageFact::Dense,
+    );
+    target.mutation = MutationFact::Immutable;
+    ValueAdmissionReceipt {
+        schema_version: VALUE_ADMISSION_RECEIPT_SCHEMA_VERSION,
+        source: target.clone(),
+        target,
+        ownership: ValueAdmissionOwnership::Moved,
+        conversion: None,
+        transfer: ValueAdmissionTransfer::None,
+        copies: ValueCopyAccounting::default(),
+    }
+}
+
 fn output(chunk: &SignalGeneratorChunk, value: ValuePayload) -> SignalGeneratorChunkOutput {
     SignalGeneratorChunkOutput {
         chunk_identity: chunk.identity,
@@ -116,7 +144,8 @@ fn planning_chunks_large_histories_and_preserves_typed_argument_order() {
         RESULT_ENVELOPE_BYTES + 2 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     assert_eq!(chunks.len(), 3);
     assert_eq!(chunks[0].first_sample, 0);
     assert_eq!(chunks[1].first_sample, 2);
@@ -145,14 +174,16 @@ fn scalar_chunks_compose_into_one_canonical_realization() {
         RESULT_ENVELOPE_BYTES + 2 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     let outputs = vec![
         output(&chunks[0], dense_f64(vec![2, 1], &[10.0, 20.0])),
         output(&chunks[1], dense_f64(vec![1, 2], &[30.0, 40.0])),
         output(&chunks[2], dense_f64(vec![1], &[50.0])),
     ];
     let realization =
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &outputs).unwrap();
+        canonicalize_signal_generator_outputs(&signal, &admitted, None, &[], &chunks, &outputs)
+            .unwrap();
     let CanonicalSignalValues::Real { values } = realization.values else {
         panic!("expected real realization")
     };
@@ -179,13 +210,15 @@ fn matrix_output_is_reordered_from_column_major_to_sample_major() {
         RESULT_ENVELOPE_BYTES + 2 * 3 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     let outputs = vec![output(
         &chunks[0],
         dense_f64(vec![2, 3], &[1.0, 2.0, 10.0, 20.0, 100.0, 200.0]),
     )];
     let realization =
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &outputs).unwrap();
+        canonicalize_signal_generator_outputs(&signal, &admitted, None, &[], &chunks, &outputs)
+            .unwrap();
     let CanonicalSignalValues::Real { values } = realization.values else {
         panic!("expected real realization")
     };
@@ -206,34 +239,50 @@ fn canonicalization_rejects_substituted_chunks_wrong_shapes_and_nonfinite_values
         RESULT_ENVELOPE_BYTES + 5 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     let mut substituted = vec![output(
         &chunks[0],
         dense_f64(vec![5, 1], &[1.0, 2.0, 3.0, 4.0, 5.0]),
     )];
     substituted[0].chunk_identity = digest("other-chunk");
-    assert!(
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &substituted,)
-            .is_err()
-    );
+    assert!(canonicalize_signal_generator_outputs(
+        &signal,
+        &admitted,
+        None,
+        &[],
+        &chunks,
+        &substituted,
+    )
+    .is_err());
 
     let wrong_shape = vec![output(
         &chunks[0],
         dense_f64(vec![1, 1, 5], &[1.0, 2.0, 3.0, 4.0, 5.0]),
     )];
-    assert!(
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &wrong_shape,)
-            .is_err()
-    );
+    assert!(canonicalize_signal_generator_outputs(
+        &signal,
+        &admitted,
+        None,
+        &[],
+        &chunks,
+        &wrong_shape,
+    )
+    .is_err());
 
     let nonfinite = vec![output(
         &chunks[0],
         dense_f64(vec![5, 1], &[1.0, 2.0, f64::NAN, 4.0, 5.0]),
     )];
-    assert!(
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &nonfinite,)
-            .is_err()
-    );
+    assert!(canonicalize_signal_generator_outputs(
+        &signal,
+        &admitted,
+        None,
+        &[],
+        &chunks,
+        &nonfinite,
+    )
+    .is_err());
 }
 
 #[test]
@@ -247,7 +296,8 @@ fn transported_chunk_plan_rejects_axis_and_authored_argument_tampering() {
         RESULT_ENVELOPE_BYTES + 5 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
 
     let mut changed_axis = chunks.clone();
     changed_axis[0].sample_points[1] = 0.5_f64.to_bits();
@@ -303,7 +353,12 @@ fn artifact_authority_does_not_change_logical_chunk_identity() {
         &admitted(),
         None,
         RESULT_ENVELOPE_BYTES + 5 * 16,
-        |_| Ok(ValuePayload::Object(Box::new(first.reference.clone()))),
+        |_| {
+            Ok(ResolvedSignalArtifact {
+                value: ValuePayload::Object(Box::new(first.reference.clone())),
+                admission: moved_real64_receipt(vec![Some(2), Some(1)]),
+            })
+        },
     )
     .unwrap();
     let second_chunks = plan_signal_generator_chunks(
@@ -311,14 +366,45 @@ fn artifact_authority_does_not_change_logical_chunk_identity() {
         &admitted(),
         None,
         RESULT_ENVELOPE_BYTES + 5 * 16,
-        |_| Ok(ValuePayload::Object(Box::new(second.reference.clone()))),
+        |_| {
+            Ok(ResolvedSignalArtifact {
+                value: ValuePayload::Object(Box::new(second.reference.clone())),
+                admission: moved_real64_receipt(vec![Some(2), Some(1)]),
+            })
+        },
     )
     .unwrap();
 
-    assert_ne!(first_chunks[0].arguments, second_chunks[0].arguments);
-    assert_eq!(first_chunks[0].identity, second_chunks[0].identity);
-    validate_signal_generator_chunks(&signal, &admitted(), &first_chunks).unwrap();
-    validate_signal_generator_chunks(&signal, &admitted(), &second_chunks).unwrap();
+    assert_ne!(
+        first_chunks.chunks[0].arguments,
+        second_chunks.chunks[0].arguments
+    );
+    assert_eq!(
+        first_chunks.chunks[0].identity,
+        second_chunks.chunks[0].identity
+    );
+    assert_eq!(
+        first_chunks.input_admissions,
+        second_chunks.input_admissions
+    );
+    validate_signal_generator_chunks(&signal, &admitted(), &first_chunks.chunks).unwrap();
+    validate_signal_generator_chunks(&signal, &admitted(), &second_chunks.chunks).unwrap();
+}
+
+#[test]
+fn immutable_input_receipt_must_match_the_closed_payload_shape() {
+    let payload = dense_f64(vec![2, 1], &[17.0, 19.0]);
+    let admission = SignalInputAdmission {
+        artifact_id: "immutable-vector".into(),
+        logical_digest: payload.logical_digest().unwrap(),
+        value_schema: runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into(),
+        receipt: moved_real64_receipt(vec![Some(2), Some(1)]),
+    };
+    validate_signal_input_payload(&admission, &payload).unwrap();
+
+    let mut substituted = admission;
+    substituted.receipt.target.shape = ShapeFact::from(vec![Some(1), Some(2)]);
+    assert!(validate_signal_input_payload(&substituted, &payload).is_err());
 }
 
 #[test]
@@ -332,11 +418,13 @@ fn declared_single_precision_is_canonicalized_at_that_precision() {
         RESULT_ENVELOPE_BYTES + 5 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     let input = 1.0 / 3.0;
     let outputs = vec![output(&chunks[0], dense_f64(vec![5, 1], &[input; 5]))];
     let realization =
-        canonicalize_signal_generator_outputs(&signal, &admitted, None, &chunks, &outputs).unwrap();
+        canonicalize_signal_generator_outputs(&signal, &admitted, None, &[], &chunks, &outputs)
+            .unwrap();
     let CanonicalSignalValues::Real { values } = realization.values else {
         panic!("expected real realization")
     };
@@ -354,13 +442,14 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
         RESULT_ENVELOPE_BYTES + 5 * 16,
         |_| panic!("no artifact argument expected"),
     )
-    .unwrap();
+    .unwrap()
+    .chunks;
     let outputs = vec![output(
         &chunks[0],
         dense_f64(vec![5, 1], &[10.0, 20.0, 30.0, 40.0, 50.0]),
     )];
     let realization =
-        canonicalize_signal_generator_outputs(&authored, &admitted, None, &chunks, &outputs)
+        canonicalize_signal_generator_outputs(&authored, &admitted, None, &[], &chunks, &outputs)
             .unwrap();
     let materialized = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
     let PhysicalSignal::Force(signal) = materialized else {

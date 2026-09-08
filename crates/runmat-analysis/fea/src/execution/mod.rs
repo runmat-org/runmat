@@ -29,6 +29,7 @@ pub use object::{
 };
 pub use signal::{
     CanonicalSignalRealization, CanonicalSignalRealizationInput, CanonicalSignalValues,
+    SignalInputAdmission,
 };
 pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
 pub use state::{

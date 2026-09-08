@@ -81,6 +81,26 @@ impl RemoteValueCatalog {
         }
         Ok(())
     }
+
+    pub(super) fn resolve(
+        &self,
+        reference: &ValueRef,
+        authorization_scope: &str,
+    ) -> NativeExecutionResult<ValuePayload> {
+        let (stored, encoded) = self
+            .objects
+            .lock()
+            .expect("remote value catalog poisoned")
+            .get(&reference.id)
+            .cloned()
+            .ok_or_else(|| protocol("remote value object is not registered"))?;
+        if &stored != reference {
+            return Err(protocol(
+                "remote value reference differs from its registered object",
+            ));
+        }
+        super::value_transfer::decode_value(&stored, &encoded, authorization_scope)
+    }
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

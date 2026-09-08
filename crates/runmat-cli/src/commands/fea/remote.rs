@@ -45,6 +45,7 @@ pub(super) async fn execute_study(
     let signal_materializations = prepare_signal_materializations_in_frozen(
         source,
         signals,
+        &spec.immutable_values,
         &resolved.resolved.frozen,
         config,
     )
@@ -187,9 +188,15 @@ pub(super) async fn execute_sweep(
         .filter_map(|study| study.model.as_ref())
         .flat_map(|model| model.signals.iter().cloned())
         .collect::<Vec<_>>();
+    let immutable_values = spec
+        .studies
+        .iter()
+        .flat_map(|study| study.immutable_values.iter().cloned())
+        .collect::<Vec<_>>();
     let mut materializations = prepare_signal_materializations_in_frozen(
         source,
         &signals,
+        &immutable_values,
         &resolved.resolved.frozen,
         config,
     )

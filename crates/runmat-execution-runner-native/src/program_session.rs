@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::identity::ValueId;
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{CancellationReason, ExecutionScopeId, PoolId};
-use runmat_execution_artifact::{ExecutableForm, ProgramExecutionObject, ProgramExecutionRequest};
+use runmat_execution_artifact::{
+    ArtifactAccess, ExecutableForm, ProgramExecutionObject, ProgramExecutionRequest,
+};
 use runmat_execution_runner::{AttemptSuccess, TaskSubmission};
 
 use crate::config::fresh_scope_id;
@@ -21,6 +23,7 @@ static NEXT_PROGRAM_SCOPE: AtomicU64 = AtomicU64::new(1);
 
 pub struct NativeProgramSession {
     driver: Arc<LocalDriver>,
+    artifact_access: ArtifactAccess,
     values: Mutex<HashMap<ValueId, (ValueRef, ValuePayload)>>,
 }
 
@@ -29,8 +32,19 @@ impl NativeProgramSession {
         let nonce = NEXT_PROGRAM_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-program-session", nonce);
         config.store_root.push(scope_id.to_string());
+        let authorization_scope = scope_id.to_string();
         Ok(Self {
             driver: LocalDriver::new(config, scope_id)?,
+            artifact_access: ArtifactAccess {
+                encryption_context: runmat_execution::Digest::sha256(
+                    [
+                        b"runmat-native-program-session/v1\0".as_slice(),
+                        authorization_scope.as_bytes(),
+                    ]
+                    .concat(),
+                ),
+                authorization_scope,
+            },
             values: Mutex::new(HashMap::new()),
         })
     }
@@ -45,6 +59,10 @@ impl NativeProgramSession {
 
     pub fn object_store(&self) -> FilesystemObjectStore {
         self.driver.object_store()
+    }
+
+    pub fn artifact_access(&self) -> &ArtifactAccess {
+        &self.artifact_access
     }
 
     pub fn register_value_object(

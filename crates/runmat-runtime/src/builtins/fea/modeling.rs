@@ -154,6 +154,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
         model: Some(model),
         execution,
         meshing_settings: None,
+        immutable_values: Vec::new(),
         solver_mesh_artifact_path: persisted_mesh
             .as_ref()
             .and_then(|mesh| mesh.artifact_path.clone()),

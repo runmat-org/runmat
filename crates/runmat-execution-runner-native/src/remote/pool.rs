@@ -143,6 +143,13 @@ impl RemotePoolDriver {
             .register(reference, encoded.into(), &self.value_scope)
     }
 
+    pub(super) fn resolve_value_object(
+        &self,
+        reference: &runmat_execution::value::ValueRef,
+    ) -> NativeExecutionResult<runmat_execution::value::ValuePayload> {
+        self.values.resolve(reference, &self.value_scope)
+    }
+
     pub fn register_execution_object(
         &self,
         reference: runmat_execution::value::ValueRef,

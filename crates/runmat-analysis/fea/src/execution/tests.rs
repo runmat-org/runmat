@@ -454,6 +454,7 @@ fn signal_realization(values: Vec<f64>) -> CanonicalSignalRealization {
             callable_id: "loads.launch_force".into(),
             frozen_input_digest: digest("frozen-input").to_string(),
         },
+        input_admissions: Vec::new(),
     })
     .unwrap()
 }
@@ -515,6 +516,7 @@ fn topology_signal_realization_requires_exact_entity_shape() {
             callable_id: "thermal.field".into(),
             frozen_input_digest: digest("inputs").to_string(),
         },
+        input_admissions: Vec::new(),
     };
     assert!(CanonicalSignalRealization::new(input).is_err());
 }

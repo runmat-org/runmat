@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
-    FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace,
-    StateCompleteness, StateId, StateKind, StatePersistence,
+    FormulationRequirement, PhysicalSignal, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    SolutionSpace, StateCompleteness, StateId, StateKind, StatePersistence,
 };
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, StateIdentity};
@@ -2315,6 +2315,99 @@ impl AnalysisExecutionPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AnalysisImmutableValueSpec {
+    pub artifact_id: String,
+    pub relative_path: String,
+    pub logical_digest: String,
+}
+
+impl AnalysisImmutableValueSpec {
+    pub fn validate(&self) -> Result<runmat_execution::Digest, String> {
+        let path = std::path::Path::new(&self.relative_path);
+        if self.artifact_id.trim().is_empty()
+            || self.artifact_id.trim() != self.artifact_id
+            || self.relative_path.trim().is_empty()
+            || !path.is_relative()
+            || !path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(
+                "immutable value requires a non-empty id and normalized document-relative path"
+                    .into(),
+            );
+        }
+        self.logical_digest
+            .parse::<runmat_execution::Digest>()
+            .map_err(|error| format!("immutable value logical digest is invalid: {error}"))
+    }
+}
+
+pub(crate) fn validate_immutable_value_inventory(
+    declarations: &[AnalysisImmutableValueSpec],
+    signals: &[PhysicalSignal],
+) -> Result<(), String> {
+    let mut declared = std::collections::BTreeMap::new();
+    for value in declarations {
+        let digest = value.validate()?;
+        if declared
+            .insert(value.artifact_id.as_str(), digest)
+            .is_some()
+        {
+            return Err(format!(
+                "immutable value `{}` is declared more than once",
+                value.artifact_id
+            ));
+        }
+    }
+    let mut used = std::collections::BTreeSet::new();
+    for artifact in signals
+        .iter()
+        .filter_map(PhysicalSignal::generator)
+        .flat_map(|generator| generator.arguments.iter())
+        .filter_map(|argument| match argument {
+            runmat_analysis_core::GeneratorArgument::Artifact(artifact) => Some(artifact),
+            _ => None,
+        })
+    {
+        if artifact.schema != runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA {
+            return Err(format!(
+                "signal artifact `{}` uses unsupported immutable value schema `{}`",
+                artifact.artifact_id, artifact.schema
+            ));
+        }
+        let expected = artifact
+            .content_digest
+            .parse::<runmat_execution::Digest>()
+            .map_err(|error| {
+                format!(
+                    "signal artifact `{}` has an invalid digest: {error}",
+                    artifact.artifact_id
+                )
+            })?;
+        if declared.get(artifact.artifact_id.as_str()) != Some(&expected) {
+            let reason = if declared.contains_key(artifact.artifact_id.as_str()) {
+                "differs from its immutable value declaration"
+            } else {
+                "has no immutable value declaration"
+            };
+            return Err(format!(
+                "signal artifact `{}` {reason}",
+                artifact.artifact_id
+            ));
+        }
+        used.insert(artifact.artifact_id.as_str());
+    }
+    if used.len() != declared.len() {
+        return Err(
+            "immutable value declarations must be referenced exactly by signal arguments".into(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisStudySpec {
     pub study_id: String,
     pub geometry: GeometryAsset,
@@ -2324,6 +2417,8 @@ pub struct AnalysisStudySpec {
     pub execution: AnalysisExecutionPlan,
     #[serde(default)]
     pub meshing_settings: Option<MeshingRequestSettings>,
+    #[serde(default)]
+    pub immutable_values: Vec<AnalysisImmutableValueSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

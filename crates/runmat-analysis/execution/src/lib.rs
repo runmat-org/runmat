@@ -8,6 +8,7 @@ mod materialized_signal;
 mod object;
 mod response;
 mod serial;
+mod signal_input;
 mod signal_materialization;
 mod signal_program;
 mod state_publication;
@@ -32,13 +33,16 @@ pub use host::{
 pub use materialized_signal::materialize_signal_for_solver;
 pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};
 pub use response::AnalysisHostResponse;
+pub use runmat_analysis_fea::execution::SignalInputAdmission;
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
     CompletedAnalysisWorkload,
 };
+pub use signal_input::{validate_signal_input_payload, ResolvedSignalArtifact};
 pub use signal_materialization::{
     canonicalize_signal_generator_outputs, plan_signal_generator_chunks,
-    validate_signal_generator_chunks, SignalGeneratorChunk, SignalGeneratorChunkOutput,
+    validate_signal_generator_chunks, PlannedSignalGenerator, SignalGeneratorChunk,
+    SignalGeneratorChunkOutput,
 };
 pub use signal_program::{
     build_signal_generator_task_submission, prepare_signal_generator_program,

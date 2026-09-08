@@ -50,6 +50,7 @@ pub(super) async fn execute(
         for object in &prepared.input_objects {
             pool.register_value_object(object.reference.clone(), object.bytes.clone())?;
         }
+        validate_registered_inputs(pool.as_ref(), &prepared)?;
         let identity = prepared.admitted.materialization_identity;
         if let Some(existing) = unique.get(&identity) {
             if existing != &prepared {
@@ -154,6 +155,7 @@ pub(super) async fn execute(
                 &prepared.authored,
                 &prepared.admitted,
                 None,
+                &prepared.input_admissions,
                 &prepared
                     .program
                     .chunks
@@ -197,6 +199,24 @@ pub(super) async fn execute(
         outcomes.insert(identity, outcome);
     }
     Ok(outcomes)
+}
+
+fn validate_registered_inputs(
+    pool: &RemotePoolDriver,
+    prepared: &PreparedSignalMaterialization,
+) -> NativeExecutionResult<()> {
+    for admission in &prepared.input_admissions {
+        let reference = prepared
+            .program
+            .input_references
+            .iter()
+            .find(|reference| reference.logical_digest == admission.logical_digest)
+            .ok_or_else(|| protocol("signal input admission has no registered value reference"))?;
+        let value = pool.resolve_value_object(reference)?;
+        runmat_analysis_execution::validate_signal_input_payload(admission, &value)
+            .map_err(protocol)?;
+    }
+    Ok(())
 }
 
 pub(super) fn apply_to_workload(

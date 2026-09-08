@@ -3,6 +3,7 @@ use runmat_analysis_core::{
     SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_execution::value::{ValueAdmissionReceipt, EXTERNALIZED_VALUE_SCHEMA};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +17,32 @@ const REALIZATION_DOMAIN: &str = "signal-realization";
 const CONTENT_DOMAIN: &str = "signal-content";
 const REALIZATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignalInputAdmission {
+    pub artifact_id: String,
+    pub logical_digest: Digest,
+    pub value_schema: String,
+    pub receipt: ValueAdmissionReceipt,
+}
+
+impl SignalInputAdmission {
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.receipt
+            .validate_portable_immutable_real64()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if self.artifact_id.trim().is_empty()
+            || self.logical_digest.bytes() == &[0; 32]
+            || self.value_schema != EXTERNALIZED_VALUE_SCHEMA
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal input admission is incomplete or non-portable".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +130,7 @@ pub struct CanonicalSignalRealization {
     pub extrapolation: SignalExtrapolation,
     pub evidence: SignalApproximationEvidence,
     pub provenance: GeneratorProvenance,
+    pub input_admissions: Vec<SignalInputAdmission>,
 }
 
 pub struct CanonicalSignalRealizationInput {
@@ -119,6 +147,7 @@ pub struct CanonicalSignalRealizationInput {
     pub extrapolation: SignalExtrapolation,
     pub evidence: SignalApproximationEvidence,
     pub provenance: GeneratorProvenance,
+    pub input_admissions: Vec<SignalInputAdmission>,
 }
 
 impl CanonicalSignalRealization {
@@ -140,6 +169,7 @@ impl CanonicalSignalRealization {
             extrapolation: input.extrapolation,
             evidence: input.evidence,
             provenance: input.provenance,
+            input_admissions: input.input_admissions,
         };
         realization.content_digest = realization.derive_content_digest()?;
         realization.identity = SignalRealizationIdentity::new(
@@ -181,6 +211,15 @@ impl CanonicalSignalRealization {
             ));
         }
         self.values.validate(self.precision)?;
+        let mut admission_keys = std::collections::BTreeSet::new();
+        for admission in &self.input_admissions {
+            admission.validate()?;
+            if !admission_keys.insert((admission.artifact_id.as_str(), admission.logical_digest)) {
+                return Err(AnalysisExecutionError::Invalid(
+                    "signal input admission inventory is duplicated".into(),
+                ));
+            }
+        }
         let component_count = component_count(&self.shape, self.topology_entity_count)?;
         let expected_values = self
             .sample_points

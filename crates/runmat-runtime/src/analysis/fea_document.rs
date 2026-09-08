@@ -18,10 +18,11 @@ use runmat_meshing_core::{ElementOrder, MeshingRequestSettings};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::contracts::validate_immutable_value_inventory;
 use super::{
     analysis_create_model_op, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisModelTemplate, AnalysisSolverOptions, AnalysisStudySpec,
-    AnalysisStudySweepSpec,
+    AnalysisExecutionStep, AnalysisImmutableValueSpec, AnalysisModelTemplate,
+    AnalysisSolverOptions, AnalysisStudySpec, AnalysisStudySweepSpec,
 };
 use crate::operations::OperationContext;
 
@@ -86,6 +87,8 @@ struct FeaStudyDocument {
     initial_conditions: Vec<InitialCondition>,
     #[serde(default)]
     response_spectra: Vec<ResponseSpectrum>,
+    #[serde(default)]
+    immutable_values: Vec<AnalysisImmutableValueSpec>,
     sequence: AnalysisSequence,
     #[serde(default)]
     domains: FeaDomainsDocument,
@@ -482,6 +485,7 @@ async fn resolve_study(
     if study.id.trim().is_empty() {
         return Err("study id must be non-empty".to_string());
     }
+    validate_immutable_value_inventory(&study.immutable_values, &study.signals)?;
 
     let geometry = load_geometry(&study.geometry, base_dir).await?;
     let model_id = study
@@ -503,6 +507,7 @@ async fn resolve_study(
         model,
         execution,
         meshing_settings,
+        immutable_values: study.immutable_values,
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
     };
@@ -1070,8 +1075,11 @@ fn default_assignment_confidence() -> EvidenceConfidence {
 mod tests {
     use super::*;
     use runmat_analysis_core::{
-        AnalysisProcedure, Force, ProcedureStep, Signal, SignalApproximationEvidence, SignalId,
-        SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+        AnalysisProcedure, Force, GeneratorArgument, GeneratorDomain, GeneratorEffectPolicy,
+        ProcedureStep, Signal, SignalApproximationEvidence, SignalArtifactDomain,
+        SignalArtifactRef, SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation,
+        SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
+        SignalValue,
     };
     use runmat_geometry_core::{
         GeometrySource, MeshDescriptor, MeshKind, Region, SourceGeometry, SourceGeometryKind,
@@ -1220,6 +1228,122 @@ mod tests {
     fn canonical_yaml(value: impl Serialize) -> serde_yaml::Value {
         let json = serde_json::to_value(value).expect("JSON-compatible contract");
         serde_yaml::to_value(json).expect("canonical YAML value")
+    }
+
+    fn immutable_artifact_signal(logical_digest: runmat_execution::Digest) -> PhysicalSignal {
+        PhysicalSignal::Force(Signal {
+            signal_id: SignalId("generated-force".into()),
+            shape: SignalShape::Scalar,
+            frame: Some(CoordinateFrame::Global),
+            representation: SignalRepresentation::Generator(SignalGenerator {
+                qualified_function: "loads.scaled_force".into(),
+                arguments: vec![GeneratorArgument::Artifact(SignalArtifactRef {
+                    artifact_id: "magnitudes".into(),
+                    content_digest: logical_digest.to_string(),
+                    schema: runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into(),
+                    domain: SignalArtifactDomain::Constant,
+                    topology_digest: None,
+                    sample_count: 2,
+                })],
+                domain: GeneratorDomain::TimeSeconds,
+                sampling: SignalSamplingPolicy::Uniform {
+                    start: 0.0,
+                    end: 1.0,
+                    sample_count: 2,
+                },
+                interpolation: SignalInterpolation::Linear,
+                extrapolation: SignalExtrapolation::Reject,
+                effects: GeneratorEffectPolicy::DeclaredImmutableArtifacts,
+            }),
+            precision: SignalPrecision::Real64,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: None,
+                max_relative_error: None,
+                derivative_max_absolute_error: None,
+                sample_count: 0,
+            },
+            provenance: SignalProvenance::Authored,
+        })
+    }
+
+    #[test]
+    fn immutable_signal_arguments_require_an_exact_closed_declaration_inventory() {
+        let digest = runmat_execution::Digest::sha256(b"immutable-magnitudes");
+        let mut document = minimal_study_yaml();
+        let mapping = document.as_mapping_mut().expect("study mapping");
+        mapping.insert(
+            "signals".into(),
+            canonical_yaml(vec![immutable_artifact_signal(digest)]),
+        );
+        mapping.insert(
+            "immutable_values".into(),
+            canonical_yaml(vec![AnalysisImmutableValueSpec {
+                artifact_id: "magnitudes".into(),
+                relative_path: "inputs/magnitudes.value.json".into(),
+                logical_digest: digest.to_string(),
+            }]),
+        );
+        let RawFeaDocument::Study(mut study) =
+            parse_raw_fea_value(document).expect("typed study document")
+        else {
+            panic!("expected study")
+        };
+        validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+            .expect("exact declaration inventory");
+
+        let declaration = study.immutable_values.pop().expect("declaration");
+        assert!(
+            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+                .expect_err("missing declaration must fail")
+                .contains("no immutable value declaration")
+        );
+        study.immutable_values.push(declaration);
+
+        study.immutable_values[0].logical_digest =
+            runmat_execution::Digest::sha256(b"substituted").to_string();
+        assert!(
+            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+                .expect_err("substituted declaration must fail")
+                .contains("differs")
+        );
+        study.immutable_values[0].logical_digest = digest.to_string();
+
+        let PhysicalSignal::Force(signal) = &mut study.signals[0] else {
+            panic!("expected force signal")
+        };
+        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+            panic!("expected generated signal")
+        };
+        let GeneratorArgument::Artifact(artifact) = &mut generator.arguments[0] else {
+            panic!("expected immutable artifact argument")
+        };
+        artifact.schema = "application-specific-value".into();
+        assert!(
+            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+                .expect_err("unsupported value schema must fail")
+                .contains("unsupported immutable value schema")
+        );
+        let PhysicalSignal::Force(signal) = &mut study.signals[0] else {
+            unreachable!()
+        };
+        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+            unreachable!()
+        };
+        let GeneratorArgument::Artifact(artifact) = &mut generator.arguments[0] else {
+            unreachable!()
+        };
+        artifact.schema = runmat_execution::value::EXTERNALIZED_VALUE_SCHEMA.into();
+
+        study.immutable_values.push(AnalysisImmutableValueSpec {
+            artifact_id: "unused".into(),
+            relative_path: "inputs/unused.value.json".into(),
+            logical_digest: runmat_execution::Digest::sha256(b"unused").to_string(),
+        });
+        assert!(
+            validate_immutable_value_inventory(&study.immutable_values, &study.signals)
+                .expect_err("unused declaration must fail")
+                .contains("referenced exactly")
+        );
     }
 
     #[test]

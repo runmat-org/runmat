@@ -15,11 +15,14 @@ use runmat_analysis_fea::execution::{
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
-use runmat_execution::value::ValueLimits;
-use runmat_execution::CancellationReason;
+use runmat_execution::value::{ValueLimits, ValuePayload, ValueRefKind};
+use runmat_execution::{CancellationReason, Digest};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::ObjectNamespace;
+use runmat_execution_artifact::{
+    ArtifactAccess, ObjectNamespace, ProgramExecutionObject, EXTERNALIZED_VALUE_SCHEMA,
+    MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
+};
 use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeExecutionConfig, NativeProgramSession,
 };
@@ -40,12 +43,20 @@ pub(super) async fn materialize_study(
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
+    let immutable_values = study.immutable_values.clone();
     let Some(model) = study.model.as_mut() else {
         return Ok(());
     };
     let wall_millis = materialization_wall_millis(model);
-    model.signals =
-        materialize_signals(document_path, &model.signals, wall_millis, cli, config).await?;
+    model.signals = materialize_signals(
+        document_path,
+        &model.signals,
+        &immutable_values,
+        wall_millis,
+        cli,
+        config,
+    )
+    .await?;
     Ok(())
 }
 
@@ -56,6 +67,7 @@ pub(super) async fn materialize_sweep(
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let mut signals = Vec::new();
+    let mut immutable_values = Vec::new();
     let mut study_signal_counts = Vec::with_capacity(sweep.studies.len());
     let mut wall_millis = 1_u64;
     for study in &sweep.studies {
@@ -66,10 +78,18 @@ pub(super) async fn materialize_sweep(
         wall_millis = wall_millis.max(materialization_wall_millis(model));
         study_signal_counts.push(model.signals.len());
         signals.extend(model.signals.iter().cloned());
+        immutable_values.extend(study.immutable_values.iter().cloned());
     }
-    let mut materialized = materialize_signals(document_path, &signals, wall_millis, cli, config)
-        .await?
-        .into_iter();
+    let mut materialized = materialize_signals(
+        document_path,
+        &signals,
+        &immutable_values,
+        wall_millis,
+        cli,
+        config,
+    )
+    .await?
+    .into_iter();
     for (study, signal_count) in sweep.studies.iter_mut().zip(study_signal_counts) {
         if signal_count == 0 {
             continue;
@@ -92,6 +112,7 @@ pub(super) async fn materialize_sweep(
 async fn materialize_signals(
     document_path: &std::path::Path,
     signals: &[PhysicalSignal],
+    immutable_values: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
     maximum_wall_millis: u64,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
@@ -115,7 +136,19 @@ async fn materialize_signals(
     if compiled.len() != generator_signals.len() {
         bail!("compiled signal generator inventory is incomplete");
     }
-    let prepared = prepare_compiled_materializations(&generator_signals, &compiled)?;
+    let mut native_config = NativeExecutionConfig::for_current_executable()?;
+    native_config
+        .worker_capabilities
+        .insert(Capability::ProcessIsolation);
+    let maximum_parallel_tasks = native_config.max_workers as usize;
+    let session = NativeProgramSession::new(native_config)?;
+    let prepared = prepare_compiled_materializations(
+        document_path,
+        &generator_signals,
+        &compiled,
+        immutable_values,
+        session.artifact_access(),
+    )?;
     let mut unique =
         BTreeMap::<SignalMaterializationIdentity, PreparedSignalMaterialization>::new();
     for prepared in prepared {
@@ -129,12 +162,6 @@ async fn materialize_signals(
         unique.insert(identity, prepared);
     }
 
-    let mut native_config = NativeExecutionConfig::for_current_executable()?;
-    native_config
-        .worker_capabilities
-        .insert(Capability::ProcessIsolation);
-    let maximum_parallel_tasks = native_config.max_workers as usize;
-    let session = NativeProgramSession::new(native_config)?;
     for materialization in unique.values() {
         materialization.validate_closed()?;
         for object in &materialization.input_objects {
@@ -204,6 +231,7 @@ async fn materialize_signals(
             &materialization.authored,
             &materialization.admitted,
             None,
+            &materialization.input_admissions,
             &materialization
                 .program
                 .chunks
@@ -259,6 +287,7 @@ async fn materialize_signals(
 pub(super) async fn prepare_signal_materializations_in_frozen(
     document_path: &std::path::Path,
     signals: &[PhysicalSignal],
+    immutable_values: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
     frozen: &runmat_package::FrozenProject,
     config: &RunMatRuntimeConfig,
 ) -> Result<Vec<PreparedSignalMaterialization>> {
@@ -275,45 +304,179 @@ pub(super) async fn prepare_signal_materializations_in_frozen(
         &BTreeSet::new(),
     )
     .await?;
-    prepare_compiled_materializations(&generator_signals, &compiled)
+    prepare_compiled_materializations(
+        document_path,
+        &generator_signals,
+        &compiled,
+        immutable_values,
+        &preparation_access(frozen),
+    )
 }
 
 fn prepare_compiled_materializations(
+    document_path: &std::path::Path,
     generator_signals: &[PhysicalSignal],
     compiled: &[CompiledSignalGenerator],
+    immutable_values: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
+    artifact_access: &ArtifactAccess,
 ) -> Result<Vec<PreparedSignalMaterialization>> {
     if compiled.len() != generator_signals.len() {
         bail!("compiled signal generator inventory is incomplete");
     }
     let maximum_inline_result_bytes = usize::try_from(ValueLimits::default().max_inline_bytes)
         .context("inline result bound exceeds this host")?;
+    let immutable_values = load_immutable_values(document_path, immutable_values, artifact_access)?;
     generator_signals
         .iter()
         .cloned()
         .zip(compiled)
         .map(|(authored, compiled)| {
             compiled.validate()?;
-            let chunks = plan_signal_generator_chunks(
+            let mut selected_objects = BTreeMap::new();
+            let plan = plan_signal_generator_chunks(
                 &authored,
                 &compiled.admission,
                 None,
                 maximum_inline_result_bytes,
-                |_| {
-                    Err(runmat_analysis_execution::AnalysisBridgeError::Invalid(
-                        "generator artifact arguments require the immutable artifact resolver"
-                            .into(),
-                    ))
+                |artifact| {
+                    if artifact.schema != EXTERNALIZED_VALUE_SCHEMA {
+                        return Err(runmat_analysis_execution::AnalysisBridgeError::Invalid(
+                            "generator artifact uses an unsupported immutable value schema".into(),
+                        ));
+                    }
+                    let digest = artifact
+                        .content_digest
+                        .parse::<Digest>()
+                        .map_err(runmat_analysis_execution::AnalysisBridgeError::Platform)?;
+                    let (object, admission) = immutable_values
+                        .get(&(artifact.artifact_id.clone(), digest))
+                        .ok_or_else(|| {
+                            runmat_analysis_execution::AnalysisBridgeError::Invalid(format!(
+                                "generator artifact `{}` has no resolved immutable value",
+                                artifact.artifact_id
+                            ))
+                        })?;
+                    selected_objects.insert(digest, object.clone());
+                    Ok(runmat_analysis_execution::ResolvedSignalArtifact {
+                        value: ValuePayload::Object(Box::new(object.reference.clone())),
+                        admission: admission.clone(),
+                    })
                 },
             )?;
             Ok(prepare_signal_materialization(
                 authored,
                 compiled.admission.clone(),
                 compiled.executable.clone(),
-                chunks,
-                Vec::new(),
+                plan.chunks,
+                selected_objects.into_values().collect(),
+                plan.input_admissions,
             )?)
         })
         .collect()
+}
+
+type ImmutableValueInventory = BTreeMap<
+    (String, Digest),
+    (
+        ProgramExecutionObject,
+        runmat_execution::value::ValueAdmissionReceipt,
+    ),
+>;
+
+fn load_immutable_values(
+    document_path: &std::path::Path,
+    declarations: &[runmat_runtime::analysis::AnalysisImmutableValueSpec],
+    artifact_access: &ArtifactAccess,
+) -> Result<ImmutableValueInventory> {
+    let document_root = document_path
+        .parent()
+        .context("FEA document has no containing directory")?
+        .canonicalize()
+        .context("resolve FEA document directory")?;
+    let mut inventory = BTreeMap::new();
+    for declaration in declarations {
+        let declared_digest = declaration.validate().map_err(anyhow::Error::msg)?;
+        let relative = std::path::Path::new(&declaration.relative_path);
+        let path = document_root
+            .join(relative)
+            .canonicalize()
+            .with_context(|| format!("resolve immutable value `{}`", declaration.artifact_id))?;
+        if !path.starts_with(&document_root) {
+            bail!(
+                "immutable value `{}` resolves outside the FEA document directory",
+                declaration.artifact_id
+            );
+        }
+        let metadata = std::fs::metadata(&path)
+            .with_context(|| format!("inspect immutable value `{}`", declaration.artifact_id))?;
+        if !metadata.is_file()
+            || metadata.len() == 0
+            || metadata.len() > MAX_PROGRAM_EXECUTION_OBJECT_BYTES
+        {
+            bail!(
+                "immutable value `{}` is empty, not a file, or exceeds the portable object bound",
+                declaration.artifact_id
+            );
+        }
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("read immutable value `{}`", declaration.artifact_id))?;
+        let payload: ValuePayload = serde_json::from_slice(&bytes)
+            .with_context(|| format!("decode immutable value `{}`", declaration.artifact_id))?;
+        if serde_json::to_vec(&payload)? != bytes {
+            bail!(
+                "immutable value `{}` is not canonical compact JSON",
+                declaration.artifact_id
+            );
+        }
+        let admitted = runmat_runtime::analysis::value_admission::admit_portable_real64(
+            payload,
+            runmat_runtime::analysis::value_admission::AnalysisValueAdmissionPolicy::exact_host(),
+        )?;
+        let (payload, receipt) = admitted.into_value_payload()?;
+        receipt.validate()?;
+        let object = ProgramExecutionObject::externalized_value(
+            artifact_access,
+            ValueRefKind::DriverObject,
+            payload,
+        )?;
+        if object.reference.logical_digest != declared_digest {
+            bail!(
+                "immutable value `{}` differs from its declared logical digest",
+                declaration.artifact_id
+            );
+        }
+        let key = (declaration.artifact_id.clone(), declared_digest);
+        let candidate = (object, receipt);
+        match inventory.get(&key) {
+            Some(existing) if existing == &candidate => {}
+            Some(_) => {
+                bail!(
+                    "immutable value `{}` resolves inconsistently across the sweep",
+                    declaration.artifact_id
+                );
+            }
+            None => {
+                inventory.insert(key, candidate);
+            }
+        }
+    }
+    Ok(inventory)
+}
+
+fn preparation_access(frozen: &runmat_package::FrozenProject) -> ArtifactAccess {
+    let revision = frozen.revision();
+    let authorization_scope = format!("signal-preparation-{}", revision.graph_digest);
+    ArtifactAccess {
+        encryption_context: Digest::sha256(
+            [
+                b"runmat-signal-preparation/v1\0".as_slice(),
+                revision.graph_digest.bytes(),
+                revision.source_revision.bytes(),
+            ]
+            .concat(),
+        ),
+        authorization_scope,
+    }
 }
 
 fn wait_for_outputs(
@@ -406,4 +569,57 @@ fn signal_store_root() -> Result<std::path::PathBuf> {
         std::env::current_dir()?.join(configured)
     };
     Ok(root.join("generated-signals").join("objects"))
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_execution::value::{DenseValue, ElementType, InlineValue};
+
+    use super::*;
+
+    #[test]
+    fn immutable_value_loader_is_path_bounded_canonical_and_content_bound() {
+        let directory = tempfile::tempdir().unwrap();
+        let document = directory.path().join("study.fea");
+        std::fs::write(&document, b"study").unwrap();
+        let payload = ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+            element_type: ElementType::F64,
+            shape: vec![2, 1],
+            little_endian_data: [4.0_f64, 8.0]
+                .into_iter()
+                .flat_map(|value| value.to_bits().to_le_bytes())
+                .collect(),
+        })));
+        let digest = payload.logical_digest().unwrap();
+        std::fs::write(
+            directory.path().join("magnitude.value.json"),
+            serde_json::to_vec(&payload).unwrap(),
+        )
+        .unwrap();
+        let declaration = runmat_runtime::analysis::AnalysisImmutableValueSpec {
+            artifact_id: "magnitude".into(),
+            relative_path: "magnitude.value.json".into(),
+            logical_digest: digest.to_string(),
+        };
+        let access = ArtifactAccess {
+            authorization_scope: "loader-test".into(),
+            encryption_context: Digest::sha256(b"loader-test-key"),
+        };
+
+        let loaded =
+            load_immutable_values(&document, std::slice::from_ref(&declaration), &access).unwrap();
+        let (object, receipt) = loaded
+            .get(&(declaration.artifact_id.clone(), digest))
+            .unwrap();
+        assert_eq!(object.decode_externalized_value().unwrap(), Some(payload));
+        receipt.validate().unwrap();
+
+        let mut outside = declaration.clone();
+        outside.relative_path = "../magnitude.value.json".into();
+        assert!(load_immutable_values(&document, &[outside], &access).is_err());
+
+        let mut substituted = declaration;
+        substituted.logical_digest = Digest::sha256(b"substituted").to_string();
+        assert!(load_immutable_values(&document, &[substituted], &access).is_err());
+    }
 }

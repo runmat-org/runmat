@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use runmat_analysis_core::{
     GeneratorArgument, PhysicalSignal, SignalApproximationEvidence, SignalArtifactRef,
     SignalPrecision, SignalShape,
@@ -8,7 +10,11 @@ use runmat_analysis_fea::execution::{
 use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValueLimits, ValuePayload};
 use runmat_execution::Digest;
 
-use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
+use crate::signal_input::resolve_signal_artifact;
+use crate::{
+    AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult, ResolvedSignalArtifact,
+    SignalInputAdmission,
+};
 
 const CHUNK_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-signal-chunk/v1\0";
 const RESULT_ENVELOPE_BYTES: usize = 4096;
@@ -37,6 +43,12 @@ pub struct SignalGeneratorChunkOutput {
     pub value: ValuePayload,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlannedSignalGenerator {
+    pub chunks: Vec<SignalGeneratorChunk>,
+    pub input_admissions: Vec<SignalInputAdmission>,
+}
+
 /// Split one admitted generator into deterministic, independently schedulable calls.
 ///
 /// The first argument is the chunk's canonical axis vector. Authored arguments follow in their
@@ -47,8 +59,8 @@ pub fn plan_signal_generator_chunks(
     admitted: &AdmittedSignalGenerator,
     topology_entity_count: Option<usize>,
     maximum_inline_result_bytes: usize,
-    mut resolve_artifact: impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ValuePayload>,
-) -> AnalysisBridgeResult<Vec<SignalGeneratorChunk>> {
+    mut resolve_artifact: impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ResolvedSignalArtifact>,
+) -> AnalysisBridgeResult<PlannedSignalGenerator> {
     let generator = matching_generator(signal, admitted)?;
     let component_count = signal
         .shape()
@@ -75,10 +87,11 @@ pub fn plan_signal_generator_chunks(
         ));
     }
 
+    let mut input_admissions = BTreeMap::new();
     let authored_arguments = generator
         .arguments
         .iter()
-        .map(|argument| encode_argument(argument, &mut resolve_artifact))
+        .map(|argument| encode_argument(argument, &mut resolve_artifact, &mut input_admissions))
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     let mut chunks = Vec::new();
     for (ordinal, (first_sample, points)) in admitted
@@ -120,7 +133,10 @@ pub fn plan_signal_generator_chunks(
             "signal generator produced no executable chunks".into(),
         ));
     }
-    Ok(chunks)
+    Ok(PlannedSignalGenerator {
+        chunks,
+        input_admissions: input_admissions.into_values().collect(),
+    })
 }
 
 /// Validate ordered chunk results and seal them into the solver-facing canonical artifact.
@@ -128,6 +144,7 @@ pub fn canonicalize_signal_generator_outputs(
     signal: &PhysicalSignal,
     admitted: &AdmittedSignalGenerator,
     topology_entity_count: Option<usize>,
+    input_admissions: &[SignalInputAdmission],
     chunks: &[SignalGeneratorChunk],
     outputs: &[SignalGeneratorChunkOutput],
 ) -> AnalysisBridgeResult<CanonicalSignalRealization> {
@@ -201,6 +218,7 @@ pub fn canonicalize_signal_generator_outputs(
                 sample_count: admitted.sample_points.len(),
             },
             provenance: admitted.provenance.clone(),
+            input_admissions: input_admissions.to_vec(),
         },
     )?)
 }
@@ -302,7 +320,10 @@ fn axis_argument(points: &[f64]) -> AnalysisBridgeResult<ValuePayload> {
 
 fn encode_argument(
     argument: &GeneratorArgument,
-    resolve_artifact: &mut impl FnMut(&SignalArtifactRef) -> AnalysisBridgeResult<ValuePayload>,
+    resolve_artifact: &mut impl FnMut(
+        &SignalArtifactRef,
+    ) -> AnalysisBridgeResult<ResolvedSignalArtifact>,
+    input_admissions: &mut BTreeMap<(String, Digest), SignalInputAdmission>,
 ) -> AnalysisBridgeResult<ValuePayload> {
     let inline = match argument {
         GeneratorArgument::Boolean(value) => InlineValue::Logical(*value),
@@ -323,7 +344,20 @@ fn encode_argument(
                 .flat_map(|value| value.to_bits().to_le_bytes())
                 .collect(),
         }),
-        GeneratorArgument::Artifact(artifact) => return resolve_artifact(artifact),
+        GeneratorArgument::Artifact(artifact) => {
+            let resolved = resolve_artifact(artifact)?;
+            let admission = resolve_signal_artifact(artifact, &resolved)?;
+            let key = (admission.artifact_id.clone(), admission.logical_digest);
+            if input_admissions
+                .insert(key, admission.clone())
+                .is_some_and(|existing| existing != admission)
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "immutable signal input admission is inconsistent",
+                ));
+            }
+            return Ok(resolved.value);
+        }
     };
     Ok(ValuePayload::Inline(Box::new(inline)))
 }
@@ -350,11 +384,15 @@ fn validate_encoded_argument(
             }
         }
         _ => {
-            let expected = encode_argument(declared, &mut |_| {
-                Err(AnalysisBridgeError::Invalid(
-                    "unexpected signal artifact argument".into(),
-                ))
-            })?;
+            let expected = encode_argument(
+                declared,
+                &mut |_| {
+                    Err(AnalysisBridgeError::Invalid(
+                        "unexpected signal artifact argument".into(),
+                    ))
+                },
+                &mut BTreeMap::new(),
+            )?;
             if encoded != &expected {
                 return Err(AnalysisBridgeError::Identity(
                     "signal argument differs from its authored value",

@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
+pub use runmat_execution::value::{EXTERNALIZED_VALUE_MEDIA_TYPE, EXTERNALIZED_VALUE_SCHEMA};
 use serde::{Deserialize, Serialize};
 
 use super::request::validate_externalized_inventory;
@@ -13,9 +14,6 @@ use crate::{ArtifactError, ArtifactResult};
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
-pub const EXTERNALIZED_VALUE_MEDIA_TYPE: &str = "application/vnd.runmat.value+json";
-pub const EXTERNALIZED_VALUE_SCHEMA: &str = "runmat-value-payload-v1";
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramExecutionObject {
     pub reference: ValueRef,
