@@ -10,13 +10,6 @@ pub fn orderfields_type(args: &[Type], _context: &ResolveContext) -> Type {
         .unwrap_or(Type::Unknown)
 }
 
-pub fn rmfield_type(args: &[Type], _context: &ResolveContext) -> Type {
-    args.first()
-        .and_then(struct_container_type)
-        .map(drop_struct_fields)
-        .unwrap_or(Type::Unknown)
-}
-
 pub fn setfield_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first()
         .and_then(struct_container_type)
@@ -80,17 +73,6 @@ mod tests {
                 &ResolveContext::new(Vec::new()),
             ),
             Type::Struct { known_fields: None }
-        );
-    }
-
-    #[test]
-    fn rmfield_type_preserves_struct_array_container() {
-        assert_eq!(
-            rmfield_type(
-                &[Type::cell_of(Type::Struct { known_fields: None })],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::cell_of(Type::Struct { known_fields: None })
         );
     }
 
