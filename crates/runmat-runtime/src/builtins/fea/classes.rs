@@ -31,6 +31,7 @@ pub(super) const FEA_ELECTROTHERMAL_STEP_CLASS: &str = "fea.ElectroThermalStep";
 pub(super) const FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS: &str = "fea.ConjugateHeatTransferStep";
 pub(super) const FEA_FLUID_STRUCTURE_STEP_CLASS: &str = "fea.FluidStructureStep";
 pub(super) const FEA_THERMOMECHANICAL_DOMAIN_CLASS: &str = "fea.ThermoMechanicalDomain";
+pub(super) const FEA_THERMAL_DOMAIN_CLASS: &str = "fea.ThermalDomain";
 pub(super) const FEA_ELECTROTHERMAL_DOMAIN_CLASS: &str = "fea.ElectroThermalDomain";
 pub(super) const FEA_ELECTROMAGNETIC_DOMAIN_CLASS: &str = "fea.ElectromagneticDomain";
 pub(super) const FEA_FLUID_DOMAIN_CLASS: &str = "fea.FluidDomain";
@@ -308,6 +309,7 @@ pub(crate) fn ensure_fea_classes_registered() {
                 FEA_ELECTROTHERMAL_STEP_CLASS => electrothermal_step_methods(),
                 FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS => conjugate_heat_transfer_step_methods(),
                 FEA_FLUID_STRUCTURE_STEP_CLASS => fluid_structure_step_methods(),
+                FEA_THERMAL_DOMAIN_CLASS => thermal_domain_methods(),
                 FEA_THERMOMECHANICAL_DOMAIN_CLASS => thermomechanical_domain_methods(),
                 FEA_ELECTROTHERMAL_DOMAIN_CLASS => electrothermal_domain_methods(),
                 FEA_ELECTROMAGNETIC_DOMAIN_CLASS => electromagnetic_domain_methods(),
@@ -689,6 +691,13 @@ fn thermomechanical_domain_methods() -> HashMap<String, crate::class_registry::R
     )])
 }
 
+fn thermal_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+    static_methods(&[(
+        "atReferenceTemperature",
+        "fea.ThermalDomain.atReferenceTemperature",
+    )])
+}
+
 fn electrothermal_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
     static_methods(&[(
         "atReferenceTemperature",
@@ -724,7 +733,7 @@ fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_regist
         .collect()
 }
 
-fn fea_class_schemas() -> [FeaClassSchema; 43] {
+fn fea_class_schemas() -> [FeaClassSchema; 44] {
     [
         (
             FEA_STUDY_CLASS,
@@ -966,6 +975,13 @@ fn fea_class_schemas() -> [FeaClassSchema; 43] {
             "runmat.fea.fluid-structure-step",
             STEP_FIELDS,
             STEP_FIELDS,
+            validate_fea_object,
+        ),
+        (
+            FEA_THERMAL_DOMAIN_CLASS,
+            "runmat.fea.thermal-domain",
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
+            REFERENCE_TEMPERATURE_DOMAIN_FIELDS,
             validate_fea_object,
         ),
         (

@@ -1,6 +1,9 @@
 use crate::{AnalysisModel, AnalysisValidationError};
 
 pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisValidationError> {
+    if let Some(domain) = &model.thermal {
+        validate_reference_temperature("thermal", domain.reference_temperature)?;
+    }
     if let Some(domain) = &model.thermo_mechanical {
         validate_reference_temperature("thermo_mechanical", domain.reference_temperature)?;
     }
@@ -90,6 +93,13 @@ mod tests {
 
     #[test]
     fn physical_domain_reference_values_are_typed_and_validated() {
+        assert!(matches!(
+            validate_reference_temperature("thermal", Temperature::new(-1.0)),
+            Err(AnalysisValidationError::InvalidDomain {
+                domain: "thermal",
+                ..
+            })
+        ));
         validate_reference_temperature("thermo_mechanical", Temperature::new(293.15)).unwrap();
         let domain = CfdDomain {
             density: MassDensity::new(1.225),

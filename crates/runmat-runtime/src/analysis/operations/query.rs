@@ -16,7 +16,6 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* thermal.temperature_gradient_snapshots,
                 $($borrow)* thermal.heat_flux_snapshots,
                 $($borrow)* thermal.energy_storage_rate_snapshots,
-                $($borrow)* thermal.axis_boundary_heat_flux_summary_snapshots,
             ] {
                 for field in fields {
                     $visit(field);
@@ -489,20 +488,20 @@ pub fn analysis_results_op(
         "FEA_CONTACT_NONLINEAR",
         "load_amplification_ratio",
     );
-    let thermal_max_residual_norm = diagnostic_metric(
+    let thermal_max_relative_residual_norm = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_THERMAL_STABILITY",
-        "max_residual_norm",
+        "max_relative_residual_norm",
     );
     let thermal_min_temperature_k = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_THERMAL_STABILITY",
-        "min_temperature_k",
+        "minimum_temperature_k",
     );
     let thermal_max_temperature_k = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_THERMAL_STABILITY",
-        "max_temperature_k",
+        "maximum_temperature_k",
     );
     let thermal_conductivity_spread_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
@@ -513,21 +512,6 @@ pub fn analysis_results_op(
         &run_result.run.diagnostics,
         "FEA_THERMAL_CONSTITUTIVE",
         "heat_capacity_spread_ratio",
-    );
-    let thermal_spatial_gradient_index = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_THERMAL_OUTCOME",
-        "spatial_gradient_index",
-    );
-    let thermal_monotonic_response_fraction = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_THERMAL_OUTCOME",
-        "monotonic_response_fraction",
-    );
-    let thermal_response_realization_ratio = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_THERMAL_OUTCOME",
-        "thermal_response_realization_ratio",
     );
     let electromagnetic_enabled =
         diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled");
@@ -786,14 +770,11 @@ pub fn analysis_results_op(
         contact_nonlinear_severity_mean,
         contact_load_realization_ratio,
         contact_load_amplification_ratio,
-        thermal_max_residual_norm,
+        thermal_max_relative_residual_norm,
         thermal_min_temperature_k,
         thermal_max_temperature_k,
         thermal_conductivity_spread_ratio,
         thermal_heat_capacity_spread_ratio,
-        thermal_spatial_gradient_index,
-        thermal_monotonic_response_fraction,
-        thermal_response_realization_ratio,
         electromagnetic_enabled,
         electromagnetic_formulation_coverage_ratio,
         electromagnetic_magnetostatic_curl_curl_coverage_ratio,

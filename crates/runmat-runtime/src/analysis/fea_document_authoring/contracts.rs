@@ -6,7 +6,7 @@ use runmat_analysis_core::{
     AnalysisProcedure, AnalysisSequence, CfdDomain, CoordinateFrame, ElectroThermalDomain,
     ElectromagneticDomain, EvidenceConfidence, FormulationRequirement, MaterialAcousticModel,
     MaterialElectricalModel, MaterialMechanicalModel, MaterialPlasticModel, MaterialThermalModel,
-    PhysicsFamily, ProcedureStepId, ThermoMechanicalDomain,
+    PhysicsFamily, ProcedureStepId, ThermalDomain, ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
@@ -304,6 +304,8 @@ pub struct FeaStudyMaterialAssignmentInput {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaStudyDomainsInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thermal: Option<ThermalDomain>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thermo_mechanical: Option<ThermoMechanicalDomain>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

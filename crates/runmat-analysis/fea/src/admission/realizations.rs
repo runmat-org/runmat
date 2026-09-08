@@ -91,15 +91,6 @@ fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRea
             vec![SourceImplementation::CanonicalVolumeProjection],
             vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
         ),
-        (
-            SpatialOperatorImplementation::ReducedThermalDiffusion,
-            ConstitutiveImplementation::ReducedThermalCoefficientProfile,
-            TemporalImplementation::ThermalTransientRelaxation,
-            vec![TopologyImplementation::InferredLattice],
-            RecoveryImplementation::ThermalInferredAxisGradient,
-            vec![SourceImplementation::OrdinalDistribution],
-            vec![BoundaryTransferImplementation::GlobalCountProfile],
-        ),
     ]
     .into_iter()
     .map(

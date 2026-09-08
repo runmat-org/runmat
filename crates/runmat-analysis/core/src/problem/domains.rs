@@ -10,6 +10,12 @@ pub struct ThermoMechanicalDomain {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ThermalDomain {
+    pub reference_temperature: Temperature,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ElectroThermalDomain {
     pub reference_temperature: Temperature,
 }

@@ -27,7 +27,7 @@ pub use pipeline::linear_static::{
 };
 pub use pipeline::modal::{run_modal, run_modal_with_options};
 pub use pipeline::nonlinear::{run_nonlinear, run_nonlinear_with_options};
-pub use pipeline::thermal::{run_thermal, run_thermal_with_options};
+pub use pipeline::thermal::run_thermal_with_options;
 pub use pipeline::transient::{run_transient, run_transient_with_options};
 pub use progress::{
     check_cancelled as check_fea_cancelled, emit_phase as emit_fea_progress_phase,

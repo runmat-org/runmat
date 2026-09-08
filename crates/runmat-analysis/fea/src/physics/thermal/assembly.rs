@@ -14,6 +14,12 @@ use crate::{
     topology::{AnalysisProjection, ProjectedElement},
 };
 
+#[cfg(test)]
+mod convergence_tests;
+mod recovery;
+
+pub(crate) use recovery::ThermalEnergyBalance;
+
 #[derive(Debug, Clone)]
 pub(crate) struct ThermalOperatorAssembly {
     pub projection: AnalysisProjection,
@@ -26,17 +32,30 @@ pub(crate) struct ThermalOperatorAssembly {
     pub element_volumetric_capacity_j_per_m3k: Vec<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ThermalEnergyBalance {
-    pub storage_rate_w: f64,
-    pub boundary_loss_w: f64,
-    pub applied_power_w: f64,
-    pub prescribed_boundary_power_w: f64,
-    pub residual_w: f64,
-    pub relative_residual: f64,
-}
-
 impl ThermalOperatorAssembly {
+    #[cfg(test)]
+    pub(crate) fn steady_operator(&self) -> OperatorSystem {
+        let stiffness_csr = self.conductivity.clone();
+        let mut rhs = self.source.clone();
+        apply_prescribed_temperatures(&stiffness_csr, &self.prescribed_temperature_k, &mut rhs);
+        let stiffness_diag = diagonal(&stiffness_csr, self.projection.nodes.len());
+        OperatorSystem {
+            dof_count: self.projection.nodes.len(),
+            constrained: self
+                .prescribed_temperature_k
+                .iter()
+                .map(Option::is_some)
+                .collect(),
+            stiffness_dense: None,
+            stiffness_csr: Some(stiffness_csr),
+            stiffness_diag,
+            stiffness_upper: vec![0.0; self.projection.nodes.len().saturating_sub(1)],
+            mass_diag: diagonal(&self.capacity, self.projection.nodes.len()),
+            damping_diag: vec![0.0; self.projection.nodes.len()],
+            rhs,
+        }
+    }
+
     pub(crate) fn transient_operator(
         &self,
         time_step_s: f64,
@@ -71,125 +90,6 @@ impl ThermalOperatorAssembly {
             damping_diag: vec![0.0; self.projection.nodes.len()],
             rhs,
         }
-    }
-
-    pub(crate) fn recover_element_temperature_gradients(
-        &self,
-        temperature_k: &[f64],
-    ) -> Result<Vec<[f64; 3]>, ThermalAssemblyError> {
-        self.projection
-            .elements
-            .iter()
-            .map(|element| {
-                let mut integrated = [0.0; 3];
-                let mut volume = 0.0;
-                self.projection
-                    .visit_element_quadrature(element, |point| {
-                        for (&node, gradient) in element
-                            .node_indices
-                            .iter()
-                            .zip(point.physical_shape_gradients())
-                        {
-                            for axis in 0..3 {
-                                integrated[axis] +=
-                                    temperature_k[node] * gradient[axis] * point.volume_weight_m3;
-                            }
-                        }
-                        volume += point.volume_weight_m3;
-                    })
-                    .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-                Ok(integrated.map(|component| component / volume))
-            })
-            .collect()
-    }
-
-    pub(crate) fn recover_element_heat_flux(
-        &self,
-        temperature_k: &[f64],
-    ) -> Result<Vec<[f64; 3]>, ThermalAssemblyError> {
-        Ok(self
-            .recover_element_temperature_gradients(temperature_k)?
-            .into_iter()
-            .zip(&self.element_conductivity_w_per_mk)
-            .map(|(gradient, conductivity)| gradient.map(|value| -conductivity * value))
-            .collect())
-    }
-
-    pub(crate) fn energy_balance(
-        &self,
-        previous_temperature_k: &[f64],
-        temperature_k: &[f64],
-        time_step_s: f64,
-    ) -> ThermalEnergyBalance {
-        let rate = previous_temperature_k
-            .iter()
-            .zip(temperature_k)
-            .map(|(previous, current)| (current - previous) / time_step_s)
-            .collect::<Vec<_>>();
-        let storage_rate = apply_matrix(&self.capacity, &rate);
-        let conduction = apply_matrix(&self.conductivity, temperature_k);
-        let storage_rate_w = storage_rate.iter().sum::<f64>();
-        let boundary_loss_w = conduction.iter().sum::<f64>();
-        let applied_power_w = self.source.iter().sum::<f64>();
-        let prescribed_boundary_power_w = self
-            .prescribed_temperature_k
-            .iter()
-            .enumerate()
-            .filter(|(_, value)| value.is_some())
-            .map(|(node, _)| -(storage_rate[node] + conduction[node] - self.source[node]))
-            .sum::<f64>();
-        let residual_w =
-            storage_rate_w + boundary_loss_w - applied_power_w + prescribed_boundary_power_w;
-        let scale = storage_rate_w
-            .abs()
-            .max(boundary_loss_w.abs())
-            .max(applied_power_w.abs())
-            .max(prescribed_boundary_power_w.abs())
-            .max(1.0);
-        ThermalEnergyBalance {
-            storage_rate_w,
-            boundary_loss_w,
-            applied_power_w,
-            prescribed_boundary_power_w,
-            residual_w,
-            relative_residual: residual_w.abs() / scale,
-        }
-    }
-
-    pub(crate) fn recover_element_storage_rate(
-        &self,
-        previous_temperature_k: &[f64],
-        temperature_k: &[f64],
-        time_step_s: f64,
-    ) -> Result<Vec<f64>, ThermalAssemblyError> {
-        self.projection
-            .elements
-            .iter()
-            .enumerate()
-            .map(|(element_index, element)| {
-                let mut integrated_rate = 0.0;
-                let mut volume = 0.0;
-                self.projection
-                    .visit_element_quadrature(element, |point| {
-                        let temperature_rate = element
-                            .node_indices
-                            .iter()
-                            .zip(point.shape_values())
-                            .map(|(&node, &shape)| {
-                                shape * (temperature_k[node] - previous_temperature_k[node])
-                                    / time_step_s
-                            })
-                            .sum::<f64>();
-                        integrated_rate += self.element_volumetric_capacity_j_per_m3k
-                            [element_index]
-                            * temperature_rate
-                            * point.volume_weight_m3;
-                        volume += point.volume_weight_m3;
-                    })
-                    .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-                Ok(integrated_rate / volume)
-            })
-            .collect()
     }
 }
 
@@ -551,7 +451,7 @@ fn add_scaled_matrix(assembler: &mut CsrAssembler, matrix: &CsrMatrix, scale: f6
     }
 }
 
-fn apply_matrix(matrix: &CsrMatrix, vector: &[f64]) -> Vec<f64> {
+pub(super) fn apply_matrix(matrix: &CsrMatrix, vector: &[f64]) -> Vec<f64> {
     (0..matrix.row_offsets.len().saturating_sub(1))
         .map(|row| {
             (matrix.row_offsets[row]..matrix.row_offsets[row + 1])
@@ -595,7 +495,7 @@ mod tests {
         HeatTransferCoefficient, PhysicalQuantityKind, PrescribedValue, ProjectionRequirement,
         RegionTarget, SignalId, Temperature, ThermalConstraint, ThermalConstraintKind,
     };
-    use runmat_meshing_core::ElementOrder;
+    use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind};
 
     use super::*;
     use crate::{
@@ -629,6 +529,76 @@ mod tests {
                 },
             },
         }])
+    }
+
+    fn thermal_reference_model() -> (
+        AnalysisModel,
+        runmat_meshing_core::SolverMeshArtifact,
+        usize,
+        String,
+    ) {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints.clear();
+        model.boundaries.clear();
+        model.excitations.clear();
+        let material = &mut model.materials[0];
+        material.thermal.conductivity_w_per_mk = 1.0;
+        material.thermal.specific_heat_j_per_kgk = 1.0;
+        material.mechanical.density_kg_per_m3 = 1.0;
+
+        let mut mesh =
+            runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let coordinates = mesh
+            .topology
+            .nodes
+            .iter()
+            .map(|node| (node.node_id, node.coordinates_m))
+            .collect::<BTreeMap<_, _>>();
+        let base_face = mesh
+            .topology
+            .boundary_faces
+            .iter_mut()
+            .find(|face| {
+                face.node_ids
+                    .iter()
+                    .all(|node| coordinates[node][2].abs() <= 1.0e-12)
+            })
+            .expect("canonical tetrahedron has a z=0 base face");
+        let base_region = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "thermal_base".into(),
+            assembly_path: vec!["root".into()],
+        };
+        base_face.provenance.push(base_region.clone());
+        base_face.provenance.sort();
+        let base_nodes = base_face.node_ids.clone();
+        let free_node_id = mesh
+            .topology
+            .nodes
+            .iter()
+            .find(|node| !base_nodes.contains(&node.node_id))
+            .expect("one tetrahedron node is opposite its base")
+            .node_id;
+        let free_node_index = mesh
+            .topology
+            .nodes
+            .iter()
+            .position(|node| node.node_id == free_node_id)
+            .unwrap();
+        mesh.seal_canonical_digest().unwrap();
+        (model, mesh, free_node_index, base_region.source_topology_id)
+    }
+
+    fn prescribe_base(model: &mut AnalysisModel, base_region: String, temperature_k: f64) {
+        model
+            .constraints
+            .push(AnalysisConstraint::Thermal(ThermalConstraint {
+                constraint_id: "base_temperature".into(),
+                kind: ThermalConstraintKind::Prescribed {
+                    target: RegionTarget::boundary(base_region),
+                    value: PrescribedValue::Constant(Temperature::new(temperature_k)),
+                },
+            }));
     }
 
     #[test]
@@ -810,5 +780,110 @@ mod tests {
                 .relative_residual
                 <= 1.0e-10
         );
+    }
+
+    #[test]
+    fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode() {
+        let (mut model, mesh, free_node, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 300.0);
+        let assembly = assemble(&model, &mesh, &RealizedExcitations::default()).unwrap();
+        let final_time_s = 0.2;
+        let exact = 300.0 + 100.0 * (-10.0_f64 * final_time_s).exp();
+        let mut errors = Vec::new();
+
+        for step_count in [4, 8, 16] {
+            let time_step_s = final_time_s / step_count as f64;
+            let mut temperature = vec![300.0; assembly.projection.nodes.len()];
+            temperature[free_node] = 400.0;
+            for _ in 0..step_count {
+                let operator = assembly.transient_operator(time_step_s, &temperature);
+                let solve = solve_operator_system(
+                    &operator,
+                    SpdPreconditionerKind::Jacobi,
+                    LinearAlgebraBackendKind::CpuReference,
+                    &CpuReferenceBackend,
+                    Some(&temperature),
+                );
+                assert!(solve.converged);
+                temperature = solve.solution;
+            }
+            errors.push((temperature[free_node] - exact).abs());
+        }
+
+        assert!(errors.windows(2).all(|pair| pair[1] < 0.56 * pair[0]));
+        let observed_orders = errors
+            .windows(2)
+            .map(|pair| (pair[0] / pair[1]).log2())
+            .collect::<Vec<_>>();
+        assert!(observed_orders.iter().all(|order| *order > 0.8));
+    }
+
+    #[test]
+    fn steady_convection_matches_the_closed_form_single_free_node_balance() {
+        let (mut model, mut mesh, free_node, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 350.0);
+        let convection_region = PersistentEntityId {
+            kind: PersistentEntityKind::Face,
+            source_topology_id: "convective_sides".into(),
+            assembly_path: vec!["root".into()],
+        };
+        let base_node_ids = mesh.topology.boundary_faces.iter().find_map(|face| {
+            face.provenance
+                .iter()
+                .any(|id| id.source_topology_id == "thermal_base")
+                .then(|| face.node_ids.clone())
+        });
+        let base_node_ids = base_node_ids.unwrap();
+        for face in &mut mesh.topology.boundary_faces {
+            if !face
+                .node_ids
+                .iter()
+                .all(|node| base_node_ids.contains(node))
+            {
+                face.provenance.push(convection_region.clone());
+                face.provenance.sort();
+            }
+        }
+        mesh.seal_canonical_digest().unwrap();
+        let coefficient = 0.2;
+        let ambient_temperature_k = 290.0;
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "side_convection".into(),
+            target: RegionTarget::boundary(convection_region.source_topology_id),
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(
+                    ambient_temperature_k,
+                )),
+                coefficient: HeatTransferCoefficient::new(coefficient),
+            },
+        });
+
+        let assembly = assemble(&model, &mesh, &RealizedExcitations::default()).unwrap();
+        let side_area_m2 = assembly
+            .projection
+            .boundary_faces
+            .iter()
+            .filter(|face| {
+                face.provenance
+                    .iter()
+                    .any(|id| id.source_topology_id == "convective_sides")
+            })
+            .map(|face| face.area_m2)
+            .sum::<f64>();
+        let conductivity_term = 1.0 / 6.0;
+        let convection_diagonal = coefficient * side_area_m2 / 6.0;
+        let expected = (conductivity_term * 350.0
+            + convection_diagonal * (2.0 * ambient_temperature_k - 350.0))
+            / (conductivity_term + convection_diagonal);
+        let solve = solve_operator_system(
+            &assembly.steady_operator(),
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+        );
+
+        assert!(solve.converged);
+        assert!((solve.solution[free_node] - expected).abs() <= 1.0e-10);
     }
 }

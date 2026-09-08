@@ -6,7 +6,10 @@ use super::{
     connector::AnalysisConnector,
     constraint::AnalysisConstraint,
     coordinate_frame::CoordinateFrame,
-    domains::{CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain},
+    domains::{
+        CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermalDomain,
+        ThermoMechanicalDomain,
+    },
     excitation::{ExcitationAction, ExcitationCase},
     initial_condition::InitialCondition,
     interfaces::AnalysisInterface,
@@ -33,6 +36,8 @@ pub struct AnalysisModel {
     pub material_assignments: Vec<MaterialAssignment>,
     #[serde(default)]
     pub structural: Option<StructuralModel>,
+    #[serde(default)]
+    pub thermal: Option<ThermalDomain>,
     #[serde(default)]
     pub thermo_mechanical: Option<ThermoMechanicalDomain>,
     #[serde(default)]

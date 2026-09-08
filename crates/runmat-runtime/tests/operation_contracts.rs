@@ -210,6 +210,10 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
+use runmat_meshing_core::{
+    CanonicalMeshingContract, ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest,
+};
+use runmat_runtime::analysis::storage;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
@@ -220,8 +224,8 @@ use runmat_runtime::analysis::{
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
     analysis_trends_op, analysis_validate, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, AnalysisCreateModelIntentSpec, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisModelTemplate,
+    analysis_validate_study_sweep_op, AnalysisChtRunOptions, AnalysisCreateModelIntentSpec,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisModelTemplate,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
     AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions, AnalysisStudySpec,
     AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery, FallbackEvent,
@@ -316,6 +320,32 @@ fn assert_experimental_result_identity(
         }),
         !result.numerically_acceptable
     );
+}
+
+fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf) {
+    let artifact_root = tempfile::tempdir().expect("create contract solver-mesh artifact root");
+    let mesh_path = artifact_root.path().join("solver_mesh.cbor");
+    let mut mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let volume_region = PersistentEntityId {
+        kind: PersistentEntityKind::Region,
+        source_topology_id: model.material_assignments[0].region_id.clone(),
+        assembly_path: vec!["root".to_owned()],
+    };
+    mesh.topology.regions[0].region_id = volume_region.clone();
+    for element in &mut mesh.topology.volume_elements {
+        element.region_id = volume_region.clone();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("seal canonical contract solver mesh");
+    fs::write(
+        &mesh_path,
+        mesh.canonical_encode()
+            .expect("encode canonical contract solver mesh"),
+    )
+    .expect("write canonical contract solver mesh");
+    (artifact_root, mesh_path)
 }
 
 fn contract_study_spec(
@@ -1524,11 +1554,16 @@ fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
     )
     .expect("cht model should be created");
 
+    let (_artifact_root, mesh_path) = write_model_solver_mesh(&model.data);
+
     let envelope = analysis_run_cht_with_options_op(
         &model.data,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisChtRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(Some("trace-contract-cht-3".to_string()), None),
     )
     .expect("cht run should return envelope");
@@ -1612,12 +1647,16 @@ fn analysis_run_thermal_contract_uses_transient_identity_and_rejects_static() {
         OperationContext::new(Some("trace-contract-thermal-2".to_string()), None),
     )
     .expect("thermal transient model should be created");
+    let (_artifact_root, mesh_path) = write_model_solver_mesh(&model.data);
 
     let envelope = analysis_run_thermal_with_options_op(
         &model.data,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        runmat_runtime::analysis::AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(Some("trace-contract-thermal-3".to_string()), None),
     )
     .expect("thermal transient run should succeed");
@@ -2397,6 +2436,9 @@ fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
 
 #[test]
 fn analysis_trends_contract_is_v1_and_typed() {
+    let _artifact_store_guard = study_artifact_env_guard();
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::InMemory)
+        .expect("configure isolated in-memory artifact store");
     let model = fixture_model(FixtureId::NonlinearAssembly);
     let mut seeded_identity = None;
     for idx in 0..3 {

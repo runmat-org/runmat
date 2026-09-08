@@ -1351,6 +1351,13 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.cfd = None;
     }
     if spec_id.starts_with("thermal_standalone_ramp_") {
+        model.thermal = Some(runmat_analysis_core::ThermalDomain {
+            reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+        });
+        model.material_assignments.truncate(1);
+        if let Some(assignment) = model.material_assignments.first_mut() {
+            assignment.region_id = "thermal_core".to_owned();
+        }
         model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::thermal_transient(
             format!("step_thermal_{}", spec_id),
         )];
@@ -1503,6 +1510,9 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             )],
         );
         model.electro_thermal = None;
+        model.thermal = Some(runmat_analysis_core::ThermalDomain {
+            reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+        });
         model.interfaces.clear();
         model.cfd = Some(fixture_cfd_domain(
             model,
@@ -3376,11 +3386,11 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_max_relative_residual_norm",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_residual_norm"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_relative_residual_norm",),
         Some(0.0),
-        Some(7.0),
+        Some(1.0e-4),
     );
     push_threshold_assertion!(
         fixture_id,
@@ -3388,7 +3398,7 @@ fn push_thermal_standalone_threshold_assertions(
         failures,
         "thermal_standalone_min_temperature_k",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "min_temperature_k"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "minimum_temperature_k",),
         Some(290.0),
         Some(360.0),
     );
@@ -3398,7 +3408,7 @@ fn push_thermal_standalone_threshold_assertions(
         failures,
         "thermal_standalone_max_temperature_k",
         "FEA_THERMAL_STABILITY",
-        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "max_temperature_k"),
+        diagnostic_metric(run, "FEA_THERMAL_STABILITY", "maximum_temperature_k",),
         Some(300.0),
         Some(370.0),
     );
@@ -3406,15 +3416,11 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_energy_storage_consistency_residual_ratio",
-        "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY",
-            "storage_consistency_residual_ratio",
-        ),
+        "thermal_standalone_energy_balance_residual_ratio",
+        "FEA_THERMAL_ENERGY_BALANCE",
+        diagnostic_metric(run, "FEA_THERMAL_ENERGY_BALANCE", "max_relative_residual",),
         Some(0.0),
-        Some(0.25),
+        Some(1.0e-4),
     );
     push_threshold_assertion!(
         fixture_id,
@@ -3444,47 +3450,9 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_spatial_gradient_index",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "spatial_gradient_index"),
-        Some(0.4),
-        Some(1.4),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_monotonic_response_fraction",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(run, "FEA_THERMAL_OUTCOME", "monotonic_response_fraction"),
-        Some(0.9),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_response_realization_ratio",
-        "FEA_THERMAL_OUTCOME",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_OUTCOME",
-            "thermal_response_realization_ratio",
-        ),
-        Some(0.6),
-        Some(1.2),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_full_topology_element_count",
+        "thermal_standalone_element_count",
         "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "full_topology_element_count",
-        ),
+        diagnostic_metric(run, "FEA_THERMAL_FIELD_RECOVERY", "element_count"),
         Some(1.0),
         None,
     );
@@ -3492,111 +3460,9 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_active_dimension_count",
+        "thermal_standalone_boundary_face_count",
         "FEA_THERMAL_FIELD_RECOVERY",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_FIELD_RECOVERY",
-            "coordinate_active_dimension_count",
-        ),
-        Some(2.0),
-        Some(3.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_slab_linear_profile_rms_ratio",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "slab_linear_profile_rms_ratio",
-        ),
-        Some(0.0),
-        Some(0.35),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_slab_monotonic_edge_fraction",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "slab_monotonic_edge_fraction",
-        ),
-        Some(0.95),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_lumped_response_error_ratio",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "lumped_response_error_ratio",
-        ),
-        Some(0.0),
-        Some(0.45),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_source_response_sign_alignment",
-        "FEA_THERMAL_KNOWN_ANSWER",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_KNOWN_ANSWER",
-            "source_response_sign_alignment",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_source_coverage_ratio",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "thermal_source_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_boundary_coverage_ratio",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "thermal_boundary_coverage_ratio",
-        ),
-        Some(1.0),
-        Some(1.0),
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_prescribed_temperature_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "prescribed_temperature_count",
-        ),
+        diagnostic_metric(run, "FEA_THERMAL_FIELD_RECOVERY", "boundary_face_count"),
         Some(1.0),
         None,
     );
@@ -3604,27 +3470,9 @@ fn push_thermal_standalone_threshold_assertions(
         fixture_id,
         assertions,
         failures,
-        "thermal_standalone_heat_flux_boundary_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "heat_flux_boundary_count",
-        ),
-        Some(1.0),
-        None,
-    );
-    push_threshold_assertion!(
-        fixture_id,
-        assertions,
-        failures,
-        "thermal_standalone_convection_boundary_count",
-        "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-        diagnostic_metric(
-            run,
-            "FEA_THERMAL_SOURCE_BOUNDARY_MODEL",
-            "convection_boundary_count",
-        ),
+        "thermal_standalone_initial_prescribed_node_count",
+        "FEA_THERMAL_INITIAL_STATE",
+        diagnostic_metric(run, "FEA_THERMAL_INITIAL_STATE", "prescribed_node_count",),
         Some(1.0),
         None,
     );
@@ -4349,13 +4197,8 @@ fn write_fixture_solver_mesh_artifact(
     mesh.geometry.source_digest = StableDigest::from_bytes(source_hasher.finalize().into());
     mesh.geometry.geometry_revision = u64::from(model.geometry_revision);
 
-    if model.materials.len() > 1 {
-        let assigned_region = model
-            .material_assignments
-            .first()
-            .ok_or_else(|| "multi-material fixture requires a material assignment".to_string())?
-            .region_id
-            .clone();
+    if let Some(assignment) = model.material_assignments.first() {
+        let assigned_region = assignment.region_id.clone();
         let region_identity = PersistentEntityId {
             kind: PersistentEntityKind::Region,
             source_topology_id: assigned_region.clone(),
@@ -4555,14 +4398,11 @@ pub(super) fn run_fixture(
     let mut contact_nonlinear_severity_mean = None;
     let mut contact_load_realization_ratio = None;
     let mut contact_load_amplification_ratio = None;
-    let mut thermal_max_residual_norm = None;
+    let mut thermal_max_relative_residual_norm = None;
     let mut thermal_min_temperature_k = None;
     let mut thermal_max_temperature_k = None;
     let mut thermal_conductivity_spread_ratio = None;
     let mut thermal_heat_capacity_spread_ratio = None;
-    let mut thermal_spatial_gradient_index = None;
-    let mut thermal_monotonic_response_fraction = None;
-    let mut thermal_response_realization_ratio = None;
     let mut electromagnetic_enabled = None;
     let mut electromagnetic_formulation_coverage_ratio = None;
     let mut electromagnetic_magnetostatic_curl_curl_coverage_ratio = None;
@@ -4669,14 +4509,11 @@ pub(super) fn run_fixture(
                     contact_nonlinear_severity_mean,
                     contact_load_realization_ratio,
                     contact_load_amplification_ratio,
-                    thermal_max_residual_norm,
+                    thermal_max_relative_residual_norm,
                     thermal_min_temperature_k,
                     thermal_max_temperature_k,
                     thermal_conductivity_spread_ratio,
                     thermal_heat_capacity_spread_ratio,
-                    thermal_spatial_gradient_index,
-                    thermal_monotonic_response_fraction,
-                    thermal_response_realization_ratio,
                     electromagnetic_enabled,
                     electromagnetic_formulation_coverage_ratio,
                     electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -5763,7 +5600,7 @@ pub(super) fn run_fixture(
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_THERMAL_STABILITY",
-                    "max_residual_norm",
+                    "max_relative_residual_norm",
                 ),
                 None,
                 Some(2.0),
@@ -10110,14 +9947,11 @@ pub(super) fn run_fixture(
                                 contact_nonlinear_severity_mean,
                                 contact_load_realization_ratio,
                                 contact_load_amplification_ratio,
-                                thermal_max_residual_norm,
+                                thermal_max_relative_residual_norm,
                                 thermal_min_temperature_k,
                                 thermal_max_temperature_k,
                                 thermal_conductivity_spread_ratio,
                                 thermal_heat_capacity_spread_ratio,
-                                thermal_spatial_gradient_index,
-                                thermal_monotonic_response_fraction,
-                                thermal_response_realization_ratio,
                                 electromagnetic_enabled,
                                 electromagnetic_formulation_coverage_ratio,
                                 electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -10231,19 +10065,14 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.contact_load_realization_ratio;
                     contact_load_amplification_ratio =
                         gpu_results.data.summary.contact_load_amplification_ratio;
-                    thermal_max_residual_norm = gpu_results.data.summary.thermal_max_residual_norm;
+                    thermal_max_relative_residual_norm =
+                        gpu_results.data.summary.thermal_max_relative_residual_norm;
                     thermal_min_temperature_k = gpu_results.data.summary.thermal_min_temperature_k;
                     thermal_max_temperature_k = gpu_results.data.summary.thermal_max_temperature_k;
                     thermal_conductivity_spread_ratio =
                         gpu_results.data.summary.thermal_conductivity_spread_ratio;
                     thermal_heat_capacity_spread_ratio =
                         gpu_results.data.summary.thermal_heat_capacity_spread_ratio;
-                    thermal_spatial_gradient_index =
-                        gpu_results.data.summary.thermal_spatial_gradient_index;
-                    thermal_monotonic_response_fraction =
-                        gpu_results.data.summary.thermal_monotonic_response_fraction;
-                    thermal_response_realization_ratio =
-                        gpu_results.data.summary.thermal_response_realization_ratio;
                     electromagnetic_enabled = gpu_results.data.summary.electromagnetic_enabled;
                     electromagnetic_formulation_coverage_ratio = gpu_results
                         .data
@@ -10551,14 +10380,11 @@ pub(super) fn run_fixture(
                                     contact_nonlinear_severity_mean,
                                     contact_load_realization_ratio,
                                     contact_load_amplification_ratio,
-                                    thermal_max_residual_norm,
+                                    thermal_max_relative_residual_norm,
                                     thermal_min_temperature_k,
                                     thermal_max_temperature_k,
                                     thermal_conductivity_spread_ratio,
                                     thermal_heat_capacity_spread_ratio,
-                                    thermal_spatial_gradient_index,
-                                    thermal_monotonic_response_fraction,
-                                    thermal_response_realization_ratio,
                                     electromagnetic_enabled,
                                     electromagnetic_formulation_coverage_ratio,
                                     electromagnetic_magnetostatic_curl_curl_coverage_ratio,
@@ -10640,8 +10466,8 @@ pub(super) fn run_fixture(
                 Err(err) => {
                     run_error_code = Some(err.error_code.clone());
                     failures.push(format!(
-                        "unexpected gpu run failure for fixture {}: {}",
-                        spec.id, err.error_code
+                        "unexpected gpu run failure for fixture {}: {}: {}",
+                        spec.id, err.error_code, err.message
                     ));
                 }
             }
@@ -10714,14 +10540,11 @@ pub(super) fn run_fixture(
         contact_nonlinear_severity_mean,
         contact_load_realization_ratio,
         contact_load_amplification_ratio,
-        thermal_max_residual_norm,
+        thermal_max_relative_residual_norm,
         thermal_min_temperature_k,
         thermal_max_temperature_k,
         thermal_conductivity_spread_ratio,
         thermal_heat_capacity_spread_ratio,
-        thermal_spatial_gradient_index,
-        thermal_monotonic_response_fraction,
-        thermal_response_realization_ratio,
         electromagnetic_enabled,
         electromagnetic_formulation_coverage_ratio,
         electromagnetic_magnetostatic_curl_curl_coverage_ratio,

@@ -1,6 +1,7 @@
 use runmat_analysis_core::AnalysisModel;
 
 pub(crate) mod assembly;
+pub(crate) mod initial_state;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThermalConstitutiveStats {
@@ -16,9 +17,11 @@ pub struct ThermalConstitutiveStats {
 pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
     let mut conductivities = Vec::new();
     let mut heat_capacities = Vec::new();
+    let mut densities = Vec::new();
     for material in &model.materials {
         conductivities.push(material.thermal.conductivity_w_per_mk.max(1.0e-6));
         heat_capacities.push(material.thermal.specific_heat_j_per_kgk.max(1.0));
+        densities.push(material.mechanical.density_kg_per_m3.max(1.0e-12));
     }
     let conductivity_mean = if conductivities.is_empty() {
         1.0
@@ -30,7 +33,11 @@ pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
     } else {
         heat_capacities.iter().sum::<f64>() / heat_capacities.len() as f64
     };
-    let density_mean = 7_800.0;
+    let density_mean = if densities.is_empty() {
+        1.0
+    } else {
+        densities.iter().sum::<f64>() / densities.len() as f64
+    };
     let conductivity_spread_ratio = if conductivities.is_empty() {
         1.0
     } else {

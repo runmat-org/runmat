@@ -340,7 +340,13 @@ fn validate_initial_conditions(
                 InitialValueShape::Scalar,
                 signals,
                 steps,
-            ),
+            )
+            .and_then(|()| match &value.value {
+                InitialValue::Uniform(temperature) if temperature.kelvin < 0.0 => {
+                    Err("initial temperature must be at or above zero kelvin".to_string())
+                }
+                _ => Ok(()),
+            }),
             InitialCondition::ElectricPotential(value) => validate_initial(
                 value,
                 PhysicalQuantityKind::ElectricPotential,

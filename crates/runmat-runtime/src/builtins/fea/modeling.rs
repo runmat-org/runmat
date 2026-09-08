@@ -3,9 +3,11 @@ use super::signals::bindings::{
     FROZEN_STUDY_GENERATORS_PROPERTY,
 };
 use super::*;
+use runmat_analysis_core::ThermalDomain;
 
 #[derive(Debug, Clone)]
 pub(super) enum DomainPayload {
+    Thermal(ThermalDomain),
     ThermoMechanical(ThermoMechanicalDomain),
     ElectroThermal(ElectroThermalDomain),
     Electromagnetic(ElectromagneticDomain),
@@ -15,6 +17,7 @@ pub(super) enum DomainPayload {
 impl DomainPayload {
     fn family_name(&self) -> &'static str {
         match self {
+            Self::Thermal(_) => "thermal",
             Self::ThermoMechanical(_) => "thermo-mechanical",
             Self::ElectroThermal(_) => "electro-thermal",
             Self::Electromagnetic(_) => "electromagnetic",
@@ -856,6 +859,7 @@ fn build_model_from_parts(
     }
     for domain in domains {
         match domain {
+            DomainPayload::Thermal(domain) => model.thermal = Some(domain),
             DomainPayload::ThermoMechanical(domain) => model.thermo_mechanical = Some(domain),
             DomainPayload::ElectroThermal(domain) => model.electro_thermal = Some(domain),
             DomainPayload::Electromagnetic(domain) => model.electromagnetic = Some(domain),
@@ -882,6 +886,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         materials: Vec::new(),
         material_assignments: Vec::new(),
         structural: None,
+        thermal: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -1345,6 +1350,10 @@ pub(super) fn domain_vec_from_value(
                 unreachable!("domain inputs were classified above")
             };
             match object.class_name.as_str() {
+                FEA_THERMAL_DOMAIN_CLASS => {
+                    object_payload(builtin, value, FEA_THERMAL_DOMAIN_CLASS)
+                        .map(DomainPayload::Thermal)
+                }
                 FEA_THERMOMECHANICAL_DOMAIN_CLASS => {
                     object_payload(builtin, value, FEA_THERMOMECHANICAL_DOMAIN_CLASS)
                         .map(DomainPayload::ThermoMechanical)

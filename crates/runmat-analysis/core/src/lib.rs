@@ -49,7 +49,7 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermalDomain, ThermoMechanicalDomain,
 };
 pub use problem::excitation::{
     AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
@@ -173,6 +173,7 @@ mod tests {
             }],
             material_assignments: Vec::new(),
             structural: None,
+            thermal: None,
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
@@ -736,6 +737,23 @@ mod tests {
                 Temperature::new(293.15),
                 Temperature::new(293.15),
             ]),
+            applies_before_step_id: "step_static".to_string(),
+        })];
+
+        assert!(matches!(
+            validate_model(&model),
+            Err(AnalysisValidationError::InvalidInitialCondition { .. })
+        ));
+    }
+
+    #[test]
+    fn initial_temperature_rejects_values_below_absolute_zero() {
+        let mut model = valid_model();
+        model.initial_conditions = vec![InitialCondition::Temperature(InitialConditionValue {
+            initial_condition_id: "invalid_initial_temperature".to_string(),
+            target: InitialConditionTarget::WholeModel,
+            frame: CoordinateFrame::Global,
+            value: InitialValue::Uniform(Temperature::new(-0.01)),
             applies_before_step_id: "step_static".to_string(),
         })];
 

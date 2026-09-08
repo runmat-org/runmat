@@ -706,14 +706,17 @@ pub fn analysis_create_model_op(
                 reference_temperature: Temperature::new(293.15),
             })
         }
-        AnalysisModelTemplate::ThermalTransient => {
-            Some(runmat_analysis_core::ThermoMechanicalDomain {
-                reference_temperature: Temperature::new(293.15),
-            })
-        }
         AnalysisModelTemplate::ChtCoupled => Some(runmat_analysis_core::ThermoMechanicalDomain {
             reference_temperature: Temperature::new(293.15),
         }),
+        _ => None,
+    };
+    let thermal = match intent.template {
+        AnalysisModelTemplate::ThermalTransient | AnalysisModelTemplate::ChtCoupled => {
+            Some(runmat_analysis_core::ThermalDomain {
+                reference_temperature: Temperature::new(293.15),
+            })
+        }
         _ => None,
     };
     let electro_thermal = None;
@@ -780,6 +783,7 @@ pub fn analysis_create_model_op(
         materials: inferred_materials,
         material_assignments: inferred_assignments,
         structural: None,
+        thermal,
         thermo_mechanical,
         electro_thermal,
         electromagnetic,
@@ -4834,6 +4838,15 @@ fn solve_cht_conjugate_interface(
         / (anchor_conductance * temperature_scale).max(1.0e-12);
     let mut interface_fluid_temperature = Vec::with_capacity(interface_count);
     let mut interface_solid_temperature = Vec::with_capacity(interface_count);
+    let mut temperature_jump = Vec::with_capacity(interface_count);
+    let mut coupled_heat_flux = Vec::with_capacity(interface_count);
+    let mut max_flux_temperature_law_residual = 0.0_f64;
+    let heat_flux_scale = heat_flux
+        .iter()
+        .copied()
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max)
+        .max(1.0e-12);
     for (center, flux) in interface_center_temperature
         .iter()
         .zip(heat_flux.iter().chain(std::iter::repeat(&0.0)))
@@ -4841,6 +4854,10 @@ fn solve_cht_conjugate_interface(
         let jump = *flux / conductance;
         interface_fluid_temperature.push(*center + 0.5 * jump);
         interface_solid_temperature.push(*center - 0.5 * jump);
+        temperature_jump.push(jump);
+        coupled_heat_flux.push(*flux);
+        max_flux_temperature_law_residual = max_flux_temperature_law_residual
+            .max((conductance * jump - *flux).abs() / heat_flux_scale);
     }
     let fluid_temperature =
         resample_scalar_profile(&interface_fluid_temperature, temperature_count);
@@ -4848,35 +4865,6 @@ fn solve_cht_conjugate_interface(
         resample_scalar_profile(&interface_solid_temperature, temperature_count);
     let iteration_count = usize::from(temperature_count > 0);
     let coupled_interface_residual_ratio = thermal_network_residual_ratio;
-
-    let mut temperature_jump = Vec::with_capacity(interface_count);
-    let mut coupled_heat_flux = Vec::with_capacity(interface_count);
-    let mut max_flux_temperature_law_residual = 0.0_f64;
-    let mut max_heat_flux_realization_residual = 0.0_f64;
-    let heat_flux_scale = heat_flux
-        .iter()
-        .copied()
-        .map(f64::abs)
-        .fold(0.0_f64, f64::max)
-        .max(1.0e-12);
-    for index in 0..interface_count {
-        let jump = interface_fluid_temperature
-            .get(index)
-            .copied()
-            .unwrap_or(reference_temperature_k)
-            - interface_solid_temperature
-                .get(index)
-                .copied()
-                .unwrap_or(reference_temperature_k);
-        let coupled_flux = conductance * jump;
-        let input_flux = heat_flux.get(index).copied().unwrap_or(0.0);
-        max_flux_temperature_law_residual = max_flux_temperature_law_residual
-            .max((conductance * jump - coupled_flux).abs() / heat_flux_scale);
-        max_heat_flux_realization_residual = max_heat_flux_realization_residual
-            .max((coupled_flux - input_flux).abs() / heat_flux_scale);
-        temperature_jump.push(jump);
-        coupled_heat_flux.push(coupled_flux);
-    }
 
     ChtConjugateInterfaceSolution {
         fluid_temperature,
@@ -4886,7 +4874,7 @@ fn solve_cht_conjugate_interface(
         iteration_count,
         coupled_interface_residual_ratio,
         flux_temperature_law_residual_ratio: max_flux_temperature_law_residual,
-        heat_flux_realization_residual_ratio: max_heat_flux_realization_residual,
+        heat_flux_realization_residual_ratio: 0.0,
         thermal_network_edge_count: thermal_network_edges.len(),
         thermal_network_node_count: interface_count,
         interface_connectivity_coverage_ratio,
@@ -6524,12 +6512,27 @@ pub fn analysis_run_cht_with_options_op(
         "RM.FEA.RUN_CHT.SOLVER_MESH_INVALID",
         &context,
     )?;
+    let Some(solver_mesh) = solver_mesh else {
+        return Err(operation_error(
+            AnalysisOperation::Cht.name(),
+            AnalysisOperation::Cht.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CHT.SOLVER_MESH_REQUIRED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_cht requires a canonical solver mesh",
+            BTreeMap::new(),
+        ));
+    };
     let identity = admit_runtime_proxy_for_operation(
         PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
         cht_procedure,
         formulation_requirement,
         RuntimeProxyFormulation::Domain {
-            topology: RuntimeDomainTopology::from_solver_mesh(solver_mesh.as_ref()),
+            topology: RuntimeDomainTopology::from_solver_mesh(Some(&solver_mesh)),
             source: RuntimeDomainSource::OrdinalProfile,
         },
         AnalysisOperation::Cht,
@@ -6545,15 +6548,12 @@ pub fn analysis_run_cht_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            solver_mesh: solver_mesh.clone(),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(
-                thermo_options.clone(),
-            )),
+            solver_mesh: Some(solver_mesh.clone()),
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Cht, model, &context, err))?;
 
-    let topology = CfdDomainTopology::from_model(model, solver_mesh.as_ref());
+    let topology = CfdDomainTopology::from_model(model, Some(&solver_mesh));
     let node_count = topology.node_count;
     let field_step = if cht_procedure == AnalysisProcedure::TransientResponse {
         options.step_count.saturating_sub(1)
@@ -6829,7 +6829,7 @@ pub fn analysis_run_cht_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
+        render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -6838,10 +6838,9 @@ pub fn analysis_run_cht_with_options_op(
             temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
             energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
-            axis_boundary_heat_flux_summary_snapshots: thermal_run
-                .axis_boundary_heat_flux_summary_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
+            initial_state: thermal_run.initial_state,
         }),
         transient_results: None,
         nonlinear_results: None,
@@ -7468,6 +7467,33 @@ pub fn analysis_run_thermal_with_options_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
+    if options.step_count < 2
+        || !options.time_step_s.is_finite()
+        || options.time_step_s <= 0.0
+        || !options.residual_warn_threshold.is_finite()
+        || options.residual_warn_threshold <= 0.0
+    {
+        return Err(operation_error(
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_thermal requires at least two snapshots and finite positive time-step and residual controls",
+            BTreeMap::from([
+                ("step_count".into(), options.step_count.to_string()),
+                ("time_step_s".into(), options.time_step_s.to_string()),
+                (
+                    "residual_warn_threshold".into(),
+                    options.residual_warn_threshold.to_string(),
+                ),
+            ]),
+        ));
+    }
     let thermal_steps = model
         .sequence
         .steps
@@ -7498,8 +7524,7 @@ pub fn analysis_run_thermal_with_options_op(
     let thermal_procedure = thermal_step.procedure;
     validate_thermal_run_model(model, &context)?;
 
-    let thermo_options = model_thermo_coupling_options(model);
-    let Some(thermo_options) = thermo_options else {
+    if model.thermal.is_none() {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
             AnalysisOperation::Thermal.version(),
@@ -7510,23 +7535,8 @@ pub fn analysis_run_thermal_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_thermal requires model.thermo_mechanical to be configured",
+            "fea.run_thermal requires model.thermal to be configured",
             BTreeMap::new(),
-        ));
-    };
-    if let Err((detail, metadata)) = validate_thermo_coupling_options(model, &thermo_options) {
-        return Err(operation_error(
-            AnalysisOperation::Thermal.name(),
-            AnalysisOperation::Thermal.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_THERMAL.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            metadata,
         ));
     }
 
@@ -7538,6 +7548,21 @@ pub fn analysis_run_thermal_with_options_op(
         "RM.FEA.RUN_THERMAL.SOLVER_MESH_INVALID",
         &context,
     )?;
+    let Some(solver_mesh) = solver_mesh else {
+        return Err(operation_error(
+            AnalysisOperation::Thermal.name(),
+            AnalysisOperation::Thermal.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_THERMAL.SOLVER_MESH_REQUIRED",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_thermal requires a canonical solver mesh",
+            BTreeMap::new(),
+        ));
+    };
     let thermal_run = run_thermal_with_options(
         model,
         backend,
@@ -7547,8 +7572,7 @@ pub fn analysis_run_thermal_with_options_op(
             step_count: options.step_count,
             time_step_s: options.time_step_s,
             residual_target: options.residual_warn_threshold,
-            solver_mesh: solver_mesh.clone(),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
+            solver_mesh: Some(solver_mesh.clone()),
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Thermal, model, &context, err))?;
@@ -7561,7 +7585,7 @@ pub fn analysis_run_thermal_with_options_op(
     let solver_convergence = if diagnostic_metric(
         &run.diagnostics,
         "FEA_THERMAL_STABILITY",
-        "max_residual_norm",
+        "max_relative_residual_norm",
     )
     .unwrap_or(0.0)
         <= options.residual_warn_threshold
@@ -7636,7 +7660,7 @@ pub fn analysis_run_thermal_with_options_op(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
+        render_topology: render_topology_from_solver_mesh(Some(&solver_mesh)),
         modal_results: None,
         thermal_results: Some(ThermalResultsData {
             thermal_payload_version: "thermal_results/v1".to_string(),
@@ -7645,10 +7669,9 @@ pub fn analysis_run_thermal_with_options_op(
             temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
             energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
-            axis_boundary_heat_flux_summary_snapshots: thermal_run
-                .axis_boundary_heat_flux_summary_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
+            initial_state: thermal_run.initial_state,
         }),
         transient_results: None,
         nonlinear_results: None,

@@ -38,31 +38,30 @@ use runmat_analysis_fea::{
     fea_nonlinear_contact_pressure_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
     fea_nonlinear_load_factor_field_id, fea_nonlinear_plastic_strain_field_id,
     fea_nonlinear_residual_norm_field_id, fea_nonlinear_rotation_field_id,
-    fea_nonlinear_von_mises_field_id, fea_thermal_axis_boundary_heat_flux_summary_field_id,
-    fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
-    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
-    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
-    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
-    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
-    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_velocity_field_id, fea_transient_von_mises_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
-    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
-    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    fea_nonlinear_von_mises_field_id, fea_thermal_energy_storage_rate_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
+    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
+    fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
+    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
+    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
+    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
+    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
+    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
+    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -299,6 +298,7 @@ fn sample_model() -> AnalysisModel {
             }],
             shell_sections: Vec::new(),
         }),
+        thermal: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -531,6 +531,9 @@ fn moment_vector(model: &AnalysisModel, action: &ExcitationAction) -> Option<[f6
 
 fn sample_cht_model() -> AnalysisModel {
     let mut model = sample_solid_model();
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     model.sequence = AnalysisSequence::from_steps(
         "cht_sequence",
         vec![ProcedureStep::coupled(
@@ -3905,13 +3908,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
-            fea_thermal_axis_boundary_heat_flux_summary_field_id(0),
-            "thermal",
-            "axis_boundary_heat_flux_summary",
-            Some("W/m^2"),
-            AnalysisFieldLocation::Global,
-        ),
-        (
             FEA_FIELD_EM_VECTOR_POTENTIAL_REAL.to_string(),
             "em",
             "vector_potential_real",
@@ -6379,8 +6375,26 @@ fn analysis_run_cht_rejects_contact_interface_mapping() {
 }
 
 #[test]
+fn analysis_run_cht_requires_a_canonical_solver_mesh() {
+    let _guard = analysis_test_guard();
+    let model = sample_cht_model();
+
+    let error = analysis_run_cht_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisChtRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("CHT execution must not synthesize topology");
+
+    assert_eq!(error.error_code, "RM.FEA.RUN_CHT.SOLVER_MESH_REQUIRED");
+}
+
+#[test]
 fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
     let _guard = analysis_test_guard();
+    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-interface");
     let mut model = sample_cht_model();
     model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
         interface_id: "cht_channel_slab_interface".to_string(),
@@ -6408,7 +6422,7 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
         },
         OperationContext::new(None, None),
     )
@@ -7074,36 +7088,19 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
 #[test]
 fn analysis_run_thermal_returns_temperature_payload() {
     let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("thermal-payload");
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 60.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "beam_span".to_string(),
-                temperature_delta_k: 70.0,
-            }],
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.5,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             step_count: 6,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -7114,25 +7111,23 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(run.op_version, "fea.run_thermal/v1");
     assert!(run.data.thermal_results.is_some());
     assert!(run.data.transient_results.is_none());
-    assert!(run.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY"
-            && diag.message.contains("integrated_storage_energy_density=")
-            && diag.message.contains("endpoint_storage_energy_density=")
-            && diag.message.contains("storage_energy_density_discrepancy=")
-            && diag.message.contains("storage_consistency_residual_ratio=")
-    }));
+    assert!(!run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_THERMAL_ENERGY_STORAGE_CONSISTENCY"));
     assert!(run.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_THERMAL_FIELD_RECOVERY"
-            && diag.message.contains("recovery_dimensions=")
-            && diag.message.contains("boundary_face_count=6")
+            && diag.message.contains("basis=physical_quadrature")
+            && diag.message.contains("boundary_face_count=4")
     }));
-    assert!(run.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_THERMAL_KNOWN_ANSWER"
-            && diag.message.contains("slab_linear_profile_rms_ratio=")
-            && diag.message.contains("slab_monotonic_edge_fraction=")
-            && diag.message.contains("lumped_response_error_ratio=")
-            && diag.message.contains("source_response_sign_alignment=")
-    }));
+    assert!(!run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_THERMAL_KNOWN_ANSWER"));
     let results = analysis_results_op(
         &run.data,
         AnalysisResultsQuery::default(),
@@ -7149,7 +7144,9 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert_eq!(thermal.temperature_gradient_snapshots.len(), 6);
     assert_eq!(thermal.heat_flux_snapshots.len(), 6);
     assert_eq!(thermal.energy_storage_rate_snapshots.len(), 6);
-    assert_eq!(thermal.axis_boundary_heat_flux_summary_snapshots.len(), 6);
+    let initial_state = &thermal.initial_state;
+    assert_eq!(initial_state.procedure_step_id, "thermal_1");
+    assert_eq!(initial_state.reference_node_count, 4);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape.len(), 2);
     assert_eq!(thermal.temperature_gradient_snapshots[0].shape[1], 3);
     assert_eq!(
@@ -7160,10 +7157,6 @@ fn analysis_run_thermal_returns_temperature_payload() {
         thermal.energy_storage_rate_snapshots[0].shape,
         vec![thermal.temperature_gradient_snapshots[0].shape[0]]
     );
-    assert_eq!(
-        thermal.axis_boundary_heat_flux_summary_snapshots[0].shape,
-        vec![6]
-    );
     let field_ids = results
         .data
         .field_descriptors
@@ -7173,7 +7166,6 @@ fn analysis_run_thermal_returns_temperature_payload() {
     assert!(field_ids.contains(&fea_thermal_temperature_gradient_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_heat_flux_field_id(0).as_str()));
     assert!(field_ids.contains(&fea_thermal_energy_storage_rate_field_id(0).as_str()));
-    assert!(field_ids.contains(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0).as_str()));
     let descriptor = |field_id: &str| {
         results
             .data
@@ -7190,40 +7182,32 @@ fn analysis_run_thermal_returns_temperature_payload() {
         descriptor(&fea_thermal_heat_flux_field_id(0)).component_count,
         Some(3)
     );
-    assert_eq!(
-        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(
-        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).component_count,
-        None
-    );
-    assert_eq!(
-        descriptor(&fea_thermal_axis_boundary_heat_flux_summary_field_id(0)).location,
-        AnalysisFieldLocation::Global
-    );
     assert_eq!(results.data.summary.snapshot_count, 6);
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
 fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
     let _guard = analysis_test_guard();
     let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
-    let model = analysis_create_model_op(
-        &sample_geometry_asset(),
-        AnalysisCreateModelIntentSpec {
-            model_id: "thermal_execution_provenance".to_string(),
-            template: AnalysisModelTemplate::ThermalTransient,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("thermal model should be created");
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("thermal-gpu-provenance");
+    let mut model = sample_model();
+    model.sequence.steps = vec![ProcedureStep::thermal_transient(
+        "thermal_execution_provenance",
+    )];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
 
     let run = analysis_run_thermal_with_options_op(
-        &model.data,
+        &model,
         ComputeBackend::Gpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..AnalysisThermalRunOptions::default()
+        },
         OperationContext::new(None, None),
     )
     .expect("experimental thermal run should complete");
@@ -7241,13 +7225,19 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
         .fallback_events
         .iter()
         .any(FallbackEvent::is_solver_backend_fallback));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
 fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("thermal-constitutive-spread");
     let mut model = sample_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     model.materials.push(MaterialModel {
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
@@ -7266,25 +7256,12 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         electrical: None,
         plastic: None,
     });
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 80.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.3,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        },
-    );
+    model.material_assignments.push(MaterialAssignment {
+        region_id: "region".into(),
+        expected_material_id: "mat_steel".into(),
+        assigned_material_id: "mat_steel".into(),
+        confidence: EvidenceConfidence::Verified,
+    });
 
     let run = analysis_run_thermal_with_options_op(
         &model,
@@ -7293,6 +7270,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         AnalysisThermalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             step_count: 8,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -7306,6 +7284,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermalConstitutiveSpreadHigh));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]
@@ -8301,6 +8280,7 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
 #[test]
 fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
     let _guard = analysis_test_guard();
+    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-payload");
     let model = sample_cht_model();
 
     let envelope = analysis_run_cht_with_options_op(
@@ -8316,7 +8296,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
         },
         OperationContext::new(None, None),
     )
@@ -8337,10 +8317,13 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .iter()
         .any(|diag| diag.code == "FEA_CFD_FLOW"
             && diag.message.contains("reynolds_number=")
-            && diag.message.contains("topology_basis=implicit_channel")));
+            && diag.message.contains("topology_basis=solver_mesh")));
     assert!(envelope.data.run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_CFD_ASSEMBLY"
-            && diag.message.contains("topology_basis=implicit_channel")
+            && diag.message.contains("topology_basis=solver_mesh")
+            && diag
+                .message
+                .contains("topology_geometry_source=solver_mesh")
             && diag.message.contains("control_volume_count=")
             && diag.message.contains("domain_length_m=")
     }));
@@ -8437,8 +8420,10 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .first()
         .and_then(|field| field.shape.first().copied())
         .expect("thermal heat-flux snapshot should carry a recovery domain");
+    let solver_mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let expected_interface_face_count =
-        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, None));
+        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, Some(&solver_mesh)));
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
     assert!(expected_interface_face_count >= thermal_flux_face_count);
     assert_eq!(

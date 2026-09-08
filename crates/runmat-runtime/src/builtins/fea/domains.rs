@@ -3,6 +3,7 @@ use crate::builtins::fea::values::{
     quantity_scalar, DYNAMIC_VISCOSITY_CLASS, FREQUENCY_CLASS, MASS_DENSITY_CLASS,
     TEMPERATURE_CLASS, TURBULENCE_INTENSITY_CLASS,
 };
+use runmat_analysis_core::ThermalDomain;
 
 const TYPED_DOMAIN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -65,6 +66,12 @@ macro_rules! domain_descriptor {
 }
 
 domain_descriptor!(
+    THERMAL_DOMAIN_DESCRIPTOR,
+    THERMAL_DOMAIN_SIGNATURES,
+    "domain = fea.ThermalDomain.atReferenceTemperature(referenceTemperature)",
+    REFERENCE_TEMPERATURE_INPUTS
+);
+domain_descriptor!(
     THERMOMECHANICAL_DOMAIN_DESCRIPTOR,
     THERMOMECHANICAL_DOMAIN_SIGNATURES,
     "domain = fea.ThermoMechanicalDomain.atReferenceTemperature(referenceTemperature)",
@@ -95,6 +102,30 @@ fn domain_object<T: Serialize>(
     domain: &T,
 ) -> BuiltinResult<Value> {
     serializable_to_object(builtin, &ERROR_INTERNAL, class_name, domain)
+}
+
+#[runtime_builtin(
+    name = "fea.ThermalDomain.atReferenceTemperature",
+    category = "fea",
+    summary = "Create a standalone thermal domain at a typed reference temperature.",
+    keywords = "fea,domain,thermal,temperature,typed",
+    descriptor(crate::builtins::fea::domains::THERMAL_DOMAIN_DESCRIPTOR),
+    integer_audit(TYPED_DOMAIN_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::domains"
+)]
+pub async fn thermal_domain_builtin(reference_temperature: Value) -> BuiltinResult<Value> {
+    domain_object(
+        "fea.ThermalDomain.atReferenceTemperature",
+        FEA_THERMAL_DOMAIN_CLASS,
+        &ThermalDomain {
+            reference_temperature: Temperature::new(quantity_scalar(
+                "fea.ThermalDomain.atReferenceTemperature",
+                &reference_temperature,
+                TEMPERATURE_CLASS,
+                "kelvin",
+            )?),
+        },
+    )
 }
 
 #[runtime_builtin(

@@ -3,16 +3,15 @@ use crate::{
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,
     fea_nonlinear_plastic_strain_field_id, fea_nonlinear_residual_norm_field_id,
     fea_nonlinear_rotation_field_id, fea_nonlinear_von_mises_field_id,
-    fea_thermal_axis_boundary_heat_flux_summary_field_id, fea_thermal_energy_storage_rate_field_id,
-    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
-    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
-    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
-    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
-    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
-    fea_transient_angular_velocity_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
-    fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
-    fea_transient_von_mises_field_id,
+    fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
+    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
+    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
+    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
+    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
+    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
+    fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{
         fixture_model, replace_fixture_excitations, replace_fixture_with_electric_current,
         FixtureExcitation, FixtureExcitationKind, FixtureId,
@@ -283,19 +282,17 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     .expect("modal solve should consume the canonical mesh");
     assert_eq!(modal.mode_shapes[0].shape, vec![4, 3]);
 
+    let mut thermal_model = model.clone();
+    thermal_model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    thermal_model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal")];
     let thermal = crate::run_thermal_with_options(
-        &model,
+        &thermal_model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
             step_count: 2,
             solver_mesh: Some(mesh.clone()),
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 45.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
-            }),
             ..experimental_thermal_options()
         },
     )
@@ -1445,6 +1442,31 @@ fn thermal_pipeline_rejects_moment_loads_before_assembly() {
 }
 
 #[test]
+fn thermal_pipeline_requires_a_canonical_solver_mesh() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "thermal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            "thermal_step",
+        )],
+    );
+
+    let error = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_thermal_options(),
+    )
+    .expect_err("thermal execution must not synthesize topology");
+
+    assert!(error
+        .to_string()
+        .contains("requires a canonical solver mesh"));
+}
+
+#[test]
 fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let err = crate::run_electromagnetic_with_options(
@@ -1702,19 +1724,23 @@ fn transient_beam_moment_emits_rotational_snapshots() {
 
 #[test]
 fn thermal_solver_emits_heat_transfer_fields() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "thermal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            "thermal_step",
+        )],
+    );
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let result = crate::run_thermal_with_options(
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
             step_count: 4,
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 45.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
-            }),
+            solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
     )
@@ -1733,10 +1759,6 @@ fn thermal_solver_emits_heat_transfer_fields() {
     assert_eq!(
         result.time_points_s.len(),
         result.energy_storage_rate_snapshots.len()
-    );
-    assert_eq!(
-        result.time_points_s.len(),
-        result.axis_boundary_heat_flux_summary_snapshots.len()
     );
     assert_eq!(
         result.temperature_gradient_snapshots[1].field_id,
@@ -1761,27 +1783,29 @@ fn thermal_solver_emits_heat_transfer_fields() {
         vec![result.temperature_gradient_snapshots[1].shape[0]],
         "thermal energy storage rate should be an element scalar field"
     );
-    assert_eq!(
-        result.axis_boundary_heat_flux_summary_snapshots[1].field_id,
-        fea_thermal_axis_boundary_heat_flux_summary_field_id(1)
-    );
-    assert_eq!(
-        result.axis_boundary_heat_flux_summary_snapshots[1].shape,
-        vec![6],
-        "thermal axis-boundary heat-flux summary should report six signed axis-face averages"
-    );
     assert!(result
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_THERMAL_FIELD_RECOVERY"
-            && diag.message.contains("recovery_dimensions=")
-            && diag.message.contains("boundary_face_count=6")));
+            && diag.message.contains("basis=physical_quadrature")
+            && diag.message.contains("node_count=4")
+            && diag.message.contains("element_count=1")
+            && diag.message.contains("boundary_face_count=4")));
 }
 
 #[test]
 fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_closure() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "thermal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            "thermal_step",
+        )],
+    );
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
     let fixed_face = &projection.boundary_faces[0];
@@ -1820,13 +1844,6 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
             step_count: 3,
             time_step_s: 0.1,
             solver_mesh: Some(mesh),
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 0.0,
-                thermal_expansion_coefficient: 0.0,
-                region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
-            }),
             ..experimental_thermal_options()
         },
     )
@@ -1858,6 +1875,75 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
             component.spatial_operator
                 == runmat_analysis_core::SpatialOperatorImplementation::ThermalGalerkinConduction
         }));
+    let initial_state = &result.initial_state;
+    assert_eq!(initial_state.procedure_step_id, "thermal_step");
+    assert_eq!(
+        initial_state.prescribed_node_count,
+        fixed_face.node_indices.len()
+    );
+    assert_eq!(
+        initial_state.reference_node_count,
+        final_temperature.len() - fixed_face.node_indices.len()
+    );
+    assert_eq!(
+        result.run.solver_method,
+        crate::contracts::SolverMethod::MatrixFreePcg
+    );
+    assert!(!result
+        .run
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FEA_THERMAL_OUTCOME"));
+}
+
+#[test]
+fn canonical_mesh_thermal_pipeline_starts_from_the_authored_temperature_state() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
+        "thermal_sequence",
+        vec![runmat_analysis_core::ProcedureStep::thermal_transient(
+            "thermal_step",
+        )],
+    );
+    model.initial_conditions = vec![runmat_analysis_core::InitialCondition::Temperature(
+        runmat_analysis_core::InitialConditionValue {
+            initial_condition_id: "uniform_start".into(),
+            target: runmat_analysis_core::InitialConditionTarget::WholeModel,
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            value: runmat_analysis_core::InitialValue::Uniform(
+                runmat_analysis_core::Temperature::new(317.0),
+            ),
+            applies_before_step_id: "thermal_step".into(),
+        },
+    )];
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 3,
+            time_step_s: 0.1,
+            solver_mesh: Some(mesh),
+            ..experimental_thermal_options()
+        },
+    )
+    .unwrap();
+
+    for snapshot in &result.temperature_snapshots {
+        assert!(snapshot
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .all(|temperature| (*temperature - 317.0).abs() <= 1.0e-9));
+    }
+    let evidence = result.initial_state;
+    assert_eq!(evidence.applied_initial_condition_ids, ["uniform_start"]);
+    assert_eq!(evidence.authored_node_count, 4);
+    assert_eq!(evidence.reference_node_count, 0);
 }
 
 #[test]

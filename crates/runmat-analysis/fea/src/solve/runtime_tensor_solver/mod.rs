@@ -404,7 +404,7 @@ fn solve_runtime_tensor_linear_system_internal(
 
     let mut z =
         apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
-    let mut p = block_on(provider.elem_add(&z, &x)).ok()?;
+    let mut p = block_on(provider.elem_add(&z, &zero_h)).ok()?;
 
     let mut host_sync_count: u32 = 0;
     let mut rz_old = dot_handle(provider, &r, &z, &mut host_sync_count)?;

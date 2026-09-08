@@ -3385,6 +3385,8 @@ mod tests {
         let turbulence = block_on(turbulence_intensity_builtin(Value::Num(0.05)))
             .expect("typed turbulence intensity");
 
+        let thermal =
+            block_on(domains::thermal_domain_builtin(temperature.clone())).expect("thermal domain");
         let thermo = block_on(domains::thermomechanical_domain_builtin(
             temperature.clone(),
         ))
@@ -3399,6 +3401,7 @@ mod tests {
         .expect("fluid domain");
 
         for (value, class_name) in [
+            (thermal, FEA_THERMAL_DOMAIN_CLASS),
             (thermo, FEA_THERMOMECHANICAL_DOMAIN_CLASS),
             (electro, FEA_ELECTROTHERMAL_DOMAIN_CLASS),
             (electromagnetic, FEA_ELECTROMAGNETIC_DOMAIN_CLASS),
@@ -3415,6 +3418,11 @@ mod tests {
     #[test]
     fn fea_domain_classes_expose_only_their_own_constructors() {
         ensure_fea_classes_registered();
+        assert!(crate::class_registry::lookup_method(
+            FEA_THERMAL_DOMAIN_CLASS,
+            "atReferenceTemperature"
+        )
+        .is_some());
         assert!(crate::class_registry::lookup_method(
             FEA_THERMOMECHANICAL_DOMAIN_CLASS,
             "atReferenceTemperature"

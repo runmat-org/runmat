@@ -20,7 +20,8 @@ pub(crate) use model::{
     RealizedExcitations,
 };
 pub(crate) use projection::{ScalarProjectionAccumulator, SpatialProjectionAccumulator};
-pub(crate) use realize::realize_model_excitations;
+pub(crate) use realize::{realize_excitations, realize_model_excitations};
+pub(crate) use sample::{expect_scalar, sample_signal, ExcitationSamplePoint};
 
 #[cfg(test)]
 mod tests;

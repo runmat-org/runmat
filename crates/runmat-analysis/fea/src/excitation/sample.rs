@@ -20,7 +20,7 @@ pub(crate) enum ExcitationSamplePoint<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum SampledValue {
+pub(crate) enum SampledValue {
     Scalar(ComplexScalar),
     Vector3(ComplexVector3),
 }
@@ -34,7 +34,7 @@ enum SampleLocation {
     },
 }
 
-pub(super) fn sample_signal<Q>(
+pub(crate) fn sample_signal<Q>(
     signal: &Signal<Q>,
     sample: ExcitationSamplePoint<'_>,
     component: impl Fn(&Q) -> f64,
@@ -63,7 +63,7 @@ pub(super) fn sample_signal<Q>(
     }
 }
 
-pub(super) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, RealizationError> {
+pub(crate) fn expect_scalar(value: SampledValue) -> Result<ComplexScalar, RealizationError> {
     match value {
         SampledValue::Scalar(value) => Ok(value),
         SampledValue::Vector3(_) => Err(RealizationError::new("excitation requires scalar signal")),

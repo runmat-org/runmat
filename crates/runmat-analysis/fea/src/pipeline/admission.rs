@@ -159,20 +159,21 @@ pub(super) fn admit_nonstructural(
     boundary_transfer: BoundaryTransferImplementation,
     requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
-    let topology = solver_mesh
-        .map(|mesh| match mesh.resolved_request.element_order {
+    let topology = if let Some(mesh) = solver_mesh {
+        match mesh.resolved_request.element_order {
             ElementOrder::Tet4 => TopologyImplementation::CanonicalSolverMeshTet4,
             ElementOrder::Tet10 => TopologyImplementation::CanonicalSolverMeshTet10,
-        })
-        .unwrap_or(match family {
-            PhysicsFamily::Thermal => TopologyImplementation::InferredLattice,
+        }
+    } else {
+        match family {
             PhysicsFamily::Electromagnetic => TopologyImplementation::DofAdjacency,
             _ => {
                 return Err(FeaRunError::InvalidModel(format!(
-                    "no FEA pipeline admission branch is defined for {family:?}"
+                    "no meshless FEA pipeline admission branch is defined for {family:?}"
                 )))
             }
-        });
+        }
+    };
     let realization = registered_formulations(family, procedure)
         .into_iter()
         .find(|entry| {

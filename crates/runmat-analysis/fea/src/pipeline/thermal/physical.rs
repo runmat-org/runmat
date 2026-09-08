@@ -1,0 +1,481 @@
+use runmat_analysis_core::{
+    AnalysisField, AnalysisModel, CoupledPhysicsFamily, IndependentDomain, PhysicsFamily,
+};
+
+use crate::{
+    contracts::{
+        fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
+        fea_thermal_temperature_field_id, fea_thermal_temperature_gradient_field_id,
+        ComputeBackend, ExecutionBackend, FeaRunError, FeaRunResult, FeaThermalRunResult,
+        ThermalSolveOptions,
+    },
+    diagnostics::{
+        builders::material_assignment_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity,
+    },
+    excitation::{realize_excitations, ExcitationSamplePoint},
+    physics::thermal::{
+        assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
+        constitutive_stats, initial_state,
+    },
+    progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
+    solve::{
+        backend::{build_backend, kind::LinearAlgebraBackendKind},
+        linear::{solve_operator_system, LinearSolveResult},
+        preconditioner::SpdPreconditionerKind,
+    },
+};
+
+pub(super) fn run(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ThermalSolveOptions,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> Result<FeaThermalRunResult, FeaRunError> {
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Started,
+        "assembling physical thermal system",
+        Some(1),
+        Some(5),
+    );
+    let domain = model.thermal.as_ref().ok_or_else(|| {
+        FeaRunError::InvalidModel("thermal solve requires model.thermal".to_string())
+    })?;
+    let identity = super::super::admission::admit_nonstructural(
+        PhysicsFamily::Thermal,
+        options.procedure,
+        Some(mesh),
+        runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+        runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+        options.formulation_requirement,
+    )?;
+
+    let thermal_step = thermal_step(model, options.procedure)?;
+    let time_origin_s = match &thermal_step.independent_domain {
+        IndependentDomain::TimeSeconds { start, .. } => *start,
+        IndependentDomain::Static => 0.0,
+        _ => {
+            return Err(FeaRunError::InvalidModel(
+                "transient thermal solve requires a time-domain procedure step".into(),
+            ));
+        }
+    };
+    let initial_excitations = realize_excitations_for_step(model, thermal_step, time_origin_s)?;
+    let initial_assembly = assemble_thermal_operator(model, mesh, &initial_excitations)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let initial = initial_state::realize(
+        model,
+        &initial_assembly.projection,
+        thermal_step.step_id.as_str(),
+        domain.reference_temperature.kelvin,
+        &initial_assembly.prescribed_temperature_k,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "physical thermal system assembly complete",
+        Some(2),
+        Some(5),
+    );
+    check_cancelled("fea.run_thermal")?;
+
+    let step_count = options.step_count;
+    let time_step_s = options.time_step_s;
+    let mut time_points_s = Vec::with_capacity(step_count);
+    let mut recovered = RecoveredSnapshots::with_capacity(step_count);
+    let mut residual_norms = Vec::with_capacity(step_count - 1);
+    let mut energy_balances = Vec::with_capacity(step_count - 1);
+    let mut source_evidence = initial_assembly.source_evidence.clone();
+    let mut previous = initial.temperature_k.clone();
+    push_recovered_snapshot(
+        &initial_assembly,
+        &previous,
+        None,
+        time_step_s,
+        &mut recovered,
+    )?;
+    time_points_s.push(time_origin_s);
+
+    let requested_solver_backend = match backend {
+        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::RuntimeTensor,
+    };
+    let algebra = build_backend(requested_solver_backend);
+    let mut last_solve = None;
+    let mut host_sync_count = 0_u32;
+    let mut device_apply_count = 0_u32;
+    let mut device_apply_attempt_count = 0_u32;
+
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "solving physical thermal time steps",
+        Some(2),
+        Some(5),
+    );
+    for step_index in 1..step_count {
+        check_cancelled("fea.run_thermal")?;
+        let time_s = time_origin_s + step_index as f64 * time_step_s;
+        emit_phase(
+            "fea.run_thermal",
+            FeaProgressPhase::Solve,
+            FeaProgressStatus::Advanced,
+            format!("solving physical thermal step {}", step_index + 1),
+            Some(step_index as u64),
+            Some(step_count as u64),
+        );
+        let excitations = realize_excitations_for_step(model, thermal_step, time_s)?;
+        let assembly = assemble_thermal_operator(model, mesh, &excitations)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        source_evidence.extend(assembly.source_evidence.clone());
+        let operator = assembly.transient_operator(time_step_s, &previous);
+        let rhs_norm = operator
+            .rhs
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+            .max(1.0);
+        let solve = solve_operator_system(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            requested_solver_backend,
+            algebra.as_ref(),
+            Some(&previous),
+        );
+        if !solve.converged {
+            return Err(FeaRunError::Assembly(format!(
+                "physical thermal solve did not converge: residual_norm={}",
+                solve.residual_norm
+            )));
+        }
+        host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
+        device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
+        device_apply_attempt_count =
+            device_apply_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
+        residual_norms.push(solve.residual_norm / rhs_norm);
+        energy_balances.push(assembly.energy_balance(&previous, &solve.solution, time_step_s));
+        push_recovered_snapshot(
+            &assembly,
+            &solve.solution,
+            Some(&previous),
+            time_step_s,
+            &mut recovered,
+        )?;
+        previous = solve.solution.clone();
+        time_points_s.push(time_s);
+        last_solve = Some(solve);
+    }
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "physical thermal time integration complete",
+        Some(3),
+        Some(5),
+    );
+
+    let last_solve = last_solve.expect("a minimum of two snapshots performs one solve");
+    let diagnostics = diagnostics(ThermalDiagnosticsInput {
+        model,
+        initial: &initial.evidence,
+        assembly: &initial_assembly,
+        last_solve: &last_solve,
+        temperature_snapshots: &recovered.temperatures,
+        residual_norms: &residual_norms,
+        energy_balances: &energy_balances,
+        residual_target: options.residual_target,
+    });
+    let device_apply_ratio = if device_apply_attempt_count == 0 {
+        0.0
+    } else {
+        device_apply_count as f64 / device_apply_attempt_count as f64
+    };
+    let run = FeaRunResult {
+        identity,
+        requested_backend: backend,
+        execution_backend: ExecutionBackend::from_solver_backend(last_solve.solver_backend),
+        solver_backend: last_solve.solver_backend,
+        solver_device_apply_k_ratio: device_apply_ratio,
+        solver_method: last_solve.solver_method,
+        preconditioner: last_solve.preconditioner,
+        solver_host_sync_count: host_sync_count,
+        diagnostics,
+        spatial_projection_evidence: source_evidence,
+        fields: Vec::new(),
+    };
+
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA physical thermal run complete",
+        Some(5),
+        Some(5),
+    );
+    Ok(FeaThermalRunResult {
+        run,
+        time_points_s,
+        temperature_snapshots: scalar_snapshots(
+            recovered.temperatures,
+            fea_thermal_temperature_field_id,
+        ),
+        temperature_gradient_snapshots: vector_snapshots(
+            recovered.gradients,
+            fea_thermal_temperature_gradient_field_id,
+        ),
+        heat_flux_snapshots: vector_snapshots(recovered.heat_flux, fea_thermal_heat_flux_field_id),
+        energy_storage_rate_snapshots: scalar_snapshots(
+            recovered.storage_rates,
+            fea_thermal_energy_storage_rate_field_id,
+        ),
+        residual_norms,
+        reference_temperature_k: domain.reference_temperature.kelvin,
+        initial_state: initial.evidence,
+    })
+}
+
+fn thermal_step(
+    model: &AnalysisModel,
+    procedure: runmat_analysis_core::AnalysisProcedure,
+) -> Result<&runmat_analysis_core::ProcedureStep, FeaRunError> {
+    let mut steps = model.sequence.steps.iter().filter(|step| {
+        step.procedure == procedure
+            && matches!(
+                step.family,
+                PhysicsFamily::Thermal
+                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
+            )
+    });
+    steps
+        .next()
+        .filter(|_| steps.next().is_none())
+        .ok_or_else(|| {
+            FeaRunError::InvalidModel(
+                "thermal solve requires exactly one matching thermal procedure step".into(),
+            )
+        })
+}
+
+fn realize_excitations_for_step(
+    model: &AnalysisModel,
+    step: &runmat_analysis_core::ProcedureStep,
+    time_s: f64,
+) -> Result<crate::excitation::RealizedExcitations, FeaRunError> {
+    let sample = match &step.independent_domain {
+        IndependentDomain::TimeSeconds { .. } => ExcitationSamplePoint::TimeSeconds(time_s),
+        IndependentDomain::Static => ExcitationSamplePoint::Static,
+        _ => {
+            return Err(FeaRunError::InvalidModel(
+                "transient thermal solve requires a time-domain procedure step".into(),
+            ));
+        }
+    };
+    realize_excitations(model, Some(step.step_id.as_str()), sample)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))
+}
+
+struct RecoveredSnapshots {
+    temperatures: Vec<Vec<f64>>,
+    gradients: Vec<Vec<f64>>,
+    heat_flux: Vec<Vec<f64>>,
+    storage_rates: Vec<Vec<f64>>,
+}
+
+impl RecoveredSnapshots {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            temperatures: Vec::with_capacity(capacity),
+            gradients: Vec::with_capacity(capacity),
+            heat_flux: Vec::with_capacity(capacity),
+            storage_rates: Vec::with_capacity(capacity),
+        }
+    }
+}
+
+fn push_recovered_snapshot(
+    assembly: &crate::physics::thermal::assembly::ThermalOperatorAssembly,
+    temperature_k: &[f64],
+    previous_temperature_k: Option<&[f64]>,
+    time_step_s: f64,
+    recovered: &mut RecoveredSnapshots,
+) -> Result<(), FeaRunError> {
+    recovered.temperatures.push(temperature_k.to_vec());
+    recovered.gradients.push(
+        assembly
+            .recover_element_temperature_gradients(temperature_k)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+            .into_iter()
+            .flatten()
+            .collect(),
+    );
+    recovered.heat_flux.push(
+        assembly
+            .recover_element_heat_flux(temperature_k)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?
+            .into_iter()
+            .flatten()
+            .collect(),
+    );
+    recovered.storage_rates.push(match previous_temperature_k {
+        Some(previous) => assembly
+            .recover_element_storage_rate(previous, temperature_k, time_step_s)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+        None => vec![0.0; assembly.projection.elements.len()],
+    });
+    Ok(())
+}
+
+fn scalar_snapshots(values: Vec<Vec<f64>>, field_id: fn(usize) -> String) -> Vec<AnalysisField> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, values)| {
+            let len = values.len();
+            AnalysisField::host_f64(field_id(index), vec![len], values)
+        })
+        .collect()
+}
+
+fn vector_snapshots(values: Vec<Vec<f64>>, field_id: fn(usize) -> String) -> Vec<AnalysisField> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, values)| {
+            let count = values.len() / 3;
+            AnalysisField::host_f64(field_id(index), vec![count, 3], values)
+        })
+        .collect()
+}
+
+struct ThermalDiagnosticsInput<'a> {
+    model: &'a AnalysisModel,
+    initial: &'a crate::contracts::ThermalInitialStateEvidence,
+    assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
+    last_solve: &'a LinearSolveResult,
+    temperature_snapshots: &'a [Vec<f64>],
+    residual_norms: &'a [f64],
+    energy_balances: &'a [ThermalEnergyBalance],
+    residual_target: f64,
+}
+
+fn diagnostics(input: ThermalDiagnosticsInput<'_>) -> Vec<FeaDiagnostic> {
+    let ThermalDiagnosticsInput {
+        model,
+        initial,
+        assembly,
+        last_solve,
+        temperature_snapshots,
+        residual_norms,
+        energy_balances,
+        residual_target,
+    } = input;
+    let maximum_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+    let maximum_energy_residual = energy_balances
+        .iter()
+        .map(|balance| balance.relative_residual)
+        .fold(0.0_f64, f64::max);
+    let minimum_temperature_k = temperature_snapshots
+        .iter()
+        .flatten()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let maximum_temperature_k = temperature_snapshots
+        .iter()
+        .flatten()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let final_energy = energy_balances
+        .last()
+        .copied()
+        .unwrap_or(ThermalEnergyBalance {
+            storage_rate_w: 0.0,
+            boundary_loss_w: 0.0,
+            applied_power_w: 0.0,
+            prescribed_boundary_power_w: 0.0,
+            residual_w: 0.0,
+            relative_residual: 0.0,
+        });
+    let constitutive = constitutive_stats(model);
+    let mut diagnostics = vec![
+        FeaDiagnostic {
+            code: "FEA_THERMAL_INITIAL_STATE".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "procedure_step_id={} reference_temperature_k={} applied_initial_condition_count={} authored_node_count={} prescribed_node_count={} authored_and_prescribed_node_count={} reference_node_count={} minimum_temperature_k={} maximum_temperature_k={}",
+                initial.procedure_step_id,
+                initial.reference_temperature_k,
+                initial.applied_initial_condition_ids.len(),
+                initial.authored_node_count,
+                initial.prescribed_node_count,
+                initial.authored_and_prescribed_node_count,
+                initial.reference_node_count,
+                initial.minimum_temperature_k,
+                initial.maximum_temperature_k,
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_THERMAL_STABILITY".into(),
+            severity: if maximum_residual <= residual_target {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "all_linear_solves_converged=true max_relative_residual_norm={} residual_target={} minimum_temperature_k={} maximum_temperature_k={}",
+                maximum_residual,
+                residual_target,
+                minimum_temperature_k,
+                maximum_temperature_k,
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_THERMAL_CONSTITUTIVE".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "conductivity_mean={} heat_capacity_mean={} density_mean={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+                constitutive.conductivity_mean,
+                constitutive.heat_capacity_mean,
+                constitutive.density_mean,
+                constitutive.conductivity_spread_ratio,
+                constitutive.heat_capacity_spread_ratio,
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_THERMAL_ENERGY_BALANCE".into(),
+            severity: if maximum_energy_residual <= residual_target {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Error
+            },
+            message: format!(
+                "storage_rate_w={} boundary_loss_w={} applied_power_w={} prescribed_boundary_power_w={} residual_w={} final_relative_residual={} max_relative_residual={}",
+                final_energy.storage_rate_w,
+                final_energy.boundary_loss_w,
+                final_energy.applied_power_w,
+                final_energy.prescribed_boundary_power_w,
+                final_energy.residual_w,
+                final_energy.relative_residual,
+                maximum_energy_residual,
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_THERMAL_FIELD_RECOVERY".into(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "basis=physical_quadrature node_count={} element_count={} boundary_face_count={}",
+                assembly.projection.nodes.len(),
+                assembly.projection.elements.len(),
+                assembly.projection.boundary_faces.len(),
+            ),
+        },
+    ];
+    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    diagnostics.extend(last_solve.diagnostics.clone());
+    diagnostics
+}

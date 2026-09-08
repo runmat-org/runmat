@@ -5092,27 +5092,18 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
                 "thermal_standalone_ramp_gpu_fallback",
             )
             for name, observed in (
-                ("thermal_standalone_max_residual_norm", 4.963781470198714),
+                ("thermal_standalone_max_relative_residual_norm", 1.0e-10),
                 ("thermal_standalone_min_temperature_k", 293.339),
                 ("thermal_standalone_max_temperature_k", 337.87747326361944),
                 (
-                    "thermal_standalone_heat_balance_residual_ratio",
+                    "thermal_standalone_energy_balance_residual_ratio",
                     8.892701458688957e-15,
                 ),
                 ("thermal_standalone_conductivity_spread_ratio", 1.0),
                 ("thermal_standalone_heat_capacity_spread_ratio", 1.0),
-                ("thermal_standalone_spatial_gradient_index", 1.0950807831259657),
-                ("thermal_standalone_monotonic_response_fraction", 1.0),
-                ("thermal_standalone_response_realization_ratio", 0.671959951712075),
-                ("thermal_standalone_slab_linear_profile_rms_ratio", 0.02),
-                ("thermal_standalone_slab_monotonic_edge_fraction", 1.0),
-                ("thermal_standalone_lumped_response_error_ratio", 0.18),
-                ("thermal_standalone_source_response_sign_alignment", 1.0),
-                ("thermal_standalone_source_coverage_ratio", 1.0),
-                ("thermal_standalone_boundary_coverage_ratio", 1.0),
-                ("thermal_standalone_prescribed_temperature_count", 1.0),
-                ("thermal_standalone_heat_flux_boundary_count", 1.0),
-                ("thermal_standalone_convection_boundary_count", 1.0),
+                ("thermal_standalone_element_count", 1.0),
+                ("thermal_standalone_boundary_face_count", 4.0),
+                ("thermal_standalone_initial_prescribed_node_count", 3.0),
             )
         ],
         {

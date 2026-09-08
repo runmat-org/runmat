@@ -1540,7 +1540,6 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     }
     if normalized.contains("poynting_vector")
         || normalized.contains("boundary_heat_flux")
-        || normalized.contains("axis_boundary_heat_flux_summary")
         || normalized.contains("interface_heat_flux")
         || normalized.ends_with(".heat_flux")
         || normalized.contains(".heat_flux.")
@@ -1628,9 +1627,6 @@ fn infer_field_unit(field_id: &str) -> Option<&'static str> {
 
 fn infer_field_location(field_id: &str) -> AnalysisFieldLocation {
     let normalized = field_id.to_ascii_lowercase();
-    if normalized.contains("axis_boundary_heat_flux_summary") {
-        return AnalysisFieldLocation::Global;
-    }
     if normalized.contains("nodal_von_mises") {
         return AnalysisFieldLocation::Node;
     }
@@ -1977,14 +1973,11 @@ pub struct AnalysisResultsSummary {
     pub contact_nonlinear_severity_mean: Option<f64>,
     pub contact_load_realization_ratio: Option<f64>,
     pub contact_load_amplification_ratio: Option<f64>,
-    pub thermal_max_residual_norm: Option<f64>,
+    pub thermal_max_relative_residual_norm: Option<f64>,
     pub thermal_min_temperature_k: Option<f64>,
     pub thermal_max_temperature_k: Option<f64>,
     pub thermal_conductivity_spread_ratio: Option<f64>,
     pub thermal_heat_capacity_spread_ratio: Option<f64>,
-    pub thermal_spatial_gradient_index: Option<f64>,
-    pub thermal_monotonic_response_fraction: Option<f64>,
-    pub thermal_response_realization_ratio: Option<f64>,
     pub electromagnetic_enabled: Option<bool>,
     pub electromagnetic_formulation_coverage_ratio: Option<f64>,
     pub electromagnetic_magnetostatic_curl_curl_coverage_ratio: Option<f64>,
@@ -2726,10 +2719,9 @@ pub struct ThermalResultsData {
     pub heat_flux_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub axis_boundary_heat_flux_summary_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
+    pub initial_state: runmat_analysis_fea::ThermalInitialStateEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

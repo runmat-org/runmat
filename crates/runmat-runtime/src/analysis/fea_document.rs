@@ -9,7 +9,7 @@ use runmat_analysis_core::{
     MaterialAcousticModel, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
     MaterialModel, MaterialPlasticModel, MaterialThermalModel, PhysicalSignal, RegionTarget,
     ResponseSpectrum, ShellElementModel, ShellSectionModel, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, ThermoMechanicalDomain,
+    StructuralElementKind, StructuralModel, StructuralNode, ThermalDomain, ThermoMechanicalDomain,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{GeometryAsset, UnitSystem};
@@ -318,6 +318,8 @@ impl FeaStructuralSectionType {
 #[serde(deny_unknown_fields)]
 struct FeaDomainsDocument {
     #[serde(default)]
+    thermal: Option<ThermalDomain>,
+    #[serde(default)]
     thermo_mechanical: Option<ThermoMechanicalDomain>,
     #[serde(default)]
     electro_thermal: Option<ElectroThermalDomain>,
@@ -625,6 +627,9 @@ fn resolve_model(
     model.response_spectra = study.response_spectra.clone();
     model.sequence = study.sequence.clone();
     resolve_typed_region_targets(&mut model, geometry, &study.regions)?;
+    if study.domains.thermal.is_some() {
+        model.thermal = study.domains.thermal.clone();
+    }
     if study.domains.thermo_mechanical.is_some() {
         model.thermo_mechanical = study.domains.thermo_mechanical.clone();
     }
@@ -823,6 +828,7 @@ fn empty_model(model_id: String, geometry: &GeometryAsset) -> AnalysisModel {
         materials: Vec::new(),
         material_assignments: Vec::new(),
         structural: None,
+        thermal: None,
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
@@ -1420,6 +1426,36 @@ mod tests {
             .expect("resolve scaffold model")
             .expect("resolved model");
         assert_eq!(model.sequence, study.sequence);
+    }
+
+    #[test]
+    fn standalone_thermal_domain_round_trips_through_the_document_boundary() {
+        let mut document = minimal_study_yaml();
+        let mut domains = serde_yaml::Mapping::new();
+        domains.insert(
+            "thermal".into(),
+            canonical_yaml(ThermalDomain {
+                reference_temperature: runmat_analysis_core::Temperature::new(318.15),
+            }),
+        );
+        document
+            .as_mapping_mut()
+            .expect("study mapping")
+            .insert("domains".into(), domains.into());
+
+        let parsed = parse_raw_fea_value(document).expect("thermal study document");
+        let RawFeaDocument::Study(study) = parsed else {
+            panic!("expected study")
+        };
+        let intent = AnalysisCreateModelIntentSpec {
+            model_id: "thermal-model".into(),
+            template: study.model.template,
+        };
+        let model = resolve_model(&study, &sample_geometry(), &intent)
+            .expect("resolve thermal model")
+            .expect("resolved model");
+        assert_eq!(model.thermal.unwrap().reference_temperature.kelvin, 318.15);
+        assert!(model.thermo_mechanical.is_none());
     }
 
     #[test]

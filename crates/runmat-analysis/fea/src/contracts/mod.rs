@@ -154,10 +154,6 @@ pub fn fea_thermal_energy_storage_rate_field_id(snapshot_index: usize) -> String
     format!("thermal.energy_storage_rate.{snapshot_index}")
 }
 
-pub fn fea_thermal_axis_boundary_heat_flux_summary_field_id(snapshot_index: usize) -> String {
-    format!("thermal.axis_boundary_heat_flux_summary.{snapshot_index}")
-}
-
 pub fn fea_transient_displacement_field_id(snapshot_index: usize) -> String {
     format!("transient.displacement.{snapshot_index}")
 }
@@ -303,7 +299,6 @@ pub enum SolverMethod {
     MatrixFreeSubspaceIteration,
     ImplicitEulerPcg,
     IncrementalNewtonRaphson,
-    ThermalProfileIntegrator,
     ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
     AcousticDomainGraphHelmholtzHarmonic,
     CfdVelocityPressureFiniteVolume,
@@ -320,7 +315,6 @@ impl SolverMethod {
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
             Self::ImplicitEulerPcg => "implicit_euler_pcg",
             Self::IncrementalNewtonRaphson => "incremental_newton_raphson",
-            Self::ThermalProfileIntegrator => "thermal_profile_integrator",
             Self::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
                 "electromagnetic_edge_curl_curl_harmonic_block_bicgstab"
             }
@@ -555,9 +549,23 @@ pub struct FeaThermalRunResult {
     pub temperature_gradient_snapshots: Vec<AnalysisField>,
     pub heat_flux_snapshots: Vec<AnalysisField>,
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
-    pub axis_boundary_heat_flux_summary_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
+    pub initial_state: ThermalInitialStateEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThermalInitialStateEvidence {
+    pub procedure_step_id: String,
+    pub reference_temperature_k: f64,
+    pub applied_initial_condition_ids: Vec<String>,
+    pub authored_node_count: usize,
+    pub prescribed_node_count: usize,
+    pub authored_and_prescribed_node_count: usize,
+    pub reference_node_count: usize,
+    pub minimum_temperature_k: f64,
+    pub maximum_temperature_k: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -619,7 +627,6 @@ pub struct ThermalSolveOptions {
     pub time_step_s: f64,
     pub residual_target: f64,
     pub solver_mesh: Option<SolverMeshArtifact>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
 impl Default for ThermalSolveOptions {
@@ -631,7 +638,6 @@ impl Default for ThermalSolveOptions {
             time_step_s: 1.0e-2,
             residual_target: 1.0e-4,
             solver_mesh: None,
-            thermo_mechanical_context: None,
         }
     }
 }

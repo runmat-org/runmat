@@ -2473,6 +2473,7 @@ mod tests {
             materials: Vec::new(),
             material_assignments: Vec::new(),
             structural: None,
+            thermal: None,
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
