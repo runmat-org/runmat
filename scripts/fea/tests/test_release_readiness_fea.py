@@ -35,14 +35,11 @@ def report(
     contact_nonlinear_severity=None,
     contact_load_realization_ratio=None,
     contact_load_amplification_ratio=None,
-    thermal_max_residual_norm=None,
+    thermal_max_relative_residual_norm=None,
     thermal_min_temperature_k=None,
     thermal_max_temperature_k=None,
     thermal_conductivity_spread_ratio=None,
     thermal_heat_capacity_spread_ratio=None,
-    thermal_spatial_gradient_index=None,
-    thermal_monotonic_response_fraction=None,
-    thermal_response_realization_ratio=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -109,9 +106,11 @@ def report(
     if contact_load_amplification_ratio is not None:
         for rec in records:
             rec["contact_load_amplification_ratio"] = contact_load_amplification_ratio
-    if thermal_max_residual_norm is not None:
+    if thermal_max_relative_residual_norm is not None:
         for rec in records:
-            rec["thermal_max_residual_norm"] = thermal_max_residual_norm
+            rec["thermal_max_relative_residual_norm"] = (
+                thermal_max_relative_residual_norm
+            )
     if thermal_min_temperature_k is not None:
         for rec in records:
             rec["thermal_min_temperature_k"] = thermal_min_temperature_k
@@ -124,18 +123,6 @@ def report(
     if thermal_heat_capacity_spread_ratio is not None:
         for rec in records:
             rec["thermal_heat_capacity_spread_ratio"] = thermal_heat_capacity_spread_ratio
-    if thermal_spatial_gradient_index is not None:
-        for rec in records:
-            rec["thermal_spatial_gradient_index"] = thermal_spatial_gradient_index
-    if thermal_monotonic_response_fraction is not None:
-        for rec in records:
-            rec["thermal_monotonic_response_fraction"] = (
-                thermal_monotonic_response_fraction
-            )
-    if thermal_response_realization_ratio is not None:
-        for rec in records:
-            rec["thermal_response_realization_ratio"] = thermal_response_realization_ratio
-
     return {
         "passed": passed,
         "records": records,
@@ -168,23 +155,21 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RELATIVE_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_ENERGY_BALANCE_RESIDUAL_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_ELEMENT_COUNT",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_BOUNDARY_FACE_COUNT",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_INITIAL_PRESCRIBED_NODE_COUNT",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RELATIVE_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_ENERGY_BALANCE_RESIDUAL_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM",
@@ -4277,7 +4262,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             passed=True,
             publishable=True,
             gpu_ms=100.0,
-            thermal_max_residual_norm=1.0,
+            thermal_max_relative_residual_norm=1.0e-6,
             thermal_min_temperature_k=300.0,
             thermal_max_temperature_k=350.0,
             thermal_conductivity_spread_ratio=3.0,
@@ -4291,7 +4276,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                     passed=True,
                     publishable=True,
                     gpu_ms=95.0,
-                    thermal_max_residual_norm=1.0,
+                    thermal_max_relative_residual_norm=1.0e-6,
                     thermal_min_temperature_k=300.0,
                     thermal_max_temperature_k=350.0,
                     thermal_conductivity_spread_ratio=1.2,
@@ -4303,23 +4288,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMAL_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
 
-    def test_thermal_outcome_reasons_are_emitted(self):
+    def test_thermal_relative_residual_reason_is_emitted(self):
         latest = report(
             passed=True,
             publishable=True,
             gpu_ms=100.0,
-            thermal_max_residual_norm=1.0,
+            thermal_max_relative_residual_norm=2.0e-4,
             thermal_min_temperature_k=300.0,
             thermal_max_temperature_k=350.0,
             thermal_conductivity_spread_ratio=1.2,
             thermal_heat_capacity_spread_ratio=1.1,
-            thermal_spatial_gradient_index=2.2,
-            thermal_monotonic_response_fraction=0.5,
-            thermal_response_realization_ratio=0.2,
         )
-        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX"] = "1.5"
-        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION"] = "0.8"
-        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO"] = "0.5"
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MAX_RELATIVE_RESIDUAL_NORM"] = "0.0001"
         result = evaluate_release_readiness(
             latest,
             [
@@ -4327,91 +4307,50 @@ class ReleaseReadinessTests(unittest.TestCase):
                     passed=True,
                     publishable=True,
                     gpu_ms=95.0,
-                    thermal_max_residual_norm=1.0,
+                    thermal_max_relative_residual_norm=1.0e-6,
                     thermal_min_temperature_k=300.0,
                     thermal_max_temperature_k=350.0,
                     thermal_conductivity_spread_ratio=1.2,
                     thermal_heat_capacity_spread_ratio=1.1,
-                    thermal_spatial_gradient_index=1.0,
-                    thermal_monotonic_response_fraction=0.95,
-                    thermal_response_realization_ratio=1.0,
                 )
             ],
             protected=False,
         )
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMAL_SPATIAL_GRADIENT_HIGH", codes)
-        self.assertIn("THERMAL_MONOTONIC_RESPONSE_LOW", codes)
-        self.assertIn("THERMAL_RESPONSE_REALIZATION_RATIO_LOW", codes)
+        self.assertIn("THERMAL_RELATIVE_RESIDUAL_NORM_HIGH", codes)
 
-    def test_thermal_residual_norm_trend_worsening_reason_is_emitted(self):
+    def test_thermal_relative_residual_norm_trend_worsening_reason_is_emitted(self):
         latest = report(
             passed=True,
             publishable=True,
             gpu_ms=100.0,
-            thermal_max_residual_norm=2.0,
+            thermal_max_relative_residual_norm=2.0e-6,
             thermal_conductivity_spread_ratio=1.1,
             thermal_heat_capacity_spread_ratio=1.1,
-            thermal_spatial_gradient_index=1.1,
-            thermal_monotonic_response_fraction=0.95,
-            thermal_response_realization_ratio=1.0,
         )
         rolling = [
             report(
                 passed=True,
                 publishable=True,
                 gpu_ms=95.0,
-                thermal_max_residual_norm=1.0,
+                thermal_max_relative_residual_norm=1.0e-6,
                 thermal_conductivity_spread_ratio=1.0,
                 thermal_heat_capacity_spread_ratio=1.0,
-                thermal_spatial_gradient_index=1.0,
-                thermal_monotonic_response_fraction=0.95,
-                thermal_response_realization_ratio=1.0,
-            )
-        ]
-        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM_TREND_RATIO"] = "1.5"
-        result = evaluate_release_readiness(latest, rolling, protected=False)
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMAL_RESIDUAL_NORM_TREND_WORSENING", codes)
-
-    def test_thermal_monotonic_response_trend_worsening_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermal_max_residual_norm=1.0,
-            thermal_conductivity_spread_ratio=1.1,
-            thermal_heat_capacity_spread_ratio=1.1,
-            thermal_spatial_gradient_index=1.0,
-            thermal_monotonic_response_fraction=0.5,
-            thermal_response_realization_ratio=0.6,
-        )
-        rolling = [
-            report(
-                passed=True,
-                publishable=True,
-                gpu_ms=95.0,
-                thermal_max_residual_norm=1.0,
-                thermal_conductivity_spread_ratio=1.0,
-                thermal_heat_capacity_spread_ratio=1.0,
-                thermal_spatial_gradient_index=1.0,
-                thermal_monotonic_response_fraction=0.9,
-                thermal_response_realization_ratio=0.9,
             )
         ]
         os.environ[
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO"
-        ] = "1.2"
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RELATIVE_RESIDUAL_NORM_TREND_RATIO"
+        ] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMAL_MONOTONIC_RESPONSE_TREND_WORSENING", codes)
+        self.assertIn("THERMAL_RELATIVE_RESIDUAL_NORM_TREND_WORSENING", codes)
 
     def test_thermal_assertion_metrics_missing_reason_is_emitted_when_required(self):
         latest = report(
             passed=True,
             publishable=True,
             gpu_ms=100.0,
-            thermal_max_residual_norm=1.0,
+            thermal_max_relative_residual_norm=1.0e-6,
             thermal_conductivity_spread_ratio=1.1,
         )
         latest["records"].append(
@@ -4430,17 +4369,43 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMAL_ASSERTION_METRICS_MISSING", codes)
 
-    def test_thermal_assertion_monotonic_trend_worsening_reason_is_emitted(self):
+    def test_thermal_topology_assertion_reasons_are_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            thermal_max_relative_residual_norm=1.0e-6,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermal_standalone_ramp_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [
+                    {"name": "thermal_standalone_element_count", "observed": 0.0},
+                    {
+                        "name": "thermal_standalone_boundary_face_count",
+                        "observed": 0.0,
+                    },
+                    {
+                        "name": "thermal_standalone_initial_prescribed_node_count",
+                        "observed": 0.0,
+                    },
+                ],
+            }
+        )
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_ASSERTION_ELEMENT_COUNT_LOW", codes)
+        self.assertIn("THERMAL_ASSERTION_BOUNDARY_FACE_COUNT_LOW", codes)
+        self.assertIn("THERMAL_ASSERTION_INITIAL_PRESCRIBED_NODE_COUNT_LOW", codes)
+
+    def test_thermal_assertion_energy_balance_trend_worsening_reason_is_emitted(self):
         latest = report(
             passed=True,
             publishable=True,
             gpu_ms=100.0,
-            thermal_max_residual_norm=1.0,
+            thermal_max_relative_residual_norm=1.0e-6,
             thermal_conductivity_spread_ratio=1.1,
             thermal_heat_capacity_spread_ratio=1.1,
-            thermal_spatial_gradient_index=1.0,
-            thermal_monotonic_response_fraction=0.95,
-            thermal_response_realization_ratio=0.95,
         )
         latest["records"].append(
             {
@@ -4448,8 +4413,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "threshold_assertions": [
                     {
-                        "name": "thermal_standalone_monotonic_response_fraction",
-                        "observed": 0.40,
+                        "name": "thermal_standalone_energy_balance_residual_ratio",
+                        "observed": 2.0e-6,
                     }
                 ],
             }
@@ -4461,18 +4426,18 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "threshold_assertions": [
                     {
-                        "name": "thermal_standalone_monotonic_response_fraction",
-                        "observed": 0.90,
+                        "name": "thermal_standalone_energy_balance_residual_ratio",
+                        "observed": 1.0e-6,
                     }
                 ],
             }
         )
         os.environ[
-            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO"
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_ENERGY_BALANCE_RESIDUAL_TREND_RATIO"
         ] = "1.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMAL_ASSERTION_MONOTONIC_RESPONSE_TREND_WORSENING", codes)
+        self.assertIn("THERMAL_ASSERTION_ENERGY_BALANCE_TREND_WORSENING", codes)
 
     def test_plastic_assertion_contract_missing_reason_is_emitted_when_required(self):
         latest = report(
@@ -7180,7 +7145,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             thermo_assignment_heterogeneity_index=0.08,
             thermo_spatial_coverage_ratio=0.7,
             thermo_field_extrapolation_ratio=0.01,
-            thermal_max_residual_norm=1.0,
+            thermal_max_relative_residual_norm=1.0e-6,
             thermal_min_temperature_k=300.0,
             thermal_max_temperature_k=350.0,
             thermal_conductivity_spread_ratio=1.2,
@@ -7224,10 +7189,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             summary,
         )
         self.assertIn("### Thermal Posture", summary)
-        self.assertIn("Max thermal residual norm", summary)
-        self.assertIn("Max thermal conductivity spread ratio", summary)
-        self.assertIn("Max thermal spatial gradient index", summary)
-        self.assertIn("Min thermal monotonic response fraction", summary)
+        self.assertIn("Max thermal relative residual norm/threshold", summary)
+        self.assertIn("Conductivity/heat-capacity spread ratios", summary)
+        self.assertIn("Standalone topology assertions and thresholds", summary)
+        self.assertIn("Standalone assertion trend ratios", summary)
         self.assertIn("Thermal spread trend ratio", summary)
         self.assertIn("### Nonlinear Core Posture", summary)
         self.assertIn("Nonlinear assembly increments/failed/spikes thresholds", summary)
