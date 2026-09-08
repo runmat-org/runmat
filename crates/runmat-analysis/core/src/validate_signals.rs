@@ -282,6 +282,7 @@ fn validate_table<Q: FiniteQuantity>(
     {
         return Err("complex precision requires complex ordinates".to_string());
     }
+    let mut previous_breakpoint = None;
     for breakpoint in &table.breakpoints {
         if !breakpoint.abscissa.is_finite()
             || breakpoint.abscissa < axis[0]
@@ -289,6 +290,16 @@ fn validate_table<Q: FiniteQuantity>(
         {
             return Err("breakpoints must lie on the tabulated domain".to_string());
         }
+        if previous_breakpoint.is_some_and(|previous| breakpoint.abscissa <= previous) {
+            return Err("breakpoints must be strictly increasing and unique".to_string());
+        }
+        if axis
+            .binary_search_by(|sample| sample.total_cmp(&breakpoint.abscissa))
+            .is_err()
+        {
+            return Err("breakpoints must identify tabulated axis samples".to_string());
+        }
+        previous_breakpoint = Some(breakpoint.abscissa);
     }
     Ok(())
 }
@@ -445,10 +456,11 @@ fn is_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal, Signal,
-        SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
-        SignalInterpolation, SignalPrecision, SignalProvenance, SignalRepresentation,
-        SignalSamplingPolicy, SignalShape,
+        BreakpointSide, Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance,
+        PhysicalSignal, Signal, SignalApproximationEvidence, SignalAxis, SignalBreakpoint,
+        SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalOrdinate,
+        SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
+        SignalValue, TabulatedSignal,
     };
 
     use super::validate_signals;
@@ -523,5 +535,56 @@ mod tests {
         }));
 
         assert!(validate_signals(&[signal]).is_err());
+    }
+
+    #[test]
+    fn tabulated_breakpoints_are_ordered_axis_samples() {
+        let mut signal = generated_force(SignalProvenance::Authored);
+        let PhysicalSignal::Force(signal) = &mut signal else {
+            unreachable!()
+        };
+        signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+            axis: SignalAxis::TimeSeconds(vec![0.0, 0.5, 1.0]),
+            values: vec![0.0, 1.0, 2.0]
+                .into_iter()
+                .map(|value| SignalOrdinate::Real(SignalValue::Scalar(Force::new(value))))
+                .collect(),
+            interpolation: SignalInterpolation::StepRight,
+            extrapolation: SignalExtrapolation::Reject,
+            breakpoints: vec![SignalBreakpoint {
+                abscissa: 0.5,
+                side: BreakpointSide::Both,
+            }],
+        });
+        signal.evidence.sample_count = 3;
+        validate_signals(&[PhysicalSignal::Force(signal.clone())])
+            .expect("axis-aligned breakpoint should validate");
+
+        let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+            unreachable!()
+        };
+        table.breakpoints[0].abscissa = 0.25;
+        let error = validate_signals(&[PhysicalSignal::Force(signal.clone())]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("breakpoints must identify tabulated axis samples"));
+
+        let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+            unreachable!()
+        };
+        table.breakpoints = vec![
+            SignalBreakpoint {
+                abscissa: 0.5,
+                side: BreakpointSide::Left,
+            },
+            SignalBreakpoint {
+                abscissa: 0.5,
+                side: BreakpointSide::Right,
+            },
+        ];
+        let error = validate_signals(&[PhysicalSignal::Force(signal.clone())]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("breakpoints must be strictly increasing and unique"));
     }
 }

@@ -2,7 +2,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
-    SolverMeshRegionMappingError, StructuralLoadKind, WrenchLoweringSummary,
+    MomentProjectionSummary, SolverMeshRegionMappingError, StructuralLoadKind,
 };
 use crate::constraints::CanonicalStructuralConstraintPlan;
 use crate::excitation::{RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations};
@@ -13,10 +13,10 @@ pub(super) fn apply_solver_mesh_structural_loads(
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     strict_region_mapping: bool,
-) -> Result<Vec<WrenchLoweringSummary>, SolverMeshRegionMappingError> {
+) -> Result<Vec<MomentProjectionSummary>, SolverMeshRegionMappingError> {
     rhs.fill(0.0);
 
-    let mut wrench_lowering = Vec::new();
+    let mut moment_projection = Vec::new();
     for load in excitations.iter() {
         if matches!(load.target, RealizedExcitationTarget::ReferencePoint { .. }) {
             continue;
@@ -45,31 +45,25 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, fz * scale);
                 }
             }
-            RealizedExcitationKind::Wrench {
-                force,
-                moment,
-                point,
-            } => {
+            RealizedExcitationKind::Moment(value) => {
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
                         return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
                             load_id: load.excitation_id.0.clone(),
                             region_id: region_id.to_string(),
-                            load_kind: StructuralLoadKind::Wrench,
+                            load_kind: StructuralLoadKind::Moment,
                         });
                     }
                     continue;
                 }
-                let summary = add_solver_mesh_wrench_rhs(
+                let summary = add_solver_mesh_moment_projection_rhs(
                     mesh,
                     layout,
                     rhs,
                     &target_nodes,
-                    force.real,
-                    moment.real,
-                    point.meters,
+                    value.real,
                 );
-                wrench_lowering.push(WrenchLoweringSummary {
+                moment_projection.push(MomentProjectionSummary {
                     load_id: load.excitation_id.0.clone(),
                     region_id: region_id.to_string(),
                     ..summary
@@ -104,7 +98,7 @@ pub(super) fn apply_solver_mesh_structural_loads(
         }
     }
 
-    Ok(wrench_lowering)
+    Ok(moment_projection)
 }
 
 pub(super) fn apply_reference_point_structural_loads(
@@ -143,10 +137,6 @@ pub(super) fn apply_reference_point_structural_loads(
             }
             RealizedExcitationKind::Moment(moment) => {
                 add_reference_vector(layout, rhs, point_index, moment.real, true)
-            }
-            RealizedExcitationKind::Wrench { force, moment, .. } => {
-                add_reference_vector(layout, rhs, point_index, force.real, false);
-                add_reference_vector(layout, rhs, point_index, moment.real, true);
             }
             _ => {
                 return Err(
@@ -247,51 +237,32 @@ fn apply_solver_mesh_pressure(
     }
 }
 
-fn add_solver_mesh_wrench_rhs(
+fn add_solver_mesh_moment_projection_rhs(
     mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     target_nodes: &[usize],
-    force: [f64; 3],
-    moment_at_point: [f64; 3],
-    point_m: [f64; 3],
-) -> WrenchLoweringSummary {
+    requested_moment: [f64; 3],
+) -> MomentProjectionSummary {
     if target_nodes.is_empty() {
-        return WrenchLoweringSummary {
+        return MomentProjectionSummary {
             load_id: String::new(),
             region_id: String::new(),
             target_node_count: 0,
+            projection_point_m: [0.0; 3],
             applied_force: [0.0; 3],
-            applied_moment_at_point: [0.0; 3],
-            force_residual: force,
-            moment_residual: moment_at_point,
-            moment_couple_applied: false,
+            applied_moment: [0.0; 3],
+            force_residual: [0.0; 3],
+            moment_residual: requested_moment,
+            projection_applied: false,
         };
     }
 
     let centroid = solver_mesh_target_centroid(mesh, target_nodes);
-    let scale = 1.0 / target_nodes.len() as f64;
-    let mut nodal_forces = Vec::with_capacity(target_nodes.len());
-    for &node_index in target_nodes {
-        let nodal_force = scale_vec(force, scale);
-        add_translational_rhs(layout, rhs, node_index, nodal_force);
-        nodal_forces.push(nodal_force);
-    }
+    let mut nodal_forces = vec![[0.0; 3]; target_nodes.len()];
+    let mut projection_applied = false;
 
-    let force_arm = [
-        centroid[0] - point_m[0],
-        centroid[1] - point_m[1],
-        centroid[2] - point_m[2],
-    ];
-    let force_moment = cross(force_arm, force);
-    let couple = [
-        moment_at_point[0] - force_moment[0],
-        moment_at_point[1] - force_moment[1],
-        moment_at_point[2] - force_moment[2],
-    ];
-    let mut moment_couple_applied = false;
-
-    if !couple
+    if !requested_moment
         .iter()
         .all(|component| component.abs() <= f64::EPSILON)
     {
@@ -318,7 +289,7 @@ fn add_solver_mesh_wrench_rhs(
         }
 
         if let Some(inv) = invert_3x3(coupling) {
-            let lambda = mat_vec(inv, couple);
+            let lambda = mat_vec(inv, requested_moment);
             for ((&node_index, offset), nodal_force) in target_nodes
                 .iter()
                 .zip(offsets.iter())
@@ -330,29 +301,26 @@ fn add_solver_mesh_wrench_rhs(
                 nodal_force[1] += couple_force[1];
                 nodal_force[2] += couple_force[2];
             }
-            moment_couple_applied = true;
+            projection_applied = true;
         }
     }
 
-    let (applied_force, applied_moment_at_point) =
-        solver_mesh_wrench_resultants(mesh, target_nodes, &nodal_forces, point_m);
-    WrenchLoweringSummary {
+    let (applied_force, applied_moment) =
+        solver_mesh_projected_resultants(mesh, target_nodes, &nodal_forces, centroid);
+    MomentProjectionSummary {
         load_id: String::new(),
         region_id: String::new(),
         target_node_count: target_nodes.len(),
+        projection_point_m: centroid,
         applied_force,
-        applied_moment_at_point,
-        force_residual: [
-            force[0] - applied_force[0],
-            force[1] - applied_force[1],
-            force[2] - applied_force[2],
-        ],
+        applied_moment,
+        force_residual: applied_force.map(|value| -value),
         moment_residual: [
-            moment_at_point[0] - applied_moment_at_point[0],
-            moment_at_point[1] - applied_moment_at_point[1],
-            moment_at_point[2] - applied_moment_at_point[2],
+            requested_moment[0] - applied_moment[0],
+            requested_moment[1] - applied_moment[1],
+            requested_moment[2] - applied_moment[2],
         ],
-        moment_couple_applied,
+        projection_applied,
     }
 }
 
@@ -390,7 +358,7 @@ fn solver_mesh_target_centroid(mesh: &SolverMeshArtifact, target_nodes: &[usize]
     scale_vec(centroid, 1.0 / target_nodes.len() as f64)
 }
 
-fn solver_mesh_wrench_resultants(
+fn solver_mesh_projected_resultants(
     mesh: &SolverMeshArtifact,
     target_nodes: &[usize],
     nodal_forces: &[[f64; 3]],

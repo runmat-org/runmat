@@ -14,16 +14,6 @@ pub(super) fn apply_reduced_multiphysics_rhs(excitations: &RealizedExcitations, 
                     rhs[base + 2] += z;
                 }
             }
-            RealizedExcitationKind::Wrench { force, .. } => {
-                let [x, y, z] = force.real;
-                rhs[base] += x;
-                if base + 1 < rhs.len() {
-                    rhs[base + 1] += y;
-                }
-                if base + 2 < rhs.len() {
-                    rhs[base + 2] += z;
-                }
-            }
             RealizedExcitationKind::Pressure(value) => {
                 rhs[base] += value.real * 1.0e-3;
                 if base + 1 < rhs.len() {

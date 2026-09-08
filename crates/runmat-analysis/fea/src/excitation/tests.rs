@@ -3,8 +3,8 @@ use crate::fixtures::{
 };
 
 use super::{
-    realize::{realize_excitations, ExcitationSamplePoint},
-    realize_model_excitations, RealizedExcitationKind,
+    realize::realize_excitations, realize_model_excitations, sample::ExcitationSamplePoint,
+    RealizedExcitationKind,
 };
 
 fn tabulated_force_model(
@@ -34,6 +34,22 @@ fn tabulated_force_model(
     );
     signal.evidence.sample_count = 2;
     model
+}
+
+fn set_table_policy(
+    model: &mut runmat_analysis_core::AnalysisModel,
+    interpolation: runmat_analysis_core::SignalInterpolation,
+    extrapolation: runmat_analysis_core::SignalExtrapolation,
+) {
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        panic!("cantilever fixture should carry a force signal");
+    };
+    let runmat_analysis_core::SignalRepresentation::Tabulated(table) = &mut signal.representation
+    else {
+        panic!("test signal should be tabulated");
+    };
+    table.interpolation = interpolation;
+    table.extrapolation = extrapolation;
 }
 
 #[test]
@@ -135,6 +151,131 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
 }
 
 #[test]
+fn step_interpolation_selects_the_documented_side_of_an_interval() {
+    let mut model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 1.0,
+    ]));
+    let step = model.sequence.steps[0].step_id.clone();
+    set_table_policy(
+        &mut model,
+        runmat_analysis_core::SignalInterpolation::StepLeft,
+        runmat_analysis_core::SignalExtrapolation::Reject,
+    );
+    let left = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(0.5),
+    )
+    .unwrap();
+    assert!(matches!(
+        left.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [0.0; 3]
+    ));
+
+    set_table_policy(
+        &mut model,
+        runmat_analysis_core::SignalInterpolation::StepRight,
+        runmat_analysis_core::SignalExtrapolation::Reject,
+    );
+    let right = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(0.5),
+    )
+    .unwrap();
+    assert!(matches!(
+        right.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [20.0, 40.0, 60.0]
+    ));
+}
+
+#[test]
+fn extrapolation_policy_is_applied_without_numeric_sentinels() {
+    let mut model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 1.0,
+    ]));
+    let step = model.sequence.steps[0].step_id.clone();
+    set_table_policy(
+        &mut model,
+        runmat_analysis_core::SignalInterpolation::Linear,
+        runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
+    );
+    let held = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(2.0),
+    )
+    .unwrap();
+    assert!(matches!(
+        held.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [20.0, 40.0, 60.0]
+    ));
+
+    set_table_policy(
+        &mut model,
+        runmat_analysis_core::SignalInterpolation::Linear,
+        runmat_analysis_core::SignalExtrapolation::Zero,
+    );
+    let zero = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(-1.0),
+    )
+    .unwrap();
+    assert!(matches!(
+        zero.iter().next().unwrap().kind,
+        RealizedExcitationKind::Force(value) if value.real == [0.0; 3]
+    ));
+
+    set_table_policy(
+        &mut model,
+        runmat_analysis_core::SignalInterpolation::Linear,
+        runmat_analysis_core::SignalExtrapolation::Reject,
+    );
+    let error = realize_excitations(
+        &model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(-1.0),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "sample lies outside signal domain");
+}
+
+#[test]
+fn rejects_nonfinite_and_mismatched_parameter_samples() {
+    let time_model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
+        0.0, 1.0,
+    ]));
+    let step = time_model.sequence.steps[0].step_id.clone();
+    let error = realize_excitations(
+        &time_model,
+        Some(&step.0),
+        ExcitationSamplePoint::TimeSeconds(f64::NAN),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "excitation sample point must be finite");
+
+    let parameter_model = tabulated_force_model(runmat_analysis_core::SignalAxis::StudyParameter {
+        parameter_id: "load_scale".into(),
+        canonical_values: vec![0.0, 1.0],
+    });
+    let step = parameter_model.sequence.steps[0].step_id.clone();
+    let error = realize_excitations(
+        &parameter_model,
+        Some(&step.0),
+        ExcitationSamplePoint::StudyParameter {
+            parameter_id: "temperature_scale",
+            canonical_value: 0.5,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "excitation sample point does not match the signal domain"
+    );
+}
+
+#[test]
 fn projects_scalar_force_along_its_typed_direction() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
@@ -178,7 +319,7 @@ fn rejects_scalar_force_without_a_direction() {
 }
 
 #[test]
-fn coalesces_reference_point_force_and_moment_into_wrench() {
+fn preserves_reference_point_force_and_moment_action_identity() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(
         &mut model,
@@ -194,14 +335,19 @@ fn coalesces_reference_point_force_and_moment_into_wrench() {
     );
 
     let realized = realize_model_excitations(&model).expect("wrench should realize");
-    assert_eq!(realized.len(), 1);
+    assert_eq!(realized.len(), 2);
+    let entries = realized.iter().collect::<Vec<_>>();
+    assert_eq!(entries[0].excitation_id.0, "tip_wrench");
     assert!(matches!(
-        &realized.iter().next().expect("one wrench").kind,
-        RealizedExcitationKind::Wrench { force, moment, point }
-            if force.real == [1.0, 2.0, 3.0]
-                && moment.real == [4.0, 5.0, 6.0]
-                && point.meters == [0.1, 0.2, 0.3]
+        entries[0].kind,
+        RealizedExcitationKind::Force(force) if force.real == [1.0, 2.0, 3.0]
     ));
+    assert_eq!(entries[1].excitation_id.0, "tip_wrench.moment");
+    assert!(matches!(
+        entries[1].kind,
+        RealizedExcitationKind::Moment(moment) if moment.real == [4.0, 5.0, 6.0]
+    ));
+    assert_eq!(entries[0].target, entries[1].target);
 }
 
 #[test]

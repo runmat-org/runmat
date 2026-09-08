@@ -72,7 +72,7 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_requested_moment_norm_n_m: f64,
     #[serde(default)]
-    pub structural_wrench_lowering: Vec<WrenchLoweringSummary>,
+    pub structural_moment_projection: Vec<MomentProjectionSummary>,
     #[serde(default)]
     pub structural_rotational_constraint_count: usize,
     #[serde(default)]
@@ -144,7 +144,6 @@ impl std::error::Error for LinearAssemblyError {}
 pub enum StructuralLoadKind {
     Force,
     Moment,
-    Wrench,
     Traction,
     Pressure,
     BodyForce,
@@ -172,7 +171,6 @@ impl StructuralLoadKind {
         match self {
             Self::Force => "force",
             Self::Moment => "moment",
-            Self::Wrench => "wrench",
             Self::Traction => "traction",
             Self::Pressure => "pressure",
             Self::BodyForce => "body_force",
@@ -483,15 +481,16 @@ pub struct SolidRecoveryElementSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WrenchLoweringSummary {
+pub struct MomentProjectionSummary {
     pub load_id: String,
     pub region_id: String,
     pub target_node_count: usize,
+    pub projection_point_m: [f64; 3],
     pub applied_force: [f64; 3],
-    pub applied_moment_at_point: [f64; 3],
+    pub applied_moment: [f64; 3],
     pub force_residual: [f64; 3],
     pub moment_residual: [f64; 3],
-    pub moment_couple_applied: bool,
+    pub projection_applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -775,7 +774,7 @@ fn assemble_linear_system_impl(
         constrained[dof] = true;
         rhs[dof] = 0.0;
     }
-    let mut structural_wrench_lowering = Vec::new();
+    let mut structural_moment_projection = Vec::new();
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
@@ -785,7 +784,7 @@ fn assemble_linear_system_impl(
                     "canonical solid assembly has no compiled constraint plan".into(),
                 ))
             })?;
-            structural_wrench_lowering = apply_solver_mesh_structural_loads(
+            structural_moment_projection = apply_solver_mesh_structural_loads(
                 &excitations,
                 mesh,
                 &structural_dof_layout,
@@ -1056,7 +1055,7 @@ fn assemble_linear_system_impl(
         structural_moment_load_count,
         structural_direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m,
-        structural_wrench_lowering,
+        structural_moment_projection,
         structural_rotational_constraint_count: 0,
         structural_beam_element_count: 0,
         structural_shell_element_count: 0,
@@ -1413,7 +1412,7 @@ fn assemble_explicit_structural_system(
     }
 
     let mut direct_rotational_moment_load_count = 0usize;
-    let mut structural_wrench_lowering = Vec::new();
+    let mut structural_moment_projection = Vec::new();
     for load in excitations.iter() {
         if matches!(
             load.kind,
@@ -1466,51 +1465,50 @@ fn assemble_explicit_structural_system(
                 }
             }
             RealizedExcitationKind::Moment(value) => {
-                let [mx, my, mz] = value.real;
-                direct_rotational_moment_load_count += 1;
-                for node_index in target_nodes {
-                    add_rhs(
+                if target_nodes.iter().all(|node_index| {
+                    structural_dof_layout
+                        .index(*node_index, StructuralDofKind::Rx)
+                        .is_some()
+                }) {
+                    let [mx, my, mz] = value.real;
+                    direct_rotational_moment_load_count += 1;
+                    for node_index in target_nodes {
+                        add_rhs(
+                            &structural_dof_layout,
+                            &mut rhs,
+                            node_index,
+                            StructuralDofKind::Rx,
+                            mx * scale,
+                        );
+                        add_rhs(
+                            &structural_dof_layout,
+                            &mut rhs,
+                            node_index,
+                            StructuralDofKind::Ry,
+                            my * scale,
+                        );
+                        add_rhs(
+                            &structural_dof_layout,
+                            &mut rhs,
+                            node_index,
+                            StructuralDofKind::Rz,
+                            mz * scale,
+                        );
+                    }
+                } else {
+                    let summary = add_moment_projection_rhs(
+                        structural,
                         &structural_dof_layout,
                         &mut rhs,
-                        node_index,
-                        StructuralDofKind::Rx,
-                        mx * scale,
+                        &target_nodes,
+                        value.real,
                     );
-                    add_rhs(
-                        &structural_dof_layout,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Ry,
-                        my * scale,
-                    );
-                    add_rhs(
-                        &structural_dof_layout,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Rz,
-                        mz * scale,
-                    );
+                    structural_moment_projection.push(MomentProjectionSummary {
+                        load_id: load.excitation_id.0.clone(),
+                        region_id: region_id.to_string(),
+                        ..summary
+                    });
                 }
-            }
-            RealizedExcitationKind::Wrench {
-                force,
-                moment,
-                point,
-            } => {
-                let summary = add_wrench_rhs(
-                    structural,
-                    &structural_dof_layout,
-                    &mut rhs,
-                    &target_nodes,
-                    force.real,
-                    moment.real,
-                    point.meters,
-                );
-                structural_wrench_lowering.push(WrenchLoweringSummary {
-                    load_id: load.excitation_id.0.clone(),
-                    region_id: region_id.to_string(),
-                    ..summary
-                });
             }
             _ => {}
         }
@@ -1648,7 +1646,7 @@ fn assemble_explicit_structural_system(
             .count(),
         structural_direct_rotational_moment_load_count: direct_rotational_moment_load_count,
         structural_requested_moment_norm_n_m: requested_moment_norm(excitations),
-        structural_wrench_lowering,
+        structural_moment_projection,
         structural_rotational_constraint_count: rotational_constraint_count,
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
@@ -1952,51 +1950,32 @@ fn add_rhs(
     }
 }
 
-fn add_wrench_rhs(
+fn add_moment_projection_rhs(
     structural: &StructuralModel,
     layout: &StructuralDofLayout,
     rhs: &mut [f64],
     target_nodes: &[usize],
-    force: [f64; 3],
-    moment_at_point: [f64; 3],
-    point_m: [f64; 3],
-) -> WrenchLoweringSummary {
+    requested_moment: [f64; 3],
+) -> MomentProjectionSummary {
     if target_nodes.is_empty() {
-        return WrenchLoweringSummary {
+        return MomentProjectionSummary {
             load_id: String::new(),
             region_id: String::new(),
             target_node_count: 0,
+            projection_point_m: [0.0; 3],
             applied_force: [0.0; 3],
-            applied_moment_at_point: [0.0; 3],
-            force_residual: force,
-            moment_residual: moment_at_point,
-            moment_couple_applied: false,
+            applied_moment: [0.0; 3],
+            force_residual: [0.0; 3],
+            moment_residual: requested_moment,
+            projection_applied: false,
         };
     }
 
     let centroid = target_centroid(structural, target_nodes);
-    let scale = 1.0 / target_nodes.len() as f64;
-    let mut nodal_forces = Vec::with_capacity(target_nodes.len());
-    for &node_index in target_nodes {
-        let nodal_force = scale_vec(force, scale);
-        add_translational_rhs(layout, rhs, node_index, nodal_force);
-        nodal_forces.push(nodal_force);
-    }
+    let mut nodal_forces = vec![[0.0; 3]; target_nodes.len()];
+    let mut projection_applied = false;
 
-    let force_arm = [
-        centroid[0] - point_m[0],
-        centroid[1] - point_m[1],
-        centroid[2] - point_m[2],
-    ];
-    let force_moment = cross(force_arm, force);
-    let couple = [
-        moment_at_point[0] - force_moment[0],
-        moment_at_point[1] - force_moment[1],
-        moment_at_point[2] - force_moment[2],
-    ];
-    let mut moment_couple_applied = false;
-
-    if !couple
+    if !requested_moment
         .iter()
         .all(|component| component.abs() <= f64::EPSILON)
     {
@@ -2023,7 +2002,7 @@ fn add_wrench_rhs(
         }
 
         if let Some(inv) = invert_3x3(coupling) {
-            let lambda = mat_vec(inv, couple);
+            let lambda = mat_vec(inv, requested_moment);
             for ((&node_index, offset), nodal_force) in target_nodes
                 .iter()
                 .zip(offsets.iter())
@@ -2035,29 +2014,26 @@ fn add_wrench_rhs(
                 nodal_force[1] += couple_force[1];
                 nodal_force[2] += couple_force[2];
             }
-            moment_couple_applied = true;
+            projection_applied = true;
         }
     }
 
-    let (applied_force, applied_moment_at_point) =
-        wrench_resultants(structural, target_nodes, &nodal_forces, point_m);
-    WrenchLoweringSummary {
+    let (applied_force, applied_moment) =
+        projected_resultants(structural, target_nodes, &nodal_forces, centroid);
+    MomentProjectionSummary {
         load_id: String::new(),
         region_id: String::new(),
         target_node_count: target_nodes.len(),
+        projection_point_m: centroid,
         applied_force,
-        applied_moment_at_point,
-        force_residual: [
-            force[0] - applied_force[0],
-            force[1] - applied_force[1],
-            force[2] - applied_force[2],
-        ],
+        applied_moment,
+        force_residual: applied_force.map(|value| -value),
         moment_residual: [
-            moment_at_point[0] - applied_moment_at_point[0],
-            moment_at_point[1] - applied_moment_at_point[1],
-            moment_at_point[2] - applied_moment_at_point[2],
+            requested_moment[0] - applied_moment[0],
+            requested_moment[1] - applied_moment[1],
+            requested_moment[2] - applied_moment[2],
         ],
-        moment_couple_applied,
+        projection_applied,
     }
 }
 
@@ -2083,7 +2059,7 @@ fn target_centroid(structural: &StructuralModel, target_nodes: &[usize]) -> [f64
     scale_vec(centroid, 1.0 / target_nodes.len() as f64)
 }
 
-fn wrench_resultants(
+fn projected_resultants(
     structural: &StructuralModel,
     target_nodes: &[usize],
     nodal_forces: &[[f64; 3]],
@@ -2767,6 +2743,44 @@ mod tests {
     }
 
     #[test]
+    fn solver_mesh_projects_a_solid_boundary_moment_with_conserved_resultants() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = Vec::new();
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "moment_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Moment([2.0, -3.0, 5.0]),
+            }],
+        );
+        let mut mesh = tetrahedron4_mesh();
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
+
+        let summary = assemble_physical_structural_system(&model, Some(mesh))
+            .expect("solid boundary moment should project to a nodal force couple");
+
+        assert_eq!(summary.structural_moment_projection.len(), 1);
+        let projection = &summary.structural_moment_projection[0];
+        assert_eq!(projection.load_id, "moment_tip");
+        assert_eq!(projection.region_id, "tip");
+        assert_eq!(projection.target_node_count, 3);
+        assert!(projection.projection_applied);
+        for residual in projection
+            .force_residual
+            .iter()
+            .chain(projection.moment_residual.iter())
+        {
+            assert!(residual.abs() <= 1.0e-12, "residual={residual}");
+        }
+        assert_eq!(
+            summary.structural_sources,
+            vec![SourceImplementation::BoundaryResultantMomentProjection]
+        );
+    }
+
+    #[test]
     fn strict_solver_mesh_assembly_rejects_unmapped_load_region() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = vec![fixed_constraint("root")];
@@ -2903,7 +2917,7 @@ mod tests {
         )
         .expect("valid wrench boundary should assemble");
 
-        assert!(summary.structural_wrench_lowering.is_empty());
+        assert!(summary.structural_moment_projection.is_empty());
         assert_eq!(summary.structural_dof_layout.reference_point_count(), 1);
         let reference_ry = summary
             .structural_dof_layout

@@ -17,11 +17,9 @@ use runmat_analysis_core::{
 use crate::{
     assembly::{dofs::StructuralDofKind, AssemblySummary},
     contracts::FeaRunError,
-    excitation::{realize_model_excitations, RealizedExcitation, RealizedExcitationKind},
+    excitation::{realize_model_excitations, RealizedExcitationKind},
 };
 
-const MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
-    "moment loads require rotational-DOF structural elements; use a wrench load for equivalent force-couple moments on solid-only face regions";
 const ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
     "prescribed rotations require rotational-DOF structural elements";
 
@@ -29,30 +27,6 @@ pub(crate) fn validate_rotational_dof_targets(
     model: &AnalysisModel,
     summary: &AssemblySummary,
 ) -> Result<(), FeaRunError> {
-    let excitations = realize_model_excitations(model)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    for load in excitations.iter() {
-        if !matches!(load.kind, RealizedExcitationKind::Moment(_)) {
-            continue;
-        }
-        if !summary.structural_dof_layout.has_rotational_dofs() {
-            return Err(moment_load_error(load));
-        }
-        let Some(structural) = model.structural.as_ref() else {
-            continue;
-        };
-        let Some(region_id) = load.target.solver_region_id() else {
-            return Err(moment_load_error(load));
-        };
-        let target_nodes = structural_target_nodes(structural, region_id);
-        if target_nodes.is_empty()
-            || target_nodes
-                .iter()
-                .any(|node_index| !node_has_rotational_dofs(summary, *node_index))
-        {
-            return Err(moment_load_error(load));
-        }
-    }
     for constraint in &model.constraints {
         let Some(constraint) = constraint.structural() else {
             continue;
@@ -91,36 +65,18 @@ pub(crate) fn reject_moment_loads_for_nonstructural_pipeline(
 ) -> Result<(), FeaRunError> {
     let excitations = realize_model_excitations(model)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let Some(load) = excitations.iter().find(|load| {
-        matches!(
-            load.kind,
-            RealizedExcitationKind::Moment(_) | RealizedExcitationKind::Wrench { .. }
-        )
-    }) else {
+    let Some(load) = excitations
+        .iter()
+        .find(|load| matches!(load.kind, RealizedExcitationKind::Moment(_)))
+    else {
         return Ok(());
-    };
-    let load_kind = match load.kind {
-        RealizedExcitationKind::Moment(_) => "moment",
-        RealizedExcitationKind::Wrench { .. } => "wrench",
-        _ => "structural",
     };
 
     Err(FeaRunError::InvalidModel(format!(
-        "{load_kind} loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
+        "moment loads are structural loads and cannot be used in {family} solves; load_id={} region_id={}",
         load.excitation_id.0,
         load.target.solver_region_id().unwrap_or("<non-region target>")
     )))
-}
-
-fn moment_load_error(load: &RealizedExcitation) -> FeaRunError {
-    FeaRunError::InvalidModel(format!(
-        "{}; load_id={} region_id={}",
-        MOMENT_REQUIRES_ROTATIONAL_DOF_MESSAGE,
-        load.excitation_id.0,
-        load.target
-            .solver_region_id()
-            .unwrap_or("<non-region target>")
-    ))
 }
 
 fn rotation_constraint_error(constraint: &StructuralConstraint) -> FeaRunError {

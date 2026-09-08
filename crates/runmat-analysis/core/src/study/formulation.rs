@@ -119,7 +119,7 @@ pub enum SourceImplementation {
     CanonicalEdgeProjection,
     CanonicalPointProjection,
     AcousticHashedTargetGraphProjection,
-    BoundaryResultantWrenchDistribution,
+    BoundaryResultantMomentProjection,
     ReferencePointGeneralizedLoad,
     ExplicitRegionNodalDistribution,
     UniformNodeDistribution,

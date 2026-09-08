@@ -43,18 +43,10 @@ pub(super) fn apply_synthetic_structural_rhs(excitations: &RealizedExcitations, 
 
 pub(super) fn requested_moment_norm(excitations: &RealizedExcitations) -> f64 {
     let moment = excitations.iter().fold([0.0_f64; 3], |mut total, entry| {
-        match entry.kind {
-            RealizedExcitationKind::Moment(value) => {
-                for (total, value) in total.iter_mut().zip(value.real) {
-                    *total += value;
-                }
+        if let RealizedExcitationKind::Moment(value) = entry.kind {
+            for (total, value) in total.iter_mut().zip(value.real) {
+                *total += value;
             }
-            RealizedExcitationKind::Wrench { moment, .. } => {
-                for (total, value) in total.iter_mut().zip(moment.real) {
-                    *total += value;
-                }
-            }
-            _ => {}
         }
         total
     });
@@ -78,9 +70,7 @@ pub(super) fn structural_source_implementations(
             )
             && matches!(
                 excitation.kind,
-                RealizedExcitationKind::Force(_)
-                    | RealizedExcitationKind::Moment(_)
-                    | RealizedExcitationKind::Wrench { .. }
+                RealizedExcitationKind::Force(_) | RealizedExcitationKind::Moment(_)
             ) {
             SourceImplementation::ReferencePointGeneralizedLoad
         } else {
@@ -92,11 +82,9 @@ pub(super) fn structural_source_implementations(
                     RealizedExcitationKind::Pressure(_),
                     StructuralProjectionBasis::CanonicalSolid,
                 ) => SourceImplementation::CanonicalBoundaryPressureIntegration,
-                (
-                    RealizedExcitationKind::Wrench { .. },
-                    StructuralProjectionBasis::CanonicalSolid
-                    | StructuralProjectionBasis::ExplicitConnectivity,
-                ) => SourceImplementation::BoundaryResultantWrenchDistribution,
+                (RealizedExcitationKind::Moment(_), StructuralProjectionBasis::CanonicalSolid) => {
+                    SourceImplementation::BoundaryResultantMomentProjection
+                }
                 (
                     RealizedExcitationKind::BodyForce(_),
                     StructuralProjectionBasis::CanonicalSolid,
@@ -161,13 +149,9 @@ pub(super) fn validate_structural_inputs(
             (RealizedExcitationKind::Force(_), _) => (StructuralLoadKind::Force, true),
             (
                 RealizedExcitationKind::Moment(_),
-                StructuralProjectionBasis::ExplicitConnectivity,
+                StructuralProjectionBasis::CanonicalSolid
+                | StructuralProjectionBasis::ExplicitConnectivity,
             ) => (StructuralLoadKind::Moment, true),
-            (RealizedExcitationKind::Wrench { .. }, StructuralProjectionBasis::CanonicalSolid)
-            | (
-                RealizedExcitationKind::Wrench { .. },
-                StructuralProjectionBasis::ExplicitConnectivity,
-            ) => (StructuralLoadKind::Wrench, true),
             (RealizedExcitationKind::Pressure(_), StructuralProjectionBasis::CanonicalSolid)
             | (RealizedExcitationKind::Pressure(_), StructuralProjectionBasis::Synthetic) => {
                 (StructuralLoadKind::Pressure, true)
@@ -177,7 +161,6 @@ pub(super) fn validate_structural_inputs(
                 (StructuralLoadKind::BodyForce, true)
             }
             (RealizedExcitationKind::Moment(_), _) => (StructuralLoadKind::Moment, false),
-            (RealizedExcitationKind::Wrench { .. }, _) => (StructuralLoadKind::Wrench, false),
             (RealizedExcitationKind::Traction(_), _) => (StructuralLoadKind::Traction, false),
             (RealizedExcitationKind::Pressure(_), _) => (StructuralLoadKind::Pressure, false),
             (RealizedExcitationKind::BodyForce(_), _) => (StructuralLoadKind::BodyForce, false),
@@ -322,7 +305,6 @@ pub(super) fn explicit_load_kind(kind: &RealizedExcitationKind) -> StructuralLoa
     match kind {
         RealizedExcitationKind::Force(_) => StructuralLoadKind::Force,
         RealizedExcitationKind::Moment(_) => StructuralLoadKind::Moment,
-        RealizedExcitationKind::Wrench { .. } => StructuralLoadKind::Wrench,
         RealizedExcitationKind::Traction(_) => StructuralLoadKind::Traction,
         RealizedExcitationKind::Pressure(_) => StructuralLoadKind::Pressure,
         RealizedExcitationKind::BodyForce(_) => StructuralLoadKind::BodyForce,

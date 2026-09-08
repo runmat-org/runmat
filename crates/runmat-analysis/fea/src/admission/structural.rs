@@ -165,7 +165,7 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::CanonicalEdgeProjection => 4,
         SourceImplementation::CanonicalPointProjection => 5,
         SourceImplementation::AcousticHashedTargetGraphProjection => 6,
-        SourceImplementation::BoundaryResultantWrenchDistribution => 7,
+        SourceImplementation::BoundaryResultantMomentProjection => 7,
         SourceImplementation::ReferencePointGeneralizedLoad => 8,
         SourceImplementation::ExplicitRegionNodalDistribution => 9,
         SourceImplementation::UniformNodeDistribution => 10,
@@ -215,7 +215,7 @@ fn validate_projection_evidence(
             SourceImplementation::NotApplicable,
             SourceImplementation::CanonicalBoundaryProjection,
             SourceImplementation::CanonicalBoundaryPressureIntegration,
-            SourceImplementation::BoundaryResultantWrenchDistribution,
+            SourceImplementation::BoundaryResultantMomentProjection,
             SourceImplementation::ReferencePointGeneralizedLoad,
             SourceImplementation::UniformNodeDistribution,
         ],
@@ -223,7 +223,7 @@ fn validate_projection_evidence(
         | StructuralOperatorImplementation::PairSpringShellProxy => &[
             SourceImplementation::NotApplicable,
             SourceImplementation::ExplicitRegionNodalDistribution,
-            SourceImplementation::BoundaryResultantWrenchDistribution,
+            SourceImplementation::BoundaryResultantMomentProjection,
         ],
         StructuralOperatorImplementation::SyntheticDiagonalChain => &[
             SourceImplementation::NotApplicable,

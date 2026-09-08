@@ -58,11 +58,6 @@ impl RealizedExcitationTarget {
 pub(crate) enum RealizedExcitationKind {
     Force(ComplexVector3),
     Moment(ComplexVector3),
-    Wrench {
-        force: ComplexVector3,
-        moment: ComplexVector3,
-        point: Position,
-    },
     Traction(ComplexVector3),
     Pressure(ComplexScalar),
     BodyForce(ComplexVector3),
