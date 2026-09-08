@@ -1,7 +1,13 @@
+pub(in crate::catalog) mod cell;
 pub(in crate::catalog) mod cell2struct;
 pub(in crate::catalog) mod cellstr;
 pub(in crate::catalog) mod num2cell;
 
+pub use cell::{
+    CELL_CATALOG_ENTRY, CELL_DESCRIPTOR, CELL_ERROR_INTERNAL, CELL_ERROR_INVALID_INPUT,
+    CELL_ERROR_INVALID_SIZE, CELL_EXTENSIONS, CELL_GPU_SIZE_EXTENSION, CELL_INTEGER_CAPABILITIES,
+    CELL_LIKE_EXTENSION,
+};
 pub use cell2struct::{
     CELL2STRUCT_CATALOG_ENTRY, CELL2STRUCT_DESCRIPTOR, CELL2STRUCT_ERROR_INVALID_INPUT,
     CELL2STRUCT_ERROR_SHAPE, CELL2STRUCT_INTEGER_CAPABILITIES,
@@ -19,6 +25,11 @@ pub use num2cell::{
 pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     super::super::extend_groups(
         entries,
-        &[cell2struct::ENTRIES, cellstr::ENTRIES, num2cell::ENTRIES],
+        &[
+            cell::ENTRIES,
+            cell2struct::ENTRIES,
+            cellstr::ENTRIES,
+            num2cell::ENTRIES,
+        ],
     );
 }
