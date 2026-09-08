@@ -1780,6 +1780,87 @@ fn thermal_solver_emits_heat_transfer_fields() {
 }
 
 #[test]
+fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_closure() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let fixed_face = &projection.boundary_faces[0];
+    let heated_face = &projection.boundary_faces[1];
+    let fixed_selector = fixed_face.provenance[0].analysis_selection_id().unwrap();
+    let heated_selector = heated_face.provenance[0].analysis_selection_id().unwrap();
+    model
+        .constraints
+        .push(runmat_analysis_core::AnalysisConstraint::Thermal(
+            runmat_analysis_core::ThermalConstraint {
+                constraint_id: "fixed_temperature".into(),
+                kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+                    target: runmat_analysis_core::RegionTarget::boundary(fixed_selector),
+                    value: runmat_analysis_core::PrescribedValue::Constant(
+                        runmat_analysis_core::Temperature::new(293.15),
+                    ),
+                },
+            },
+        ));
+    model
+        .boundaries
+        .push(runmat_analysis_core::AnalysisBoundary {
+            boundary_id: "applied_heat_flux".into(),
+            target: runmat_analysis_core::RegionTarget::boundary(heated_selector),
+            operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::HeatFlux::new(600.0),
+                ),
+            },
+        });
+
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            step_count: 3,
+            time_step_s: 0.1,
+            solver_mesh: Some(mesh),
+            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 0.0,
+                thermal_expansion_coefficient: 0.0,
+                region_temperature_deltas: Vec::new(),
+                sampled_time_profile: Vec::new(),
+            }),
+            ..experimental_thermal_options()
+        },
+    )
+    .unwrap();
+
+    let final_temperature = result
+        .temperature_snapshots
+        .last()
+        .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+        .unwrap();
+    for &node in &fixed_face.node_indices {
+        assert!((final_temperature[node] - 293.15).abs() <= 1.0e-12);
+    }
+    assert!(final_temperature
+        .iter()
+        .any(|temperature| *temperature > 293.15));
+    assert!(result.run.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_THERMAL_ENERGY_BALANCE"
+            && diagnostic.severity == crate::diagnostics::FeaDiagnosticSeverity::Info
+            && diagnostic.message.contains("prescribed_boundary_power_w=")
+    }));
+    assert!(result
+        .run
+        .identity
+        .realization()
+        .components
+        .iter()
+        .any(|component| {
+            component.spatial_operator
+                == runmat_analysis_core::SpatialOperatorImplementation::ThermalGalerkinConduction
+        }));
+}
+
+#[test]
 fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
     let model = fixture_model(FixtureId::ModalLarge);
     let result = crate::run_modal_with_options(

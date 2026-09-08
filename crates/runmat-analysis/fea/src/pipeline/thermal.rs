@@ -155,6 +155,7 @@ pub fn run_thermal_with_options(
     let mut time_points_s = Vec::with_capacity(step_count);
     let mut temperature_snapshots_raw = Vec::with_capacity(step_count);
     let mut residual_norms = Vec::with_capacity(step_count.saturating_sub(1));
+    let mut physical_energy_balances = Vec::with_capacity(step_count);
     let mut previous_temperatures = vec![thermo_context.reference_temperature_k; node_count];
     let mut min_temperature_k = f64::INFINITY;
     let mut max_temperature_k = f64::NEG_INFINITY;
@@ -260,6 +261,13 @@ pub fn run_thermal_with_options(
             min_temperature_k = min_temperature_k.min(temperature);
             max_temperature_k = max_temperature_k.max(temperature);
         }
+        if let Some(physical) = &physical_thermal {
+            physical_energy_balances.push(physical.energy_balance(
+                &previous_temperatures,
+                &temperatures,
+                dt,
+            ));
+        }
         if step > 0 {
             residual_norms.push(residual_sum / node_count as f64);
         }
@@ -319,46 +327,104 @@ pub fn run_thermal_with_options(
     );
     let thermal_elements = thermal_element_node_sets(&recovery_topology);
     let element_count = thermal_elements.len().max(1);
-    let temperature_gradient_snapshots = project_nodal_vector_snapshots_to_thermal_elements(
-        &temperature_gradient_raw,
-        &thermal_elements,
-    )
-    .into_iter()
-    .enumerate()
-    .map(|(step, values)| {
-        AnalysisField::host_f64(
-            fea_thermal_temperature_gradient_field_id(step),
-            vec![element_count, VECTOR_COMPONENT_COUNT],
-            values,
+    let physical_temperature_gradients = physical_thermal
+        .as_ref()
+        .map(|physical| {
+            temperature_snapshots_raw
+                .iter()
+                .map(|temperatures| {
+                    physical
+                        .recover_element_temperature_gradients(temperatures)
+                        .map(|values| values.into_iter().flatten().collect::<Vec<_>>())
+                        .map_err(|error| FeaRunError::Assembly(error.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let physical_heat_flux = physical_thermal
+        .as_ref()
+        .map(|physical| {
+            temperature_snapshots_raw
+                .iter()
+                .map(|temperatures| {
+                    physical
+                        .recover_element_heat_flux(temperatures)
+                        .map(|values| values.into_iter().flatten().collect::<Vec<_>>())
+                        .map_err(|error| FeaRunError::Assembly(error.to_string()))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let temperature_gradient_values = physical_temperature_gradients.unwrap_or_else(|| {
+        project_nodal_vector_snapshots_to_thermal_elements(
+            &temperature_gradient_raw,
+            &thermal_elements,
         )
-    })
-    .collect::<Vec<_>>();
-    let heat_flux_snapshots =
+    });
+    let temperature_gradient_snapshots = temperature_gradient_values
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_temperature_gradient_field_id(step),
+                vec![element_count, VECTOR_COMPONENT_COUNT],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
+    let heat_flux_values = physical_heat_flux.unwrap_or_else(|| {
         project_nodal_vector_snapshots_to_thermal_elements(&heat_flux_raw, &thermal_elements)
-            .into_iter()
-            .enumerate()
-            .map(|(step, values)| {
-                AnalysisField::host_f64(
-                    fea_thermal_heat_flux_field_id(step),
-                    vec![element_count, VECTOR_COMPONENT_COUNT],
-                    values,
-                )
-            })
-            .collect::<Vec<_>>();
-    let energy_storage_rate_snapshots = project_nodal_scalar_snapshots_to_thermal_elements(
-        &energy_storage_rate_raw,
-        &thermal_elements,
-    )
-    .into_iter()
-    .enumerate()
-    .map(|(step, values)| {
-        AnalysisField::host_f64(
-            fea_thermal_energy_storage_rate_field_id(step),
-            vec![element_count],
-            values,
+    });
+    let heat_flux_snapshots = heat_flux_values
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_heat_flux_field_id(step),
+                vec![element_count, VECTOR_COMPONENT_COUNT],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
+    let physical_storage_rates = physical_thermal
+        .as_ref()
+        .map(|physical| {
+            temperature_snapshots_raw
+                .iter()
+                .enumerate()
+                .map(|(step, temperatures)| {
+                    if step == 0 {
+                        Ok(vec![0.0; physical.projection.elements.len()])
+                    } else {
+                        physical
+                            .recover_element_storage_rate(
+                                &temperature_snapshots_raw[step - 1],
+                                temperatures,
+                                dt,
+                            )
+                            .map_err(|error| FeaRunError::Assembly(error.to_string()))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let energy_storage_rate_values = physical_storage_rates.unwrap_or_else(|| {
+        project_nodal_scalar_snapshots_to_thermal_elements(
+            &energy_storage_rate_raw,
+            &thermal_elements,
         )
-    })
-    .collect::<Vec<_>>();
+    });
+    let energy_storage_rate_snapshots = energy_storage_rate_values
+        .into_iter()
+        .enumerate()
+        .map(|(step, values)| {
+            AnalysisField::host_f64(
+                fea_thermal_energy_storage_rate_field_id(step),
+                vec![element_count],
+                values,
+            )
+        })
+        .collect::<Vec<_>>();
     let axis_boundary_heat_flux_summary_snapshots = axis_boundary_heat_flux_summary_raw
         .into_iter()
         .enumerate()
@@ -480,6 +546,31 @@ pub fn run_thermal_with_options(
             constitutive.heat_capacity_spread_ratio,
         ),
     });
+    if !physical_energy_balances.is_empty() {
+        let max_relative_residual = physical_energy_balances
+            .iter()
+            .map(|balance| balance.relative_residual)
+            .fold(0.0_f64, f64::max);
+        let final_balance = physical_energy_balances.last().copied().unwrap();
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_THERMAL_ENERGY_BALANCE".to_string(),
+            severity: if max_relative_residual <= options.residual_target {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Error
+            },
+            message: format!(
+                "storage_rate_w={} boundary_loss_w={} applied_power_w={} prescribed_boundary_power_w={} residual_w={} final_relative_residual={} max_relative_residual={}",
+                final_balance.storage_rate_w,
+                final_balance.boundary_loss_w,
+                final_balance.applied_power_w,
+                final_balance.prescribed_boundary_power_w,
+                final_balance.residual_w,
+                final_balance.relative_residual,
+                max_relative_residual,
+            ),
+        });
+    }
     diagnostics.push(FeaDiagnostic {
         code: "FEA_THERMAL_OUTCOME".to_string(),
         severity: if monotonic_response_fraction >= 0.75
