@@ -2399,6 +2399,45 @@ for (const { path: sourcePath, text } of allRust) {
   }
 }
 enforceMigratedBuiltinFamily({
+  name: "num2cell catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/cells/core/num2cell"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/cells/core/num2cell/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/num2cell.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/num2cell.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "num2cell runtime",
+  roots: ["crates/runmat-runtime/src/builtins/cells/core/num2cell"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/cells/core/num2cell/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/num2cell/conversion/mod.rs",
+    "crates/runmat-runtime/src/builtins/cells/core/num2cell/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/cells/core/num2cell.rs"],
+  testLineCeiling: 160,
+});
+const num2cellRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/cells/core/num2cell/mod.rs"
+);
+if (
+  /\b(?:category|summary|keywords|accel|type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(
+    num2cellRuntimeMacro
+  )
+) {
+  fail("num2cell runtime registration must not duplicate catalog-owned contracts");
+}
+const num2cellPartitionPlan = read(
+  "crates/runmat-runtime/src/builtins/cells/core/num2cell/plan.rs"
+);
+if (/Vec\s*<\s*Vec\s*<\s*usize\s*>\s*>/.test(num2cellPartitionPlan)) {
+  fail("num2cell partition planning must stream source groups instead of retaining one allocation per output cell");
+}
+enforceMigratedBuiltinFamily({
   name: "mapped callable runtime service",
   roots: ["crates/runmat-runtime/src/builtins/common/mapped_callable"],
   compositionFiles: ["crates/runmat-runtime/src/builtins/common/mapped_callable/mod.rs"],
