@@ -10,25 +10,25 @@ mod acceleration;
 mod aggregate;
 mod array;
 mod cells;
+mod inference;
 mod introspection;
 mod io;
 mod logical;
 mod math;
 mod parallel;
 mod stats;
-mod structs;
 
 pub use acceleration::*;
 pub use aggregate::*;
 pub use array::*;
 pub use cells::*;
+pub use inference::*;
 pub use introspection::*;
 pub use io::*;
 pub use logical::*;
 pub use math::*;
 pub use parallel::*;
 pub use stats::*;
-pub use structs::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinContractMaturity {
@@ -36,21 +36,6 @@ pub enum BuiltinContractMaturity {
     DynamicByDesign,
     LegacyResolver,
     Incomplete,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinInferenceRule {
-    Acceleration(AccelerationInferenceRule),
-    Aggregate(AggregateInferenceRule),
-    Array(ArrayInferenceRule),
-    Cells(CellInferenceRule),
-    Introspection(IntrospectionInferenceRule),
-    Io(IoInferenceRule),
-    Logical(LogicalInferenceRule),
-    Math(MathInferenceRule),
-    Parallel(ParallelInferenceRule),
-    Stats(StatsInferenceRule),
-    Structs(StructInferenceRule),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

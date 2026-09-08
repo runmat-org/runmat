@@ -52,8 +52,7 @@ fn string_array(array: &StringArray) -> crate::BuiltinResult<Vec<String>> {
 
 fn cell_array(array: &CellArray) -> crate::BuiltinResult<Vec<String>> {
     array
-        .to_column_major()
-        .iter()
+        .iter_column_major()
         .enumerate()
         .map(|(index, value)| scalar(value, Some(&format!("cell element {}", index + 1))))
         .collect()

@@ -8,17 +8,17 @@ use crate::{
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
-use super::{
-    documentation, FIELDNAMES_DESCRIPTOR, FIELDNAMES_EXTENSIONS, FIELDNAMES_INTEGER_AUDIT,
-};
+use super::{documentation, ORDERFIELDS_DESCRIPTOR, ORDERFIELDS_INTEGER_CAPABILITIES};
 
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
-pub const FIELDNAMES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    identity: BuiltinCatalogIdentity { name: "fieldnames" },
+pub const ORDERFIELDS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    identity: BuiltinCatalogIdentity {
+        name: "orderfields",
+    },
     category: "structs/core",
     documentation: documentation::DOCUMENTATION,
-    descriptor: &FIELDNAMES_DESCRIPTOR,
+    descriptor: &ORDERFIELDS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(super::infer)),
@@ -45,8 +45,8 @@ pub const FIELDNAMES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: FIELDNAMES_EXTENSIONS,
-    integer_capabilities: &[],
-    integer_audit: Some(&FIELDNAMES_INTEGER_AUDIT),
+    extensions: &[],
+    integer_capabilities: ORDERFIELDS_INTEGER_CAPABILITIES,
+    integer_audit: None,
     suppress_auto_output: false,
 };

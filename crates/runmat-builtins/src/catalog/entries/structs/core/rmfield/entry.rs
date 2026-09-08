@@ -3,7 +3,7 @@ use crate::{
     BuiltinCompatibility, BuiltinContractDeclaration, BuiltinContractMaturity,
     BuiltinDistributedPolicy, BuiltinFusionPolicy, BuiltinInferenceRule, BuiltinLinkContract,
     BuiltinLinkPolicy, BuiltinPlacementContract, BuiltinPortability, BuiltinPurity,
-    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, StructInferenceRule,
+    BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind, IdentityInferenceRule,
     REQUIRED_DEFAULT_BINDING,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
@@ -19,7 +19,7 @@ pub const RMFIELD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &RMFIELD_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Structs(StructInferenceRule::Rmfield),
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(super::infer)),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         purity: BuiltinPurity::Pure,

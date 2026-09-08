@@ -75,21 +75,19 @@ impl CellArray {
     }
 
     pub fn to_column_major(&self) -> Vec<Value> {
-        let pages = if self.shape.len() <= 2 {
-            1
-        } else {
-            self.shape[2..].iter().product()
-        };
-        let mut column_major = Vec::with_capacity(self.data.len());
-        for page in 0..pages {
-            let page_offset = page * self.rows * self.cols;
-            for col in 0..self.cols {
-                for row in 0..self.rows {
-                    column_major.push(self.data[page_offset + row * self.cols + col].clone());
-                }
-            }
-        }
-        column_major
+        self.iter_column_major().cloned().collect()
+    }
+
+    /// Iterate in MATLAB-visible linear order without cloning cell payloads.
+    pub fn iter_column_major(&self) -> impl Iterator<Item = &Value> {
+        let page_len = self.rows * self.cols;
+        (0..self.data.len()).map(move |linear| {
+            let page = linear / page_len.max(1);
+            let within_page = linear % page_len.max(1);
+            let row = within_page % self.rows.max(1);
+            let col = within_page / self.rows.max(1);
+            &self.data[page * page_len + row * self.cols + col]
+        })
     }
 
     pub fn get(&self, row: usize, col: usize) -> Result<Value, String> {
@@ -144,5 +142,30 @@ impl fmt::Display for CellArray {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn borrowed_column_major_iteration_matches_owned_projection() {
+        let expected = vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ];
+        let array = CellArray::from_column_major(expected.clone(), vec![2, 2]).unwrap();
+        let borrowed = array.iter_column_major().cloned().collect::<Vec<_>>();
+        assert_eq!(borrowed, array.to_column_major());
+        assert_eq!(borrowed, expected);
+    }
+
+    #[test]
+    fn borrowed_column_major_iteration_handles_empty_shape() {
+        let array = CellArray::new(Vec::new(), 0, 0).unwrap();
+        assert_eq!(array.iter_column_major().count(), 0);
     }
 }

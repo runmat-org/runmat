@@ -3,11 +3,11 @@ use runmat_types::{CallInference, CallRequest};
 
 pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {
     match entry.contract.inference_rule {
+        BuiltinInferenceRule::Identity(rule) => rule.infer(request, entry),
         BuiltinInferenceRule::Array(rule) => super::array::infer(rule, request, entry),
         BuiltinInferenceRule::Cells(rule) => super::cells::infer(rule, request, entry),
         BuiltinInferenceRule::Math(rule) => super::math::infer(rule, request, entry),
         BuiltinInferenceRule::Stats(rule) => super::stats::infer(rule, request, entry),
-        BuiltinInferenceRule::Structs(rule) => super::structs::infer(rule, request, entry),
         BuiltinInferenceRule::Acceleration(rule) => {
             super::acceleration::infer(rule, request, entry)
         }
