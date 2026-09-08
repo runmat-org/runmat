@@ -9,6 +9,7 @@ mod compile;
 mod contract;
 mod frame;
 mod normal;
+mod pairing;
 mod plan;
 mod rank;
 mod result;
@@ -19,8 +20,8 @@ mod vector;
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
     CanonicalStructuralConstraintTerm, CanonicalStructuralDof, ConstraintEnforcement,
-    ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence, ReactionRecovery,
-    ResolvedConstraintTarget,
+    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPairingWeight,
+    ConstraintPlanError, ConstraintPlanEvidence, ReactionRecovery, ResolvedConstraintTarget,
 };
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintResultError,

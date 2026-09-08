@@ -1,8 +1,9 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement,
-    PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
+    AnalysisConstraint, AnalysisField, AnalysisModel, CoordinateFrame, Displacement, Length,
+    PairedConstraint, PairingPolicy, PeriodicConstraint, PeriodicTransform,
+    PrescribedStructuralDofs, PrescribedValue, RegionTarget, Rotation, StructuralConstraint,
     StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralConstraintKind,
-    StructuralTranslationDof, TranslationDofValue,
+    StructuralTranslationDof, Translation, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
@@ -271,6 +272,110 @@ fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces()
             assert!(dot.abs() <= 1.0e-12);
         }
     }
+}
+
+#[test]
+fn translated_periodic_nodes_pair_bijectively_and_compile_vector_relations() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "periodic_x".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Periodic(PeriodicConstraint {
+            pair: PairedConstraint {
+                primary: RegionTarget::point("node:1"),
+                secondary: RegionTarget::point("node:2"),
+                pairing: PairingPolicy::Matching,
+            },
+            transform: PeriodicTransform::Translation(Translation::new([1.0, 0.0, 0.0])),
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.groups[0].pairings.len(), 1);
+    assert_eq!(plan.rows.len(), 3);
+    assert!(plan.rows.iter().all(|row| {
+        row.terms.len() == 2 && row.terms.iter().map(|term| term.coefficient).sum::<f64>() == 0.0
+    }));
+}
+
+#[test]
+fn rotated_periodic_relation_rotates_displacements_with_geometry() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "quarter_turn".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Periodic(PeriodicConstraint {
+            pair: PairedConstraint {
+                primary: RegionTarget::point("node:3"),
+                secondary: RegionTarget::point("node:4"),
+                pairing: PairingPolicy::Matching,
+            },
+            transform: PeriodicTransform::Rotation {
+                origin: runmat_analysis_core::Position::new([0.0; 3]),
+                axis: [1.0, 0.0, 0.0],
+                angle: Rotation::new(std::f64::consts::FRAC_PI_2),
+            },
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.rows.len(), 3);
+    let uz_row = plan
+        .rows
+        .iter()
+        .find(|row| {
+            row.terms.iter().any(|term| {
+                term.node_identity == mesh.topology.nodes[3].stable_identity
+                    && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz)
+                    && term.coefficient == 1.0
+            })
+        })
+        .unwrap();
+    assert!(uz_row.terms.iter().any(|term| {
+        term.node_identity == mesh.topology.nodes[2].stable_identity
+            && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy)
+            && (term.coefficient + 1.0).abs() <= 1.0e-12
+    }));
+}
+
+#[test]
+fn geometric_tie_projects_secondary_node_to_primary_surface() {
+    let (mut model, mut mesh) = model_and_mesh();
+    mesh.topology.nodes[3].coordinates_m = [0.2, 0.3, 0.01];
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    let primary = mesh.topology.boundary_faces[0]
+        .provenance
+        .iter()
+        .find(|entity| entity.source_topology_id != "root")
+        .unwrap()
+        .source_topology_id
+        .clone();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "surface_tie".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Tie(PairedConstraint {
+            primary: RegionTarget::boundary(primary),
+            secondary: RegionTarget::point("node:4"),
+            pairing: PairingPolicy::GeometricTolerance(Length::new(0.02)),
+        }),
+    })];
+
+    let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+
+    assert_eq!(plan.groups[0].pairings.len(), 1);
+    assert!((plan.groups[0].pairings[0].geometric_error_meters - 0.01).abs() <= 1.0e-12);
+    let weights = plan.groups[0].pairings[0]
+        .primary_weights
+        .iter()
+        .map(|weight| weight.weight)
+        .collect::<Vec<_>>();
+    assert_eq!(weights.len(), 3);
+    assert!(weights.iter().all(|weight| *weight > 0.0));
+    assert!((weights.into_iter().sum::<f64>() - 1.0).abs() <= 1.0e-12);
+    assert_eq!(plan.rows.len(), 3);
 }
 
 fn row_vector(row: &CanonicalStructuralConstraintRow) -> [f64; 3] {

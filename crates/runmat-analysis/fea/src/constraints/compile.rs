@@ -3,21 +3,29 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    AnalysisModel, CoordinateFrame, PrescribedStructuralDofs, PrescribedValue,
-    StructuralConstraint, StructuralConstraintKind,
+    AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
+    PrescribedStructuralDofs, PrescribedValue, StructuralConstraint, StructuralConstraintKind,
 };
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use super::contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
     CanonicalStructuralConstraintTerm, CanonicalStructuralDof, ConstraintEnforcement,
-    ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence, ResolvedConstraintTarget,
+    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
+    ConstraintPlanEvidence, ResolvedConstraintTarget,
 };
 use super::frame::{boundary_tangent_basis, translation_basis};
 use super::normal::boundary_node_normals;
+use super::pairing::{displacement_transform, pair_targets};
 use super::plan::{authored_constraints_digest, source_digest, structural_constraints};
 use super::row;
 use super::target::resolve_solid_target;
+
+type CompiledConstraint = (
+    Vec<ResolvedConstraintTarget>,
+    Vec<CanonicalStructuralConstraintRow>,
+    Vec<ConstraintPairingEvidence>,
+);
 
 pub(super) fn compile(
     model: &AnalysisModel,
@@ -37,7 +45,7 @@ pub(super) fn compile(
                 constraint_id: constraint.constraint_id.clone(),
             }
         })?;
-        let (mut targets, compiled_rows) = compile_constraint(model, mesh, constraint)?;
+        let (mut targets, compiled_rows, pairings) = compile_constraint(model, mesh, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
         let enforcement = enforcement_for(&compiled_rows);
@@ -47,6 +55,7 @@ pub(super) fn compile(
             constraint_id: constraint.constraint_id.clone(),
             source_digest: source_digest(constraint)?,
             targets,
+            pairings,
             enforcement,
             row_count: rows.len() - first_row,
         });
@@ -92,13 +101,7 @@ fn compile_constraint(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     match &constraint.kind {
         StructuralConstraintKind::Fixed { target } => compile_fixed(mesh, constraint, target),
         StructuralConstraintKind::Prescribed(values) => {
@@ -147,6 +150,7 @@ fn compile_constraint(
                     terms,
                     right_hand_side,
                 )?],
+                Vec::new(),
             ))
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
@@ -167,13 +171,19 @@ fn compile_constraint(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((vec![resolved], rows))
+            Ok((vec![resolved], rows, Vec::new()))
         }
         StructuralConstraintKind::Symmetry { target } => {
             compile_boundary_directions(mesh, constraint, target, false)
         }
         StructuralConstraintKind::Antisymmetry { target } => {
             compile_boundary_directions(mesh, constraint, target, true)
+        }
+        StructuralConstraintKind::Tie(pair) => {
+            compile_pair(mesh, constraint, pair, &PeriodicTransform::Identity, false)
+        }
+        StructuralConstraintKind::Periodic(periodic) => {
+            compile_periodic(mesh, constraint, periodic)
         }
         kind => Err(ConstraintPlanError::UnsupportedKind {
             constraint_id: constraint.constraint_id.clone(),
@@ -186,13 +196,7 @@ fn compile_fixed(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
     target: &runmat_analysis_core::RegionTarget,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
     let rows = resolved
         .matched_node_identities
@@ -203,7 +207,7 @@ fn compile_fixed(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok((vec![resolved], rows))
+    Ok((vec![resolved], rows, Vec::new()))
 }
 
 fn compile_prescribed(
@@ -211,13 +215,7 @@ fn compile_prescribed(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
     values: &PrescribedStructuralDofs,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     if !values.rotations.is_empty() {
         return Err(ConstraintPlanError::UnavailableRotationalDof {
             constraint_id: constraint.constraint_id.clone(),
@@ -260,7 +258,7 @@ fn compile_prescribed(
             )?);
         }
     }
-    Ok((vec![resolved], rows))
+    Ok((vec![resolved], rows, Vec::new()))
 }
 
 fn compile_boundary_directions(
@@ -268,13 +266,7 @@ fn compile_boundary_directions(
     constraint: &StructuralConstraint,
     target: &runmat_analysis_core::RegionTarget,
     tangential: bool,
-) -> Result<
-    (
-        Vec<ResolvedConstraintTarget>,
-        Vec<CanonicalStructuralConstraintRow>,
-    ),
-    ConstraintPlanError,
-> {
+) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_normal_frame(constraint)?;
     let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
     let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
@@ -294,7 +286,67 @@ fn compile_boundary_directions(
             )?);
         }
     }
-    Ok((vec![resolved], rows))
+    Ok((vec![resolved], rows, Vec::new()))
+}
+
+fn compile_periodic(
+    mesh: &SolverMeshArtifact,
+    constraint: &StructuralConstraint,
+    periodic: &PeriodicConstraint,
+) -> Result<CompiledConstraint, ConstraintPlanError> {
+    compile_pair(mesh, constraint, &periodic.pair, &periodic.transform, true)
+}
+
+fn compile_pair(
+    mesh: &SolverMeshArtifact,
+    constraint: &StructuralConstraint,
+    pair: &PairedConstraint,
+    transform: &PeriodicTransform,
+    transform_displacement: bool,
+) -> Result<CompiledConstraint, ConstraintPlanError> {
+    require_global_frame(constraint)?;
+    let primary = resolve_solid_target(mesh, &pair.primary, &constraint.constraint_id)?;
+    let secondary = resolve_solid_target(mesh, &pair.secondary, &constraint.constraint_id)?;
+    let pairings = pair_targets(
+        mesh,
+        &primary,
+        &secondary,
+        &pair.pairing,
+        transform,
+        &constraint.constraint_id,
+    )?;
+    let basis = if transform_displacement {
+        displacement_transform(transform)
+    } else {
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    };
+    let mut rows = Vec::with_capacity(pairings.len() * 3);
+    for pairing in &pairings {
+        for (secondary_dof, transformed_direction) in
+            CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
+        {
+            let mut terms = vec![CanonicalStructuralConstraintTerm {
+                node_identity: pairing.secondary_node_identity,
+                dof: secondary_dof,
+                coefficient: 1.0,
+            }];
+            for weight in &pairing.primary_weights {
+                terms.extend(
+                    CanonicalStructuralDof::TRANSLATIONS
+                        .into_iter()
+                        .zip(transformed_direction)
+                        .filter(|(_, coefficient)| *coefficient != 0.0)
+                        .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
+                            node_identity: weight.primary_node_identity,
+                            dof,
+                            coefficient: -weight.weight * coefficient,
+                        }),
+                );
+            }
+            rows.push(row::new_sparse(&constraint.constraint_id, terms, 0.0)?);
+        }
+    }
+    Ok((vec![primary, secondary], rows, pairings))
 }
 
 fn enforcement_for(rows: &[CanonicalStructuralConstraintRow]) -> ConstraintEnforcement {

@@ -57,14 +57,30 @@ pub struct ResolvedConstraintTarget {
     pub selection_digest: Digest,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConstraintGroupEvidence {
     pub constraint_id: String,
     pub source_digest: Digest,
     pub targets: Vec<ResolvedConstraintTarget>,
+    pub pairings: Vec<ConstraintPairingEvidence>,
     pub enforcement: ConstraintEnforcement,
     pub row_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintPairingEvidence {
+    pub secondary_node_identity: StableDigest,
+    pub primary_weights: Vec<ConstraintPairingWeight>,
+    pub geometric_error_meters: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConstraintPairingWeight {
+    pub primary_node_identity: StableDigest,
+    pub weight: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,6 +146,14 @@ pub enum ConstraintPlanError {
     },
     #[error("constraint `{constraint_id}` boundary normal could not be recovered")]
     NormalUnavailable { constraint_id: String },
+    #[error("constraint `{constraint_id}` could not pair secondary node {secondary_node_identity:?}: {reason}")]
+    PairingUnavailable {
+        constraint_id: String,
+        secondary_node_identity: StableDigest,
+        reason: &'static str,
+    },
+    #[error("constraint `{constraint_id}` matching pairing is not bijective")]
+    NonBijectivePairing { constraint_id: String },
     #[error("constraint `{constraint_id}` targets unsupported topology: {reason}")]
     UnsupportedTarget {
         constraint_id: String,

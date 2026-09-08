@@ -250,6 +250,8 @@ pub(super) fn validate_structural_inputs(
                     | StructuralConstraintKind::NormalDisplacement { .. }
                     | StructuralConstraintKind::Symmetry { .. }
                     | StructuralConstraintKind::Antisymmetry { .. }
+                    | StructuralConstraintKind::Tie(_)
+                    | StructuralConstraintKind::Periodic(_)
                     | StructuralConstraintKind::Equation(_)
             ),
             StructuralProjectionBasis::ExplicitConnectivity => matches!(

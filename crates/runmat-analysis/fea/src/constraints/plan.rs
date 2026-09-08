@@ -72,6 +72,32 @@ impl CanonicalStructuralConstraintPlan {
                     .targets
                     .windows(2)
                     .all(|pair| pair[0].selection_digest < pair[1].selection_digest)
+                || !group
+                    .pairings
+                    .windows(2)
+                    .all(|pair| pair[0].secondary_node_identity < pair[1].secondary_node_identity)
+                || group.pairings.iter().any(|pairing| {
+                    pairing.secondary_node_identity == StableDigest::ZERO
+                        || !pairing.geometric_error_meters.is_finite()
+                        || pairing.geometric_error_meters < 0.0
+                        || pairing.primary_weights.is_empty()
+                        || !pairing.primary_weights.windows(2).all(|pair| {
+                            pair[0].primary_node_identity < pair[1].primary_node_identity
+                        })
+                        || pairing.primary_weights.iter().any(|weight| {
+                            weight.primary_node_identity == StableDigest::ZERO
+                                || !weight.weight.is_finite()
+                                || weight.weight == 0.0
+                        })
+                        || (pairing
+                            .primary_weights
+                            .iter()
+                            .map(|weight| weight.weight)
+                            .sum::<f64>()
+                            - 1.0)
+                            .abs()
+                            > 1.0e-10
+                })
                 || !enforcement_matches_rows(group.enforcement, &group_rows)
             {
                 return Err(ConstraintPlanError::Invalid(
