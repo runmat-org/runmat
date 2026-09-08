@@ -1,10 +1,10 @@
+use crate::builtins::common::uniform_scalar_output::UniformScalarCollector;
 use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 use runmat_value::Value;
 
 use super::error;
 use super::error_context;
 use super::options::Invocation;
-use super::output::UniformCollector;
 use super::plan::Plan;
 
 pub(super) async fn execute(function: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
@@ -35,12 +35,16 @@ impl Execution {
     }
 
     async fn uniform(&self) -> BuiltinResult<Value> {
-        let mut collector = UniformCollector::Pending;
+        let mut collector = UniformScalarCollector::new();
         for index in 0..self.plan.element_count {
             let value = self.evaluate(index).await?;
-            collector.push(&gather_if_needed_async(&value).await?)?;
+            collector
+                .push(&gather_if_needed_async(&value).await?)
+                .map_err(super::output::map_error)?;
         }
-        collector.finish(&self.plan.shape)
+        collector
+            .finish(&self.plan.shape)
+            .map_err(super::output::map_error)
     }
 
     async fn nonuniform(&self) -> BuiltinResult<Value> {

@@ -33,6 +33,7 @@ pub(crate) mod resident_output;
 pub mod shape;
 pub mod spec;
 pub mod tensor;
+pub(crate) mod uniform_scalar_output;
 pub mod validation;
 
 #[cfg(test)]

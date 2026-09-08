@@ -1,0 +1,10 @@
+use crate::{
+    BuiltinExample, BuiltinExampleCompatibility, BuiltinExampleHarness, BuiltinExampleVerification,
+};
+
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample { id: "field-lengths", title: "Measure every field value", program: "S = struct('a', 1:3, 'b', 10:11);\nA = structfun(@length, S)", display_output: Some("A = [3; 2]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [3; 2]));" } },
+    BuiltinExample { id: "mixed-class-results", title: "Keep heterogeneous results in a struct", program: "S = struct('name', 'runmat', 'flag', true);\nC = structfun(@class, S, 'UniformOutput', false)", display_output: Some("C retains the fields name and flag"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(C.name == \"char\");\nassert(C.flag == \"logical\");" } },
+    BuiltinExample { id: "exact-wide-integers", title: "Preserve exact wide integer results", program: "base = uint64(2^53);\nS = struct('a', base + uint64(1), 'b', base + uint64(2));\nA = structfun(@(value) value, S)", display_output: Some("A is a uint64 column"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(A, \"uint64\"));\nassert(isequal(A, [base + uint64(1); base + uint64(2)]));" } },
+    BuiltinExample { id: "empty-struct", title: "Map an empty scalar struct", program: "S = struct();\nA = structfun(@length, S)", display_output: Some("A is an empty 0-by-1 double array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(A, \"double\"));\nassert(isequal(size(A), [0 1]));" } },
+];

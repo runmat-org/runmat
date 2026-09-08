@@ -31,6 +31,7 @@ mod logical;
 pub(in crate::catalog) mod math;
 mod parallel;
 mod stats;
+pub(in crate::catalog) mod structs;
 
 pub use acceleration::*;
 pub use aggregate::*;
@@ -42,6 +43,7 @@ pub use logical::*;
 pub use math::*;
 pub use parallel::*;
 pub use stats::*;
+pub use structs::*;
 
 pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(entries);
@@ -54,6 +56,7 @@ pub(super) fn extend_catalog_entries(entries: &mut Vec<&'static crate::BuiltinCa
     math::extend_entries(entries);
     parallel::extend_entries(entries);
     stats::extend_entries(entries);
+    structs::extend_entries(entries);
 }
 
 fn extend_groups(

@@ -1,11 +1,9 @@
-mod push;
-
-use crate::BuiltinResult;
 use runmat_value::{IntValue, IntegerStorage, Value};
 
 use super::classify::{self, ClassifiedValue};
+use super::{finish, push, UniformScalarError};
 
-pub(in crate::builtins::cells::core::cellfun) enum UniformCollector {
+pub(crate) enum UniformScalarCollector {
     Pending,
     Logical(Vec<u8>),
     F64(Vec<f64>),
@@ -24,11 +22,12 @@ pub(in crate::builtins::cells::core::cellfun) enum UniformCollector {
     Char(Vec<char>),
 }
 
-impl UniformCollector {
-    pub(in crate::builtins::cells::core::cellfun) fn push(
-        &mut self,
-        value: &Value,
-    ) -> BuiltinResult<()> {
+impl UniformScalarCollector {
+    pub(crate) fn new() -> Self {
+        Self::Pending
+    }
+
+    pub(crate) fn push(&mut self, value: &Value) -> Result<(), UniformScalarError> {
         let classified = classify::value(value)?;
         match self {
             Self::Pending => self.start(classified),
@@ -66,7 +65,11 @@ impl UniformCollector {
         }
     }
 
-    fn start(&mut self, value: ClassifiedValue) -> BuiltinResult<()> {
+    pub(crate) fn finish(self, shape: &[usize]) -> Result<Value, UniformScalarError> {
+        finish::value(self, shape)
+    }
+
+    fn start(&mut self, value: ClassifiedValue) -> Result<(), UniformScalarError> {
         *self = match value {
             ClassifiedValue::Logical(value) => Self::Logical(vec![value as u8]),
             ClassifiedValue::F64(value) => Self::F64(vec![value]),
