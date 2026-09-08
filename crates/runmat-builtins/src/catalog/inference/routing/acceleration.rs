@@ -7,6 +7,9 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
+        AccelerationInferenceRule::Arrayfun => {
+            crate::catalog::entries::acceleration::arrayfun::infer(request, entry)
+        }
         AccelerationInferenceRule::Gather => {
             super::super::acceleration_semantics::infer_gather(request, entry)
         }

@@ -2268,6 +2268,51 @@ enforceMigratedBuiltinFamily({
   ],
   testLineCeiling: 160,
 });
+enforceMigratedBuiltinFamily({
+  name: "arrayfun catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/acceleration/arrayfun"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/acceleration/arrayfun/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/acceleration/arrayfun/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/acceleration/arrayfun/inference/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/acceleration/arrayfun/inference_tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/arrayfun.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/arrayfun.json",
+  ],
+});
+enforceMigratedBuiltinFamily({
+  name: "arrayfun runtime",
+  roots: ["crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/mod.rs",
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/callback/mod.rs",
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/input/mod.rs",
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/output/mod.rs",
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/tests/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs",
+  ],
+  testLineCeiling: 192,
+});
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun"
+)) {
+  if (
+    !sourcePath.includes("/tests/") &&
+    /"(?:sin|cos|abs|exp|log|sqrt|plus|minus|times|rdivide|ldivide)"/.test(text)
+  ) {
+    fail(`${sourcePath} derives callback semantics from a builtin identity string`);
+  }
+}
+const arrayfunRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(arrayfunRuntimeMacro)) {
+  fail("arrayfun runtime registration must not duplicate catalog-owned contracts");
+}
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/math/elementwise/bsxfun"
 )) {
