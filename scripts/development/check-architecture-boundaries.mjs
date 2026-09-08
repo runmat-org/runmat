@@ -2435,6 +2435,31 @@ enforceMigratedBuiltinFamily({
   testLineCeiling: 160,
 });
 enforceMigratedBuiltinFamily({
+  name: "orderfields catalog",
+  roots: ["crates/runmat-builtins/src/catalog/entries/structs/core/orderfields"],
+  compositionFiles: [
+    "crates/runmat-builtins/src/catalog/entries/structs/core/orderfields/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/orderfields/contract/mod.rs",
+    "crates/runmat-builtins/src/catalog/entries/structs/core/orderfields/inference/mod.rs",
+  ],
+  obsoletePaths: [
+    "docs/builtins/reference/orderfields.json",
+    "crates/runmat-runtime/src/builtins/builtins-json/orderfields.json",
+  ],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
+  name: "orderfields runtime",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/orderfields"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/orderfields/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/orderfields/order/mod.rs",
+    "crates/runmat-runtime/src/builtins/structs/core/orderfields/tests/mod.rs",
+  ],
+  obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/orderfields.rs"],
+  testLineCeiling: 160,
+});
+enforceMigratedBuiltinFamily({
   name: "rmfield runtime",
   roots: ["crates/runmat-runtime/src/builtins/structs/core/rmfield"],
   compositionFiles: [
@@ -2507,6 +2532,50 @@ if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(rm
 }
 if (/\brmfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
   fail("rmfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+const orderfieldsRuntimeMacro = read(
+  "crates/runmat-runtime/src/builtins/structs/core/orderfields/mod.rs"
+);
+if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(orderfieldsRuntimeMacro)) {
+  fail("orderfields runtime registration must not duplicate catalog-owned contracts");
+}
+if (/\borderfields_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+  fail("orderfields must use its catalog-owned inference rule rather than a legacy runtime resolver");
+}
+for (const obsoletePath of [
+  "crates/runmat-builtins/src/catalog/contract/structs.rs",
+  "crates/runmat-builtins/src/catalog/inference/routing/structs.rs",
+  "crates/runmat-builtins/src/catalog/entries/structs/core/inference.rs",
+]) {
+  if (fs.existsSync(path.join(repo, obsoletePath))) {
+    fail(`${obsoletePath} must not restore count-proportional structure inference routing`);
+  }
+}
+const identityInferenceContractPath =
+  "crates/runmat-builtins/src/catalog/contract/inference.rs";
+const identityInferenceContractLines = read(identityInferenceContractPath).split("\n").length;
+if (identityInferenceContractLines > 96) {
+  fail(
+    `${identityInferenceContractPath} must remain generic inference vocabulary ` +
+      `(found ${identityInferenceContractLines} lines; maximum 96)`
+  );
+}
+for (const { path: sourcePath, text } of rustSources(
+  "crates/runmat-builtins/src/catalog"
+)) {
+  if (/\b(?:StructInferenceRule|CoreStructInferenceRule)\b/.test(text)) {
+    fail(`${sourcePath} must not restore count-proportional structure inference identities`);
+  }
+}
+for (const identity of ["fieldnames", "isfield", "orderfields", "rmfield", "structfun"]) {
+  const entryPath = `crates/runmat-builtins/src/catalog/entries/structs/core/${identity}/entry.rs`;
+  const entrySource = read(entryPath);
+  if (!/BuiltinInferenceRule::Identity\(IdentityInferenceRule::new\(super::infer\)\)/.test(entrySource)) {
+    fail(`${entryPath} must bind its inference implementation directly from its identity package`);
+  }
+  if (/StructInferenceRule|CoreStructInferenceRule/.test(entrySource)) {
+    fail(`${entryPath} must not depend on count-proportional structure inference enums`);
+  }
 }
 for (const { path: sourcePath, text } of rustSources(
   "crates/runmat-runtime/src/builtins/structs/core/structfun"

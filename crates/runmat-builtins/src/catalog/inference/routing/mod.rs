@@ -9,7 +9,6 @@ mod local;
 pub(super) mod math;
 pub(super) mod parallel;
 pub(super) mod stats;
-pub(super) mod structs;
 
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};

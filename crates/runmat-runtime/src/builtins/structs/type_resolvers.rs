@@ -4,12 +4,6 @@ pub fn getfield_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn orderfields_type(args: &[Type], _context: &ResolveContext) -> Type {
-    args.first()
-        .and_then(struct_container_type)
-        .unwrap_or(Type::Unknown)
-}
-
 pub fn setfield_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first()
         .and_then(struct_container_type)
@@ -62,17 +56,6 @@ mod tests {
         assert_eq!(
             getfield_type(&[], &ResolveContext::new(Vec::new())),
             Type::Unknown
-        );
-    }
-
-    #[test]
-    fn orderfields_type_preserves_struct() {
-        assert_eq!(
-            orderfields_type(
-                &[Type::Struct { known_fields: None }],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Struct { known_fields: None }
         );
     }
 
