@@ -1,7 +1,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
+use runmat_execution::identity::AttemptId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,12 +49,49 @@ pub struct FeaProgressEvent {
 }
 
 pub type FeaProgressHandler = Arc<dyn Fn(FeaProgressEvent) + Send + Sync + 'static>;
-pub type FeaCancellationPredicate = Arc<dyn Fn() -> bool + Send + Sync + 'static>;
+
+#[derive(Clone, Debug, Default)]
+pub struct FeaCancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl FeaCancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_shared(cancelled: Arc<AtomicBool>) -> Self {
+        Self { cancelled }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn shared_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancelled)
+    }
+}
 
 #[derive(Clone)]
-struct FeaProgressContext {
-    handler: Option<FeaProgressHandler>,
-    cancellation: Option<FeaCancellationPredicate>,
+pub struct FeaProgressContext {
+    pub handler: Option<FeaProgressHandler>,
+    pub cancellation: FeaCancellationToken,
+    pub attempt_id: Option<AttemptId>,
+}
+
+impl Default for FeaProgressContext {
+    fn default() -> Self {
+        Self {
+            handler: None,
+            cancellation: FeaCancellationToken::new(),
+            attempt_id: None,
+        }
+    }
 }
 
 thread_local! {
@@ -69,16 +110,8 @@ impl Drop for FeaProgressContextGuard {
     }
 }
 
-pub fn replace_fea_progress_context(
-    handler: Option<FeaProgressHandler>,
-    cancellation: Option<FeaCancellationPredicate>,
-) -> FeaProgressContextGuard {
-    let previous = FEA_PROGRESS_CONTEXT.with(|slot| {
-        slot.replace(Some(FeaProgressContext {
-            handler,
-            cancellation,
-        }))
-    });
+pub fn replace_fea_progress_context(context: FeaProgressContext) -> FeaProgressContextGuard {
+    let previous = FEA_PROGRESS_CONTEXT.with(|slot| slot.replace(Some(context)));
     FeaProgressContextGuard { previous }
 }
 
@@ -121,9 +154,25 @@ pub fn is_cancelled() -> bool {
     FEA_PROGRESS_CONTEXT.with(|slot| {
         slot.borrow()
             .as_ref()
-            .and_then(|context| context.cancellation.clone())
-            .map(|is_cancelled| is_cancelled())
+            .map(|context| context.cancellation.is_cancelled())
             .unwrap_or(false)
+    })
+}
+
+pub(crate) fn cancellation_token() -> FeaCancellationToken {
+    FEA_PROGRESS_CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|context| context.cancellation.clone())
+            .unwrap_or_default()
+    })
+}
+
+pub(crate) fn attempt_id() -> Option<AttemptId> {
+    FEA_PROGRESS_CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|context| context.attempt_id)
     })
 }
 

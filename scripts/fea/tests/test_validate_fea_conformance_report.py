@@ -79,7 +79,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         ],
         "gpu_speedup_ratio": 0.25,
         "gpu_solver_solve_ms": 1.5,
-        "gpu_solver_backend": "runtime_tensor",
+        "gpu_solver_backend": "accelerator",
     }
     if fixture_id.startswith("electromagnetic_reference_"):
         record["gpu_solver_fallback_apply_count"] = 0.0

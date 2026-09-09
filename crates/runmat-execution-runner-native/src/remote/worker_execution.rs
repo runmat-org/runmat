@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use runmat_execution::identity::AttemptId;
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
 };
@@ -45,6 +46,7 @@ impl RemoteMeshingHost {
 }
 
 pub(super) async fn execute(
+    attempt_id: AttemptId,
     program: ProgramExecutionRequest,
     project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     meshing_host: Option<RemoteMeshingHost>,
@@ -55,7 +57,7 @@ pub(super) async fn execute(
     if program.artifact.form == ExecutableForm::AnalysisWorkload {
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
-            let _guard = install_analysis_cancellation(&cancellation);
+            let _guard = install_analysis_cancellation(attempt_id, &cancellation);
             crate::execute_analysis_program_request(
                 &program,
                 &mut objects,
@@ -120,13 +122,14 @@ pub(super) async fn execute(
 }
 
 fn install_analysis_cancellation(
+    attempt_id: AttemptId,
     cancellation: &AttemptCancellation,
 ) -> runmat_analysis_fea::FeaProgressContextGuard {
-    let cancellation_flag = cancellation.flag();
-    runmat_analysis_fea::replace_fea_progress_context(
-        None,
-        Some(Arc::new(move || cancellation_flag.load(Ordering::Acquire))),
-    )
+    runmat_analysis_fea::replace_fea_progress_context(runmat_analysis_fea::FeaProgressContext {
+        handler: None,
+        cancellation: runmat_analysis_fea::FeaCancellationToken::from_shared(cancellation.flag()),
+        attempt_id: Some(attempt_id),
+    })
 }
 
 pub(super) fn report(
@@ -213,7 +216,8 @@ mod tests {
     #[test]
     fn remote_attempt_cancellation_reaches_analysis_solver_context() {
         let cancellation = AttemptCancellation::default();
-        let _guard = install_analysis_cancellation(&cancellation);
+        let attempt_id = AttemptId::derive(&[b"analysis-cancellation-test"]);
+        let _guard = install_analysis_cancellation(attempt_id, &cancellation);
         assert!(!runmat_analysis_fea::is_fea_cancelled());
         cancellation.cancel();
         assert!(runmat_analysis_fea::is_fea_cancelled());

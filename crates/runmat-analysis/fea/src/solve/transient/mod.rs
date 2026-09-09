@@ -14,8 +14,7 @@ use crate::{
     },
     progress::{emit_phase, is_cancelled, FeaProgressPhase, FeaProgressStatus},
     solve::{
-        backend::kind::LinearAlgebraBackendKind,
-        runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
+        accelerator::AcceleratorPreparedLinearSystem, backend::kind::LinearAlgebraBackendKind,
     },
     ComputeBackend, FeaElectroThermalContext, FeaThermoMechanicalContext,
 };
@@ -25,8 +24,8 @@ mod linear_step;
 
 use diagnostics::{push_transient_quality_diagnostics, TransientQualityDiagnosticInputs};
 use linear_step::{
-    build_step_rhs_with_load, solve_implicit_step_system, strain_energy, LinearStepStats,
-    RuntimeTensorStepCache,
+    build_step_rhs_with_load, solve_implicit_step_system, strain_energy, AcceleratorStepCache,
+    LinearStepStats,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,6 +100,7 @@ pub struct TransientSolveResult {
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
     pub preconditioner: SolverPreconditioner,
+    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
 pub fn solve_transient_system(
@@ -144,10 +144,11 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             preconditioner: SolverPreconditioner::None,
+            accelerator_evidence: Vec::new(),
         });
     }
 
-    let use_runtime_tensor = backend == ComputeBackend::Gpu;
+    let use_accelerator = backend == ComputeBackend::Gpu;
     let thermo_context = options.thermo_mechanical_context.as_ref();
     let electro_context = options.electro_thermal_context.as_ref();
     let thermo_severity_base = thermo_mechanical::severity(thermo_context);
@@ -177,11 +178,12 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     let mut device_apply_k_attempt_count = 0u32;
     let mut selected_preconditioner = SolverPreconditioner::None;
     let mut linear_diagnostics = Vec::new();
-    let mut prepared_runtime_systems_by_dt: HashMap<u64, RuntimeTensorPreparedLinearSystem> =
+    let mut accelerator_evidence = Vec::new();
+    let mut prepared_accelerator_systems_by_dt: HashMap<u64, AcceleratorPreparedLinearSystem> =
         HashMap::new();
-    let mut prepared_runtime_system_lru = VecDeque::new();
-    let mut prepared_runtime_cache_hits = 0usize;
-    let mut prepared_runtime_cache_misses = 0usize;
+    let mut prepared_accelerator_system_lru = VecDeque::new();
+    let mut prepared_accelerator_cache_hits = 0usize;
+    let mut prepared_accelerator_cache_misses = 0usize;
     let mut prepared_build_ms = 0.0_f64;
     let mut solve_ms = 0.0_f64;
     let mut fallback_apply_count = 0u32;
@@ -252,12 +254,12 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                 &rhs,
                 step_dt,
                 &options,
-                use_runtime_tensor,
-                RuntimeTensorStepCache {
-                    prepared_systems_by_dt: &mut prepared_runtime_systems_by_dt,
-                    prepared_lru: &mut prepared_runtime_system_lru,
-                    cache_hits: &mut prepared_runtime_cache_hits,
-                    cache_misses: &mut prepared_runtime_cache_misses,
+                use_accelerator,
+                AcceleratorStepCache {
+                    prepared_systems_by_dt: &mut prepared_accelerator_systems_by_dt,
+                    prepared_lru: &mut prepared_accelerator_system_lru,
+                    cache_hits: &mut prepared_accelerator_cache_hits,
+                    cache_misses: &mut prepared_accelerator_cache_misses,
                     prepared_build_ms: &mut prepared_build_ms,
                     dt_bucket_rel_tolerance,
                 },
@@ -295,6 +297,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             device_apply_k_attempt_count: step_device_apply_k_attempt_count,
             preconditioner,
             diagnostics: step_diagnostics,
+            accelerator_evidence: step_accelerator_evidence,
         }) = step_stats
         {
             solver_backend = step_solver_backend;
@@ -307,6 +310,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             );
             selected_preconditioner = preconditioner;
             linear_diagnostics.extend(step_diagnostics);
+            accelerator_evidence.extend(step_accelerator_evidence);
         }
 
         x = next_x;
@@ -389,7 +393,11 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_TRANSIENT_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
-        message: "solver=implicit_euler_pcg matrix_free=true".to_string(),
+        message: format!(
+            "solver=implicit_euler_pcg matrix_free={} backend={}",
+            solver_backend == LinearAlgebraBackendKind::CpuReference,
+            solver_backend
+        ),
     }];
     diagnostics.extend(linear_diagnostics);
     push_transient_quality_diagnostics(
@@ -402,10 +410,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             accepted_time_steps_s: &accepted_time_steps_s,
             residual_norms: &residual_norms,
             energies: &energies,
-            use_runtime_tensor,
-            prepared_cache_entries: prepared_runtime_systems_by_dt.len(),
-            prepared_cache_hits: prepared_runtime_cache_hits,
-            prepared_cache_misses: prepared_runtime_cache_misses,
+            use_accelerator,
+            prepared_cache_entries: prepared_accelerator_systems_by_dt.len(),
+            prepared_cache_hits: prepared_accelerator_cache_hits,
+            prepared_cache_misses: prepared_accelerator_cache_misses,
             prepared_build_ms,
             solve_ms,
             fallback_apply_count,
@@ -475,6 +483,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
         device_apply_k_count,
         device_apply_k_attempt_count,
         preconditioner: selected_preconditioner,
+        accelerator_evidence,
     })
 }
 

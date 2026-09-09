@@ -115,12 +115,12 @@ fn production_requirement_rejects_before_structural_solver_progress() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let events = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&events);
-    let _guard = crate::replace_fea_progress_context(
-        Some(Arc::new(move |event| {
+    let _guard = crate::replace_fea_progress_context(crate::FeaProgressContext {
+        handler: Some(Arc::new(move |event| {
             captured.lock().expect("progress lock").push(event);
         })),
-        None,
-    );
+        ..crate::FeaProgressContext::default()
+    });
     let error = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,

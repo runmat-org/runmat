@@ -3141,7 +3141,7 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     );
     assert!(matches!(
         gpu.data.provenance.solver_backend.as_str(),
-        "runtime_tensor" | "cpu_reference"
+        "accelerator" | "cpu_reference"
     ));
     assert_eq!(cpu.data.run_status, RunStatus::Completed);
     assert_eq!(gpu.data.run_status, RunStatus::Completed);
@@ -3176,7 +3176,7 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
     } else {
         assert_eq!(
             envelope.data.provenance.solver_backend,
-            LinearAlgebraBackendKind::RuntimeTensor
+            LinearAlgebraBackendKind::Accelerator
         );
     }
     for event in &envelope.data.provenance.fallback_events {

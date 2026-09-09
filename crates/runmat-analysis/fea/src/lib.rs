@@ -34,8 +34,9 @@ pub use pipeline::transient::{run_transient, run_transient_with_options};
 pub use progress::{
     check_cancelled as check_fea_cancelled, emit_phase as emit_fea_progress_phase,
     emit_progress as emit_fea_progress, is_cancelled as is_fea_cancelled,
-    replace_fea_progress_context, FeaCancellationPredicate, FeaProgressContextGuard,
-    FeaProgressEvent, FeaProgressHandler, FeaProgressPhase, FeaProgressStatus,
+    replace_fea_progress_context, FeaCancellationToken, FeaProgressContext,
+    FeaProgressContextGuard, FeaProgressEvent, FeaProgressHandler, FeaProgressPhase,
+    FeaProgressStatus,
 };
 
 #[cfg(test)]

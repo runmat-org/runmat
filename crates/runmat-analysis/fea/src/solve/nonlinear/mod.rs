@@ -92,6 +92,7 @@ pub struct NonlinearSolveResult {
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
     pub preconditioner: SolverPreconditioner,
+    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
 pub fn solve_nonlinear_system(
@@ -132,6 +133,7 @@ pub fn solve_nonlinear_system(
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             preconditioner: SolverPreconditioner::None,
+            accelerator_evidence: Vec::new(),
         };
     }
 
@@ -669,6 +671,7 @@ pub fn solve_nonlinear_system(
         device_apply_k_count: transient.device_apply_k_count,
         device_apply_k_attempt_count: transient.device_apply_k_attempt_count,
         preconditioner: transient.preconditioner,
+        accelerator_evidence: transient.accelerator_evidence,
     }
 }
 

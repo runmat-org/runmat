@@ -4257,6 +4257,7 @@ execution:
         let run = crate::analysis::AnalysisRunResult {
             run_id: run_id.clone(),
             run: runmat_analysis_fea::FeaRunResult {
+                accelerator_evidence: Vec::new(),
                 identity,
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
@@ -4343,6 +4344,7 @@ execution:
         let run = crate::analysis::AnalysisRunResult {
             run_id: run_id.clone(),
             run: runmat_analysis_fea::FeaRunResult {
+                accelerator_evidence: Vec::new(),
                 identity,
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

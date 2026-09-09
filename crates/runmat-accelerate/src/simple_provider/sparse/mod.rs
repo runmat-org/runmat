@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{anyhow, ensure};
@@ -62,6 +62,45 @@ impl SparseState {
         self.storage
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub fn live_bytes(&self) -> u64 {
+        let storage = self.lock();
+        let mut patterns = HashSet::new();
+        let mut bytes = 0_u64;
+        for pattern in storage
+            .patterns
+            .values()
+            .chain(storage.matrices.values().map(|matrix| &matrix.pattern))
+        {
+            if patterns.insert(Arc::as_ptr(pattern) as usize) {
+                bytes = bytes.saturating_add(
+                    u64::try_from(
+                        pattern
+                            .row_offsets
+                            .len()
+                            .saturating_add(pattern.column_indices.len()),
+                    )
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(8),
+                );
+            }
+        }
+        for matrix in storage.matrices.values() {
+            bytes = bytes.saturating_add(
+                u64::try_from(matrix.values.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(8),
+            );
+        }
+        for preconditioner in storage.preconditioners.values() {
+            bytes = bytes.saturating_add(
+                u64::try_from(preconditioner.inverse_diagonal.len())
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(8),
+            );
+        }
+        bytes
     }
 
     pub fn upload_pattern(

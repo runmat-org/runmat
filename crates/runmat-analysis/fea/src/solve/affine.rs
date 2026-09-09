@@ -52,7 +52,7 @@ pub(super) fn solve_affine_constraint_system(
             reduction.pivot_dof_indices.len()
         ),
     }];
-    if requested_backend == LinearAlgebraBackendKind::RuntimeTensor {
+    if requested_backend == LinearAlgebraBackendKind::Accelerator {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_AFFINE_CPU_REFERENCE".into(),
             severity: FeaDiagnosticSeverity::Warning,
@@ -70,6 +70,7 @@ pub(super) fn solve_affine_constraint_system(
             solver_backend: LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: None,
             solution: reduction.offset.clone(),
             solver_method: SolverMethod::MatrixFreePcg,
             preconditioner: SolverPreconditioner::None,
@@ -152,6 +153,7 @@ pub(super) fn solve_affine_constraint_system(
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
         solution: expand(reduction, &reduced_solution),
         solver_method: SolverMethod::MatrixFreePcg,
         preconditioner: SolverPreconditioner::None,
@@ -174,6 +176,7 @@ fn rejected_affine_system(summary: &AssemblySummary, message: &str) -> LinearSol
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
         solution: vec![0.0; summary.dof_count],
         solver_method: SolverMethod::MatrixFreePcg,
         preconditioner: SolverPreconditioner::None,

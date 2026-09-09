@@ -4096,6 +4096,20 @@ impl AccelProvider for InProcessProvider {
         sparse::feasibility(query)
     }
 
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        runmat_execution::ProviderResourceSnapshot {
+            device_id: self.device_id,
+            capacity_bytes: None,
+            live_bytes: self.sparse.live_bytes(),
+            reclaimable_bytes: 0,
+            scratch_available_bytes: None,
+            queue_depth: None,
+            queue_limit: None,
+            lost: false,
+            epoch: 1,
+        }
+    }
+
     fn estimate_sparse_cost(
         &self,
         query: &runmat_accelerate_api::SparseCostQuery,

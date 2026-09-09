@@ -93,7 +93,7 @@ pub(super) fn run(
 
     let requested_solver_backend = match backend {
         ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
-        ComputeBackend::Gpu => LinearAlgebraBackendKind::RuntimeTensor,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
     };
     let algebra = build_backend(requested_solver_backend);
     emit_phase(
@@ -164,6 +164,7 @@ pub(super) fn run(
         solver_method: outcome.last_solve.solver_method,
         preconditioner: outcome.last_solve.preconditioner,
         solver_host_sync_count: outcome.host_sync_count,
+        accelerator_evidence: outcome.accelerator_evidence,
         diagnostics,
         spatial_projection_evidence: outcome.source_evidence,
         observations: Vec::new(),
@@ -213,6 +214,7 @@ struct ProcedureOutcome {
     host_sync_count: u32,
     device_apply_count: u32,
     device_apply_attempt_count: u32,
+    accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
 fn solve_steady(
@@ -244,6 +246,7 @@ fn solve_steady(
         host_sync_count: solve.host_sync_count,
         device_apply_count: solve.device_apply_k_count,
         device_apply_attempt_count: solve.device_apply_k_attempt_count,
+        accelerator_evidence: solve.accelerator_evidence.clone().into_iter().collect(),
         last_solve: solve,
     })
 }
@@ -289,6 +292,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
     let mut host_sync_count = 0_u32;
     let mut device_apply_count = 0_u32;
     let mut device_apply_attempt_count = 0_u32;
+    let mut accelerator_evidence = Vec::new();
     for step_index in 1..solve_times.len() {
         check_cancelled("fea.run_thermal")?;
         let previous_time_s = solve_times[step_index - 1];
@@ -329,6 +333,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
         device_apply_attempt_count =
             device_apply_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
+        accelerator_evidence.extend(solve.accelerator_evidence.clone());
         residual_norms.push(solve.residual_norm / rhs_norm);
         energy_balances.push(assembly.energy_balance(&previous, &solve.solution, time_step_s));
         push_recovered_snapshot(
@@ -352,6 +357,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         host_sync_count,
         device_apply_count,
         device_apply_attempt_count,
+        accelerator_evidence,
     })
 }
 

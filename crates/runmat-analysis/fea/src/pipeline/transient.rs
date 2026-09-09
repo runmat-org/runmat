@@ -208,6 +208,7 @@ pub fn run_transient_with_options(
         solver_method: transient.solver_method,
         preconditioner: transient.preconditioner,
         solver_host_sync_count: transient.solver_host_sync_count,
+        accelerator_evidence: transient.accelerator_evidence.clone(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),

@@ -127,7 +127,7 @@ pub(super) fn admit_linear_static_result(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
     let numerically_acceptable = match input.options.quality_policy {

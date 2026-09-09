@@ -430,6 +430,7 @@ fn run_linear_static_with_constraint_plan(
         solver_method: solve_result.solver_method,
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,
+        accelerator_evidence: solve_result.accelerator_evidence.into_iter().collect(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations,

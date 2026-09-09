@@ -2376,6 +2376,7 @@ mod tests {
         AnalysisRunResult {
             run_id: "run_test".to_string(),
             run: runmat_analysis_fea::FeaRunResult {
+                accelerator_evidence: Vec::new(),
                 identity,
                 requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

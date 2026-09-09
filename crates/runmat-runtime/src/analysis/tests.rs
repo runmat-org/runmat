@@ -3639,9 +3639,176 @@ fn gpu_run_without_provider_records_fallback_event() {
     } else {
         assert_eq!(
             envelope.data.provenance.solver_backend,
-            LinearAlgebraBackendKind::RuntimeTensor
+            LinearAlgebraBackendKind::Accelerator
         );
     }
+}
+
+#[test]
+fn gpu_run_uses_native_sparse_provider_and_releases_prepared_resources() {
+    let _guard = analysis_test_guard();
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+    );
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+
+    let envelope = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Gpu,
+        FormulationRequirement::Experimental,
+        Default::default(),
+        OperationContext::new(Some("trace-native-sparse".to_string()), None),
+    )
+    .expect("native sparse FEA run should converge");
+
+    assert_eq!(
+        envelope.data.provenance.solver_backend,
+        LinearAlgebraBackendKind::Accelerator
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        SolverMethod::AssembledPcg
+    );
+    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert_eq!(envelope.data.run.accelerator_evidence.len(), 1);
+    let evidence = &envelope.data.run.accelerator_evidence[0];
+    evidence.validate().expect("evidence should validate");
+    assert!(evidence.satisfies_tolerance());
+    assert_eq!(evidence.provider().host_synchronizations, 0);
+    assert_eq!(evidence.provider().device_readbacks, 0);
+    assert_eq!(evidence.terminal_solution_readbacks(), 1);
+    assert!(evidence.provider().resident_matrix_bytes > 0);
+    assert!(evidence.provider().resident_preconditioner_bytes > 0);
+    assert!(evidence.provider().scratch_bytes > 0);
+    assert!(!evidence.provider().used_host_fallback);
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+}
+
+#[test]
+fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
+    let _guard = analysis_test_guard();
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+    );
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let cancellation = runmat_analysis_fea::FeaCancellationToken::new();
+    cancellation.cancel();
+    let _progress_guard = runmat_analysis_fea::replace_fea_progress_context(
+        runmat_analysis_fea::FeaProgressContext {
+            handler: None,
+            cancellation,
+            attempt_id: Some(runmat_execution::identity::AttemptId::derive(&[
+                b"cancelled-fea-solve",
+            ])),
+        },
+    );
+    let dimension = 32;
+    let stiffness = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![2.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Stiffness,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .expect("stiffness");
+    let mass = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![1.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Mass,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .expect("mass");
+    let damping = runmat_analysis_fea::algebra::RealSparseMatrix::diagonal(
+        vec![0.0; dimension],
+        runmat_analysis_fea::algebra::OperatorRole::Damping,
+        runmat_analysis_fea::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .expect("damping");
+    let operators =
+        runmat_analysis_fea::algebra::CanonicalRealOperators::try_new(stiffness, mass, damping)
+            .expect("operators");
+    let system = runmat_analysis_fea::algebra::AssembledRealSystem::try_new(
+        operators,
+        vec![false; dimension],
+        vec![1.0; dimension],
+    )
+    .expect("system");
+
+    let result = runmat_analysis_fea::solve::linear::solve_operator_system(
+        &system,
+        runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::Accelerator,
+        &runmat_analysis_fea::solve::backend::cpu_reference::CpuReferenceBackend,
+        None,
+    );
+
+    assert!(!result.converged);
+    assert!(result.solution.iter().all(|value| *value == 0.0));
+    let evidence = result
+        .accelerator_evidence
+        .expect("cancelled provider evidence");
+    assert!(matches!(
+        evidence,
+        runmat_analysis_fea::solve::accelerator::AcceleratorSolveEvidence::Cancelled { .. }
+    ));
+    assert!(evidence.provider().cancellation_observed);
+    assert_eq!(evidence.terminal_solution_readbacks(), 0);
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+}
+
+#[test]
+fn native_sparse_provider_serves_modal_and_transient_routes() {
+    let _guard = analysis_test_guard();
+    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
+        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
+    );
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+
+    let mut modal_model = sample_model();
+    modal_model.sequence.steps = vec![ProcedureStep::structural_modal("modal-native-sparse")];
+    let modal = analysis_run_modal_with_options_op(
+        &modal_model,
+        ComputeBackend::Gpu,
+        FormulationRequirement::Experimental,
+        Default::default(),
+        OperationContext::new(Some("trace-modal-native-sparse".to_string()), None),
+    )
+    .expect("native sparse modal solve");
+    assert_eq!(
+        modal.data.run.solver_backend,
+        LinearAlgebraBackendKind::Accelerator
+    );
+    assert!(!modal.data.run.accelerator_evidence.is_empty());
+    assert!(modal
+        .data
+        .run
+        .accelerator_evidence
+        .iter()
+        .all(|evidence| evidence.validate().is_ok() && evidence.satisfies_tolerance()));
+    assert_eq!(provider.placement_resources().live_bytes, 0);
+
+    let mut transient_model = sample_model();
+    transient_model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient-native-sparse",
+    )];
+    let transient = analysis_run_transient_with_options_op(
+        &transient_model,
+        ComputeBackend::Gpu,
+        FormulationRequirement::Experimental,
+        Default::default(),
+        OperationContext::new(Some("trace-transient-native-sparse".to_string()), None),
+    )
+    .expect("native sparse transient solve");
+    assert_eq!(
+        transient.data.run.solver_backend,
+        LinearAlgebraBackendKind::Accelerator
+    );
+    assert!(!transient.data.run.accelerator_evidence.is_empty());
+    assert!(transient
+        .data
+        .run
+        .accelerator_evidence
+        .iter()
+        .all(|evidence| evidence.validate().is_ok() && evidence.satisfies_tolerance()));
+    assert_eq!(provider.placement_resources().live_bytes, 0);
 }
 
 #[test]
@@ -3709,7 +3876,7 @@ fn gpu_run_with_provider_keeps_authoritative_host_fields() {
 
     assert!(matches!(
         envelope.data.provenance.solver_backend.as_str(),
-        "runtime_tensor" | "cpu_reference"
+        "accelerator" | "cpu_reference"
     ));
     if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
         assert!(envelope

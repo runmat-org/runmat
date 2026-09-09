@@ -285,7 +285,7 @@ impl ExecutionBackend {
     pub(crate) fn from_solver_backend(solver_backend: LinearAlgebraBackendKind) -> Self {
         match solver_backend {
             LinearAlgebraBackendKind::CpuReference => Self::Cpu,
-            LinearAlgebraBackendKind::RuntimeTensor => Self::Accelerator,
+            LinearAlgebraBackendKind::Accelerator => Self::Accelerator,
         }
     }
 }
@@ -294,6 +294,7 @@ impl ExecutionBackend {
 #[serde(rename_all = "snake_case")]
 pub enum SolverMethod {
     DenseDirect,
+    AssembledPcg,
     MatrixFreePcg,
     MatrixFreeSaddlePointGmres,
     MatrixFreeSubspaceIteration,
@@ -310,6 +311,7 @@ impl SolverMethod {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::DenseDirect => "dense_direct",
+            Self::AssembledPcg => "assembled_pcg",
             Self::MatrixFreePcg => "matrix_free_pcg",
             Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
@@ -383,6 +385,7 @@ pub struct FeaRunResult {
     pub solver_method: SolverMethod,
     pub preconditioner: SolverPreconditioner,
     pub solver_host_sync_count: u32,
+    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
     #[serde(default)]
     pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,

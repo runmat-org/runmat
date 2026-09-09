@@ -244,10 +244,13 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
             host_handler(event);
         }
     }) as FeaProgressHandler);
-    runmat_analysis_fea::replace_fea_progress_context(
+    runmat_analysis_fea::replace_fea_progress_context(runmat_analysis_fea::FeaProgressContext {
         handler,
-        Some(Arc::new(crate::interrupt::is_cancelled)),
-    )
+        cancellation: crate::interrupt::current_interrupt()
+            .map(runmat_analysis_fea::FeaCancellationToken::from_shared)
+            .unwrap_or_default(),
+        attempt_id: None,
+    })
 }
 
 pub use contracts::{
@@ -2050,7 +2053,7 @@ pub fn analysis_run_modal_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -2427,7 +2430,7 @@ pub fn analysis_run_acoustic_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -2657,6 +2660,7 @@ fn solve_acoustic_harmonic(
         solver_method: SolverMethod::AcousticDomainGraphHelmholtzHarmonic,
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
+        accelerator_evidence: Vec::new(),
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
         diagnostics: vec![
@@ -4474,6 +4478,7 @@ fn solve_cfd_finite_volume_run(
         solver_method: SolverMethod::CfdVelocityPressureFiniteVolume,
         preconditioner: SolverPreconditioner::FiniteVolumePressureBalance,
         solver_host_sync_count: 0,
+        accelerator_evidence: Vec::new(),
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
         diagnostics: vec![
@@ -6169,7 +6174,7 @@ pub fn analysis_run_cfd_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -6828,7 +6833,7 @@ pub fn analysis_run_cht_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -7218,6 +7223,7 @@ pub fn analysis_run_fsi_with_options_op(
         solver_method: SolverMethod::FsiPartitionedProjection,
         preconditioner: SolverPreconditioner::InterfaceRelaxation,
         solver_host_sync_count: 0,
+        accelerator_evidence: Vec::new(),
         diagnostics: Vec::new(),
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
@@ -7414,7 +7420,7 @@ pub fn analysis_run_fsi_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -8156,7 +8162,7 @@ pub fn analysis_run_transient_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
     let numerically_acceptable = match options.quality_policy {
@@ -8784,7 +8790,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
         });
     }
 
@@ -9055,12 +9061,12 @@ fn prepare_linear_static_workload_template(
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
         PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
     };
-    let runtime_tensor_available = runmat_accelerate_api::provider().is_some();
+    let accelerator_available = runmat_accelerate_api::provider().is_some();
     let requested_solver_backend = match backend {
         ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
         ComputeBackend::Gpu => {
-            if runtime_tensor_available {
-                LinearAlgebraBackendKind::RuntimeTensor
+            if accelerator_available {
+                LinearAlgebraBackendKind::Accelerator
             } else {
                 LinearAlgebraBackendKind::CpuReference
             }

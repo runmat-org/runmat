@@ -1,12 +1,9 @@
 use crate::{
     algebra::{apply_k, AssembledRealSystem},
-    assembly::AssemblySummary,
     solve::{
+        accelerator::{solve_prepared_accelerator_system, AcceleratorPreparedLinearSystem},
+        linear::{linear_result_from_accelerator_error, linear_result_from_accelerator_output},
         preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::{
-            prepare_runtime_tensor_linear_system, solve_prepared_linear_system_runtime_tensor,
-            RuntimeTensorPreparedLinearSystem,
-        },
     },
 };
 
@@ -14,51 +11,42 @@ use super::math::dot;
 
 pub(super) struct LinearSolveAttempt {
     pub(super) vector: Vec<f64>,
-    pub(super) runtime_tensor: Option<crate::solve::linear::LinearSolveResult>,
+    pub(super) accelerator: Option<crate::solve::linear::LinearSolveResult>,
 }
 
 pub(super) struct CgSolveOptions<'a> {
     pub(super) max_iters: usize,
     pub(super) tol: f64,
-    pub(super) use_runtime_tensor: bool,
-    pub(super) prepared_runtime_system: Option<&'a RuntimeTensorPreparedLinearSystem>,
+    pub(super) prepared_accelerator_system: Option<&'a AcceleratorPreparedLinearSystem>,
     pub(super) initial_guess: Option<&'a [f64]>,
 }
 
 pub(super) fn solve_k_system_cg(
-    summary: &AssemblySummary,
     system: &AssembledRealSystem,
     rhs: &[f64],
     options: CgSolveOptions<'_>,
 ) -> LinearSolveAttempt {
-    if options.use_runtime_tensor {
-        if let Some(prepared) = options.prepared_runtime_system {
-            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                summary,
-                prepared,
+    if let Some(prepared) = options.prepared_accelerator_system {
+        let result = match solve_prepared_accelerator_system(
+            prepared,
+            rhs,
+            options.initial_guess,
+            options.tol,
+        ) {
+            Ok(output) => {
+                linear_result_from_accelerator_output(output, SpdPreconditionerKind::Jacobi)
+            }
+            Err(error) => linear_result_from_accelerator_error(
+                system.dof_count(),
                 rhs,
                 SpdPreconditionerKind::Jacobi,
-                None,
-            ) {
-                return LinearSolveAttempt {
-                    vector: result.solution.clone(),
-                    runtime_tensor: Some(result),
-                };
-            }
-        } else if let Some(fallback_prepared) = prepare_runtime_tensor_linear_system(summary) {
-            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                summary,
-                &fallback_prepared,
-                rhs,
-                SpdPreconditionerKind::Jacobi,
-                None,
-            ) {
-                return LinearSolveAttempt {
-                    vector: result.solution.clone(),
-                    runtime_tensor: Some(result),
-                };
-            }
-        }
+                error,
+            ),
+        };
+        return LinearSolveAttempt {
+            vector: result.solution.clone(),
+            accelerator: Some(result),
+        };
     }
 
     let mut x = match options.initial_guess {
@@ -77,7 +65,7 @@ pub(super) fn solve_k_system_cg(
     if rr_old.sqrt() <= options.tol {
         return LinearSolveAttempt {
             vector: x,
-            runtime_tensor: None,
+            accelerator: None,
         };
     }
 
@@ -102,6 +90,6 @@ pub(super) fn solve_k_system_cg(
 
     LinearSolveAttempt {
         vector: x,
-        runtime_tensor: None,
+        accelerator: None,
     }
 }

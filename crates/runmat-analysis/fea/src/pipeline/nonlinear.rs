@@ -160,6 +160,7 @@ pub fn run_nonlinear_with_options(
         solver_method: nonlinear.solver_method,
         preconditioner: nonlinear.preconditioner,
         solver_host_sync_count: nonlinear.solver_host_sync_count,
+        accelerator_evidence: nonlinear.accelerator_evidence.clone(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),

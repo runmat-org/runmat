@@ -9,13 +9,13 @@ use crate::{
     assembly::AssemblySummary,
     contracts::SolverPreconditioner,
     solve::{
-        backend::kind::LinearAlgebraBackendKind,
-        preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::{
-            prepare_runtime_tensor_linear_system,
-            solve_linear_system_runtime_tensor_with_initial_guess,
-            solve_prepared_linear_system_runtime_tensor, RuntimeTensorPreparedLinearSystem,
+        accelerator::{
+            prepare_accelerator_linear_system, solve_prepared_accelerator_system,
+            AcceleratorAdapterError, AcceleratorPreparedLinearSystem,
         },
+        backend::kind::LinearAlgebraBackendKind,
+        linear::{linear_result_from_accelerator_error, linear_result_from_accelerator_output},
+        preconditioner::SpdPreconditionerKind,
     },
 };
 
@@ -29,10 +29,11 @@ pub(super) struct LinearStepStats {
     pub(super) device_apply_k_attempt_count: u32,
     pub(super) preconditioner: SolverPreconditioner,
     pub(super) diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
+    pub(super) accelerator_evidence: Option<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
-pub(super) struct RuntimeTensorStepCache<'a> {
-    pub(super) prepared_systems_by_dt: &'a mut HashMap<u64, RuntimeTensorPreparedLinearSystem>,
+pub(super) struct AcceleratorStepCache<'a> {
+    pub(super) prepared_systems_by_dt: &'a mut HashMap<u64, AcceleratorPreparedLinearSystem>,
     pub(super) prepared_lru: &'a mut VecDeque<u64>,
     pub(super) cache_hits: &'a mut usize,
     pub(super) cache_misses: &'a mut usize,
@@ -58,18 +59,18 @@ pub(super) fn solve_implicit_step_system(
     rhs: &[f64],
     dt: f64,
     options: &TransientSolveOptions,
-    use_runtime_tensor: bool,
-    runtime_cache: RuntimeTensorStepCache<'_>,
+    use_accelerator: bool,
+    accelerator_cache: AcceleratorStepCache<'_>,
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
-    const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
+    const PREPARED_ACCELERATOR_CACHE_CAPACITY: usize = 12;
     let preconditioner_kind = SpdPreconditionerKind::Jacobi;
     let implicit_summary = match build_implicit_summary(summary, rhs, dt) {
         Ok(prepared) => prepared,
         Err(_) => return (vec![0.0; summary.dof_count], f64::INFINITY, false, None),
     };
     if implicit_summary.constraint_matrix.is_some() {
-        let backend = if use_runtime_tensor {
-            LinearAlgebraBackendKind::RuntimeTensor
+        let backend = if use_accelerator {
+            LinearAlgebraBackendKind::Accelerator
         } else {
             LinearAlgebraBackendKind::CpuReference
         };
@@ -92,6 +93,7 @@ pub(super) fn solve_implicit_step_system(
                 device_apply_k_attempt_count: result.device_apply_k_attempt_count,
                 preconditioner: result.preconditioner,
                 diagnostics: result.diagnostics,
+                accelerator_evidence: result.accelerator_evidence,
             }),
         );
     }
@@ -99,76 +101,95 @@ pub(super) fn solve_implicit_step_system(
         Ok(prepared) => prepared,
         Err(_) => return (vec![0.0; summary.dof_count], f64::INFINITY, false, None),
     };
-    if use_runtime_tensor {
+    let mut accelerator_admission_diagnostics = Vec::new();
+    if use_accelerator {
         let dt_key = dt_cache_key(
             dt,
             options.time_step_s,
-            runtime_cache.dt_bucket_rel_tolerance,
+            accelerator_cache.dt_bucket_rel_tolerance,
         );
-        if runtime_cache.prepared_systems_by_dt.contains_key(&dt_key) {
-            *runtime_cache.cache_hits += 1;
-            runtime_cache.prepared_lru.retain(|value| *value != dt_key);
-            runtime_cache.prepared_lru.push_back(dt_key);
+        if accelerator_cache
+            .prepared_systems_by_dt
+            .contains_key(&dt_key)
+        {
+            *accelerator_cache.cache_hits += 1;
+            accelerator_cache
+                .prepared_lru
+                .retain(|value| *value != dt_key);
+            accelerator_cache.prepared_lru.push_back(dt_key);
         } else {
-            *runtime_cache.cache_misses += 1;
+            *accelerator_cache.cache_misses += 1;
             let prepare_start = Instant::now();
-            if let Some(prepared) = prepare_runtime_tensor_linear_system(&implicit_summary) {
-                *runtime_cache.prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
-                if runtime_cache.prepared_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
-                    if let Some(evicted_key) = runtime_cache.prepared_lru.pop_front() {
-                        runtime_cache.prepared_systems_by_dt.remove(&evicted_key);
+            match prepare_accelerator_linear_system(
+                prepared_cpu_system.clone(),
+                u32::try_from(options.max_linear_iters).unwrap_or(u32::MAX),
+            ) {
+                Ok(prepared) => {
+                    *accelerator_cache.prepared_build_ms +=
+                        prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                    if accelerator_cache.prepared_systems_by_dt.len()
+                        >= PREPARED_ACCELERATOR_CACHE_CAPACITY
+                    {
+                        if let Some(evicted_key) = accelerator_cache.prepared_lru.pop_front() {
+                            accelerator_cache
+                                .prepared_systems_by_dt
+                                .remove(&evicted_key);
+                        }
                     }
+                    accelerator_cache
+                        .prepared_systems_by_dt
+                        .insert(dt_key, prepared);
+                    accelerator_cache.prepared_lru.push_back(dt_key);
                 }
-                runtime_cache
-                    .prepared_systems_by_dt
-                    .insert(dt_key, prepared);
-                runtime_cache.prepared_lru.push_back(dt_key);
-            } else {
-                *runtime_cache.prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                Err(error) if error.permits_cpu_fallback() => {
+                    *accelerator_cache.prepared_build_ms +=
+                        prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                    accelerator_admission_diagnostics.push(
+                        crate::diagnostics::FeaDiagnostic {
+                            code: "FEA_TRANSIENT_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
+                            severity: crate::diagnostics::FeaDiagnosticSeverity::Warning,
+                            message: format!(
+                                "native sparse execution was rejected before provider allocation; using cpu_reference: {}",
+                                error.message
+                            ),
+                        },
+                    );
+                }
+                Err(error) => {
+                    *accelerator_cache.prepared_build_ms +=
+                        prepare_start.elapsed().as_secs_f64() * 1_000.0;
+                    return accelerator_step_failure(
+                        &prepared_cpu_system,
+                        preconditioner_kind,
+                        error,
+                    );
+                }
             }
         }
 
-        if let Some(prepared) = runtime_cache.prepared_systems_by_dt.get(&dt_key) {
-            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                &implicit_summary,
+        if let Some(prepared) = accelerator_cache.prepared_systems_by_dt.get(&dt_key) {
+            let result = match solve_prepared_accelerator_system(
                 prepared,
                 prepared_cpu_system.rhs(),
-                preconditioner_kind,
                 None,
+                options.tolerance,
             ) {
-                let rhs_norm = dot(prepared_cpu_system.rhs(), prepared_cpu_system.rhs())
-                    .sqrt()
-                    .max(1.0);
-                let relative_residual = result.residual_norm / rhs_norm;
-                let converged = result.converged || relative_residual <= options.tolerance;
-                return (
-                    result.solution.clone(),
-                    relative_residual,
-                    converged,
-                    Some(LinearStepStats {
-                        solver_backend: result.solver_backend,
-                        host_sync_count: result.host_sync_count,
-                        device_apply_k_count: result.device_apply_k_count,
-                        device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                        preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
-                        diagnostics: result.diagnostics.clone(),
-                    }),
-                );
-            }
-        }
-
-        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
-            &implicit_summary,
-            preconditioner_kind,
-            None,
-        ) {
-            let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+                Ok(output) => linear_result_from_accelerator_output(output, preconditioner_kind),
+                Err(error) => linear_result_from_accelerator_error(
+                    prepared_cpu_system.dof_count(),
+                    prepared_cpu_system.rhs(),
+                    preconditioner_kind,
+                    error,
+                ),
+            };
+            let rhs_norm = dot(prepared_cpu_system.rhs(), prepared_cpu_system.rhs())
+                .sqrt()
+                .max(1.0);
             let relative_residual = result.residual_norm / rhs_norm;
-            let converged = result.converged || relative_residual <= options.tolerance;
             return (
                 result.solution.clone(),
                 relative_residual,
-                converged,
+                result.converged,
                 Some(LinearStepStats {
                     solver_backend: result.solver_backend,
                     host_sync_count: result.host_sync_count,
@@ -176,6 +197,7 @@ pub(super) fn solve_implicit_step_system(
                     device_apply_k_attempt_count: result.device_apply_k_attempt_count,
                     preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
                     diagnostics: result.diagnostics.clone(),
+                    accelerator_evidence: result.accelerator_evidence.clone(),
                 }),
             );
         }
@@ -204,7 +226,12 @@ pub(super) fn solve_implicit_step_system(
         .max(1.0);
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() / rhs_norm <= options.tolerance {
-        return (x, rr_old.sqrt(), true, None);
+        return cpu_step_result(
+            x,
+            rr_old.sqrt() / rhs_norm,
+            true,
+            accelerator_admission_diagnostics,
+        );
     }
 
     let mut converged = false;
@@ -232,7 +259,57 @@ pub(super) fn solve_implicit_step_system(
         rr_old = rr_new;
     }
 
-    (x, rr_old.sqrt() / rhs_norm, converged, None)
+    cpu_step_result(
+        x,
+        rr_old.sqrt() / rhs_norm,
+        converged,
+        accelerator_admission_diagnostics,
+    )
+}
+
+fn cpu_step_result(
+    solution: Vec<f64>,
+    residual: f64,
+    converged: bool,
+    diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
+) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
+    let stats = (!diagnostics.is_empty()).then_some(LinearStepStats {
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        host_sync_count: 0,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        preconditioner: SolverPreconditioner::None,
+        diagnostics,
+        accelerator_evidence: None,
+    });
+    (solution, residual, converged, stats)
+}
+
+fn accelerator_step_failure(
+    prepared: &crate::algebra::PreparedRealLinearSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    error: AcceleratorAdapterError,
+) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
+    let result = linear_result_from_accelerator_error(
+        prepared.dof_count(),
+        prepared.rhs(),
+        preconditioner_kind,
+        error,
+    );
+    (
+        result.solution,
+        f64::INFINITY,
+        false,
+        Some(LinearStepStats {
+            solver_backend: result.solver_backend,
+            host_sync_count: result.host_sync_count,
+            device_apply_k_count: result.device_apply_k_count,
+            device_apply_k_attempt_count: result.device_apply_k_attempt_count,
+            preconditioner: result.preconditioner,
+            diagnostics: result.diagnostics,
+            accelerator_evidence: result.accelerator_evidence,
+        }),
+    )
 }
 
 fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {

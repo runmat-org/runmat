@@ -172,6 +172,7 @@ pub fn run_modal_with_options(
             crate::contracts::SolverPreconditioner::None
         },
         solver_host_sync_count: modal.solver_host_sync_count,
+        accelerator_evidence: modal.accelerator_evidence.clone(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),

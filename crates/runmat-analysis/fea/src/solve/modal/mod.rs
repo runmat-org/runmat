@@ -1,4 +1,3 @@
-use runmat_accelerate_api::provider as accel_provider;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -8,8 +7,7 @@ use crate::{
     contracts::SolverMethod,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::{
-        backend::kind::LinearAlgebraBackendKind,
-        runtime_tensor_solver::prepare_runtime_tensor_linear_system,
+        accelerator::prepare_accelerator_linear_system, backend::kind::LinearAlgebraBackendKind,
     },
     ComputeBackend,
 };
@@ -34,6 +32,7 @@ pub struct ModalSolveResult {
     pub solver_host_sync_count: u32,
     pub device_apply_k_count: u32,
     pub device_apply_k_attempt_count: u32,
+    pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
 pub fn solve_modal_system(
@@ -59,6 +58,7 @@ pub fn solve_modal_system(
             solver_host_sync_count: 0,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: Vec::new(),
         };
     }
 
@@ -103,6 +103,7 @@ pub fn solve_modal_system(
                 solver_host_sync_count: 0,
                 device_apply_k_count: 0,
                 device_apply_k_attempt_count: 0,
+                accelerator_evidence: Vec::new(),
             };
         }
     };
@@ -124,6 +125,7 @@ pub fn solve_modal_system(
                 solver_host_sync_count: 0,
                 device_apply_k_count: 0,
                 device_apply_k_attempt_count: 0,
+                accelerator_evidence: Vec::new(),
             };
         }
     };
@@ -145,13 +147,14 @@ pub fn solve_modal_system(
             solver_host_sync_count: 0,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: Vec::new(),
         };
     }
     let mut solve_summary = summary.clone();
     solve_summary.dof_count = reduced_operator.dof_count();
     solve_summary.constrained_dof_count = 0;
     solve_summary.operator = reduced_operator;
-    let use_runtime_tensor = backend == ComputeBackend::Gpu;
+    let accelerator_requested = backend == ComputeBackend::Gpu;
     let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
@@ -162,18 +165,56 @@ pub fn solve_modal_system(
 
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
     let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
-    let has_accel_provider = use_runtime_tensor && accel_provider().is_some();
     let mut prepared_build_ms = 0.0_f64;
-    let prepared_runtime_system = if has_accel_provider {
+    let mut accelerator_admission_fallback = None;
+    let prepared_accelerator_system = if accelerator_requested {
         let prepared_start = Instant::now();
-        let prepared = prepare_runtime_tensor_linear_system(&solve_summary);
+        let prepared = prepare_accelerator_linear_system(
+            solve_summary
+                .operator
+                .prepare_linear()
+                .expect("modal coercivity was checked before accelerator preparation"),
+            64,
+        );
         prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
-        prepared
+        match prepared {
+            Ok(prepared) => Some(prepared),
+            Err(error) if error.permits_cpu_fallback() => {
+                accelerator_admission_fallback = Some(error.message);
+                None
+            }
+            Err(error) => {
+                return ModalSolveResult {
+                    converged: false,
+                    frequencies_hz: Vec::new(),
+                    mode_shapes: Vec::new(),
+                    residual_norms: Vec::new(),
+                    diagnostics: vec![FeaDiagnostic {
+                        code: "FEA_MODAL_ACCELERATOR_PREPARATION_FAILED".to_string(),
+                        severity: FeaDiagnosticSeverity::Error,
+                        message: error.message,
+                    }],
+                    solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                    solver_backend: LinearAlgebraBackendKind::Accelerator,
+                    solver_host_sync_count: 0,
+                    device_apply_k_count: 0,
+                    device_apply_k_attempt_count: 0,
+                    accelerator_evidence: error
+                        .evidence
+                        .into_iter()
+                        .map(|evidence| *evidence)
+                        .collect(),
+                };
+            }
+        }
     } else {
         None
     };
+    let has_accel_provider = prepared_accelerator_system.is_some();
     let mut solve_ms = 0.0_f64;
     let mut fallback_apply_count = 0u32;
+    let mut accelerator_evidence = Vec::new();
+    let mut linear_diagnostics = Vec::new();
     let (max_inverse_iters, min_inverse_iters, update_tol) = if has_accel_provider {
         (6usize, 2usize, 5.0e-4)
     } else {
@@ -197,14 +238,12 @@ pub fn solve_modal_system(
             let mq = apply_m(&solve_summary.operator, &q);
             let solve_start = Instant::now();
             let z = solve_k_system_cg(
-                &solve_summary,
                 &solve_summary.operator,
                 &mq,
                 CgSolveOptions {
                     max_iters: 64,
                     tol: 1.0e-10,
-                    use_runtime_tensor,
-                    prepared_runtime_system: prepared_runtime_system.as_ref(),
+                    prepared_accelerator_system: prepared_accelerator_system.as_ref(),
                     initial_guess: linear_guess.as_deref(),
                 },
             );
@@ -212,7 +251,7 @@ pub fn solve_modal_system(
                 break 'modes;
             }
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
-            if let Some(solve) = z.runtime_tensor {
+            if let Some(solve) = z.accelerator {
                 solver_backend = solve.solver_backend;
                 solver_host_sync_count =
                     solver_host_sync_count.saturating_add(solve.host_sync_count);
@@ -225,6 +264,11 @@ pub fn solve_modal_system(
                         .device_apply_k_attempt_count
                         .saturating_sub(solve.device_apply_k_count),
                 );
+                linear_diagnostics.extend(solve.diagnostics.clone());
+                accelerator_evidence.extend(solve.accelerator_evidence.clone());
+                if !solve.converged {
+                    break 'modes;
+                }
             }
             let mut z_vec = z.vector;
             linear_guess = Some(z_vec.clone());
@@ -285,6 +329,16 @@ pub fn solve_modal_system(
         severity: FeaDiagnosticSeverity::Info,
         message: "solver=matrix_free_subspace_iteration inverse_k=true".to_string(),
     }];
+    if let Some(reason) = accelerator_admission_fallback {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "native sparse execution was rejected before provider allocation; using cpu_reference: {reason}"
+            ),
+        });
+    }
+    diagnostics.extend(linear_diagnostics);
     diagnostics.push(FeaDiagnostic {
         code: "FEA_MODAL_CONVERGENCE".to_string(),
         severity: if converged {
@@ -327,5 +381,6 @@ pub fn solve_modal_system(
         solver_host_sync_count,
         device_apply_k_count,
         device_apply_k_attempt_count,
+        accelerator_evidence,
     }
 }

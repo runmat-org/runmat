@@ -30,6 +30,7 @@ pub(super) fn solve_multiplier_constraint_system(
             solver_backend: LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: None,
             solution: vec![0.0; dofs],
             solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
             preconditioner: SolverPreconditioner::None,
@@ -94,7 +95,7 @@ pub(super) fn solve_multiplier_constraint_system(
             "physical_dofs={dofs} multiplier_dofs={rows} equation_scale={equation_scale}"
         ),
     }];
-    if requested_backend == LinearAlgebraBackendKind::RuntimeTensor {
+    if requested_backend == LinearAlgebraBackendKind::Accelerator {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MULTIPLIER_CPU_REFERENCE".into(),
             severity: FeaDiagnosticSeverity::Warning,
@@ -203,6 +204,7 @@ pub(super) fn solve_multiplier_constraint_system(
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
         solution: solution[..dofs].to_vec(),
         solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
         preconditioner: SolverPreconditioner::None,
@@ -225,6 +227,7 @@ fn rejected_multiplier_system(summary: &AssemblySummary, message: &str) -> Linea
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
         solution: vec![0.0; summary.dof_count],
         solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
         preconditioner: SolverPreconditioner::None,

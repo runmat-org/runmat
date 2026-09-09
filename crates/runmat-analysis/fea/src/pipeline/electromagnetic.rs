@@ -665,7 +665,7 @@ pub fn run_electromagnetic_with_options(
         Some(5),
     );
     let backend_kind = if backend == ComputeBackend::Gpu {
-        LinearAlgebraBackendKind::RuntimeTensor
+        LinearAlgebraBackendKind::Accelerator
     } else {
         LinearAlgebraBackendKind::CpuReference
     };
@@ -1382,6 +1382,7 @@ pub fn run_electromagnetic_with_options(
             crate::contracts::SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
         preconditioner: crate::contracts::SolverPreconditioner::BlockJacobi,
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
+        accelerator_evidence: Vec::new(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),

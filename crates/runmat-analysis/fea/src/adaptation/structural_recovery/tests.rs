@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use runmat_analysis_core::AnalysisField;
 use runmat_meshing_core::{
     solver_volume_element_identity, FieldTopologyLocation, MeshNeighbor, SolverMeshNode,
@@ -153,7 +151,13 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
         ),
         Err(StructuralRecoveryEstimatorError::ResourceLimit)
     );
-    let _guard = crate::progress::replace_fea_progress_context(None, Some(Arc::new(|| true)));
+    let cancellation = crate::progress::FeaCancellationToken::new();
+    cancellation.cancel();
+    let _guard =
+        crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+            cancellation,
+            ..crate::progress::FeaProgressContext::default()
+        });
     assert_eq!(
         estimate_structural_recovery_error(
             &artifact,

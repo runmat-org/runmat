@@ -4,14 +4,14 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum LinearAlgebraBackendKind {
     CpuReference,
-    RuntimeTensor,
+    Accelerator,
 }
 
 impl LinearAlgebraBackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
             LinearAlgebraBackendKind::CpuReference => "cpu_reference",
-            LinearAlgebraBackendKind::RuntimeTensor => "runtime_tensor",
+            LinearAlgebraBackendKind::Accelerator => "accelerator",
         }
     }
 }

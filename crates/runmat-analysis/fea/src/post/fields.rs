@@ -1193,6 +1193,7 @@ mod tests {
             solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: None,
             solution: vec![
                 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
             ],
@@ -1308,6 +1309,7 @@ mod tests {
             solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
+            accelerator_evidence: None,
             solution: vec![
                 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.03,
             ],

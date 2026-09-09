@@ -10,7 +10,7 @@ pub(super) struct TransientQualityDiagnosticInputs<'a> {
     pub(super) accepted_time_steps_s: &'a [f64],
     pub(super) residual_norms: &'a [f64],
     pub(super) energies: &'a [f64],
-    pub(super) use_runtime_tensor: bool,
+    pub(super) use_accelerator: bool,
     pub(super) prepared_cache_entries: usize,
     pub(super) prepared_cache_hits: usize,
     pub(super) prepared_cache_misses: usize,
@@ -89,7 +89,7 @@ pub(super) fn push_transient_quality_diagnostics(
             message: format!("retry_budget_hits={}", inputs.retry_budget_hits),
         });
     }
-    if inputs.use_runtime_tensor {
+    if inputs.use_accelerator {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TRANSIENT_CACHE".to_string(),
             severity: FeaDiagnosticSeverity::Info,

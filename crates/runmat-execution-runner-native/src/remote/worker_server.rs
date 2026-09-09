@@ -309,6 +309,7 @@ pub(super) async fn run_worker_loop(
                             Ok(arguments) => {
                                 program.arguments = arguments;
                                 super::worker_execution::execute(
+                                    attempt_id,
                                     program,
                                     materialized_project,
                                     meshing_host,
