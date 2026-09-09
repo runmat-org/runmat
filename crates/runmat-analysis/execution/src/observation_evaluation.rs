@@ -5,7 +5,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest,
     ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
 };
-use runmat_analysis_fea::results::field::{RecoveredFieldArtifact, RecoveredFieldCatalog};
+use runmat_analysis_fea::results::field::RecoveredFieldSelection;
 use runmat_analysis_fea::results::observation::{
     resolve_observation_plan, ObservationArtifact, ObservationLimits,
 };
@@ -18,16 +18,17 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
-    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    import_analysis_objects, import_analysis_output_set, import_analysis_partition,
+    prepare_analysis_objects, prepare_analysis_program, prepare_partitioned_analysis_objects,
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+    AnalysisPartitionImport, AnalysisWorkloadInput, AnalysisWorkloadRequest,
+    ImportedRecoveredFields, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct StructuralObservationPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: FieldRecoveryRequest,
-    pub source_fields: PreparedAnalysisObjects,
+    pub source_fields: ImportedRecoveredFields,
     pub mesh: PreparedAnalysisObjects,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
@@ -51,13 +52,14 @@ pub struct ImportedObservations {
 }
 
 pub fn prepare_structural_observation(
+    source: &impl CacheImport,
     preparation: StructuralObservationPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralObservation> {
     preparation.source_host.validate()?;
     preparation.source_request.validate()?;
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
         || preparation.source_host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
-        || preparation.source_fields.manifest.kind != AnalysisNumericalObjectKind::Field
+        || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
         || preparation.mesh.manifest.kind != AnalysisNumericalObjectKind::Mesh
         || preparation.chunk_bytes == 0
     {
@@ -98,9 +100,8 @@ pub fn prepare_structural_observation(
             "observation projection differs from its field-recovery request",
         ));
     }
-    let fields = RecoveredFieldArtifact::from_canonical_bytes(&preparation.source_fields.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if fields.identity().digest() != preparation.source_fields.manifest.logical_identity
+    let fields = &preparation.source_fields.manifest;
+    if fields.identity.digest() != preparation.source_fields.output.logical_identity
         || fields.recovery_request != preparation.source_request.identity()
         || fields.source_result != preparation.source_request.source_result
     {
@@ -108,12 +109,10 @@ pub fn prepare_structural_observation(
             "recovered-field artifact differs from its source request",
         ));
     }
-    let catalog = RecoveredFieldCatalog::from_artifact(&projection, fields.clone())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let definitions = catalog
-        .fields()
+    let definitions = fields
+        .fields
         .iter()
-        .map(|field| field.definition().clone())
+        .map(|field| field.definition.clone())
         .collect::<Vec<_>>();
     let plan = resolve_observation_plan(
         &preparation.step,
@@ -122,11 +121,65 @@ pub fn prepare_structural_observation(
         preparation.limits,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let required_definitions = plan
+        .observations
+        .iter()
+        .map(|observation| observation.source_field_definition_identity)
+        .collect::<BTreeSet<_>>();
+    let selected_fields = fields
+        .fields
+        .iter()
+        .filter(|entry| required_definitions.contains(&entry.definition.identity()))
+        .map(|entry| entry.field)
+        .collect::<Vec<_>>();
+    let selection = RecoveredFieldSelection::new(fields.clone(), selected_fields)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let request = ObservationEvaluationRequest::new(
         preparation.source_request.producer,
-        &fields,
+        &selection,
         preparation.source_request.mesh_digest,
         plan,
+    )?;
+    let selection_bytes = selection
+        .canonical_bytes()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mut selected_payloads = Vec::with_capacity(selection.fields.len());
+    for field in &selection.fields {
+        selected_payloads.push((
+            *field,
+            import_analysis_partition(
+                source,
+                AnalysisPartitionImport {
+                    root: &preparation.source_fields.output.root,
+                    expected_kind: AnalysisNumericalObjectKind::Field,
+                    expected_logical_identity: preparation.source_fields.output.logical_identity,
+                    expected_payload_digest: preparation.source_fields.output.payload_digest,
+                    partition_identity: field.digest(),
+                    access: &preparation.source_host.artifact_access,
+                    limits: preparation.inventory_limits,
+                },
+            )?
+            .payload(),
+        ));
+    }
+    let mut field_partitions = Vec::with_capacity(selected_payloads.len() + 1);
+    field_partitions.push(runmat_analysis_fea::execution::AnalysisPayloadPartition {
+        logical_identity: selection.identity.digest(),
+        payload: &selection_bytes,
+    });
+    field_partitions.extend(selected_payloads.iter().map(|(identity, payload)| {
+        runmat_analysis_fea::execution::AnalysisPayloadPartition {
+            logical_identity: identity.digest(),
+            payload,
+        }
+    }));
+    let selected_field_objects = prepare_partitioned_analysis_objects(
+        AnalysisNumericalObjectKind::FieldSelection,
+        selection.identity.digest(),
+        &field_partitions,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
     )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
@@ -139,7 +192,7 @@ pub fn prepare_structural_observation(
     )?;
     let inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
-        (preparation.source_fields, ValueRefKind::ResultObject),
+        (selected_field_objects, ValueRefKind::DriverObject),
         (preparation.mesh, ValueRefKind::DriverObject),
     ];
     let workload_inputs = inputs

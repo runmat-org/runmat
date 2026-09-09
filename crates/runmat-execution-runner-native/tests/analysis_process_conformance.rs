@@ -296,18 +296,21 @@ async fn execute_publication_chain_in_process(
     )
     .unwrap();
 
-    let observations = prepare_structural_observation(StructuralObservationPreparation {
-        source_host: fields.host.clone(),
-        source_request: fields.request.clone(),
-        source_fields: imported_fields.objects,
-        mesh: solve_inputs[1].clone(),
-        sequence,
-        step: step.clone(),
-        limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
-        program_revision: revision(),
-        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-        inventory_limits: limits,
-    })
+    let observations = prepare_structural_observation(
+        store,
+        StructuralObservationPreparation {
+            source_host: fields.host.clone(),
+            source_request: fields.request.clone(),
+            source_fields: imported_fields,
+            mesh: solve_inputs[1].clone(),
+            sequence,
+            step: step.clone(),
+            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            program_revision: revision(),
+            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+            inventory_limits: limits,
+        },
+    )
     .unwrap();
     observations.program.write_to(store).unwrap();
     let observation_success = wait_for_native_task(

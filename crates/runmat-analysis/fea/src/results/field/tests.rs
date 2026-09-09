@@ -145,3 +145,67 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
     encoded["topology_digest"] = serde_json::to_value(Digest::sha256("substituted")).unwrap();
     assert!(serde_json::from_value::<RecoveredFieldArtifact>(encoded).is_err());
 }
+
+#[test]
+fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_content() {
+    let projection = projection();
+    let final_field = RecoveredField::new(
+        temperature_definition("temperature.final"),
+        RecoveredFieldSample::Final,
+        temperature_field("temperature.final"),
+    )
+    .unwrap();
+    let time_field = RecoveredField::new(
+        temperature_definition("temperature.time"),
+        RecoveredFieldSample::TimeSeconds(1.0),
+        temperature_field("temperature.time"),
+    )
+    .unwrap();
+    let artifact = RecoveredFieldArtifact::new(
+        recovery_request(),
+        source_result(),
+        projection.projection_digest,
+        projection.nodes.len(),
+        projection.elements.len(),
+        vec![final_field.clone(), time_field.clone()],
+    )
+    .unwrap();
+    let manifest = artifact.manifest().unwrap();
+    assert_eq!(manifest.identity, artifact.identity());
+    assert_eq!(manifest.fields.len(), 2);
+    assert_eq!(manifest.fields[0].field, final_field.identity());
+    assert_eq!(
+        manifest.fields[1].sample,
+        RecoveredFieldSample::TimeSeconds(1.0)
+    );
+    let decoded_manifest =
+        RecoveredFieldArtifactManifest::from_canonical_bytes(&manifest.canonical_bytes().unwrap())
+            .unwrap();
+    let decoded_field =
+        RecoveredField::from_canonical_bytes(&final_field.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(decoded_field, final_field);
+    assert_eq!(
+        RecoveredFieldArtifact::from_manifest_and_fields(
+            decoded_manifest.clone(),
+            vec![final_field.clone(), time_field.clone()],
+        )
+        .unwrap(),
+        artifact
+    );
+
+    let substituted = RecoveredField::new(
+        temperature_definition("temperature.time"),
+        RecoveredFieldSample::TimeSeconds(1.0),
+        AnalysisField::host_f64(
+            "temperature.time",
+            vec![4],
+            vec![900.0, 901.0, 902.0, 903.0],
+        ),
+    )
+    .unwrap();
+    assert!(RecoveredFieldArtifact::from_manifest_and_fields(
+        decoded_manifest,
+        vec![final_field, substituted],
+    )
+    .is_err());
+}

@@ -2,7 +2,9 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use crate::results::field::{RecoveredFieldArtifact, RecoveredFieldArtifactIdentity};
+use crate::results::field::{
+    RecoveredFieldArtifactIdentity, RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
+};
 use crate::results::observation::ResolvedObservationPlan;
 
 use super::{
@@ -22,6 +24,7 @@ pub struct ObservationEvaluationRequest {
     pub producer: StepIdentity,
     pub field_recovery_request: FieldRecoveryRequestIdentity,
     pub source_fields: RecoveredFieldArtifactIdentity,
+    pub source_selection: RecoveredFieldSelectionIdentity,
     pub source_result: SolverResultIdentity,
     pub mesh_digest: Digest,
     pub plan: ResolvedObservationPlan,
@@ -35,6 +38,7 @@ struct ObservationEvaluationRequestWire {
     producer: StepIdentity,
     field_recovery_request: FieldRecoveryRequestIdentity,
     source_fields: RecoveredFieldArtifactIdentity,
+    source_selection: RecoveredFieldSelectionIdentity,
     source_result: SolverResultIdentity,
     mesh_digest: Digest,
     plan: ResolvedObservationPlan,
@@ -50,6 +54,7 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
             producer: wire.producer,
             field_recovery_request: wire.field_recovery_request,
             source_fields: wire.source_fields,
+            source_selection: wire.source_selection,
             source_result: wire.source_result,
             mesh_digest: wire.mesh_digest,
             plan: wire.plan,
@@ -62,7 +67,7 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
 impl ObservationEvaluationRequest {
     pub fn new(
         producer: StepIdentity,
-        source: &RecoveredFieldArtifact,
+        source: &RecoveredFieldSelection,
         mesh_digest: Digest,
         plan: ResolvedObservationPlan,
     ) -> AnalysisExecutionResult<Self> {
@@ -71,7 +76,7 @@ impl ObservationEvaluationRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         plan.validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if source.topology_digest != plan.topology_digest {
+        if source.source.topology_digest != plan.topology_digest {
             return Err(AnalysisExecutionError::Identity(
                 "observation plan topology differs from its recovered fields",
             ));
@@ -82,18 +87,20 @@ impl ObservationEvaluationRequest {
                 "observation-evaluation-request",
                 &(
                     producer,
-                    source.recovery_request,
-                    source.identity(),
-                    source.source_result,
+                    source.source.recovery_request,
+                    source.source.identity,
+                    source.identity,
+                    source.source.source_result,
                     mesh_digest,
                     plan.identity,
                     plan.topology_digest,
                 ),
             )?,
             producer,
-            field_recovery_request: source.recovery_request,
-            source_fields: source.identity(),
-            source_result: source.source_result,
+            field_recovery_request: source.source.recovery_request,
+            source_fields: source.source.identity,
+            source_selection: source.identity,
+            source_result: source.source.source_result,
             mesh_digest,
             plan,
         };
@@ -120,6 +127,7 @@ impl ObservationEvaluationRequest {
                 self.producer,
                 self.field_recovery_request,
                 self.source_fields,
+                self.source_selection,
                 self.source_result,
                 self.mesh_digest,
                 self.plan.identity,

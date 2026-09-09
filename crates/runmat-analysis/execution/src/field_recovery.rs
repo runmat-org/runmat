@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, SolverResultIdentity,
 };
-use runmat_analysis_fea::results::field::RecoveredFieldArtifact;
+use runmat_analysis_fea::results::field::{
+    RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
+};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -12,10 +14,11 @@ use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
-    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    analysis_object_references, import_analysis_output_set, import_analysis_partition,
+    prepare_analysis_objects, prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputRoot,
+    AnalysisPartitionImport, AnalysisWorkloadInput, AnalysisWorkloadRequest,
+    ImportedAnalysisPartition, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct StructuralFieldRecoveryPreparation {
@@ -36,8 +39,9 @@ pub struct PreparedStructuralFieldRecovery {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedRecoveredFields {
-    pub artifact: RecoveredFieldArtifact,
-    pub objects: PreparedAnalysisObjects,
+    pub manifest: RecoveredFieldArtifactManifest,
+    pub catalog_objects: ImportedAnalysisPartition,
+    pub output: AnalysisOutputRoot,
 }
 
 pub fn prepare_structural_field_recovery(
@@ -151,35 +155,73 @@ pub fn import_structural_recovered_fields(
             "field recovery must return exactly one field artifact root".into(),
         ));
     };
-    let imported = import_analysis_objects(
+    let imported = import_analysis_partition(
         source,
-        &output.root,
-        AnalysisNumericalObjectKind::Field,
-        output.logical_identity,
-        output.payload_digest,
-        &prepared.host.artifact_access,
-        limits,
+        AnalysisPartitionImport {
+            root: &output.root,
+            expected_kind: AnalysisNumericalObjectKind::Field,
+            expected_logical_identity: output.logical_identity,
+            expected_payload_digest: output.payload_digest,
+            partition_identity: output.logical_identity,
+            access: &prepared.host.artifact_access,
+            limits,
+        },
     )?;
-    let mut expected =
-        imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    let mut expected = analysis_object_references(
+        &imported.manifest,
+        &output.root,
+        &prepared.host.artifact_access,
+        ValueRefKind::ResultObject,
+    )?;
     expected.push(output_set.root);
     if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(
             "field result inventory differs from its canonical closure",
         ));
     }
-    let artifact = RecoveredFieldArtifact::from_canonical_bytes(&imported.payload())
+    let manifest = RecoveredFieldArtifactManifest::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if artifact.identity().digest() != output.logical_identity
-        || artifact.source_result != prepared.request.source_result
-        || artifact.topology_digest != prepared.request.projection_digest
+    if manifest.identity.digest() != output.logical_identity
+        || manifest.source_result != prepared.request.source_result
+        || manifest.topology_digest != prepared.request.projection_digest
+        || manifest.recovery_request != prepared.request.identity()
     {
         return Err(AnalysisBridgeError::Identity(
             "recovered fields differ from their admitted source request",
         ));
     }
     Ok(ImportedRecoveredFields {
-        artifact,
-        objects: imported,
+        manifest,
+        catalog_objects: imported,
+        output: output.clone(),
     })
+}
+
+pub fn decode_recovered_field_artifact(
+    objects: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<RecoveredFieldArtifact> {
+    if objects.manifest.kind != AnalysisNumericalObjectKind::Field {
+        return Err(AnalysisBridgeError::Invalid(
+            "recovered-field decoder requires a field numerical object".into(),
+        ));
+    }
+    let manifest = RecoveredFieldArtifactManifest::from_canonical_bytes(
+        &objects.partition_payload(objects.manifest.logical_identity)?,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if manifest.identity.digest() != objects.manifest.logical_identity {
+        return Err(AnalysisBridgeError::Identity(
+            "recovered-field manifest differs from its numerical object identity",
+        ));
+    }
+    let fields = manifest
+        .fields
+        .iter()
+        .map(|entry| {
+            RecoveredField::from_canonical_bytes(&objects.partition_payload(entry.field.digest())?)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    RecoveredFieldArtifact::from_manifest_and_fields(manifest, fields)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
 }

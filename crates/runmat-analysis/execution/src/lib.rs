@@ -31,8 +31,9 @@ pub use callable::{
 };
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
 pub use field_recovery::{
-    import_structural_recovered_fields, prepare_structural_field_recovery, ImportedRecoveredFields,
-    PreparedStructuralFieldRecovery, StructuralFieldRecoveryPreparation,
+    decode_recovered_field_artifact, import_structural_recovered_fields,
+    prepare_structural_field_recovery, ImportedRecoveredFields, PreparedStructuralFieldRecovery,
+    StructuralFieldRecoveryPreparation,
 };
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
@@ -47,7 +48,11 @@ pub use host::{
 pub use materialized_signal::{
     canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
 };
-pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};
+pub use object::{
+    analysis_object_references, import_analysis_objects, import_analysis_partition,
+    prepare_analysis_objects, prepare_partitioned_analysis_objects, AnalysisPartitionImport,
+    ImportedAnalysisPartition, PreparedAnalysisObjects,
+};
 pub use observation_evaluation::{
     import_structural_observations, prepare_structural_observation, ImportedObservations,
     PreparedStructuralObservation, StructuralObservationPreparation,
@@ -63,7 +68,7 @@ pub use result_publication::{
 pub use runmat_analysis_fea::execution::SignalInputAdmission;
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
-    CompletedAnalysisWorkload,
+    AnalysisKernelOutputPartition, CompletedAnalysisWorkload,
 };
 pub use signal_input::{validate_signal_input_payload, ResolvedSignalArtifact};
 pub use signal_materialization::{

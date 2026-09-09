@@ -34,6 +34,26 @@ impl RecoveredFieldArtifactIdentity {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RecoveredFieldIdentity(Digest);
+
+impl RecoveredFieldIdentity {
+    pub const fn digest(self) -> Digest {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RecoveredFieldSelectionIdentity(Digest);
+
+impl RecoveredFieldSelectionIdentity {
+    pub const fn digest(self) -> Digest {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveredFieldNumericRepresentation {
     Real,
@@ -68,7 +88,7 @@ impl RecoveredFieldSample {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "RecoveredFieldDefinitionData")]
 pub struct RecoveredFieldDefinition {
     identity: RecoveredFieldDefinitionIdentity,
@@ -190,6 +210,7 @@ impl RecoveredFieldDefinition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "RecoveredFieldData")]
 pub struct RecoveredField {
+    identity: RecoveredFieldIdentity,
     definition: RecoveredFieldDefinition,
     sample: RecoveredFieldSample,
     storage: AnalysisField,
@@ -198,6 +219,7 @@ pub struct RecoveredField {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecoveredFieldData {
+    identity: RecoveredFieldIdentity,
     definition: RecoveredFieldDefinition,
     sample: RecoveredFieldSample,
     storage: AnalysisField,
@@ -207,7 +229,14 @@ impl TryFrom<RecoveredFieldData> for RecoveredField {
     type Error = RecoveredFieldError;
 
     fn try_from(data: RecoveredFieldData) -> Result<Self, Self::Error> {
-        Self::new(data.definition, data.sample, data.storage)
+        let field = Self {
+            identity: data.identity,
+            definition: data.definition,
+            sample: data.sample,
+            storage: data.storage,
+        };
+        field.validate()?;
+        Ok(field)
     }
 }
 
@@ -218,12 +247,19 @@ impl RecoveredField {
         storage: AnalysisField,
     ) -> Result<Self, RecoveredFieldError> {
         let field = Self {
+            identity: RecoveredFieldIdentity(Digest::sha256([])),
             definition,
             sample,
             storage,
         };
+        let mut field = field;
+        field.identity = field.derive_identity()?;
         field.validate()?;
         Ok(field)
+    }
+
+    pub const fn identity(&self) -> RecoveredFieldIdentity {
+        self.identity
     }
 
     pub fn definition(&self) -> &RecoveredFieldDefinition {
@@ -261,7 +297,33 @@ impl RecoveredField {
         if expected != actual {
             return Err(RecoveredFieldError::StorageShapeMismatch);
         }
+        if self.identity != self.derive_identity()? {
+            return Err(RecoveredFieldError::IdentityMismatch);
+        }
         Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
+        self.validate()?;
+        encode_contract(FIELD_PREFIX, "recovered-field", self, FIELD_LIMITS)
+            .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
+        decode_contract(FIELD_PREFIX, "recovered-field", bytes, FIELD_LIMITS)
+            .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    fn derive_identity(&self) -> Result<RecoveredFieldIdentity, RecoveredFieldError> {
+        encode_contract(
+            FIELD_PREFIX,
+            "recovered-field-identity",
+            &(&self.definition, self.sample, &self.storage),
+            FIELD_LIMITS,
+        )
+        .map(Digest::sha256)
+        .map(RecoveredFieldIdentity)
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }
 }
 
@@ -288,6 +350,180 @@ pub struct RecoveredFieldArtifact {
     pub node_count: usize,
     pub element_count: usize,
     fields: Vec<RecoveredField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveredFieldArtifactEntry {
+    pub field: RecoveredFieldIdentity,
+    pub definition: RecoveredFieldDefinition,
+    pub sample: RecoveredFieldSample,
+}
+
+/// Lightweight semantic catalog for a recovered-field artifact.
+///
+/// The catalog carries enough information to resolve observations and select exact field payloads
+/// without loading any field values. Its identity is the identity of the complete artifact.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveredFieldArtifactManifest {
+    pub schema_version: u16,
+    pub identity: RecoveredFieldArtifactIdentity,
+    pub recovery_request: FieldRecoveryRequestIdentity,
+    pub source_result: SolverResultIdentity,
+    pub topology_digest: Digest,
+    pub node_count: usize,
+    pub element_count: usize,
+    pub fields: Vec<RecoveredFieldArtifactEntry>,
+}
+
+impl RecoveredFieldArtifactManifest {
+    pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        if self.schema_version != 1
+            || self.node_count == 0
+            || self.element_count == 0
+            || self.fields.is_empty()
+        {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field manifest requires a supported schema, nonempty topology, and fields".into(),
+            ));
+        }
+        let mut field_ids = std::collections::BTreeSet::new();
+        let mut sample_keys = std::collections::BTreeSet::new();
+        for entry in &self.fields {
+            entry.definition.validate()?;
+            entry.sample.validate()?;
+            if !field_ids.insert(entry.field)
+                || !sample_keys.insert(sample_identity(entry.definition.identity(), entry.sample)?)
+            {
+                return Err(RecoveredFieldError::CatalogDuplicateSample);
+            }
+        }
+        if self.identity != derive_artifact_identity(self)? {
+            return Err(RecoveredFieldError::IdentityMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
+        self.validate()?;
+        encode_contract(
+            FIELD_PREFIX,
+            "recovered-field-artifact-manifest",
+            self,
+            FIELD_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
+        let manifest: Self = decode_contract(
+            FIELD_PREFIX,
+            "recovered-field-artifact-manifest",
+            bytes,
+            FIELD_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveredFieldSelection {
+    pub schema_version: u16,
+    pub identity: RecoveredFieldSelectionIdentity,
+    pub source: RecoveredFieldArtifactManifest,
+    pub fields: Vec<RecoveredFieldIdentity>,
+}
+
+impl RecoveredFieldSelection {
+    pub fn new(
+        source: RecoveredFieldArtifactManifest,
+        fields: Vec<RecoveredFieldIdentity>,
+    ) -> Result<Self, RecoveredFieldError> {
+        let mut selection = Self {
+            schema_version: 1,
+            identity: RecoveredFieldSelectionIdentity(Digest::sha256([])),
+            source,
+            fields,
+        };
+        selection.identity = selection.derive_identity()?;
+        selection.validate()?;
+        Ok(selection)
+    }
+
+    pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        self.source.validate()?;
+        if self.schema_version != 1 || self.fields.is_empty() {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field selection requires a supported schema and selected fields".into(),
+            ));
+        }
+        let selected = self
+            .fields
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        if selected.len() != self.fields.len() {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field selection contains duplicate field identities".into(),
+            ));
+        }
+        let canonical = self
+            .source
+            .fields
+            .iter()
+            .filter(|entry| selected.contains(&entry.field))
+            .map(|entry| entry.field)
+            .collect::<Vec<_>>();
+        if canonical != self.fields {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field selection is absent from or reordered relative to its source manifest"
+                    .into(),
+            ));
+        }
+        if self.identity != self.derive_identity()? {
+            return Err(RecoveredFieldError::IdentityMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
+        self.validate()?;
+        encode_contract(
+            FIELD_PREFIX,
+            "recovered-field-selection",
+            self,
+            FIELD_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
+        let selection: Self = decode_contract(
+            FIELD_PREFIX,
+            "recovered-field-selection",
+            bytes,
+            FIELD_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))?;
+        selection.validate()?;
+        Ok(selection)
+    }
+
+    fn derive_identity(&self) -> Result<RecoveredFieldSelectionIdentity, RecoveredFieldError> {
+        encode_contract(
+            FIELD_PREFIX,
+            "recovered-field-selection-identity",
+            &(self.schema_version, self.source.identity, &self.fields),
+            FIELD_LIMITS,
+        )
+        .map(Digest::sha256)
+        .map(RecoveredFieldSelectionIdentity)
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
 }
 
 #[derive(Deserialize)]
@@ -358,6 +594,57 @@ impl RecoveredFieldArtifact {
         self.fields
     }
 
+    pub fn manifest(&self) -> Result<RecoveredFieldArtifactManifest, RecoveredFieldError> {
+        let manifest = RecoveredFieldArtifactManifest {
+            schema_version: self.schema_version,
+            identity: self.identity,
+            recovery_request: self.recovery_request,
+            source_result: self.source_result,
+            topology_digest: self.topology_digest,
+            node_count: self.node_count,
+            element_count: self.element_count,
+            fields: self
+                .fields
+                .iter()
+                .map(|field| RecoveredFieldArtifactEntry {
+                    field: field.identity(),
+                    definition: field.definition().clone(),
+                    sample: field.sample(),
+                })
+                .collect(),
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn from_manifest_and_fields(
+        manifest: RecoveredFieldArtifactManifest,
+        fields: Vec<RecoveredField>,
+    ) -> Result<Self, RecoveredFieldError> {
+        manifest.validate()?;
+        if manifest.fields.len() != fields.len()
+            || manifest.fields.iter().zip(&fields).any(|(entry, field)| {
+                entry.field != field.identity()
+                    || entry.definition != *field.definition()
+                    || entry.sample != field.sample()
+            })
+        {
+            return Err(RecoveredFieldError::IdentityMismatch);
+        }
+        let artifact = Self {
+            schema_version: manifest.schema_version,
+            identity: manifest.identity,
+            recovery_request: manifest.recovery_request,
+            source_result: manifest.source_result,
+            topology_digest: manifest.topology_digest,
+            node_count: manifest.node_count,
+            element_count: manifest.element_count,
+            fields,
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
         if self.schema_version != 1 || self.node_count == 0 || self.element_count == 0 {
             return Err(RecoveredFieldError::InvalidArtifact(
@@ -390,14 +677,7 @@ impl RecoveredFieldArtifact {
             if field.storage().shape != expected_shape {
                 return Err(RecoveredFieldError::StorageShapeMismatch);
             }
-            let sample_key = encode_contract(
-                FIELD_PREFIX,
-                "recovered-field-sample",
-                &(field.definition().identity(), field.sample()),
-                FIELD_LIMITS,
-            )
-            .map(Digest::sha256)
-            .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))?;
+            let sample_key = sample_identity(field.definition().identity(), field.sample())?;
             if !sample_keys.insert(sample_key) {
                 return Err(RecoveredFieldError::CatalogDuplicateSample);
             }
@@ -425,24 +705,61 @@ impl RecoveredFieldArtifact {
     }
 
     fn derive_identity(&self) -> Result<RecoveredFieldArtifactIdentity, RecoveredFieldError> {
-        encode_contract(
-            FIELD_PREFIX,
-            "recovered-field-artifact-identity",
-            &(
-                self.schema_version,
-                self.recovery_request,
-                self.source_result,
-                self.topology_digest,
-                self.node_count,
-                self.element_count,
-                &self.fields,
-            ),
-            FIELD_LIMITS,
-        )
-        .map(Digest::sha256)
-        .map(RecoveredFieldArtifactIdentity)
-        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+        derive_artifact_identity(&RecoveredFieldArtifactManifest {
+            schema_version: self.schema_version,
+            identity: self.identity,
+            recovery_request: self.recovery_request,
+            source_result: self.source_result,
+            topology_digest: self.topology_digest,
+            node_count: self.node_count,
+            element_count: self.element_count,
+            fields: self
+                .fields
+                .iter()
+                .map(|field| RecoveredFieldArtifactEntry {
+                    field: field.identity(),
+                    definition: field.definition().clone(),
+                    sample: field.sample(),
+                })
+                .collect(),
+        })
     }
+}
+
+fn derive_artifact_identity(
+    manifest: &RecoveredFieldArtifactManifest,
+) -> Result<RecoveredFieldArtifactIdentity, RecoveredFieldError> {
+    encode_contract(
+        FIELD_PREFIX,
+        "recovered-field-artifact-identity",
+        &(
+            manifest.schema_version,
+            manifest.recovery_request,
+            manifest.source_result,
+            manifest.topology_digest,
+            manifest.node_count,
+            manifest.element_count,
+            &manifest.fields,
+        ),
+        FIELD_LIMITS,
+    )
+    .map(Digest::sha256)
+    .map(RecoveredFieldArtifactIdentity)
+    .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+}
+
+fn sample_identity(
+    definition: RecoveredFieldDefinitionIdentity,
+    sample: RecoveredFieldSample,
+) -> Result<Digest, RecoveredFieldError> {
+    encode_contract(
+        FIELD_PREFIX,
+        "recovered-field-sample",
+        &(definition, sample),
+        FIELD_LIMITS,
+    )
+    .map(Digest::sha256)
+    .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]

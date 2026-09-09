@@ -1,6 +1,6 @@
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisResultIdentity, AnalysisWorkKind,
-    DEFAULT_ANALYSIS_CHUNK_BYTES,
+    AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisResultIdentity,
+    AnalysisWorkKind, DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
@@ -9,7 +9,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionRequest};
 
 use crate::{
-    import_analysis_objects, prepare_analysis_objects,
+    import_analysis_objects, prepare_analysis_objects, prepare_partitioned_analysis_objects,
     response::{publish_analysis_output_set, AnalysisOutputSet},
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
@@ -17,6 +17,51 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnalysisKernelOutput {
     pub kind: AnalysisNumericalObjectKind,
+    pub logical_identity: Digest,
+    pub payload: Vec<u8>,
+    pub partitions: Vec<AnalysisKernelOutputPartition>,
+}
+
+impl AnalysisKernelOutput {
+    pub fn whole(
+        kind: AnalysisNumericalObjectKind,
+        logical_identity: Digest,
+        payload: Vec<u8>,
+    ) -> Self {
+        Self {
+            kind,
+            logical_identity,
+            payload,
+            partitions: Vec::new(),
+        }
+    }
+
+    pub fn partitioned(
+        kind: AnalysisNumericalObjectKind,
+        logical_identity: Digest,
+        partitions: Vec<AnalysisKernelOutputPartition>,
+    ) -> Self {
+        Self {
+            kind,
+            logical_identity,
+            payload: Vec::new(),
+            partitions,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        (self.partitions.is_empty() && !self.payload.is_empty())
+            || (self.payload.is_empty()
+                && !self.partitions.is_empty()
+                && self
+                    .partitions
+                    .iter()
+                    .all(|partition| !partition.payload.is_empty()))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalysisKernelOutputPartition {
     pub logical_identity: Digest,
     pub payload: Vec<u8>,
 }
@@ -103,7 +148,7 @@ where
         || kernel_outputs
             .iter()
             .zip(&host.workload.outputs)
-            .any(|(actual, expected)| actual.kind != *expected || actual.payload.is_empty())
+            .any(|(actual, expected)| actual.kind != *expected || !actual.is_valid())
     {
         return Err(AnalysisBridgeError::Invalid(
             "analysis kernel outputs differ from the workload contract".into(),
@@ -114,14 +159,34 @@ where
     let mut roots = Vec::with_capacity(kernel_outputs.len());
     let mut result_objects = Vec::new();
     for output in kernel_outputs {
-        let prepared = prepare_analysis_objects(
-            output.kind,
-            output.logical_identity,
-            &output.payload,
-            chunk_bytes.min(DEFAULT_ANALYSIS_CHUNK_BYTES),
-            ObjectNamespace::ResultValue,
-            limits,
-        )?;
+        let bounded_chunk_bytes = chunk_bytes.min(DEFAULT_ANALYSIS_CHUNK_BYTES);
+        let prepared = if output.partitions.is_empty() {
+            prepare_analysis_objects(
+                output.kind,
+                output.logical_identity,
+                &output.payload,
+                bounded_chunk_bytes,
+                ObjectNamespace::ResultValue,
+                limits,
+            )?
+        } else {
+            let partitions = output
+                .partitions
+                .iter()
+                .map(|partition| AnalysisPayloadPartition {
+                    logical_identity: partition.logical_identity,
+                    payload: &partition.payload,
+                })
+                .collect::<Vec<_>>();
+            prepare_partitioned_analysis_objects(
+                output.kind,
+                output.logical_identity,
+                &partitions,
+                bounded_chunk_bytes,
+                ObjectNamespace::ResultValue,
+                limits,
+            )?
+        };
         let references = prepared.references(&host.artifact_access, ValueRefKind::ResultObject)?;
         let root = references
             .first()

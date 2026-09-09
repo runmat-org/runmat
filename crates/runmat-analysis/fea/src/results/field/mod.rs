@@ -5,9 +5,11 @@ mod contract;
 
 pub use catalog::RecoveredFieldCatalog;
 pub use contract::{
-    RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactIdentity,
-    RecoveredFieldDefinition, RecoveredFieldDefinitionIdentity, RecoveredFieldError,
-    RecoveredFieldNumericRepresentation, RecoveredFieldSample,
+    RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactEntry,
+    RecoveredFieldArtifactIdentity, RecoveredFieldArtifactManifest, RecoveredFieldDefinition,
+    RecoveredFieldDefinitionIdentity, RecoveredFieldError, RecoveredFieldIdentity,
+    RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
+    RecoveredFieldSelectionIdentity,
 };
 
 #[cfg(test)]

@@ -212,6 +212,74 @@ fn numerical_objects_are_deterministically_chunked_and_self_validating() {
 }
 
 #[test]
+fn semantic_payloads_have_independent_chunk_intervals_and_identity() {
+    let header = b"field catalog".as_slice();
+    let displacement = (0_u8..=31).collect::<Vec<_>>();
+    let stress = (64_u8..=95).collect::<Vec<_>>();
+    let prepared = chunk_partitioned_numerical_payload(
+        AnalysisNumericalObjectKind::Field,
+        digest("field-artifact"),
+        &[
+            AnalysisPayloadPartition {
+                logical_identity: digest("catalog"),
+                payload: header,
+            },
+            AnalysisPayloadPartition {
+                logical_identity: digest("displacement"),
+                payload: &displacement,
+            },
+            AnalysisPayloadPartition {
+                logical_identity: digest("stress"),
+                payload: &stress,
+            },
+        ],
+        13,
+    )
+    .unwrap();
+
+    assert_eq!(prepared.manifest.partitions.len(), 3);
+    assert_eq!(prepared.manifest.partitions[0].chunk_count, 1);
+    assert_eq!(prepared.manifest.partitions[1].first_chunk_ordinal, 1);
+    assert_eq!(prepared.manifest.partitions[1].chunk_count, 3);
+    assert_eq!(prepared.manifest.partitions[2].first_chunk_ordinal, 4);
+    assert_eq!(prepared.manifest.partitions[2].chunk_count, 3);
+    assert_eq!(
+        prepared.manifest.partitions[1].payload_digest,
+        Digest::sha256(&displacement)
+    );
+    prepared.revalidate(13).unwrap();
+
+    let mut duplicated = [
+        AnalysisPayloadPartition {
+            logical_identity: digest("same"),
+            payload: header,
+        },
+        AnalysisPayloadPartition {
+            logical_identity: digest("same"),
+            payload: &stress,
+        },
+    ];
+    assert!(chunk_partitioned_numerical_payload(
+        AnalysisNumericalObjectKind::Field,
+        digest("invalid-field-artifact"),
+        &duplicated,
+        13,
+    )
+    .is_err());
+    duplicated[1].logical_identity = digest("other");
+    let mut malformed = chunk_partitioned_numerical_payload(
+        AnalysisNumericalObjectKind::Field,
+        digest("malformed-field-artifact"),
+        &duplicated,
+        13,
+    )
+    .unwrap()
+    .manifest;
+    malformed.partitions[1].first_chunk_ordinal += 1;
+    assert!(malformed.validate().is_err());
+}
+
+#[test]
 fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
     use runmat_analysis_core::{
         AnalysisField, ProcedureStepId, ReferenceStatePolicy, StateCompleteness, StateId,

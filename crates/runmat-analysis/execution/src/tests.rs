@@ -522,6 +522,84 @@ impl runmat_execution_artifact::cache::CacheExport for MemoryObjects {
     }
 }
 
+#[test]
+fn semantic_partition_import_does_not_gather_unrelated_payloads() {
+    let catalog = b"field catalog".to_vec();
+    let displacement = vec![3_u8; 41];
+    let stress = vec![7_u8; 53];
+    let field_identity = digest("partitioned-fields");
+    let prepared = prepare_partitioned_analysis_objects(
+        AnalysisNumericalObjectKind::Field,
+        field_identity,
+        &[
+            runmat_analysis_fea::execution::AnalysisPayloadPartition {
+                logical_identity: digest("catalog"),
+                payload: &catalog,
+            },
+            runmat_analysis_fea::execution::AnalysisPayloadPartition {
+                logical_identity: digest("displacement"),
+                payload: &displacement,
+            },
+            runmat_analysis_fea::execution::AnalysisPayloadPartition {
+                logical_identity: digest("stress"),
+                payload: &stress,
+            },
+        ],
+        16,
+        ObjectNamespace::ResultValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = prepared
+        .root_reference(&access(), ValueRefKind::ResultObject)
+        .unwrap();
+    let mut store = MemoryObjects::default();
+    for object in &prepared.objects {
+        store
+            .0
+            .insert(object.descriptor.digest, object.bytes.clone());
+    }
+    let selected = prepared
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == digest("displacement"))
+        .unwrap();
+    let selected_start = selected.first_chunk_ordinal as usize + 1;
+    let selected_end = selected_start + selected.chunk_count as usize;
+    for (index, object) in prepared.objects.iter().enumerate().skip(1) {
+        if !(selected_start..selected_end).contains(&index) {
+            store.0.remove(&object.descriptor.digest);
+        }
+    }
+
+    let imported = import_analysis_partition(
+        &store,
+        AnalysisPartitionImport {
+            root: &root,
+            expected_kind: AnalysisNumericalObjectKind::Field,
+            expected_logical_identity: field_identity,
+            expected_payload_digest: prepared.manifest.payload_digest,
+            partition_identity: digest("displacement"),
+            access: &access(),
+            limits: ObjectInventoryLimits::default(),
+        },
+    )
+    .unwrap();
+    assert_eq!(imported.payload(), displacement);
+    assert_eq!(imported.objects.len(), selected.chunk_count as usize + 1);
+    assert!(import_analysis_objects(
+        &store,
+        &root,
+        AnalysisNumericalObjectKind::Field,
+        field_identity,
+        prepared.manifest.payload_digest,
+        &access(),
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+}
+
 struct FieldKernel;
 
 impl AnalysisKernel for FieldKernel {
@@ -535,6 +613,7 @@ impl AnalysisKernel for FieldKernel {
             kind: AnalysisNumericalObjectKind::Field,
             logical_identity: digest("field-identity"),
             payload: b"canonical field bytes".to_vec(),
+            partitions: Vec::new(),
         }])
     }
 }
@@ -662,11 +741,13 @@ impl AnalysisKernel for StructuralResultKernel {
                 kind: AnalysisNumericalObjectKind::SolverResult,
                 logical_identity: result_identity.digest(),
                 payload: self.0.clone(),
+                partitions: Vec::new(),
             },
             AnalysisKernelOutput {
                 kind: AnalysisNumericalObjectKind::NumericalReceipt,
                 logical_identity: receipt.identity().digest(),
                 payload: receipt.canonical_bytes()?,
+                partitions: Vec::new(),
             },
         ])
     }
@@ -682,14 +763,29 @@ impl AnalysisKernel for RecoveredFieldKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::RecoverField);
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::Field,
+        let manifest = self
+            .0
+            .manifest()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        let mut partitions = vec![AnalysisKernelOutputPartition {
             logical_identity: self.0.identity().digest(),
-            payload: self
-                .0
+            payload: manifest
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        }])
+        }];
+        for field in self.0.fields() {
+            partitions.push(AnalysisKernelOutputPartition {
+                logical_identity: field.identity().digest(),
+                payload: field
+                    .canonical_bytes()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            });
+        }
+        Ok(vec![AnalysisKernelOutput::partitioned(
+            AnalysisNumericalObjectKind::Field,
+            self.0.identity().digest(),
+            partitions,
+        )])
     }
 }
 
@@ -708,6 +804,7 @@ impl AnalysisKernel for ObservationKernel {
                 .0
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            partitions: Vec::new(),
         }])
     }
 }
@@ -727,6 +824,7 @@ impl AnalysisKernel for AccuracyKernel {
                 .0
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            partitions: Vec::new(),
         }])
     }
 }
@@ -743,6 +841,7 @@ impl AnalysisKernel for PublicationKernel {
             kind: AnalysisNumericalObjectKind::PublishedResult,
             logical_identity: self.0.identity().digest(),
             payload: self.0.canonical_bytes()?,
+            partitions: Vec::new(),
         }])
     }
 }
@@ -777,6 +876,7 @@ impl AnalysisKernel for StateProjectionKernel {
             kind: AnalysisNumericalObjectKind::SemanticState,
             logical_identity: state.identity.digest(),
             payload: state.canonical_bytes()?,
+            partitions: Vec::new(),
         }])
     }
 }
@@ -1027,22 +1127,72 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    assert_eq!(imported_fields.artifact, recovered_artifact);
+    assert_eq!(
+        imported_fields.manifest,
+        recovered_artifact.manifest().unwrap()
+    );
 
     let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
-    let observation_prepared = prepare_structural_observation(StructuralObservationPreparation {
-        source_host: field_prepared.host.clone(),
-        source_request: field_prepared.request.clone(),
-        source_fields: field_completed.outputs[0].clone(),
-        mesh: prepared.inputs[1].clone(),
-        sequence,
-        step: producer_step.clone(),
-        limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
-        program_revision: revision(),
-        chunk_bytes: 4096,
-        inventory_limits: ObjectInventoryLimits::default(),
-    })
+    let observation_prepared = prepare_structural_observation(
+        &store,
+        StructuralObservationPreparation {
+            source_host: field_prepared.host.clone(),
+            source_request: field_prepared.request.clone(),
+            source_fields: imported_fields,
+            mesh: prepared.inputs[1].clone(),
+            sequence,
+            step: producer_step.clone(),
+            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        },
+    )
     .unwrap();
+    let selection_objects = &observation_prepared.inputs[1];
+    assert_eq!(
+        selection_objects.manifest.kind,
+        AnalysisNumericalObjectKind::FieldSelection
+    );
+    let selection =
+        runmat_analysis_fea::results::field::RecoveredFieldSelection::from_canonical_bytes(
+            &selection_objects
+                .partition_payload(selection_objects.manifest.logical_identity)
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(selection.fields.len(), 1);
+    let selected_field = recovered_artifact
+        .fields()
+        .iter()
+        .find(|field| {
+            field.storage().field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
+        })
+        .unwrap();
+    assert_eq!(selection.fields, vec![selected_field.identity()]);
+    let selected_chunk_digests = selection_objects
+        .manifest
+        .chunks
+        .iter()
+        .map(|chunk| chunk.digest)
+        .collect::<BTreeSet<_>>();
+    for entry in recovered_artifact
+        .fields()
+        .iter()
+        .filter(|field| field.identity() != selected_field.identity())
+    {
+        let partition = field_completed.outputs[0]
+            .manifest
+            .partitions
+            .iter()
+            .find(|partition| partition.logical_identity == entry.identity().digest())
+            .unwrap();
+        let start = partition.first_chunk_ordinal as usize;
+        let end = start + partition.chunk_count as usize;
+        assert!(field_completed.outputs[0].manifest.chunks[start..end]
+            .iter()
+            .all(|chunk| !selected_chunk_digests.contains(&chunk.digest)));
+    }
     let recovered_catalog =
         runmat_analysis_fea::results::field::RecoveredFieldCatalog::from_artifact(
             &projection,
