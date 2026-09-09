@@ -9,7 +9,7 @@ use runmat_analysis_execution::{
     import_structural_observations, import_structural_recovered_fields, prepare_result_publication,
     prepare_structural_accuracy, prepare_structural_field_recovery, prepare_structural_observation,
     AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
-    ResultPublicationPreparation, StructuralAccuracyPreparation,
+    PreparedStructuralResourceUsage, ResultPublicationPreparation, StructuralAccuracyPreparation,
     StructuralFieldRecoveryPreparation, StructuralObservationPreparation,
 };
 use runmat_analysis_fea::execution::{
@@ -36,23 +36,19 @@ pub(super) trait PublicationChainDriver {
         &'a mut self,
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
-    ) -> Pin<Box<dyn Future<Output = AttemptSuccess> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>>;
 }
 
 pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     driver: &mut D,
     solve: &PreparedStructuralLinearProgram,
-    solve_success: &AttemptSuccess,
+    solve_response: ProgramExecutionResponse,
+    resource_usage: &PreparedStructuralResourceUsage,
     program_revision: ProgramRevision,
 ) -> PublishedAnalysisResult {
     let limits = ObjectInventoryLimits::default();
-    let imported_solve = import_structural_linear_completion(
-        driver.store(),
-        success_response(solve_success),
-        solve,
-        limits,
-    )
-    .unwrap();
+    let imported_solve =
+        import_structural_linear_completion(driver.store(), solve_response, solve, limits).unwrap();
     let source_result = imported_solve.objects;
     let source_numerical_receipt = imported_solve.numerical_receipt_objects;
     let workload =
@@ -69,14 +65,10 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         inventory_limits: limits,
     })
     .unwrap();
-    let field_success = driver.execute(&fields.host, &fields.program).await;
-    let imported_fields = import_structural_recovered_fields(
-        driver.store(),
-        success_response(&field_success),
-        &fields,
-        limits,
-    )
-    .unwrap();
+    let field_response = driver.execute(&fields.host, &fields.program).await;
+    let imported_fields =
+        import_structural_recovered_fields(driver.store(), field_response, &fields, limits)
+            .unwrap();
     let observations = prepare_structural_observation(
         driver.store(),
         StructuralObservationPreparation {
@@ -93,16 +85,12 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         },
     )
     .unwrap();
-    let observation_success = driver
+    let observation_response = driver
         .execute(&observations.host, &observations.program)
         .await;
-    let imported_observations = import_structural_observations(
-        driver.store(),
-        success_response(&observation_success),
-        &observations,
-        limits,
-    )
-    .unwrap();
+    let imported_observations =
+        import_structural_observations(driver.store(), observation_response, &observations, limits)
+            .unwrap();
 
     let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: solve.host.clone(),
@@ -116,55 +104,33 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         inventory_limits: limits,
     })
     .unwrap();
-    let accuracy_success = driver.execute(&accuracy.host, &accuracy.program).await;
-    let imported_accuracy = import_structural_accuracy(
-        driver.store(),
-        success_response(&accuracy_success),
-        &accuracy,
-        limits,
-    )
-    .unwrap();
+    let accuracy_response = driver.execute(&accuracy.host, &accuracy.program).await;
+    let imported_accuracy =
+        import_structural_accuracy(driver.store(), accuracy_response, &accuracy, limits).unwrap();
 
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
+        source_resource_plan: solve.inputs[3].clone(),
+        source_resource_usage: resource_usage.objects.clone(),
         source_observations: Some(imported_observations),
         program_revision,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,
     })
     .unwrap();
-    let publication_success = driver
+    let publication_response = driver
         .execute(&publication.host, &publication.program)
         .await;
-    import_published_result(
-        driver.store(),
-        success_response(&publication_success),
-        &publication,
-        limits,
-    )
-    .unwrap()
-    .result
+    import_published_result(driver.store(), publication_response, &publication, limits)
+        .unwrap()
+        .result
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
     ProgramExecutionResponse::ExternalizedSuccess {
         outputs: success.outputs.clone(),
         result_objects: success.result_objects.clone(),
-    }
-}
-
-pub(super) fn response_to_success(response: ProgramExecutionResponse) -> AttemptSuccess {
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs,
-        result_objects,
-    } = response
-    else {
-        panic!("analysis stage did not externalize its result: {response:?}")
-    };
-    AttemptSuccess {
-        outputs,
-        result_objects,
     }
 }
 
@@ -184,7 +150,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
         &'a mut self,
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
-    ) -> Pin<Box<dyn Future<Output = AttemptSuccess> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
         Box::pin(async move {
             program.write_to(self.store).unwrap();
             let task = self
@@ -203,7 +169,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                 .unwrap()
                 .pop()
                 .unwrap();
-            wait_for_native_task(task).await
+            success_response(&wait_for_native_task(task).await)
         })
     }
 }
@@ -241,7 +207,7 @@ impl PublicationChainDriver for DurableDriver {
         &'a mut self,
         _host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
-    ) -> Pin<Box<dyn Future<Output = AttemptSuccess> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
         Box::pin(async move {
             program.write_to(&mut self.store).unwrap();
             self.submission_sequence += 1;
@@ -280,14 +246,12 @@ impl PublicationChainDriver for DurableDriver {
             })
             .await
             .expect("durable analysis completion timeout");
-            let success = response_to_success(response);
-
             self.supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
                 self.config.clone(),
             )
             .unwrap();
             self.store = self.supervisor.object_store().unwrap();
-            success
+            response
         })
     }
 }
@@ -322,7 +286,7 @@ impl PublicationChainDriver for RemoteDriver {
         &'a mut self,
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
-    ) -> Pin<Box<dyn Future<Output = AttemptSuccess> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
         Box::pin(async move {
             for object in &program.objects {
                 self.pool
@@ -363,7 +327,7 @@ impl PublicationChainDriver for RemoteDriver {
                         .to_vec(),
                 );
             }
-            success
+            success_response(&success)
         })
     }
 }

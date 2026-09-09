@@ -38,6 +38,7 @@ impl PreparedMeshingResultPublication {
         AttemptSuccess {
             outputs: vec![self.root_output.clone()],
             result_objects: self.result_objects.clone(),
+            resources: None,
         }
     }
 }

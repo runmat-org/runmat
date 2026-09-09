@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use runmat_execution::identity::AttemptId;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
@@ -259,6 +260,7 @@ pub(super) async fn run_worker_loop(
                 }
                 let attempt = *attempt;
                 let attempt_id = attempt.scheduling.id;
+                let scheduling = attempt.scheduling.clone();
                 let correlation_id = request.correlation_id;
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
@@ -289,6 +291,7 @@ pub(super) async fn run_worker_loop(
                     if start_receiver.await.is_err() {
                         return;
                     }
+                    let started = Instant::now();
                     let mut program = attempt.program;
                     let materialized = if externalized {
                         Ok(program.arguments.clone())
@@ -348,7 +351,13 @@ pub(super) async fn run_worker_loop(
                             }
                         }
                     };
-                    let report = super::worker_execution::report(response);
+                    let report = super::worker_execution::report(
+                        &scheduling,
+                        response,
+                        u64::try_from(started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX)
+                            .max(1),
+                    );
                     let _ = reply(
                         connection.as_ref(),
                         &sender,

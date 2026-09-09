@@ -126,6 +126,7 @@ impl MeshingHostResponse {
             } => Some(runmat_execution_runner::AttemptSuccess {
                 outputs: vec![ValuePayload::Object(Box::new(root.clone()))],
                 result_objects: result_objects.clone(),
+                resources: None,
             }),
             Self::Failed { .. } => None,
         }

@@ -10,6 +10,7 @@ mod host;
 mod materialized_signal;
 mod object;
 mod observation_evaluation;
+mod resource_usage;
 mod response;
 mod result_publication;
 mod serial;
@@ -62,6 +63,10 @@ pub use object::{
 pub use observation_evaluation::{
     import_observation_result, import_structural_observations, prepare_structural_observation,
     ImportedObservations, PreparedStructuralObservation, StructuralObservationPreparation,
+};
+pub use resource_usage::{
+    prepare_structural_resource_usage, validate_structural_resource_usage,
+    PreparedStructuralResourceUsage,
 };
 pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,

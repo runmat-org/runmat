@@ -2,7 +2,7 @@ use runmat_execution::identity::{AttemptId, ResultCommitId};
 use runmat_execution::value::{ValuePayload, ValueRef};
 use serde::{Deserialize, Serialize};
 
-use super::AttemptSuccess;
+use super::{AttemptResourceAccounting, AttemptSuccess};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResultCommit {
@@ -11,6 +11,7 @@ pub struct ResultCommit {
     pub driver_fence: u64,
     pub outputs: Vec<ValuePayload>,
     pub result_objects: Vec<ValueRef>,
+    pub resources: Option<Box<AttemptResourceAccounting>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,6 +32,7 @@ impl ResultCommit {
             driver_fence,
             outputs: success.outputs,
             result_objects: success.result_objects,
+            resources: success.resources,
         }
     }
 }

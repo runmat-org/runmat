@@ -1283,6 +1283,67 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let response = AnalysisHostResponse::completed(&prepared.host, &completed)
         .unwrap()
         .program_response();
+    let imported_completion = import_structural_linear_completion(
+        &store,
+        response.clone(),
+        &prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let attempt_request = runmat_execution_runner::AttemptRequest {
+        id: runmat_execution::identity::AttemptId::derive(&[b"structural-attempt"]),
+        task_id: submission.request.id,
+        scope_id: submission.request.scope_id,
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"structural-worker"]),
+        ordinal: 0,
+        driver_fence: 1,
+        task: submission.request.clone(),
+    };
+    let unmetered = completed.attempt_success();
+    assert!(prepare_structural_resource_usage(
+        &prepared,
+        &imported_completion,
+        &unmetered,
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+    let metered = runmat_execution_runner::AttemptSuccess::new(
+        &attempt_request,
+        unmetered.outputs,
+        unmetered.result_objects,
+        1,
+        0,
+        0,
+    )
+    .unwrap();
+    let resource_usage = prepare_structural_resource_usage(
+        &prepared,
+        &imported_completion,
+        &metered,
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let unmetered = completed.attempt_success();
+    let overrun_success = runmat_execution_runner::AttemptSuccess::new(
+        &attempt_request,
+        unmetered.outputs,
+        unmetered.result_objects,
+        prepared.resource_plan.request.max_wall_millis + 1,
+        0,
+        0,
+    )
+    .unwrap();
+    let overrun_usage = prepare_structural_resource_usage(
+        &prepared,
+        &imported_completion,
+        &overrun_success,
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert!(!overrun_usage.evidence.overruns.is_empty());
     let decoded = import_structural_linear_result(
         &store,
         response.clone(),
@@ -1633,9 +1694,22 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
     );
 
+    assert!(prepare_result_publication(ResultPublicationPreparation {
+        accuracy_host: accuracy_prepared.host.clone(),
+        source_accuracy: accuracy_completed.outputs[0].clone(),
+        source_resource_plan: prepared.inputs[3].clone(),
+        source_resource_usage: overrun_usage.objects,
+        source_observations: Some(imported_observations.clone()),
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .is_err());
     let publication_prepared = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
+        source_resource_plan: prepared.inputs[3].clone(),
+        source_resource_usage: resource_usage.objects,
         source_observations: Some(imported_observations),
         program_revision: revision(),
         chunk_bytes: 4096,

@@ -41,6 +41,15 @@ impl Driver {
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
+                if result.validate_against(&attempt.request).is_err() {
+                    self.fail_attempt(
+                        &attempt,
+                        report.task_id,
+                        report.attempt_id,
+                        AttemptFailureKind::Rejected,
+                    )?;
+                    return Ok(());
+                }
                 let uncommitted_objects = result.result_objects.clone();
                 self.finish_attempt(&attempt, AttemptState::Completed)?;
                 let decision = self.commit_result(&attempt, result)?;

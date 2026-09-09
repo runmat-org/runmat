@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use runmat_execution_runner::{AttemptRequest, AttemptSuccess};
 use runmat_process_host::environment::EnvironmentPolicy;
@@ -18,6 +18,7 @@ pub(super) fn execute_attempt(
     request: &AttemptRequest,
     completion: &TaskCompletion,
 ) -> TransferResult {
+    let started = Instant::now();
     let stored = driver
         .artifacts
         .get(request.task.program_artifact_id)
@@ -43,13 +44,21 @@ pub(super) fn execute_attempt(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    runtime.block_on(run_process(driver, worker_request, completion))
+    runtime.block_on(run_process(
+        driver,
+        request,
+        worker_request,
+        completion,
+        started,
+    ))
 }
 
 async fn run_process(
     driver: &LocalDriver,
+    attempt: &AttemptRequest,
     request: WorkerRequest,
     completion: &TaskCompletion,
+    started: Instant,
 ) -> TransferResult {
     let mut command = HostCommand::new(&driver.config.executable);
     command.arguments = driver.config.worker_arguments.clone();
@@ -115,19 +124,33 @@ async fn run_process(
         .validate_against(&request)
         .map_err(|error| error.to_string())?;
     match response {
-        WorkerResponse::Success { value } => Ok(AttemptSuccess {
-            outputs: vec![value],
-            result_objects: Vec::new(),
-        }),
+        WorkerResponse::Success { value } => AttemptSuccess::new(
+            attempt,
+            vec![value],
+            Vec::new(),
+            elapsed_millis(started),
+            0,
+            0,
+        ),
         WorkerResponse::ExternalizedSuccess {
             outputs,
             result_objects,
-        } => Ok(AttemptSuccess {
+        } => AttemptSuccess::new(
+            attempt,
             outputs,
             result_objects,
-        }),
+            elapsed_millis(started),
+            0,
+            0,
+        ),
         WorkerResponse::Failure { message } => Err(message),
     }
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1)
 }
 
 async fn read_payload_until_cancelled(

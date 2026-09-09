@@ -90,10 +90,15 @@ async fn execute_with_pool(
     let mut completed_nodes = BTreeMap::new();
     while !coordinator.is_complete() {
         let solve_wave = coordinator.prepare_next_solve_wave().map_err(protocol)?;
-        let solve_responses =
+        let solve_execution =
             execute_solve_wave(pool, &solve_wave, &policy, &mut completed_nodes).await?;
         let state_wave = coordinator
-            .complete_solve_wave(pool, solve_wave, solve_responses)
+            .complete_metered_solve_wave(
+                pool,
+                solve_wave,
+                solve_execution.responses,
+                solve_execution.attempts,
+            )
             .map_err(protocol)?;
         let state_responses =
             execute_state_wave(pool, &state_wave, &policy, &mut completed_nodes).await?;
@@ -109,7 +114,7 @@ async fn execute_solve_wave(
     wave: &PreparedStructuralSolveWave,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
-) -> NativeExecutionResult<BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>> {
+) -> NativeExecutionResult<ExecutedWave> {
     let tasks = wave.tasks.iter().map(|task| TaskView {
         node: &task.node,
         dependencies: &task.dependencies,
@@ -133,7 +138,9 @@ async fn execute_state_wave(
         program: &task.prepared.program,
         structural: None,
     });
-    execute_wave(pool, tasks, policy, completed_nodes).await
+    Ok(execute_wave(pool, tasks, policy, completed_nodes)
+        .await?
+        .responses)
 }
 
 async fn execute_wave<'a>(
@@ -141,7 +148,7 @@ async fn execute_wave<'a>(
     tasks: impl IntoIterator<Item = TaskView<'a>>,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
-) -> NativeExecutionResult<BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>> {
+) -> NativeExecutionResult<ExecutedWave> {
     let mut submissions = Vec::new();
     let mut admitted = Vec::new();
     for task in tasks {
@@ -249,15 +256,27 @@ async fn execute_wave<'a>(
         ));
     }
     let mut by_node = BTreeMap::new();
-    for ((node, identity, task_id), response) in admitted.into_iter().zip(responses) {
+    let mut attempts = BTreeMap::new();
+    for ((node, identity, task_id), (response, attempt)) in admitted.into_iter().zip(responses) {
         if by_node.insert(node.clone(), response).is_some() {
             return Err(NativeExecutionError::Protocol(
                 "sequence wave returned a duplicate node".into(),
             ));
         }
+        if let Some(attempt) = attempt {
+            attempts.insert(node.clone(), attempt);
+        }
         completed_nodes.insert(node, (identity, task_id));
     }
-    Ok(by_node)
+    Ok(ExecutedWave {
+        responses: by_node,
+        attempts,
+    })
+}
+
+struct ExecutedWave {
+    responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+    attempts: BTreeMap<StructuralSequenceNode, AttemptSuccess>,
 }
 
 struct TaskView<'a> {
@@ -277,7 +296,7 @@ trait SequencePool {
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
         maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<ProgramExecutionResponse>>;
+    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>>;
 }
 
 struct LocalSequencePool {
@@ -309,7 +328,7 @@ impl SequencePool for LocalSequencePool {
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
         maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<ProgramExecutionResponse>> {
+    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
         let tasks = self.session.submit_graph(tasks)?;
         let started = Instant::now();
         let maximum_wall = Duration::from_millis(maximum_wall_millis);
@@ -328,7 +347,10 @@ impl SequencePool for LocalSequencePool {
                 }
                 if let Some(result) = task.try_result() {
                     match result {
-                        Ok(success) => responses[index] = Some(success_response(success)),
+                        Ok(success) => {
+                            responses[index] =
+                                Some((success_response(success.clone()), Some(success)))
+                        }
                         Err(message) => {
                             if !deadline_exceeded && !user_cancelled {
                                 if failure.is_none() {
@@ -337,9 +359,12 @@ impl SequencePool for LocalSequencePool {
                                 }
                                 failure.get_or_insert(message);
                             }
-                            responses[index] = Some(ProgramExecutionResponse::Failure {
-                                message: "sequence peer failed".into(),
-                            });
+                            responses[index] = Some((
+                                ProgramExecutionResponse::Failure {
+                                    message: "sequence peer failed".into(),
+                                },
+                                None,
+                            ));
                         }
                     }
                 }
@@ -432,7 +457,7 @@ impl SequencePool for RemoteSequencePool {
         &mut self,
         tasks: Vec<(ProgramExecutionRequest, TaskSubmission)>,
         maximum_wall_millis: u64,
-    ) -> NativeExecutionResult<Vec<ProgramExecutionResponse>> {
+    ) -> NativeExecutionResult<Vec<(ProgramExecutionResponse, Option<AttemptSuccess>)>> {
         let completions = self.pool.submit_graph(tasks)?;
         let mut responses = Vec::with_capacity(completions.len());
         let mut failure = None;
@@ -473,14 +498,17 @@ impl SequencePool for RemoteSequencePool {
                 }
             };
             match terminal {
-                Ok(success) => responses.push(success_response(success)),
+                Ok(success) => responses.push((success_response(success.clone()), Some(success))),
                 Err(message) => {
                     if !deadline_exceeded {
                         failure.get_or_insert(message);
                     }
-                    responses.push(ProgramExecutionResponse::Failure {
-                        message: "sequence peer failed".into(),
-                    });
+                    responses.push((
+                        ProgramExecutionResponse::Failure {
+                            message: "sequence peer failed".into(),
+                        },
+                        None,
+                    ));
                 }
             }
         }

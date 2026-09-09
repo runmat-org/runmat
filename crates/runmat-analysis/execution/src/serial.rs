@@ -96,6 +96,7 @@ impl CompletedAnalysisWorkload {
         runmat_execution_runner::AttemptSuccess {
             outputs: vec![ValuePayload::Object(Box::new(self.output_set_root.clone()))],
             result_objects: self.result_objects.clone(),
+            resources: None,
         }
     }
 }

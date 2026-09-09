@@ -9,6 +9,7 @@ use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ProgramExecutionResponse};
+use runmat_execution_runner::AttemptSuccess;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +18,8 @@ use crate::{
     prepare_semantic_state_publication, prepare_structural_sequence_step, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     PreparedAnalysisObjects, PreparedSemanticStatePublication, PreparedStructuralLinearProgram,
-    SemanticStatePublicationPreparation, StructuralLinearProgramPreparation,
+    PreparedStructuralResourceUsage, SemanticStatePublicationPreparation,
+    StructuralLinearProgramPreparation,
 };
 
 /// Stable semantic node names used to bind generic scheduler dependencies to an authored
@@ -87,6 +89,7 @@ pub struct CompletedStructuralSequenceStep {
     pub objects: PreparedAnalysisObjects,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub numerical_receipt_objects: PreparedAnalysisObjects,
+    pub resource_usage: Option<PreparedStructuralResourceUsage>,
     pub response: ProgramExecutionResponse,
 }
 
@@ -336,7 +339,27 @@ impl StructuralSequenceCoordinator {
         &mut self,
         source: &impl CacheImport,
         wave: PreparedStructuralSolveWave,
+        responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+    ) -> AnalysisBridgeResult<PreparedStructuralStateWave> {
+        self.complete_solve_wave_internal(source, wave, responses, None)
+    }
+
+    pub fn complete_metered_solve_wave(
+        &mut self,
+        source: &impl CacheImport,
+        wave: PreparedStructuralSolveWave,
+        responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+        attempts: BTreeMap<StructuralSequenceNode, AttemptSuccess>,
+    ) -> AnalysisBridgeResult<PreparedStructuralStateWave> {
+        self.complete_solve_wave_internal(source, wave, responses, Some(attempts))
+    }
+
+    fn complete_solve_wave_internal(
+        &mut self,
+        source: &impl CacheImport,
+        wave: PreparedStructuralSolveWave,
         mut responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+        mut attempts: Option<BTreeMap<StructuralSequenceNode, AttemptSuccess>>,
     ) -> AnalysisBridgeResult<PreparedStructuralStateWave> {
         if self.phase != CoordinatorPhase::AwaitingSolve || wave.level != self.next_level {
             return Err(AnalysisBridgeError::Invalid(
@@ -351,6 +374,14 @@ impl StructuralSequenceCoordinator {
         if responses.keys().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(AnalysisBridgeError::Invalid(
                 "solve responses do not exactly cover the prepared wave".into(),
+            ));
+        }
+        if attempts
+            .as_ref()
+            .is_some_and(|attempts| attempts.keys().cloned().collect::<BTreeSet<_>>() != expected)
+        {
+            return Err(AnalysisBridgeError::Invalid(
+                "solve resource accounting does not exactly cover the prepared wave".into(),
             ));
         }
 
@@ -372,6 +403,23 @@ impl StructuralSequenceCoordinator {
                 &task.prepared,
                 self.preparation.inventory_limits,
             )?;
+            let resource_usage = attempts
+                .as_mut()
+                .map(|attempts| {
+                    let attempt = attempts.remove(&task.node).ok_or_else(|| {
+                        AnalysisBridgeError::Invalid(
+                            "prepared solve has no scheduler resource accounting".into(),
+                        )
+                    })?;
+                    crate::prepare_structural_resource_usage(
+                        &task.prepared,
+                        &imported,
+                        &attempt,
+                        self.preparation.chunk_bytes,
+                        self.preparation.inventory_limits,
+                    )
+                })
+                .transpose()?;
             let step = self
                 .sequence
                 .sequence()
@@ -411,6 +459,7 @@ impl StructuralSequenceCoordinator {
                 objects: imported.objects,
                 numerical_receipt: imported.numerical_receipt,
                 numerical_receipt_objects: imported.numerical_receipt_objects,
+                resource_usage,
                 response: retained_response,
             });
         }

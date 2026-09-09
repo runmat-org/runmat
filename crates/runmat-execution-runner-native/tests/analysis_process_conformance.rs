@@ -9,9 +9,11 @@ use std::time::Duration;
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
     build_analysis_task_submission, build_structural_task_submission, import_analysis_objects,
-    import_analysis_output_set, prepare_structural_linear_program, AnalysisExecutionContext,
+    import_analysis_output_set, import_structural_linear_completion,
+    prepare_structural_linear_program, prepare_structural_resource_usage, AnalysisExecutionContext,
     AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
-    StructuralLinearProgramPreparation, StructuralSequencePreparation,
+    PreparedStructuralResourceUsage, StructuralLinearProgramPreparation,
+    StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -163,6 +165,7 @@ async fn parent() {
         inputs: input_objects,
         resource_plan,
     };
+    let solve_resource_usage = resource_usage(&store, &prepared_solve, &process_result);
     let mut publication_driver = publication_chain::ProcessDriver {
         session: &session,
         store: &mut store,
@@ -170,7 +173,8 @@ async fn parent() {
     let published = publication_chain::execute_publication_chain(
         &mut publication_driver,
         &prepared_solve,
-        &process_result,
+        success_response(&process_result),
+        &solve_resource_usage,
         revision(),
     )
     .await;
@@ -235,7 +239,7 @@ async fn parent() {
     drop(interrupt_guard);
 
     remote_conformance(process_payload, published.clone()).await;
-    durable_conformance(inline_payload, published).await;
+    durable_conformance(inline_payload, published, solve_resource_usage).await;
     signal::run().await;
 }
 
@@ -259,6 +263,28 @@ fn decoded_result_identity(
     runmat_analysis_fea::execution::SolverResultIdentity::new(
         host.workload.identity,
         Digest::sha256(payload),
+    )
+    .unwrap()
+}
+
+fn resource_usage(
+    store: &impl CacheImport,
+    solve: &PreparedStructuralLinearProgram,
+    success: &runmat_execution_runner::AttemptSuccess,
+) -> PreparedStructuralResourceUsage {
+    let result = import_structural_linear_completion(
+        store,
+        success_response(success),
+        solve,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    prepare_structural_resource_usage(
+        solve,
+        &result,
+        success,
+        DEFAULT_ANALYSIS_CHUNK_BYTES,
+        ObjectInventoryLimits::default(),
     )
     .unwrap()
 }
@@ -293,6 +319,7 @@ async fn run_durable_driver() {
 async fn durable_conformance(
     expected_payload: Vec<u8>,
     expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+    resource_usage: PreparedStructuralResourceUsage,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = publication_chain::DurableDriver::open(
@@ -317,17 +344,14 @@ async fn durable_conformance(
     let solve_program = solve.program.clone();
     let solve_success = driver.execute(&solve_host, &solve_program).await;
     assert_eq!(
-        import_result(
-            driver.store(),
-            success_response(&solve_success),
-            &solve.host,
-        ),
+        import_result(driver.store(), solve_success.clone(), &solve.host,),
         expected_payload
     );
     let publication = publication_chain::execute_publication_chain(
         &mut driver,
         &solve,
-        &solve_success,
+        solve_success,
+        &resource_usage,
         revision(),
     )
     .await;
@@ -559,6 +583,7 @@ async fn remote_conformance(
             inputs: input_objects,
             resource_plan,
         };
+        let solve_resource_usage = resource_usage(&result_store, &solve, &success);
         let mut publication_driver = publication_chain::RemoteDriver {
             pool: Arc::clone(&pool),
             store: result_store,
@@ -568,7 +593,8 @@ async fn remote_conformance(
         let publication = publication_chain::execute_publication_chain(
             &mut publication_driver,
             &solve,
-            &success,
+            success_response(&success),
+            &solve_resource_usage,
             revision.clone(),
         )
         .await;
@@ -862,6 +888,25 @@ fn assert_sequence(sequence: &runmat_analysis_execution::CompletedStructuralSequ
             .len(),
         3
     );
+    for step in &sequence.steps {
+        let usage = step
+            .resource_usage
+            .as_ref()
+            .expect("native sequence solves must retain scheduler resource accounting");
+        assert_eq!(usage.evidence.result_digest, step.result_identity.digest());
+        assert!(usage.evidence.overruns.is_empty());
+        let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = &step.response
+        else {
+            panic!("completed native sequence step must retain its successful response");
+        };
+        assert_eq!(
+            usage.evidence.actual.artifact_bytes.0,
+            result_objects
+                .iter()
+                .map(|reference| reference.encoded_length)
+                .sum::<u64>()
+        );
+    }
 }
 
 fn solver_mesh(solve: &StructuralLinearWorkload) -> runmat_meshing_core::SolverMeshArtifact {

@@ -494,6 +494,54 @@ fn reconciliation_checks_accelerator_device_time() {
 }
 
 #[test]
+fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let allocation = plan.request.clone();
+    let actual = AnalysisResourceUsage {
+        scheduler: ResourceUsage {
+            cpu_core_millis: 1,
+            memory_byte_millis: u128::from(allocation.memory_bytes),
+            wall_millis: 1,
+            ..ResourceUsage::default()
+        },
+        peak_cpu_millicores: allocation.cpu_millicores,
+        peak_memory_bytes: ByteCount(allocation.memory_bytes),
+        peak_scratch_bytes: ByteCount(allocation.scratch_bytes),
+        artifact_bytes: ByteCount(0),
+    };
+    let evidence = record_resource_usage(
+        &plan,
+        Digest::sha256("workload"),
+        Digest::sha256("result"),
+        runmat_execution::identity::AttemptId::derive(&[b"attempt"]),
+        runmat_execution::identity::WorkerId::derive(&[b"worker"]),
+        allocation.clone(),
+        actual,
+    )
+    .unwrap();
+    assert!(evidence.overruns.is_empty());
+    assert_eq!(
+        ResourceUsageEvidence::from_canonical_bytes(&evidence.canonical_bytes().unwrap()).unwrap(),
+        evidence
+    );
+
+    let mut substituted = allocation;
+    substituted.memory_bytes += 1;
+    assert!(matches!(
+        record_resource_usage(
+            &plan,
+            Digest::sha256("workload"),
+            Digest::sha256("result"),
+            runmat_execution::identity::AttemptId::derive(&[b"attempt"]),
+            runmat_execution::identity::WorkerId::derive(&[b"worker"]),
+            substituted,
+            evidence.actual.clone(),
+        ),
+        Err(ResourcePlanningError::Identity)
+    ));
+}
+
+#[test]
 fn deserialization_revalidates_derived_plan_fields() {
     let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let mut encoded = serde_json::to_value(plan).unwrap();

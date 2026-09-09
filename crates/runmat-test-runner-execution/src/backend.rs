@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use runmat_execution::identity::WorkerId;
 use runmat_execution::state::PoolState;
@@ -137,15 +138,11 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
                 .active
                 .lock()
                 .expect("test attempt registry poisoned") = Some(launch.clone());
+            let started = Instant::now();
             let execution = self.inner.execute(&session.inner, request).await;
             let report = match &execution {
                 Ok(_) => AttemptReport::Succeeded {
-                    result: AttemptSuccess {
-                        outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
-                            runmat_execution::value::InlineValue::Null,
-                        ))],
-                        result_objects: Vec::new(),
-                    },
+                    result: metered_success(&launch, elapsed_millis(started)),
                 },
                 Err(error) => AttemptReport::Failed {
                     kind: failure_kind(error.kind),
@@ -200,12 +197,7 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             {
                 let report = if execution.is_some() {
                     AttemptReport::Succeeded {
-                        result: AttemptSuccess {
-                            outputs: vec![runmat_execution::value::ValuePayload::Inline(Box::new(
-                                runmat_execution::value::InlineValue::Null,
-                            ))],
-                            result_objects: Vec::new(),
-                        },
+                        result: metered_success(&active, 1),
                     }
                 } else {
                     AttemptReport::Cancelled
@@ -246,6 +238,29 @@ impl<B: WorkerBackend> WorkerBackend for ExecutionWorkerBackend<B> {
             self.inner.shutdown(&session.inner).await
         })
     }
+}
+
+fn metered_success(
+    request: &runmat_execution_runner::AttemptRequest,
+    wall_millis: u64,
+) -> AttemptSuccess {
+    AttemptSuccess::new(
+        request,
+        vec![runmat_execution::value::ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::Null,
+        ))],
+        Vec::new(),
+        wall_millis,
+        0,
+        0,
+    )
+    .expect("bounded test-runner allocation accounting must converge")
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1)
 }
 
 fn one_launch(

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
 };
-use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptSuccess};
+use runmat_execution_runner::{AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess};
 use runmat_meshing_core::{MeshingCancellationSignal, MeshingProgress};
 use runmat_meshing_execution::{MeshingProgressSink, MeshingStageKernel};
 
@@ -129,25 +129,45 @@ fn install_analysis_cancellation(
     )
 }
 
-pub(super) fn report(response: ProgramExecutionResponse) -> AttemptReport {
-    match response {
-        ProgramExecutionResponse::Success { value } => AttemptReport::Succeeded {
-            result: AttemptSuccess {
-                outputs: vec![value],
-                result_objects: Vec::new(),
-            },
-        },
+pub(super) fn report(
+    request: &AttemptRequest,
+    response: ProgramExecutionResponse,
+    wall_millis: u64,
+) -> AttemptReport {
+    let success = match response {
+        ProgramExecutionResponse::Success { value } => {
+            AttemptSuccess::new(request, vec![value], Vec::new(), wall_millis, 0, 0)
+        }
         ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
             result_objects,
-        } => AttemptReport::Succeeded {
-            result: AttemptSuccess {
-                outputs,
-                result_objects,
-            },
-        },
-        ProgramExecutionResponse::Failure { message } => AttemptReport::Failed {
-            kind: AttemptFailureKind::Execution,
+        } => {
+            let egress_bytes = result_objects.iter().try_fold(0_u64, |total, reference| {
+                total.checked_add(reference.encoded_length)
+            });
+            match egress_bytes {
+                Some(egress_bytes) => AttemptSuccess::new(
+                    request,
+                    outputs,
+                    result_objects,
+                    wall_millis,
+                    egress_bytes,
+                    0,
+                ),
+                None => Err("remote result egress accounting overflowed".into()),
+            }
+        }
+        ProgramExecutionResponse::Failure { message } => {
+            return AttemptReport::Failed {
+                kind: AttemptFailureKind::Execution,
+                message,
+            }
+        }
+    };
+    match success {
+        Ok(result) => AttemptReport::Succeeded { result },
+        Err(message) => AttemptReport::Failed {
+            kind: AttemptFailureKind::Rejected,
             message,
         },
     }
@@ -179,7 +199,16 @@ fn failure(message: &str) -> ProgramExecutionResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_analysis_cancellation, AttemptCancellation};
+    use std::collections::BTreeSet;
+
+    use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
+    use runmat_execution::resource::ResourceRequest;
+    use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+    use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, TaskId};
+    use runmat_execution_artifact::ProgramExecutionResponse;
+    use runmat_execution_runner::{AttemptReport, AttemptRequest};
+
+    use super::{install_analysis_cancellation, report, AttemptCancellation};
 
     #[test]
     fn remote_attempt_cancellation_reaches_analysis_solver_context() {
@@ -188,5 +217,58 @@ mod tests {
         assert!(!runmat_analysis_fea::is_fea_cancelled());
         cancellation.cancel();
         assert!(runmat_analysis_fea::is_fea_cancelled());
+    }
+
+    #[test]
+    fn metered_attempt_report_round_trips_over_the_remote_json_contract() {
+        let task_id = TaskId::derive(&[b"task"]);
+        let request = AttemptRequest {
+            id: AttemptId::derive(&[b"attempt"]),
+            task_id,
+            scope_id: ExecutionScopeId::derive(&[b"scope"]),
+            worker_id: WorkerId::derive(&[b"worker"]),
+            ordinal: 0,
+            driver_fence: 1,
+            task: TaskRequest {
+                id: task_id,
+                scope_id: ExecutionScopeId::derive(&[b"scope"]),
+                pool_id: PoolId::derive(&[b"pool"]),
+                program_artifact_id: ArtifactId::derive(&[b"artifact"]),
+                callable: Callable {
+                    owner_identity: "test".into(),
+                    qualified_name: "test".into(),
+                    entrypoint_digest: Digest::sha256(b"entrypoint"),
+                },
+                inputs: Vec::new(),
+                outputs: OutputContract {
+                    requested_outputs: 1,
+                },
+                resources: ResourceRequest {
+                    cpu_millicores: 1_000,
+                    memory_bytes: 16 * 1024 * 1024,
+                    scratch_bytes: 8 * 1024 * 1024,
+                    max_wall_millis: 1_000,
+                    max_artifact_bytes: 1024,
+                    max_egress_bytes: 1024,
+                    max_relay_bytes: 0,
+                    accelerators: Vec::new(),
+                    required_capabilities: BTreeSet::new(),
+                },
+                retry: RetryPolicy::Never,
+                deadline_unix_millis: None,
+            },
+        };
+        let report = report(
+            &request,
+            ProgramExecutionResponse::Success {
+                value: runmat_execution::value::ValuePayload::Inline(Box::new(
+                    runmat_execution::value::InlineValue::Null,
+                )),
+            },
+            1,
+        );
+        let encoded = serde_json::to_vec(&report).unwrap();
+        let decoded: AttemptReport = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, report);
     }
 }

@@ -44,6 +44,7 @@ pub enum AnalysisNumericalObjectKind {
     Checkpoint,
     ConstraintPlan,
     ResourcePlan,
+    ResourceUsage,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

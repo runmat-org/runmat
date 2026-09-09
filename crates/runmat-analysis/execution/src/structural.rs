@@ -60,6 +60,7 @@ pub struct ImportedStructuralLinearResult {
     pub objects: PreparedAnalysisObjects,
     pub numerical_receipt: StructuralLinearNumericalReceiptArtifact,
     pub numerical_receipt_objects: PreparedAnalysisObjects,
+    pub result_object_bytes: u64,
 }
 
 /// Resolves one authored sequence step against an optional completed upstream state before
@@ -420,6 +421,15 @@ pub fn import_structural_linear_completion(
             "analysis result inventory differs from its canonical closure",
         ));
     }
+    let result_object_bytes = output_set
+        .result_objects
+        .iter()
+        .try_fold(0_u64, |total, reference| {
+            total.checked_add(reference.encoded_length)
+        })
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("analysis result byte accounting overflowed".into())
+        })?;
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
@@ -445,6 +455,7 @@ pub fn import_structural_linear_completion(
         objects: imported,
         numerical_receipt,
         numerical_receipt_objects: receipt_objects,
+        result_object_bytes,
     })
 }
 

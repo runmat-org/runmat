@@ -13,7 +13,10 @@ use runmat_analysis_fea::execution::{
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult,
 };
-use runmat_analysis_fea::planning::resource::{build_structural_resource_plan, FeaResourcePlan};
+use runmat_analysis_fea::planning::resource::{
+    build_structural_resource_plan, validate_resource_usage_evidence, FeaResourcePlan,
+    ResourceUsageEvidence,
+};
 use runmat_analysis_fea::post::fields::{
     structural_observable_field_definitions, take_structural_observable_fields,
 };
@@ -62,9 +65,11 @@ fn execute_result_publication(
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let request = unique_input(&invocation, AnalysisNumericalObjectKind::PublicationRequest)?;
     let accuracy = unique_input(&invocation, AnalysisNumericalObjectKind::AccuracyReport)?;
+    let resource_plan = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let resource_usage = unique_input(&invocation, AnalysisNumericalObjectKind::ResourceUsage)?;
     let observations =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
-    if invocation.inputs.len() != 2 + usize::from(observations.is_some())
+    if invocation.inputs.len() != 4 + usize::from(observations.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::PublishedResult]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -76,6 +81,14 @@ fn execute_result_publication(
     let accuracy_manifest_identity = accuracy.manifest.logical_identity;
     let accuracy = AccuracyArtifact::from_canonical_bytes(&accuracy.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_manifest_identity = resource_plan.manifest.logical_identity;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_usage_manifest_identity = resource_usage.manifest.logical_identity;
+    let resource_usage = ResourceUsageEvidence::from_canonical_bytes(&resource_usage.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    validate_resource_usage_evidence(&resource_plan, &resource_usage)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if request.identity().digest() != request_manifest_identity
         || request.producer != invocation.host.workload.step
         || accuracy.identity().digest() != accuracy_manifest_identity
@@ -84,6 +97,10 @@ fn execute_result_publication(
         || request.source_result != accuracy.source_result
         || request.source_observations != accuracy.source_observations
         || request.source_observations.is_some() != observations.is_some()
+        || resource_plan.identity.digest() != resource_plan_manifest_identity
+        || resource_usage.identity().digest() != resource_usage_manifest_identity
+        || resource_usage.result_digest != request.source_result.digest()
+        || !resource_usage.overruns.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(
             "publication inputs differ from the admitted request",
@@ -644,10 +661,14 @@ mod tests {
     };
     use runmat_analysis_fea::execution::SolverResultIdentity;
     use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+    use runmat_analysis_fea::planning::resource::{
+        record_resource_usage, AnalysisResourceUsage, ByteCount,
+    };
     use runmat_analysis_fea::results::accuracy::{AccuracyStatus, PublicationDecision};
     use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
     use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
     use runmat_analysis_fea::ComputeBackend;
+    use runmat_execution::resource::ResourceUsage;
     use runmat_execution::value::ValueRefKind;
     use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -1144,9 +1165,42 @@ mod tests {
             ObjectInventoryLimits::default(),
         )
         .unwrap();
+        let allocation = prepared.resource_plan.request.clone();
+        let resource_usage = record_resource_usage(
+            &prepared.resource_plan,
+            host.workload.identity.digest(),
+            field_source_result.digest(),
+            runmat_execution::identity::AttemptId::derive(&[b"kernel-attempt"]),
+            runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+            allocation.clone(),
+            AnalysisResourceUsage {
+                scheduler: ResourceUsage {
+                    cpu_core_millis: 1,
+                    memory_byte_millis: u128::from(allocation.memory_bytes),
+                    wall_millis: 1,
+                    ..ResourceUsage::default()
+                },
+                peak_cpu_millicores: allocation.cpu_millicores,
+                peak_memory_bytes: ByteCount(allocation.memory_bytes),
+                peak_scratch_bytes: ByteCount(allocation.scratch_bytes),
+                artifact_bytes: ByteCount(0),
+            },
+        )
+        .unwrap();
+        let resource_usage = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourceUsage,
+            resource_usage.identity().digest(),
+            &resource_usage.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::ResultValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
         let publication_inputs = vec![
             publication_request,
             accuracy_artifact,
+            inputs[3].clone(),
+            resource_usage,
             accuracy_inputs[2].clone(),
         ];
         let publication_workload_inputs = publication_inputs
@@ -1158,7 +1212,7 @@ mod tests {
                 payload_digest: input.manifest.payload_digest,
                 manifest_digest: input.root.digest,
                 manifest_encoded_length: input.root.encoded_length,
-                reference_kind: if index == 0 || index == 2 {
+                reference_kind: if index == 0 || index == 2 || index == 4 {
                     ValueRefKind::DriverObject
                 } else {
                     ValueRefKind::ResultObject

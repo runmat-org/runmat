@@ -5,7 +5,8 @@ mod result_commit;
 mod retry;
 
 pub use attempt::{
-    AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptSuccess,
+    AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptResourceAccounting,
+    AttemptSuccess,
 };
 pub use graph::TaskGraph;
 pub use lifecycle::{TaskRecord, TaskSubmission};

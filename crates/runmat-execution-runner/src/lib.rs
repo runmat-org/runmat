@@ -14,4 +14,7 @@ pub mod testing;
 pub use driver::{Driver, DriverAction, DriverCommand, DriverConfig, DriverEvent, DriverSnapshot};
 pub use error::{RunnerError, RunnerResult};
 pub use pool::{PoolSpec, WorkerSpec};
-pub use task::{AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, TaskSubmission};
+pub use task::{
+    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptResourceAccounting, AttemptSuccess,
+    TaskSubmission,
+};

@@ -76,7 +76,7 @@ fn dependencies_release_only_after_logical_result_commit() {
         .handle(DriverCommand::BackendReport(
             runmat_execution_runner::port::BackendReport::for_request(
                 &first_request,
-                common::success(),
+                common::success(&first_request),
             ),
         ))
         .unwrap();
@@ -101,7 +101,7 @@ fn dependency_submitted_after_success_is_ready_immediately() {
         .handle(DriverCommand::BackendReport(
             runmat_execution_runner::port::BackendReport::for_request(
                 &parent_request,
-                common::success(),
+                common::success(&parent_request),
             ),
         ))
         .unwrap();

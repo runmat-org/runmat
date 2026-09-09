@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, AnalysisTaskIdentity};
-use runmat_analysis_fea::planning::resource::FeaResourcePlan;
+use runmat_analysis_fea::planning::resource::{allocation_matches_plan, FeaResourcePlan};
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::ResourceRequest;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
@@ -52,18 +52,7 @@ pub fn build_structural_task_submission(
         ));
     }
     let planned = &resource_plan.request;
-    if context.resources.cpu_millicores != planned.cpu_millicores
-        || context.resources.memory_bytes != planned.memory_bytes
-        || context.resources.scratch_bytes != planned.scratch_bytes
-        || context.resources.max_wall_millis != planned.max_wall_millis
-        || context.resources.max_artifact_bytes != planned.max_artifact_bytes
-        || context.resources.max_egress_bytes != planned.max_egress_bytes
-        || context.resources.max_relay_bytes != planned.max_relay_bytes
-        || context.resources.accelerators != planned.accelerators
-        || !planned
-            .required_capabilities
-            .is_subset(&context.resources.required_capabilities)
-    {
+    if !allocation_matches_plan(&context.resources, planned) {
         return Err(crate::AnalysisBridgeError::Identity(
             "structural task resources differ from the canonical post-projection plan",
         ));

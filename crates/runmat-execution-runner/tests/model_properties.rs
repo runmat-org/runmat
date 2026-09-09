@@ -26,7 +26,7 @@ fn randomized_report_order_preserves_model_and_commit_invariants() {
             state ^= state << 17;
             let mut report = match state % 3 {
                 0 => BackendReport::for_request(&request, AttemptReport::Started),
-                _ => BackendReport::for_request(&request, common::success()),
+                _ => BackendReport::for_request(&request, common::success(&request)),
             };
             if state & 8 != 0 {
                 report.driver_fence = report.driver_fence.saturating_sub(1);

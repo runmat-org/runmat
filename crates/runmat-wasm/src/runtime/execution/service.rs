@@ -166,11 +166,13 @@ impl BrowserExecutionService {
             self.finish_attempt(
                 attempt,
                 Err("browser scheduler lost the exact program request".into()),
+                1,
             );
             return;
         };
         let weak = self.self_weak.borrow().clone();
         let host = self.host.clone();
+        let started_millis = js_sys::Date::now();
         wasm_bindgen_futures::spawn_local(async move {
             let response = match host {
                 Some(host) => {
@@ -184,7 +186,8 @@ impl BrowserExecutionService {
                 None => Ok(runmat_vm::execute_program_request(program).await),
             };
             if let Some(service) = weak.upgrade() {
-                service.finish_attempt(attempt, response);
+                let wall_millis = (js_sys::Date::now() - started_millis).max(1.0) as u64;
+                service.finish_attempt(attempt, response, wall_millis);
             }
         });
     }
@@ -193,16 +196,22 @@ impl BrowserExecutionService {
         &self,
         attempt: AttemptRequest,
         response: Result<ProgramExecutionResponse, String>,
+        wall_millis: u64,
     ) {
         let (future_id, result, report) = match response {
             Ok(ProgramExecutionResponse::Success { value }) => {
                 let decoded = runmat_runtime::execution::value_codec::decode_inline_value(&value)
                     .map_err(|error| ExecutionServiceError::Failed(error.to_string()));
                 let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess {
-                        outputs: vec![value],
-                        result_objects: Vec::new(),
-                    },
+                    result: AttemptSuccess::new(
+                        &attempt,
+                        vec![value],
+                        Vec::new(),
+                        wall_millis,
+                        0,
+                        0,
+                    )
+                    .expect("browser attempt resource accounting must remain bounded"),
                 };
                 (self.future_id(attempt.task_id), decoded, report)
             }

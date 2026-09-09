@@ -81,12 +81,33 @@ pub struct ResourceInventory {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResourceUsage {
     pub cpu_core_millis: u64,
+    #[serde(with = "u128_decimal")]
     pub memory_byte_millis: u128,
     pub accelerator_millis: Vec<AcceleratorUsage>,
     pub wall_millis: u64,
+    #[serde(with = "u128_decimal")]
     pub retained_byte_millis: u128,
     pub egress_bytes: u64,
     pub relay_bytes: u64,
+}
+
+mod u128_decimal {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        encoded.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

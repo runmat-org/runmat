@@ -3,12 +3,14 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::AccuracyResourceCeiling;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::{
+    identity::{AttemptId, WorkerId},
     resource::{AcceleratorRequest, Capability, ResourceRequest, ResourceUsage},
     Digest,
 };
 use serde::{Deserialize, Serialize};
 
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
+const RESOURCE_USAGE_PREFIX: &[u8] = b"runmat-fea-resource-usage/v1\0";
 const RESOURCE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 1;
@@ -398,7 +400,8 @@ pub enum ResourceAdmission {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisResourceUsage {
     pub scheduler: ResourceUsage,
     pub peak_cpu_millicores: u32,
@@ -407,7 +410,8 @@ pub struct AnalysisResourceUsage {
     pub artifact_bytes: ByteCount,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResourceOverrun {
     CpuPeak {
         planned: u32,
@@ -454,6 +458,162 @@ pub enum ResourceOverrun {
         planned_device_millis: u64,
         actual_device_millis: u64,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ResourceUsageEvidenceIdentity(Digest);
+
+impl ResourceUsageEvidenceIdentity {
+    pub const fn digest(self) -> Digest {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "ResourceUsageEvidenceWire")]
+pub struct ResourceUsageEvidence {
+    pub schema_version: u16,
+    identity: ResourceUsageEvidenceIdentity,
+    pub plan: FeaResourcePlanIdentity,
+    pub workload_digest: Digest,
+    pub result_digest: Digest,
+    pub attempt_id: AttemptId,
+    pub worker_id: WorkerId,
+    pub allocation: ResourceRequest,
+    pub actual: AnalysisResourceUsage,
+    pub overruns: Vec<ResourceOverrun>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourceUsageEvidenceWire {
+    schema_version: u16,
+    identity: ResourceUsageEvidenceIdentity,
+    plan: FeaResourcePlanIdentity,
+    workload_digest: Digest,
+    result_digest: Digest,
+    attempt_id: AttemptId,
+    worker_id: WorkerId,
+    allocation: ResourceRequest,
+    actual: AnalysisResourceUsage,
+    overruns: Vec<ResourceOverrun>,
+}
+
+impl TryFrom<ResourceUsageEvidenceWire> for ResourceUsageEvidence {
+    type Error = ResourcePlanningError;
+
+    fn try_from(wire: ResourceUsageEvidenceWire) -> Result<Self, Self::Error> {
+        let expected = Self::build(
+            wire.plan,
+            wire.workload_digest,
+            wire.result_digest,
+            wire.attempt_id,
+            wire.worker_id,
+            wire.allocation.clone(),
+            wire.actual.clone(),
+        )?;
+        if wire.schema_version != expected.schema_version
+            || wire.identity != expected.identity
+            || wire.overruns != expected.overruns
+        {
+            return Err(ResourcePlanningError::Identity);
+        }
+        Ok(expected)
+    }
+}
+
+impl ResourceUsageEvidence {
+    pub(crate) fn build(
+        plan: FeaResourcePlanIdentity,
+        workload_digest: Digest,
+        result_digest: Digest,
+        attempt_id: AttemptId,
+        worker_id: WorkerId,
+        allocation: ResourceRequest,
+        actual: AnalysisResourceUsage,
+    ) -> Result<Self, ResourcePlanningError> {
+        if workload_digest == Digest::sha256([])
+            || result_digest == Digest::sha256([])
+            || actual.peak_cpu_millicores != allocation.cpu_millicores
+            || actual.peak_memory_bytes.0 != allocation.memory_bytes
+            || actual.peak_scratch_bytes.0 != allocation.scratch_bytes
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "resource usage must bind nonempty sources and its reserved allocation".into(),
+            ));
+        }
+        allocation
+            .validate()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let overruns = super::admission::reconcile_resource_request(&allocation, &actual)?;
+        let identity = ResourceUsageEvidenceIdentity(Digest::sha256(encode_contract(
+            RESOURCE_USAGE_PREFIX,
+            "resource-usage-identity",
+            &(
+                plan,
+                workload_digest,
+                result_digest,
+                attempt_id,
+                worker_id,
+                &allocation,
+                &actual,
+                &overruns,
+            ),
+            RESOURCE_LIMITS,
+        )?));
+        Ok(Self {
+            schema_version: 1,
+            identity,
+            plan,
+            workload_digest,
+            result_digest,
+            attempt_id,
+            worker_id,
+            allocation,
+            actual,
+            overruns,
+        })
+    }
+
+    pub const fn identity(&self) -> ResourceUsageEvidenceIdentity {
+        self.identity
+    }
+
+    pub fn validate_identity(&self) -> Result<(), ResourcePlanningError> {
+        let expected = Self::build(
+            self.plan,
+            self.workload_digest,
+            self.result_digest,
+            self.attempt_id,
+            self.worker_id,
+            self.allocation.clone(),
+            self.actual.clone(),
+        )?;
+        if self != &expected {
+            return Err(ResourcePlanningError::Identity);
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ResourcePlanningError> {
+        self.validate_identity()?;
+        Ok(encode_contract(
+            RESOURCE_USAGE_PREFIX,
+            "resource-usage-evidence",
+            self,
+            RESOURCE_LIMITS,
+        )?)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ResourcePlanningError> {
+        Ok(decode_contract(
+            RESOURCE_USAGE_PREFIX,
+            "resource-usage-evidence",
+            bytes,
+            RESOURCE_LIMITS,
+        )?)
+    }
 }
 
 #[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]

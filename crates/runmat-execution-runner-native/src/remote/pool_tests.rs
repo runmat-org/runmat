@@ -104,12 +104,17 @@ impl RemoteWorkerChannel for FailingRouteWorker {
             ))
         } else {
             Ok(AttemptReport::Succeeded {
-                result: AttemptSuccess {
-                    outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                result: AttemptSuccess::new(
+                    &attempt.scheduling,
+                    vec![ValuePayload::Inline(Box::new(InlineValue::String(
                         attempt.scheduling.worker_id.to_string(),
                     )))],
-                    result_objects: Vec::new(),
-                },
+                    Vec::new(),
+                    1,
+                    0,
+                    0,
+                )
+                .unwrap(),
             })
         }
     }
@@ -172,12 +177,17 @@ impl RemoteWorkerChannel for ResultObjectWorker {
         })
     }
 
-    async fn execute(&self, _attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
+    async fn execute(&self, attempt: RemoteAttempt) -> NativeExecutionResult<AttemptReport> {
         Ok(AttemptReport::Succeeded {
-            result: AttemptSuccess {
-                outputs: vec![ValuePayload::Object(Box::new(self.reference.clone()))],
-                result_objects: vec![self.reference.clone()],
-            },
+            result: AttemptSuccess::new(
+                &attempt.scheduling,
+                vec![ValuePayload::Object(Box::new(self.reference.clone()))],
+                vec![self.reference.clone()],
+                1,
+                self.reference.encoded_length,
+                0,
+            )
+            .unwrap(),
         })
     }
 
@@ -237,12 +247,16 @@ impl RemoteWorkerChannel for FakeWorker {
         self.maximum_active.fetch_max(active, Ordering::SeqCst);
         let report = tokio::select! {
             () = tokio::time::sleep(self.delay) => AttemptReport::Succeeded {
-                result: AttemptSuccess {
-                    outputs: vec![ValuePayload::Inline(Box::new(InlineValue::String(
+                result: AttemptSuccess::new(
+                    &attempt.scheduling,
+                    vec![ValuePayload::Inline(Box::new(InlineValue::String(
                         attempt.scheduling.worker_id.to_string(),
                     )))],
-                    result_objects: Vec::new(),
-                },
+                    Vec::new(),
+                    1,
+                    0,
+                    0,
+                ).unwrap(),
             },
             () = self.cancellation_signal.notified() => AttemptReport::Cancelled,
         };

@@ -28,7 +28,7 @@ fn scheduler_and_checkpoint_have_explicit_debug_build_budgets() {
             .driver
             .handle(DriverCommand::BackendReport(BackendReport::for_request(
                 &request,
-                common::success(),
+                common::success(&request),
             )))
             .unwrap();
     }

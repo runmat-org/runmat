@@ -3,6 +3,9 @@ use std::collections::BTreeSet;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ResultPublicationRequest,
 };
+use runmat_analysis_fea::planning::resource::{
+    validate_resource_usage_evidence, FeaResourcePlan, ResourceUsageEvidence,
+};
 use runmat_analysis_fea::results::accuracy::AccuracyArtifact;
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_execution::value::ValueRefKind;
@@ -22,6 +25,8 @@ use crate::{
 pub struct ResultPublicationPreparation {
     pub accuracy_host: AnalysisHostWorkload,
     pub source_accuracy: PreparedAnalysisObjects,
+    pub source_resource_plan: PreparedAnalysisObjects,
+    pub source_resource_usage: PreparedAnalysisObjects,
     pub source_observations: Option<ImportedObservations>,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
@@ -49,6 +54,10 @@ pub fn prepare_result_publication(
         || preparation.accuracy_host.workload.outputs
             != vec![AnalysisNumericalObjectKind::AccuracyReport]
         || preparation.source_accuracy.manifest.kind != AnalysisNumericalObjectKind::AccuracyReport
+        || preparation.source_resource_plan.manifest.kind
+            != AnalysisNumericalObjectKind::ResourcePlan
+        || preparation.source_resource_usage.manifest.kind
+            != AnalysisNumericalObjectKind::ResourceUsage
         || preparation.chunk_bytes == 0
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -58,6 +67,25 @@ pub fn prepare_result_publication(
     }
     let accuracy = AccuracyArtifact::from_canonical_bytes(&preparation.source_accuracy.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan =
+        FeaResourcePlan::from_canonical_bytes(&preparation.source_resource_plan.payload())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_usage =
+        ResourceUsageEvidence::from_canonical_bytes(&preparation.source_resource_usage.payload())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    validate_resource_usage_evidence(&resource_plan, &resource_usage)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if resource_plan.identity.digest() != preparation.source_resource_plan.manifest.logical_identity
+        || resource_usage.identity().digest()
+            != preparation.source_resource_usage.manifest.logical_identity
+        || resource_usage.result_digest != accuracy.source_result.digest()
+        || !resource_usage.overruns.is_empty()
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "result publication requires reconciled source-bound resource usage without overruns"
+                .into(),
+        ));
+    }
     if accuracy.identity().digest() != preparation.source_accuracy.manifest.logical_identity
         || accuracy.producer != preparation.accuracy_host.workload.step
         || !preparation
@@ -108,6 +136,11 @@ pub fn prepare_result_publication(
     let mut inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (preparation.source_accuracy, ValueRefKind::ResultObject),
+        (preparation.source_resource_plan, ValueRefKind::DriverObject),
+        (
+            preparation.source_resource_usage,
+            ValueRefKind::ResultObject,
+        ),
     ];
     if let Some(observations) = preparation.source_observations {
         let bytes = observations

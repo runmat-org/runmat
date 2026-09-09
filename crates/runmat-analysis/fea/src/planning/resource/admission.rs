@@ -1,14 +1,68 @@
 use std::collections::BTreeMap;
 
+use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::{AcceleratorRequest, ResourceInventory, ResourceRequest};
+use runmat_execution::Digest;
 
 use super::{
     build_resource_plan,
     contract::{
         AnalysisResourceUsage, FeaResourcePlan, FeaResourcePlanningInput, PartitioningPolicy,
-        ResourceAdmission, ResourceOverrun, ResourcePlanningError,
+        ResourceAdmission, ResourceOverrun, ResourcePlanningError, ResourceUsageEvidence,
     },
 };
+
+pub fn record_resource_usage(
+    plan: &FeaResourcePlan,
+    workload_digest: Digest,
+    result_digest: Digest,
+    attempt_id: AttemptId,
+    worker_id: WorkerId,
+    allocation: ResourceRequest,
+    actual: AnalysisResourceUsage,
+) -> Result<ResourceUsageEvidence, ResourcePlanningError> {
+    plan.validate_identity()?;
+    if !allocation_matches_plan(&allocation, &plan.request) {
+        return Err(ResourcePlanningError::Identity);
+    }
+    ResourceUsageEvidence::build(
+        plan.identity,
+        workload_digest,
+        result_digest,
+        attempt_id,
+        worker_id,
+        allocation,
+        actual,
+    )
+}
+
+pub fn validate_resource_usage_evidence(
+    plan: &FeaResourcePlan,
+    evidence: &ResourceUsageEvidence,
+) -> Result<(), ResourcePlanningError> {
+    plan.validate_identity()?;
+    if evidence.plan != plan.identity
+        || !allocation_matches_plan(&evidence.allocation, &plan.request)
+        || evidence.overruns != reconcile_resource_usage(plan, &evidence.actual)?
+    {
+        return Err(ResourcePlanningError::Identity);
+    }
+    Ok(())
+}
+
+pub fn allocation_matches_plan(allocation: &ResourceRequest, planned: &ResourceRequest) -> bool {
+    allocation.cpu_millicores == planned.cpu_millicores
+        && allocation.memory_bytes == planned.memory_bytes
+        && allocation.scratch_bytes == planned.scratch_bytes
+        && allocation.max_wall_millis == planned.max_wall_millis
+        && allocation.max_artifact_bytes == planned.max_artifact_bytes
+        && allocation.max_egress_bytes == planned.max_egress_bytes
+        && allocation.max_relay_bytes == planned.max_relay_bytes
+        && allocation.accelerators == planned.accelerators
+        && planned
+            .required_capabilities
+            .is_subset(&allocation.required_capabilities)
+}
 
 pub fn admit_resource_plan(
     input: FeaResourcePlanningInput,
@@ -148,8 +202,14 @@ pub fn reconcile_resource_usage(
     plan: &FeaResourcePlan,
     actual: &AnalysisResourceUsage,
 ) -> Result<Vec<ResourceOverrun>, ResourcePlanningError> {
+    reconcile_resource_request(&plan.request, actual)
+}
+
+pub(crate) fn reconcile_resource_request(
+    request: &ResourceRequest,
+    actual: &AnalysisResourceUsage,
+) -> Result<Vec<ResourceOverrun>, ResourcePlanningError> {
     let mut overruns = Vec::new();
-    let request = &plan.request;
     if actual.peak_cpu_millicores > request.cpu_millicores {
         overruns.push(ResourceOverrun::CpuPeak {
             planned: request.cpu_millicores,
