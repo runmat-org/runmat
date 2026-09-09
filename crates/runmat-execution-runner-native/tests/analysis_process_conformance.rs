@@ -9,18 +9,13 @@ use std::time::Duration;
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
     build_analysis_task_submission, import_analysis_objects, import_analysis_output_set,
-    import_published_result, import_structural_accuracy, import_structural_linear_completion,
-    import_structural_observations, import_structural_recovered_fields, prepare_result_publication,
-    prepare_structural_accuracy, prepare_structural_field_recovery,
-    prepare_structural_linear_program, prepare_structural_observation, AnalysisExecutionContext,
-    AnalysisHostWorkload, PreparedAnalysisProgram, ResultPublicationPreparation,
-    StructuralAccuracyPreparation, StructuralFieldRecoveryPreparation,
-    StructuralLinearProgramPreparation, StructuralObservationPreparation,
+    prepare_structural_linear_program, AnalysisExecutionContext, AnalysisHostWorkload,
+    PreparedAnalysisProgram, PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
     StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, SequenceIdentity, StructuralLinearWorkload,
-    StructuralLinearWorkloadResult, DEFAULT_ANALYSIS_CHUNK_BYTES,
+    AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -49,8 +44,11 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/publication_chain.rs"]
+mod publication_chain;
 #[path = "analysis_process_conformance/signal.rs"]
 mod signal;
+use publication_chain::{success_response, PublicationChainDriver};
 
 fn main() {
     let mode = std::env::args_os().nth(1);
@@ -149,13 +147,20 @@ async fn parent() {
         .iter()
         .all(|diagnostic| !diagnostic.message.contains("artifact_path")));
 
-    let published = execute_publication_chain_in_process(
-        &session,
-        &mut store,
-        &host,
-        &program,
-        &input_objects,
+    let prepared_solve = PreparedStructuralLinearProgram {
+        host: host.clone(),
+        program: program.clone(),
+        inputs: input_objects,
+    };
+    let mut publication_driver = publication_chain::ProcessDriver {
+        session: &session,
+        store: &mut store,
+    };
+    let published = publication_chain::execute_publication_chain(
+        &mut publication_driver,
+        &prepared_solve,
         &process_result,
+        revision(),
     )
     .await;
     assert_eq!(
@@ -218,8 +223,8 @@ async fn parent() {
     interrupt.store(false, Ordering::Relaxed);
     drop(interrupt_guard);
 
-    remote_conformance(process_payload).await;
-    durable_conformance(inline_payload).await;
+    remote_conformance(process_payload, published.clone()).await;
+    durable_conformance(inline_payload, published).await;
     signal::run().await;
 }
 
@@ -234,187 +239,6 @@ async fn wait_for_native_task(task: NativeProgramTask) -> runmat_execution_runne
     })
     .await
     .unwrap()
-}
-
-async fn execute_publication_chain_in_process(
-    session: &NativeProgramSession,
-    store: &mut runmat_execution_runner_native::FilesystemObjectStore,
-    solve_host: &AnalysisHostWorkload,
-    solve_program: &PreparedAnalysisProgram,
-    solve_inputs: &[runmat_analysis_execution::PreparedAnalysisObjects],
-    solve_success: &runmat_execution_runner::AttemptSuccess,
-) -> runmat_analysis_fea::results::publication::PublishedAnalysisResult {
-    let limits = ObjectInventoryLimits::default();
-    let imported_solve = import_structural_linear_completion(
-        store,
-        success_response(solve_success),
-        &runmat_analysis_execution::PreparedStructuralLinearProgram {
-            host: solve_host.clone(),
-            program: solve_program.clone(),
-            inputs: solve_inputs.to_vec(),
-        },
-        limits,
-    )
-    .unwrap();
-    let source_result = imported_solve.objects;
-    let source_numerical_receipt = imported_solve.numerical_receipt_objects;
-    let solve = StructuralLinearWorkload::from_canonical_bytes(&solve_inputs[0].payload()).unwrap();
-    let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
-    let step = solve.procedure_step().unwrap().clone();
-
-    let fields = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
-        source_host: solve_host.clone(),
-        source_result: source_result.clone(),
-        mesh: solve_inputs[1].clone(),
-        program_revision: revision(),
-        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-        inventory_limits: limits,
-    })
-    .unwrap();
-    fields.program.write_to(store).unwrap();
-    let field_success = wait_for_native_task(
-        session
-            .submit_graph(vec![(
-                fields.program.request.clone(),
-                analysis_submission(
-                    session.scope_id(),
-                    session.pool_id(),
-                    &fields.host,
-                    &fields.program.request,
-                ),
-            )])
-            .unwrap()
-            .pop()
-            .unwrap(),
-    )
-    .await;
-    let imported_fields = import_structural_recovered_fields(
-        store,
-        success_response(&field_success),
-        &fields,
-        limits,
-    )
-    .unwrap();
-
-    let observations = prepare_structural_observation(
-        store,
-        StructuralObservationPreparation {
-            source_host: fields.host.clone(),
-            source_request: fields.request.clone(),
-            source_fields: imported_fields,
-            mesh: solve_inputs[1].clone(),
-            sequence,
-            step: step.clone(),
-            limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
-            program_revision: revision(),
-            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-            inventory_limits: limits,
-        },
-    )
-    .unwrap();
-    observations.program.write_to(store).unwrap();
-    let observation_success = wait_for_native_task(
-        session
-            .submit_graph(vec![(
-                observations.program.request.clone(),
-                analysis_submission(
-                    session.scope_id(),
-                    session.pool_id(),
-                    &observations.host,
-                    &observations.program.request,
-                ),
-            )])
-            .unwrap()
-            .pop()
-            .unwrap(),
-    )
-    .await;
-    let imported_observations = import_structural_observations(
-        store,
-        success_response(&observation_success),
-        &observations,
-        limits,
-    )
-    .unwrap();
-
-    let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
-        solve_host: solve_host.clone(),
-        source_numerical_receipt,
-        source_observations: Some(imported_observations.clone()),
-        sequence,
-        step,
-        formulation_requirement: solve.formulation_requirement,
-        program_revision: revision(),
-        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-        inventory_limits: limits,
-    })
-    .unwrap();
-    accuracy.program.write_to(store).unwrap();
-    let accuracy_success = wait_for_native_task(
-        session
-            .submit_graph(vec![(
-                accuracy.program.request.clone(),
-                analysis_submission(
-                    session.scope_id(),
-                    session.pool_id(),
-                    &accuracy.host,
-                    &accuracy.program.request,
-                ),
-            )])
-            .unwrap()
-            .pop()
-            .unwrap(),
-    )
-    .await;
-    let imported_accuracy = import_structural_accuracy(
-        store,
-        success_response(&accuracy_success),
-        &accuracy,
-        limits,
-    )
-    .unwrap();
-
-    let publication = prepare_result_publication(ResultPublicationPreparation {
-        accuracy_host: accuracy.host.clone(),
-        source_accuracy: imported_accuracy.objects,
-        source_observations: Some(imported_observations),
-        program_revision: revision(),
-        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-        inventory_limits: limits,
-    })
-    .unwrap();
-    publication.program.write_to(store).unwrap();
-    let publication_success = wait_for_native_task(
-        session
-            .submit_graph(vec![(
-                publication.program.request.clone(),
-                analysis_submission(
-                    session.scope_id(),
-                    session.pool_id(),
-                    &publication.host,
-                    &publication.program.request,
-                ),
-            )])
-            .unwrap()
-            .pop()
-            .unwrap(),
-    )
-    .await;
-    import_published_result(
-        store,
-        success_response(&publication_success),
-        &publication,
-        limits,
-    )
-    .unwrap()
-    .result
-}
-
-fn success_response(success: &runmat_execution_runner::AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::ExternalizedSuccess {
-        outputs: success.outputs.clone(),
-        result_objects: success.result_objects.clone(),
-    }
 }
 
 fn decoded_result_identity(
@@ -455,63 +279,53 @@ async fn run_durable_driver() {
     }
 }
 
-async fn durable_conformance(expected_payload: Vec<u8>) {
+async fn durable_conformance(
+    expected_payload: Vec<u8>,
+    expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+) {
     let directory = tempfile::tempdir().unwrap();
-    let paths = runmat_execution_runner_native::supervisor::SupervisorPaths::new(
-        directory.path().join("durable-analysis"),
-    )
-    .unwrap();
-    let supervisor = runmat_execution_runner_native::supervisor::LocalSupervisor::open(
+    let mut driver = publication_chain::DurableDriver::open(
         runmat_execution_runner_native::supervisor::LocalSupervisorConfig {
             executable: std::env::current_exe().unwrap(),
-            paths,
+            paths: runmat_execution_runner_native::supervisor::SupervisorPaths::new(
+                directory.path().join("durable-analysis"),
+            )
+            .unwrap(),
             max_stderr_bytes: 1024 * 1024,
             max_object_bytes: 64 * 1024 * 1024,
         },
+    );
+    let (host, program, input_objects) = fixture(revision(), "durable-analysis");
+    let solve = PreparedStructuralLinearProgram {
+        host,
+        program,
+        inputs: input_objects,
+    };
+    let solve_host = solve.host.clone();
+    let solve_program = solve.program.clone();
+    let solve_success = driver.execute(&solve_host, &solve_program).await;
+    assert_eq!(
+        import_result(
+            driver.store(),
+            success_response(&solve_success),
+            &solve.host,
+        ),
+        expected_payload
+    );
+    let publication = publication_chain::execute_publication_chain(
+        &mut driver,
+        &solve,
+        &solve_success,
+        revision(),
     )
-    .unwrap();
-    let (host, program, _input_objects) = fixture(revision(), "durable-analysis");
-    let request = program.request.clone();
-    let mut store = supervisor.object_store().unwrap();
-    program.write_to(&mut store).unwrap();
-    let (record, duplicate) = supervisor
-        .submit_program(
-            runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
-                request,
-                Some("analysis-conformance".into()),
-                runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
-            ),
-        )
-        .await
-        .unwrap();
-    assert!(!duplicate);
-    let response = tokio::time::timeout(Duration::from_secs(15), async {
-        loop {
-            supervisor.reconcile().await.unwrap();
-            let attachment = supervisor.attach(record.handle.id, 0, 0).await.unwrap();
-            if attachment.record.state.is_terminal() {
-                break attachment.response.unwrap_or_else(|| {
-                    panic!(
-                        "durable analysis failed without response: {:?}",
-                        attachment.record.message
-                    )
-                });
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("durable analysis completion timeout");
-    if !matches!(
-        response,
-        ProgramExecutionResponse::ExternalizedSuccess { .. }
-    ) {
-        panic!("durable analysis did not externalize its result: {response:?}")
-    }
-    assert_eq!(import_result(&store, response, &host), expected_payload);
+    .await;
+    assert_eq!(publication, expected_publication);
 }
 
-async fn remote_conformance(expected_payload: Vec<u8>) {
+async fn remote_conformance(
+    expected_payload: Vec<u8>,
+    expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     std::fs::write(
@@ -531,7 +345,7 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
         runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap();
-    let (host, program, _input_objects) = fixture(revision.clone(), "remote-analysis");
+    let (host, program, input_objects) = fixture(revision.clone(), "remote-analysis");
     let request = program.request.clone();
     let (second_host, second_program, _second_inputs) = fixture_for_study(
         revision.clone(),
@@ -688,7 +502,7 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
                 .await
                 .expect("second remote analysis completion timeout")
                 .unwrap();
-        let mut result_store = MemoryStore::default();
+        let mut result_store = publication_chain::MemoryStore::default();
         for reference in success
             .result_objects
             .iter()
@@ -712,8 +526,27 @@ async fn remote_conformance(expected_payload: Vec<u8>) {
             ),
             expected_payload
         );
+        let solve = PreparedStructuralLinearProgram {
+            host: host.clone(),
+            program: program.clone(),
+            inputs: input_objects,
+        };
+        let mut publication_driver = publication_chain::RemoteDriver {
+            pool: Arc::clone(&pool),
+            store: result_store,
+            scope_id,
+            pool_id,
+        };
+        let publication = publication_chain::execute_publication_chain(
+            &mut publication_driver,
+            &solve,
+            &success,
+            revision.clone(),
+        )
+        .await;
+        assert_eq!(publication, expected_publication);
         let sequence = execute_structural_sequence_remotely(
-            pool,
+            Arc::clone(&pool),
             sequence_preparation(revision.clone(), "remote-analysis"),
             sequence_policy(),
         )
@@ -1088,18 +921,6 @@ fn analysis_submission(
         },
     )
     .unwrap()
-}
-
-#[derive(Default)]
-struct MemoryStore(std::collections::BTreeMap<Digest, Vec<u8>>);
-
-impl CacheImport for MemoryStore {
-    fn read_verified(
-        &self,
-        digest: Digest,
-    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
-        Ok(self.0.get(&digest).cloned())
-    }
 }
 
 fn revision() -> ProgramRevision {

@@ -117,7 +117,7 @@ impl RemoteObjectCache {
         validate_reference(&reference, &reference.authorization_scope)?;
         validate_bytes(&reference, &bytes)?;
         if let Some(stored) = self.complete.get(&reference.id) {
-            if stored != &reference {
+            if !references_share_content_identity(stored, &reference) {
                 return Err(protocol(
                     "remote object id was reused for different content",
                 ));
@@ -138,7 +138,7 @@ impl RemoteObjectCache {
     ) -> NativeExecutionResult<RemoteObjectReceipt> {
         validate_reference(reference, authorization_scope)?;
         if let Some(stored) = self.complete.get(&reference.id) {
-            if stored != reference {
+            if !references_share_content_identity(stored, reference) {
                 return Err(protocol(
                     "remote object id was reused for a different reference",
                 ));
@@ -146,7 +146,7 @@ impl RemoteObjectCache {
             return Ok(receipt(reference, reference.encoded_length, true));
         }
         if let Some(partial) = self.partial.get(&reference.id) {
-            if &partial.reference != reference {
+            if !references_share_content_identity(&partial.reference, reference) {
                 return Err(protocol("remote object id was reused during transfer"));
             }
             return Ok(receipt(reference, partial.resume.next_offset(), false));
@@ -225,7 +225,7 @@ impl RemoteObjectCache {
     ) -> NativeExecutionResult<(ObjectChunk, bool)> {
         validate_reference(reference, authorization_scope)?;
         match self.complete.get(&reference.id) {
-            Some(stored) if stored == reference => {}
+            Some(stored) if references_share_content_identity(stored, reference) => {}
             Some(_) => {
                 return Err(protocol(
                     "remote object download reference differs from stored content",
@@ -395,6 +395,22 @@ fn validate_reference(
     Ok(())
 }
 
+pub(super) fn references_share_content_identity(left: &ValueRef, right: &ValueRef) -> bool {
+    use runmat_execution::value::ValueRefKind::{DriverObject, ResultObject};
+
+    matches!(left.kind, DriverObject | ResultObject)
+        && matches!(right.kind, DriverObject | ResultObject)
+        && left.schema_version == right.schema_version
+        && left.id == right.id
+        && left.logical_digest == right.logical_digest
+        && left.encoded_length == right.encoded_length
+        && left.media_type == right.media_type
+        && left.value_schema == right.value_schema
+        && left.encryption_context == right.encryption_context
+        && left.authorization_scope == right.authorization_scope
+        && left.resident_fence == right.resident_fence
+}
+
 fn validate_bytes(reference: &ValueRef, bytes: &[u8]) -> NativeExecutionResult<()> {
     if bytes.len() as u64 != reference.encoded_length
         || Digest::sha256(bytes) != reference.logical_digest
@@ -503,9 +519,24 @@ mod tests {
         assert_eq!(chunk.bytes, bytes[..10]);
         assert!(!complete);
 
+        let mut driver_alias = reference.clone();
+        driver_alias.kind = ValueRefKind::DriverObject;
+        assert!(cache.probe(&driver_alias, "run-object").unwrap().complete);
+        assert_eq!(
+            cache
+                .get(&driver_alias, 0, bytes.len() as u32, "run-object")
+                .unwrap()
+                .0
+                .bytes,
+            bytes
+        );
+
         let mut corrupt = reference.clone();
         corrupt.logical_digest = Digest::sha256(b"substituted");
         assert!(cache.probe(&corrupt, "run-object").is_err());
+        let mut substituted_schema = driver_alias;
+        substituted_schema.value_schema = "runmat.substituted.v1".into();
+        assert!(cache.probe(&substituted_schema, "run-object").is_err());
         assert!(cache.probe(&reference, "another-run").is_err());
     }
 

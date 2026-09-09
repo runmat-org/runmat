@@ -8,7 +8,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport, FilesystemObjec
 use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::object_transfer::MAX_REMOTE_OBJECTS;
+use super::object_transfer::{references_share_content_identity, MAX_REMOTE_OBJECTS};
 use super::RemoteWorkerChannel;
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -63,7 +63,7 @@ impl RemoteObjectCatalog {
     pub(super) fn get(&self, reference: &ValueRef) -> NativeExecutionResult<Option<Arc<[u8]>>> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {
-            Some(stored) if stored == reference => self
+            Some(stored) if references_share_content_identity(stored, reference) => self
                 .store
                 .read_verified(reference.logical_digest)
                 .map(|bytes| bytes.map(Arc::<[u8]>::from))
@@ -94,7 +94,7 @@ impl RemoteObjectCatalog {
     pub(super) fn contains(&self, reference: &ValueRef) -> NativeExecutionResult<bool> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {
-            Some(stored) if stored == reference => Ok(true),
+            Some(stored) if references_share_content_identity(stored, reference) => Ok(true),
             Some(_) => Err(protocol(
                 "remote execution object reference differs from stored content",
             )),
@@ -149,7 +149,7 @@ impl RemoteObjectCatalog {
             let state = self.state.lock().expect("remote object catalog poisoned");
             for reference in references {
                 if let Some(stored) = state.objects.get(&reference.id) {
-                    if stored != reference {
+                    if !references_share_content_identity(stored, reference) {
                         return Err(protocol(
                             "remote result object collides with registered content",
                         ));
@@ -176,7 +176,7 @@ impl RemoteObjectCatalog {
         let mut state = self.state.lock().expect("remote object catalog poisoned");
         for reference in references {
             match state.objects.get(&reference.id) {
-                Some(stored) if stored == reference => {}
+                Some(stored) if references_share_content_identity(stored, reference) => {}
                 Some(_) => {
                     return Err(protocol(
                         "committed remote result differs from downloaded content",
@@ -199,7 +199,7 @@ impl RemoteObjectCatalog {
                 && state
                     .objects
                     .get(&reference.id)
-                    .is_some_and(|stored| stored == reference)
+                    .is_some_and(|stored| references_share_content_identity(stored, reference))
             {
                 state.objects.remove(&reference.id);
             }
@@ -232,7 +232,7 @@ fn insert(
     reference: ValueRef,
 ) -> NativeExecutionResult<()> {
     if let Some(stored) = objects.get(&reference.id) {
-        if stored == &reference {
+        if references_share_content_identity(stored, &reference) {
             return Ok(());
         }
         return Err(protocol(
@@ -321,6 +321,12 @@ mod tests {
             .register(input.clone(), Arc::clone(&input_bytes), "run")
             .unwrap();
         assert!(catalog.contains(&input).unwrap());
+        let mut driver_alias = input.clone();
+        driver_alias.kind = ValueRefKind::DriverObject;
+        catalog
+            .register(driver_alias.clone(), Arc::clone(&input_bytes), "run")
+            .unwrap();
+        assert!(catalog.contains(&driver_alias).unwrap());
         let mut conflicting_input = input.clone();
         conflicting_input.encoded_length += 1;
         assert!(catalog.contains(&conflicting_input).is_err());
