@@ -17,9 +17,11 @@
 </p>
 
 <p align="center">
-  <a href="https://runmat.com/download"><strong>Download RunMat</strong></a>
+  <a href="https://runmat.com/sandbox"><strong>Try RunMat in your browser</strong></a>
   |
-  <a href="docs/README.md">Docs</a>
+  <a href="https://runmat.com/download">Download RunMat Desktop</a>
+  |
+  <a href="https://runmat.com/docs">Docs</a>
   |
   <a href="docs/CHANGELOG.md">Changelog</a>
   |
@@ -28,11 +30,17 @@
 
 RunMat is an open-source, high-performance runtime designed for numerical computing using MATLAB-style syntax. It is built in Rust and provides a multi-tiered execution model that targets both CPU and GPU hardware without requiring manual management of tensor allocations and movement.
 
-The system is designed to be a drop-in runtime for .m files, offering automatic operation fusion, a high performance compiler, and a cross-platform GPU backend powered by wgpu.
+RunMat runs MATLAB-syntax `.m` files with automatic operation fusion, a high-performance compiler, and a cross-platform GPU backend powered by wgpu.
+
+RunMat Desktop is free, including local-folder projects, unlimited cloud projects, private sharing, and real-time collaboration. [See what’s included](https://runmat.com/pricing).
 
 Key Capabilities:
 
-- MATLAB Compatibility: Supports standard .m file syntax, including arrays, complex control flow, and over 1000+ built-in functions 
+- MATLAB Compatibility: Supports MATLAB-syntax scripts and projects, including arrays, functions, classes, packages, and [1,000+ documented built-in functions](https://runmat.com/docs/reference/builtins).
+- Native Compilation: [Compile `.m` scripts into standalone native executables](https://runmat.com/docs/runtime/getting-started/cli#compile) with `runmat compile`.
+- Code Checks and Tests: [Check code without executing it](https://runmat.com/docs/runtime/getting-started/cli#check) with `runmat check`, and [run MATLAB-style script, function, and class tests](https://runmat.com/docs/runtime/getting-started/cli#test-projects) with `runmat test`.
+- Integer Support: Work with signed and unsigned integer types from 8 to 64 bits.
+- Project Packages: [Manage dependencies and lockfiles](https://runmat.com/docs/runtime/packages) for reproducible MATLAB-syntax projects with the CLI.
 - Automatic Fusion: Builds an internal graph of array operations to fuse elementwise math and reductions into optimized kernels 
 - Tiered Execution: Combines a fast-startup VM interpreter with a JIT (based on Cranelift) for hot code paths
 - Cross-Platform GPU: Transparently offloads workloads to Metal, DirectX 12, Vulkan, or WebGPU
@@ -40,12 +48,11 @@ Key Capabilities:
 - Async Runtime: Built on Rust futures, allowing non-blocking execution in web environments, CLI tools and headless pipelines
 - Integrated Plotting: Features an interactive GPU-accelerated 2D/3D plotting engine supporting 30+ plot types
 
-> [!NOTE]
-> RunMat is pre-1.0 software. The core runtime, CLI, GPU engine, and TypeScript bindings are usable today, but compatibility coverage is still expanding.
+Explore the [MATLAB compatibility guide](https://runmat.com/docs/runtime/matlab-compatibility) for supported language features, or use `runmat check analysis.m` to check your code before running it.
 
 ## Quick Start
 
-The quickest way to get started with RunMat is to download the [RunMat Desktop](https://runmat.com/download) application.
+The quickest way to get started is to [open the RunMat Sandbox](https://runmat.com/sandbox) and run code in your browser—no installation required. To work with local files, download [RunMat Desktop](https://runmat.com/download).
 
 Alternatively, you can install the CLI:
 
@@ -71,7 +78,7 @@ Run the script:
 runmat hello.m
 ```
 
-See [Hello World](/docs/getting-started/hello-world.md) for more examples, and the [Command Line Interface](/docs/getting-started/cli.md) for the full command surface.
+See [Hello World](https://runmat.com/docs/runtime/getting-started/hello-world) for more examples, and the [Command Line Interface](https://runmat.com/docs/runtime/getting-started/cli) for the full command surface.
 
 ## Other Installation Options
 
@@ -99,6 +106,21 @@ runmat analysis.m
 runmat run analysis.m
 ```
 
+Check an existing script, run your project's tests, or compile a script into a standalone native executable:
+
+```bash
+# Check code without executing it
+runmat check analysis.m
+
+# Run the project's MATLAB-style tests
+runmat test
+
+# Compile a script into a native executable
+runmat compile analysis.m -o analysis
+```
+
+See [code checking](https://runmat.com/docs/runtime/getting-started/cli#check), [project tests](https://runmat.com/docs/runtime/getting-started/cli#test-projects), and [native compilation](https://runmat.com/docs/runtime/getting-started/cli#compile) for options and examples.
+
 Projects can define named entrypoints in `runmat.toml`:
 
 ```toml
@@ -114,6 +136,19 @@ Run the entrypoint:
 ```bash
 runmat run main
 ```
+
+### Project Testing and CI
+
+Produce JUnit reports for CI and collect LCOV coverage:
+
+```bash
+runmat test --report junit
+runmat test --coverage --coverage-format lcov
+```
+
+The test runner supports MATLAB-style script, function, and class tests, with name and tag filters, cancellation, and JSON, JUnit, or TAP reports. See [project testing](https://runmat.com/docs/runtime/getting-started/cli#test-projects).
+
+### Cloud Project Files
 
 To run a script in a remote project backend, ensure you are authenticated and have selected a project:
 
@@ -135,7 +170,7 @@ runmat remote run /scripts/analysis.m
 
 The script is executed locally with the remote filesystem provider mounted into the runtime's filesystem abstraction. This means that mutations to the filesystem are persisted to the remote project, but the script runs locally.
 
-For the full command surface, see [Command Line Interface](docs/getting-started/cli.md).
+For the full command surface, see [Command Line Interface](https://runmat.com/docs/runtime/getting-started/cli).
 
 ## TypeScript And WebAssembly
 
@@ -183,17 +218,21 @@ See [bindings/ts/README.md](bindings/ts/README.md) and [WASM & TypeScript/JavaSc
 | Browser bindings | `runmat-wasm`, `bindings/ts` |
 | Tooling | `runmat-lsp`, `runmat-telemetry`, `runmat-logging` |
 
-The runtime is host-neutral. The CLI, WASM bindings, LSP, and future application hosts all submit source through the same session/execution boundary and consume structured results.
+The runtime is host-neutral. The CLI, Desktop, WASM bindings, and LSP all submit source through the same session/execution boundary and consume structured results.
 
 ## Runtime Highlights
 
 - MATLAB-style source execution for scripts, functions, packages, imports, `classdef`, indexing, cells, structs, exceptions, and common language constructs.
-- A large builtin library covering array operations, math, statistics, signal processing, image I/O, file I/O, tables, plotting, strings, dates, optimization, ODEs, and control-system basics.
+- Built-in functions for array operations, linear algebra, tables, plotting, file I/O, optimization, and ODEs, plus control design with [`lqr`](https://runmat.com/docs/reference/builtins/lqr), linear regression with [`fitlm`](https://runmat.com/docs/reference/builtins/fitlm), spectral analysis with [`pwelch`](https://runmat.com/docs/reference/builtins/pwelch), and symbolic variables with [`syms`](https://runmat.com/docs/reference/builtins/syms).
 - A bytecode VM for predictable startup and a Cranelift JIT for hot execution paths.
 - GPU acceleration through fusion, auto-offload decisions, and `wgpu` backends for Metal, Vulkan, DirectX 12, and WebGPU.
 - Interactive 2D and 3D plotting with figure handles, subplot state, labels, legends, export, replay, and browser canvas integration.
 - Session APIs for REPLs, notebooks, editors, browser sandboxes, and remote filesystem-backed projects.
 - TypeScript bindings with filesystem providers for memory, IndexedDB, and remote HTTP-backed workspaces.
+
+### Validation
+
+RunMat tests cover parsing and language semantics, runtime functions, CPU/GPU execution, and browser/WASM behavior. A shared workflow fixture exercises CSV import, MAT-file save/load, FFTs, filtering, and signal windows through both the CLI and WASM. See the [testing strategy](https://runmat.com/docs/runtime/development/testing) for the suites and commands used to validate these paths. For your own project, combine `runmat check` with representative runs and `runmat test` to verify the behavior your analysis depends on.
 
 ## GPU Acceleration
 
@@ -229,11 +268,13 @@ See [Plotting System](docs/plotting/index.md).
 
 Start here:
 
-- [Installation](docs/getting-started/install.md)
-- [Command Line Interface](docs/getting-started/cli.md)
-- [Configuration Reference](docs/getting-started/config.md)
-- [Hello World](docs/getting-started/hello-world.md)
-- [MATLAB Language Compatibility](docs/getting-started/compatability.md)
+- [Installation](https://runmat.com/docs/runtime/getting-started/install)
+- [Command Line Interface](https://runmat.com/docs/runtime/getting-started/cli)
+- [Configuration Reference](https://runmat.com/docs/runtime/getting-started/config)
+- [Hello World](https://runmat.com/docs/runtime/getting-started/hello-world)
+- [MATLAB Language Compatibility](https://runmat.com/docs/runtime/matlab-compatibility)
+- [Built-in Function Reference](https://runmat.com/docs/reference/builtins)
+- [Project Packages](https://runmat.com/docs/runtime/packages)
 
 Runtime internals:
 

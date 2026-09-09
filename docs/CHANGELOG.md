@@ -2,6 +2,25 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## v0.6.3 - September 2026
+
+_September 4, 2026_
+
+### Desktop
+
+#### Changed
+* Expanded the Free plan to include Desktop local-folder projects, unlimited cloud projects, private sharing, and real-time collaboration without a subscription.
+* Free now includes 30 days of project-version and run history, 2 GB of shared cloud storage, and 50 personal Agent credits per active member each month.
+* Additional Agent credits and cloud storage can be purchased without changing plans. Enterprise remains available for extended history, organizational controls, private deployments, and dedicated support.
+* Improved [history comparisons](https://runmat.com/docs/desktop/history-and-replay) with clearer diff highlighting, collapsed unchanged sections, and an explicit message for identical versions.
+
+#### Fixed
+* Fixed [Sandbox saving](https://runmat.com/docs/desktop/projects) to preserve unsaved editor changes when converting a Sandbox into a saved project.
+
+### Runtime
+
+No runtime changes or new runtime binaries in this release.
+
 ## [v0.6.2](https://github.com/runmat-org/runmat/compare/v0.6.1...v0.6.2) - August 2026
 
 _August 26, 2026_
@@ -11,11 +30,11 @@ _August 26, 2026_
 #### Added
 * Added `runmat compile` for producing standalone host-native executables. RunMat now carries its matching AOT runtime in the main CLI, compiles through verified Native IR and relocatable objects, links only the required runtime surface, rejects incompatible targets and runtime catalogs, and supports explicit optimization, linker, temporary-file, replacement, and fallback policies.
 * Added deterministic whole-program reachability and link planning for native compilation, including `runmat compile --explain-link` and `--link-plan-json` output with the retained functions, runtime families, capabilities, targets, symbols, and reasons behind each link decision.
-* Added deterministic package composition for path, Git, RunMat Server snapshot, and public or encrypted private registry dependencies, with exact locks, frozen project handoffs, provenance, transactional native and browser caches, WASM-safe validation, read-only mounts, explicit update/offline/frozen behavior, and origin-scoped authentication.
-* Added MATLAB-compatible testing across the CLI, Core, LSP, WASM/npm, browser Web Workers, and Desktop, including semantic script/function/class discovery, immutable test plans, process/worker isolation, cancellation, retries, reports, artifacts, plugins, and backend-independent interpreter/JIT/WASM coverage.
+* Added deterministic [package composition](https://runmat.com/docs/runtime/packages) for path, Git, RunMat Server snapshot, and public or encrypted private registry dependencies, with exact locks, frozen project handoffs, provenance, transactional native and browser caches, WASM-safe validation, read-only mounts, explicit update/offline/frozen behavior, and origin-scoped authentication.
+* Added [MATLAB-compatible testing](https://runmat.com/docs/desktop/packages-and-tests) across the CLI, Core, LSP, WASM/npm, browser Web Workers, and Desktop, including semantic script/function/class discovery, immutable test plans, process/worker isolation, cancellation, retries, reports, artifacts, plugins, and backend-independent interpreter/JIT/WASM coverage.
 * Added encrypted remote jobs and distributed tests across local processes, browser workers, customer-managed nodes, and hosted nodes, with exact frozen package closure, portable scheduling, resource pools, quota and billing enforcement, recovery and retention controls, and workload-content-safe relay and observability.
 * Added cluster enrollment and node-service operations to the main `runmat` executable under `runmat cluster join`, with stable JSON automation output, inventory and credential rotation, and install, status, update, and removal support for systemd, launchd, and native Windows services.
-* Added native storage and execution semantics for all eight MATLAB integer classes across scalars, dense and sparse arrays, complex values, containers, indexing, arithmetic, providers, serialization, distributed payloads, and WASM, preserving exact 64-bit values without a binary64 mirror and applying explicit compatibility gates at RunMat-only builtin boundaries.
+* Added native storage and execution semantics for [all eight MATLAB integer classes](https://runmat.com/blog/adding-and-extending-integer-support-for-matlab-code-in-runmat) across scalars, dense and sparse arrays, complex values, containers, indexing, arithmetic, providers, serialization, distributed payloads, and WASM, preserving exact 64-bit values without a binary64 mirror and applying explicit compatibility gates at RunMat-only builtin boundaries.
 * Added one shared static model for value, type, shape, callable, effect, capability, and requested-output facts across the compiler, LSP, `runmat check`, JIT, AOT, placement, testing, packages, and browser products, with stable identities and conservative diagnostics at dynamic boundaries.
 
 #### Changed
@@ -38,7 +57,7 @@ _August 26, 2026_
 * Added interactive native Windows plot surfaces backed by the runtime's shared Direct3D 12/WGPU device, keeping presentation GPU-resident and avoiding CPU image readback and IPC transport for rendered frames.
 
 #### Changed
-* Changed organizations to use dedicated project pages with simpler switching and administration, configurable profiles and visibility, and readable organization and project URLs.
+* Changed [organizations](https://runmat.com/docs/desktop/collaboration) to use dedicated project pages with simpler switching and administration, configurable profiles and visibility, and readable organization and project URLs.
 * Expanded file and folder workflows with renaming, duplication, version history, path copying, downloads, and deletion. Cloud and Temporary Sandbox projects can also be exported as ZIP archives, including generated artifacts.
 
 #### Fixed
@@ -55,7 +74,7 @@ _August 5, 2026_
 * Added consistent TTY-aware ANSI styling throughout human-facing CLI diagnostics, help, logs, headings, progress, and summaries, with per-stream detection, `--color=auto|always|never`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, and `TERM=dumb` support while keeping structured, raw, and program-owned output plain.
 
 #### Fixed
-* Fixed `addpath` and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
+* Fixed [`addpath`](https://runmat.com/docs/reference/builtins/addpath) and `addpath(genpath(...))` so `.m` functions on the session search path are callable immediately and across later REPL inputs through direct calls, `feval`, function handles, and callbacks, with `which`, path precedence, `rmpath`, packages, and private functions using the same runtime resolution behavior.
 
 ## [v0.6.0](https://github.com/runmat-org/runmat/compare/v0.5.6...v0.6.0) - July 2026
 
@@ -64,7 +83,7 @@ _July 28, 2026_
 ### Desktop
 
 #### Added
-* Added restart + download RunMat Desktop options for if runtime is terminated due to memory pressure by Chrome / Safari / browser runtimes
+* Added [restart + download RunMat Desktop](https://runmat.com/docs/desktop/troubleshooting) options for if runtime is terminated due to memory pressure by Chrome / Safari / browser runtimes
 
 #### Fixed
 * Fixed logout / auth token refresh. Previously, when your authentication token expired (2h after log in), you'd need to log in again.
@@ -92,7 +111,7 @@ _July 28, 2026_
 * Added missing-value compatibility and filled out datetime/duration compatibility paths.
 * Added broad numeric/array compatibility: `full`, `nchoosek`, `ndgrid`, `perms`, sparse descriptors, grouping utilities, row/column predicates, `blkdiag`, `toeplitz`, `ismembertol`, `issortedrows`, `setxor`, `bsxfun`, `erf`, `erfcinv`, `gammaln`, `realsqrt`, numeric limit helpers, `uint32`, `pol2cart`, `sinpi`, `cospi`, `lcm`, `primes`, `bounds`, moving-window reductions, and top-k reductions.
 * Added linalg helpers including `decomposition`, `eigs`, `pagemtimes`, `pagetranspose`, `vecnorm`, and diagonal/triangular structure predicates.
-* Added optimization/control builtins including `lsqnonlin`, `coneprog`, `lqr`, and `pzmap`.
+* Added optimization/control builtins including [`lsqnonlin`](https://runmat.com/docs/reference/builtins/lsqnonlin), `coneprog`, `lqr`, and `pzmap`.
 * Added signal/order-selection compatibility including `cheb2ord`, shared order-selection logic, and sample-rate/filter/resample improvements.
 * Added statistics and ML compatibility: descriptive stats, distribution helpers, random sampling, covariance/correlation helpers, outlier cleanup, ECDF, hypothesis tests, clustering, nearest-neighbor/distance helpers, regression/classification helpers, `fitlm`, `predict`, `ridge`, `lasso`, `lassoglm`, `mnrfit`, `fitdist`, `fitctree`, `fitclinear`, `cvpartition`, `crossvalind`, `bayesopt`, and related option/encoding support.
 * Added deep-learning compatibility primitives: `dlarray`, `dlfeval`, `dlgradient`, `dlnetwork`, `dlupdate`, `adamupdate`, `crossentropy`, layer descriptors, training options, supervised training helpers, sequence helpers, and ONNX export metadata.
@@ -104,7 +123,7 @@ _July 28, 2026_
 * Added object/introspection compatibility: dynamic properties, metaclass hierarchy, object save/load hooks, `onCleanup`, `memoize`, `numArgumentsFromSubscript`, `underlyingType`, identifier queries, debugger/runtests/timer compatibility, and related runtime metadata helpers.
 
 #### Changed
-* Moved `runmat check` off bytecode-only validation onto the shared static-analysis frontend (with the LSP), so it reports Rust-style / JSON diagnostics for unresolved and runtime-dependent calls instead of treating successful bytecode compilation as `valid`
+* Moved [`runmat check`](https://runmat.com/docs/runtime/getting-started/cli) off bytecode-only validation onto the shared static-analysis frontend (with the LSP), so it reports Rust-style / JSON diagnostics for unresolved and runtime-dependent calls instead of treating successful bytecode compilation as `valid`
 * Removed the unused startup-snapshot system as a pre-1.0 breaking cleanup: the `runmat-snapshot` crate and CLI, session loading APIs, `runtime.snapshot_path`, TypeScript snapshot initialization options, and packaged `stdlib.snapshot` artifact no longer exist. Workspace replay and remote filesystem snapshots are unchanged.
 
 #### Fixed
@@ -133,7 +152,7 @@ _June 28, 2026_
 ### Desktop
 
 #### Added
-- Add a Command Window (REPL) for interactive RunMat execution, with terminal-style editing, command history, multiline input, selection/copy, LSP-backed syntax highlighting, persisted session transcripts, runtime variables, and figure integration
+- Add a [Command Window (REPL)](https://runmat.com/docs/desktop/run-code) for interactive RunMat execution, with terminal-style editing, command history, multiline input, selection/copy, LSP-backed syntax highlighting, persisted session transcripts, runtime variables, and figure integration
 - Add richer default sandbox content from file-backed fixtures, including a CAD STEP file, vibration dataset, 2D and 3D examples, signal filtering, flow-field, thermal diffusion, and a markdown welcome document
 - Add Mermaid diagram rendering and editing support in markdown documents alongside existing math and code rendering
 
@@ -155,7 +174,7 @@ _June 28, 2026_
 - Improve MIR read-before-assignment analysis through lowered temporary statements so diagnostics better reflect real initialization state
 
 #### Fixed
-- Fix `contour`, `contourf`, and `contour3` validation for MATLAB-style vector and meshgrid coordinate inputs
+- Fix `contour`, [`contourf`](https://runmat.com/docs/reference/builtins/contourf), and `contour3` validation for MATLAB-style vector and meshgrid coordinate inputs
 - Fix CPU rendering and export of textured and image-mode surfaces so heatmap-like plots render through textured quads with correct colormap data
 
 ---
@@ -167,11 +186,11 @@ _June 26, 2026_
 ### Runtime
 
 #### Added
-- Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, `pwelch`, `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
+- Add broader MATLAB compatibility across I/O, signal processing, optimization, symbolic math, plotting, control systems, and array construction, including `xlsread`, `writecell`, `textscan`, `importdata`, `uiputfile`, `unzip`, `imwrite`, `audioread`, `audioinfo`, [`pwelch`](https://runmat.com/docs/reference/builtins/pwelch), `periodogram`, `spectrogram`, `freqz`, `filtfilt`, `fir1`, `buttord`, `envelope`, `zplane`, `pskmod`, `lsqcurvefit`, `fminunc`, `quad`, `digits`, `vpa`, `int`, `nan`, `inf`, `zero`, `damp`, and `polarplot`
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
-- Add generalized eigenvalue support through `eig(A, B)`
-- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](/docs/fea) for details. We will share more details as this work matures.
+- Add generalized eigenvalue support through [`eig(A, B)`](https://runmat.com/docs/reference/builtins/eig)
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](https://runmat.com/docs/fea) for details. We will share more details as this work matures.
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs
@@ -213,8 +232,8 @@ _June 17, 2026_
 ### Runtime
 
 #### Added
-- Add broader symbolic math coverage — `syms`, `sym`, symbolic function declarations such as `syms y(x)`, symbolic powers, and scalar `limit` workflows now execute through parser, HIR, runtime, VM, and WASM paths
-- Add signal, linear-algebra, and math builtins — `hilbert`, `unwrap`, `pulstran`, `rectpuls`, `tripuls`, `gauspuls`, `upsample`, `downsample`, `null`, and `heaviside` now cover common signal-processing, numeric, and symbolic scripts
+- Add broader symbolic math coverage — [`syms`](https://runmat.com/docs/reference/builtins/syms), `sym`, symbolic function declarations such as `syms y(x)`, symbolic powers, and scalar `limit` workflows now execute through parser, HIR, runtime, VM, and WASM paths
+- Add signal, linear-algebra, and math builtins — [`hilbert`](https://runmat.com/docs/reference/builtins/hilbert), `unwrap`, `pulstran`, `rectpuls`, `tripuls`, `gauspuls`, `upsample`, `downsample`, `null`, and `heaviside` now cover common signal-processing, numeric, and symbolic scripts
 - Add spreadsheet and file-selection workflows — `spreadsheetImportOptions`, `uigetfile`, expanded path commands, and provider-aware `cd` behavior now work across local, sandboxed, remote, and WASM filesystem providers
 - Add root-locus plotting and output forms for transfer-function models
 
@@ -225,7 +244,7 @@ _June 17, 2026_
 #### Fixed
 - Fix browser/WASM runtime traps in plotting and timing paths, including WebGPU plotting presentation, tic/toc handle encoding, and symptom-regression coverage for node and Chrome execution
 - Fix zero-output semantic function statement calls so direct, nested, persisted, and dynamic-eval functions do not request an output when MATLAB statement semantics require none
-- Fix `fzero` optional outputs so `[x,fval]`, `[x,fval,exitflag]`, and `[x,fval,exitflag,output]` return ordered MATLAB-compatible results
+- Fix [`fzero`](https://runmat.com/docs/reference/builtins/fzero) optional outputs so `[x,fval]`, `[x,fval,exitflag]`, and `[x,fval,exitflag,output]` return ordered MATLAB-compatible results
 - Fix byte-oriented `csvread` range reads so non-UTF-8 or nonnumeric content outside the selected numeric rectangle does not fail selected CSV imports
 - Fix production name-resolution regressions for common builtins such as `rand`, `randn`, `tic`, `toc`, `gca`, `whos`, `tf`, and `null`
 
@@ -243,11 +262,11 @@ _June 13, 2026_
 ### Runtime
 
 #### Added
-- Add sparse matrix support — `sparse` now introduces a sparse runtime value with display, metadata, `class`, `whos`, indexing, element-wise arithmetic, reductions, transposes, `find`, `nnz`, JSON/string conversion, WASM wire previews, and GPU fallback/residency integration
+- Add sparse matrix support — [`sparse`](https://runmat.com/docs/reference/builtins/sparse) now introduces a sparse runtime value with display, metadata, `class`, `whos`, indexing, element-wise arithmetic, reductions, transposes, `find`, `nnz`, JSON/string conversion, WASM wire previews, and GPU fallback/residency integration
 - Add optimization and linear-algebra builtins — `linprog` and `rref` now execute through runtime, VM, docs metadata, and generated builtin registration paths
-- Add table and import workflows — `readtable`, table objects, table `Properties`, dot/paren/brace table access and assignment, variable renaming, `height`, `width`, `groupsummary`, table-aware `sortrows`, datetime import support, and spreadsheet/text import plumbing cover common MATLAB tabular scripts
+- Add table and import workflows — [`readtable`](https://runmat.com/docs/reference/builtins/readtable), table objects, table `Properties`, dot/paren/brace table access and assignment, variable renaming, `height`, `width`, `groupsummary`, table-aware `sortrows`, datetime import support, and spreadsheet/text import plumbing cover common MATLAB tabular scripts
 - Add image and signal builtins — `imhist` and `butter` now cover histogram and Butterworth-filter workflows with runtime, VM, docs metadata, and WebAssembly registry integration
-- Add SISO transfer-function control workflows — `tf('s')`, `tf('z', Ts)`, transfer-function algebra, `feedback`, `dcgain`, `pole`, `isstable`, `stepinfo`, and multi-system `step` plotting/output forms now cover common control scripts
+- Add SISO transfer-function control workflows — [`tf('s')`](https://runmat.com/docs/reference/builtins/tf), `tf('z', Ts)`, transfer-function algebra, `feedback`, `dcgain`, `pole`, `isstable`, `stepinfo`, and multi-system `step` plotting/output forms now cover common control scripts
 - Add MATLAB script execution support through `run`, including script side effects, plotting hooks, warnings, console output, and workspace updates across runtime and VM paths
 
 #### Changed
@@ -268,35 +287,35 @@ _June 13, 2026_
 
 _June 3, 2026_
 
-A major compiler and runtime revision. RunMat now resolves MATLAB language semantics through a staged, Rust-like compiler pipeline before bytecode is generated, and adds manifest-backed multi-file projects. See the [0.5 release post](/blog/runmat-runtime-0-5-release) and the [compiler pipeline deep dive](/blog/inside-runmat-runtime-compiler-pipeline).
+A major compiler and runtime revision. RunMat now resolves MATLAB language semantics through a staged, Rust-like compiler pipeline before bytecode is generated, and adds manifest-backed multi-file projects. See the [0.5 release post](https://runmat.com/blog/runmat-runtime-0-5-release) and the [compiler pipeline deep dive](https://runmat.com/blog/inside-runmat-runtime-compiler-pipeline).
 
 ### Runtime
 
 #### Added
-- Add [project composition](/docs/runtime/getting-started/projects) — `runmat.toml` and `runmat.json` manifests declare the package, source roots, local dependencies, and named entrypoints runnable through `runmat run <name>`, with source-root, package-folder (`+pkg`), class-folder (`@Class`), and private-helper discovery
-- Add source [`classdef`](/docs/runtime/classes) objects — class source now produces real runtime objects with constructors, properties, methods, inheritance, access rules, value vs handle behavior, static members, super calls, and custom indexing hooks (`subsref`/`subsasgn`) instead of a struct-like fallback
-- Expand [function](/docs/runtime/functions) semantics — requested-output-aware calls observable through `nargin`/`nargout`, `varargin`/`varargout`, local functions, nested functions that share parent scope, anonymous functions, captures, recursion, function handles, `feval`, and a supported `arguments` validation subset
+- Add [project composition](https://runmat.com/docs/runtime/getting-started/projects) — `runmat.toml` and `runmat.json` manifests declare the package, source roots, local dependencies, and named entrypoints runnable through `runmat run <name>`, with source-root, package-folder (`+pkg`), class-folder (`@Class`), and private-helper discovery
+- Add source [`classdef`](https://runmat.com/docs/runtime/classes) objects — class source now produces real runtime objects with constructors, properties, methods, inheritance, access rules, value vs handle behavior, static members, super calls, and custom indexing hooks (`subsref`/`subsasgn`) instead of a struct-like fallback
+- Expand [function](https://runmat.com/docs/runtime/functions) semantics — requested-output-aware calls observable through `nargin`/`nargout`, `varargin`/`varargout`, local functions, nested functions that share parent scope, anonymous functions, captures, recursion, function handles, `feval`, and a supported `arguments` validation subset
 - Add explicit indexing context — reads, assignment targets, deletions, `end`, comma-list reads, function-argument expansion, and overloaded object indexing are resolved as distinct operations before bytecode
-- Add typed builtin descriptors — signatures, output behavior, completion policy, documentation, and stable error identifiers are shared across runtime execution, the [language server](/docs/runtime/lsp/features), and generated reference docs
-- Add structured [execution outcomes](/docs/runtime/session/execution-requests) — workspace deltas, display events, streamed output, diagnostics, observed workspace/environment effects, figures touched, profiling data, suspension state, and fusion-plan metadata for REPLs, notebooks, Desktop, WebAssembly, and embedded hosts
+- Add typed builtin descriptors — signatures, output behavior, completion policy, documentation, and stable error identifiers are shared across runtime execution, the [language server](https://runmat.com/docs/runtime/lsp/features), and generated reference docs
+- Add structured [execution outcomes](https://runmat.com/docs/runtime/session/execution-requests) — workspace deltas, display events, streamed output, diagnostics, observed workspace/environment effects, figures touched, profiling data, suspension state, and fusion-plan metadata for REPLs, notebooks, Desktop, WebAssembly, and embedded hosts
 - Add control-system builtins — `ss` now constructs state-space model objects from validated `A`/`B`/`C`/`D` matrices with continuous and discrete sample-time support, and `nyquist` now computes or plots SISO `tf` frequency responses with default or explicit frequency grids
 - Add communications builtins — `qammod` now maps integer symbols to QAM constellations with Gray, binary, and custom ordering plus `UnitAveragePower` and `OutputDataType` options, and `scatterplot` now visualizes complex samples with decimation, offset, marker styling, and target-axes forms
 - Add plotting and export builtins — `contour3` now creates 3-D contour line plots with contour levels rendered at their scalar heights, and `print` now exports figures through MATLAB-style figure-handle, filename, device, and resolution arguments
 - Add optimization option support — `optimoptions` now builds solver-specific option structs, validates name-value overrides, and copies or updates existing options structs for supported optimization solvers
 
 #### Changed
-- Migrate the compiler and runtime to a staged semantic [pipeline](/docs/runtime/compiler) — `source -> AST -> semantic HIR -> MIR -> MIR analysis -> VM layout + bytecode -> runtime/providers` — so names, functions, classes, output counts, indexing context, and workspace layout are resolved once and shared by the interpreter, language server, JIT, and acceleration planner
+- Migrate the compiler and runtime to a staged semantic [pipeline](https://runmat.com/docs/runtime/compiler) — `source -> AST -> semantic HIR -> MIR -> MIR analysis -> VM layout + bytecode -> runtime/providers` — so names, functions, classes, output counts, indexing context, and workspace layout are resolved once and shared by the interpreter, language server, JIT, and acceleration planner
 - Remove the legacy AST-to-bytecode execution paths in favor of the semantic pipeline
-- Compile calls from typed callable identities and fallback policies — bound functions, builtins, dynamic names, external qualified names, methods, super calls, and `feval` targets share one [dispatch](/docs/runtime/vm/dispatch) model, preserving function-handle identity
+- Compile calls from typed callable identities and fallback policies — bound functions, builtins, dynamic names, external qualified names, methods, super calls, and `feval` targets share one [dispatch](https://runmat.com/docs/runtime/vm/dispatch) model, preserving function-handle identity
 - Make workspace-visible bindings explicit — script exports, function locals, `ans`, and dynamic workspace operations route through VM workspace context
-- Drive acceleration and [fusion](/docs/runtime/gpu/fusion) planning from semantic facts — the compiler identifies fusion candidates, operation kinds, and effects, while the runtime and provider own GPU residency and concrete execution
+- Drive acceleration and [fusion](https://runmat.com/docs/runtime/gpu/fusion) planning from semantic facts — the compiler identifies fusion candidates, operation kinds, and effects, while the runtime and provider own GPU residency and concrete execution
 - Split the WGPU provider out of a monolithic implementation into state, initialization, helper, trait, and operation modules
-- Give the [JIT](/docs/runtime/jit) a tagged value ABI boundary — semantic function identity, requested output counts, expanded arguments, and non-scalar runtime values now cross host calls, with the interpreter remaining the correctness fallback
+- Give the [JIT](https://runmat.com/docs/runtime/jit) a tagged value ABI boundary — semantic function identity, requested output counts, expanded arguments, and non-scalar runtime values now cross host calls, with the interpreter remaining the correctness fallback
 
 ### Desktop
 
 #### Added
-- Add [RunMat Desktop](/blog/introducing-runmat-desktop) — a local, GPU-accelerated workspace for MATLAB-syntax code with an editor, plots, variables, notebooks, run history, local file access, optional cloud projects, and a project-aware Agent
+- Add [RunMat Desktop](https://runmat.com/blog/introducing-runmat-desktop) — a local, GPU-accelerated workspace for MATLAB-syntax code with an editor, plots, variables, notebooks, run history, local file access, optional cloud projects, and a project-aware Agent
 
 ### Agent
 
@@ -318,14 +337,14 @@ _May 22, 2026_
 ### Runtime
 
 #### Added
-- Add control-system response builtins — `step` and `impulse` now compute or plot SISO `tf` responses, support automatic, scalar-final-time, and explicit time-vector sampling, return response/time column vectors, and validate unsupported model forms with clear diagnostics
+- Add control-system response builtins — [`step`](https://runmat.com/docs/reference/builtins/step) and `impulse` now compute or plot SISO `tf` responses, support automatic, scalar-final-time, and explicit time-vector sampling, return response/time column vectors, and validate unsupported model forms with clear diagnostics
 - Add polygon plotting builtins — `patch` and `fill3` now create filled 2-D and 3-D polygon graphics handles with `Faces`/`Vertices`, coordinate, color, axes-handle, and common patch property support, backed by shared triangulation and GPU plotting render paths
-- Add numerical analysis builtins — `integral` now performs finite scalar adaptive quadrature for function handles, and `fminbnd` now performs bounded scalar minimization with Brent-style search, `optimset` options, multi-output diagnostics, and shared Brent helpers with `fzero`
+- Add numerical analysis builtins — [`integral`](https://runmat.com/docs/reference/builtins/integral) now performs finite scalar adaptive quadrature for function handles, and `fminbnd` now performs bounded scalar minimization with Brent-style search, `optimset` options, multi-output diagnostics, and shared Brent helpers with `fzero`
 - Add array, statistics, and signal-processing builtins — `repelem`, `mode`, `sinc`, `sawtooth`, and `square` now cover element replication, MATLAB-compatible modal reductions, normalized sinc evaluation, and periodic waveform generation
 - Add numeric helper builtins — `complex`, `sind`, `cosd`, `tand`, `db`, and `fgetl` now support complex construction, degree-based trigonometry, decibel conversion, and line-oriented text-file reads
 
 #### Fixed
-- Fix `errorbar` parsing for line specs before name-value pairs, y-only calls, explicit `x`/`y`/error inputs, and trailing line specs
+- Fix [`errorbar`](https://runmat.com/docs/reference/builtins/errorbar) parsing for line specs before name-value pairs, y-only calls, explicit `x`/`y`/error inputs, and trailing line specs
 - Fix MATLAB complex-constructor semantics, including unary complex storage, scalar expansion, and two-argument real-input validation
 
 ---
@@ -337,9 +356,9 @@ _May 15, 2026_
 ### Runtime
 
 #### Added
-- Add `tf` — scalar-input scalar-output transfer-function objects now support numeric, logical, integer, complex, row-vector, and column-vector coefficient inputs, continuous and discrete sample-time defaults, `Variable`, `Ts`/`SampleTime`, `Numerator`, `Denominator`, `InputDelay`, and `OutputDelay` properties, and `class(H) == "tf"`
+- Add [`tf`](https://runmat.com/docs/reference/builtins/tf) — scalar-input scalar-output transfer-function objects now support numeric, logical, integer, complex, row-vector, and column-vector coefficient inputs, continuous and discrete sample-time defaults, `Variable`, `Ts`/`SampleTime`, `Numerator`, `Denominator`, `InputDelay`, and `OutputDelay` properties, and `class(H) == "tf"`
 - Add angle conversion builtins — `deg2rad` and `rad2deg` now operate element-wise on scalars, vectors, matrices, N-D tensors, complex values, integer/logical inputs, and GPU-resident inputs, with fusion support for compatible element-wise expressions
-- Add reference-line plotting — `xline` and `yline` now draw vertical and horizontal reference lines with scalar or vector coordinates, line-style strings, labels, `LineWidth`, `Color`, `LabelOrientation`, `Visible`, returned graphics handles, and `get`/`set`/dot-property integration
+- Add reference-line plotting — [`xline`](https://runmat.com/docs/reference/builtins/xline) and `yline` now draw vertical and horizontal reference lines with scalar or vector coordinates, line-style strings, labels, `LineWidth`, `Color`, `LabelOrientation`, `Visible`, returned graphics handles, and `get`/`set`/dot-property integration
 
 #### Changed
 - Track workspace assignments through the VM and Turbine JIT so interpreter fallback, compiled stores, `clear`, and `clearvars` publish only the variables assigned or removed by the current execution
@@ -352,7 +371,7 @@ _May 15, 2026_
 - Fix WGPU fused-kernel preflight checks to reject storage-buffer, bind-group, and arithmetic binding-count overflows before creating invalid WebGPU layouts
 - Fix browser/WASM file close behavior so async flush failures keep the file registered, concurrent `fclose` calls close a file only once, and dirty buffers are restored if async write-back fails
 - Fix `plot(x, y)` compatibility for matching row-vector and column-vector pairs with the same number of elements
-- Fix `fft` default-dimension output for row vectors so row orientation is preserved
+- Fix [`fft`](https://runmat.com/docs/reference/builtins/fft) default-dimension output for row vectors so row orientation is preserved
 - Fix single-point `hann`, `hamming`, and `blackman` windows by using the host path instead of provider paths that expect longer window lengths
 
 ### Sandbox
@@ -370,10 +389,10 @@ _May 8, 2026_
 ### Runtime
 
 #### Added
-- Add ODE solvers — `ode23`, `ode45`, and `ode15s` now solve scalar, vector, and matrix-valued initial-value problems with adaptive stepping, requested `tspan` output points, and `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep` options
+- Add ODE solvers — `ode23`, [`ode45`](https://runmat.com/docs/reference/builtins/ode45), and `ode15s` now solve scalar, vector, and matrix-valued initial-value problems with adaptive stepping, requested `tspan` output points, and `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep` options
 - Add random distribution builtins — `exprnd`, `normrnd`, and `unifrnd`, including scalar and shaped outputs, deterministic host RNG behavior, parameter validation, and WGPU-backed generation when the active provider supports it
-- Add image color and class conversion builtins — `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, and `lab2rgb`
-- Add `heatmap` plot support with matrix CData input, optional row and column labels, returned graphics handles, colorbar support, and `get`/`set`/dot-property integration
+- Add image color and class conversion builtins — [`rgb2gray`](https://runmat.com/docs/reference/builtins/rgb2gray), `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, and `lab2rgb`
+- Add [`heatmap`](https://runmat.com/docs/reference/builtins/heatmap) plot support with matrix CData input, optional row and column labels, returned graphics handles, colorbar support, and `get`/`set`/dot-property integration
 - Add `clearvars` with explicit variable clearing and `-except` exclusions
 
 #### Changed
@@ -389,9 +408,9 @@ _May 1, 2026_
 ### Runtime
 
 #### Added
-- Add image I/O and display support — `imread` reads raster images into MATLAB-compatible grayscale, truecolor, and alpha arrays, and `imshow` displays numeric, logical, truecolor, and file-backed images with MATLAB-style display ranges
-- Add interpolation builtins — `interp1`, `interp2`, `spline`, `pchip`, and `ppval`, including piecewise-polynomial structs and linear, nearest, spline, and shape-preserving cubic paths
-- Add optimization builtins — `fzero`, `fsolve`, and `optimset`, with bracket expansion, Brent refinement, finite-difference Levenberg-Marquardt solving, display/tolerance options, and output shape preservation
+- Add image I/O and display support — [`imread`](https://runmat.com/docs/reference/builtins/imread) reads raster images into MATLAB-compatible grayscale, truecolor, and alpha arrays, and `imshow` displays numeric, logical, truecolor, and file-backed images with MATLAB-style display ranges
+- Add interpolation builtins — [`interp1`](https://runmat.com/docs/reference/builtins/interp1), `interp2`, `spline`, `pchip`, and `ppval`, including piecewise-polynomial structs and linear, nearest, spline, and shape-preserving cubic paths
+- Add optimization builtins — `fzero`, [`fsolve`](https://runmat.com/docs/reference/builtins/fsolve), and `optimset`, with bracket expansion, Brent refinement, finite-difference Levenberg-Marquardt solving, display/tolerance options, and output shape preservation
 - Add `format` — session-persistent numeric display modes for `short`, `long`, `shortE`, `longE`, `shortG`, `longG`, `rat`, and `hex`
 - Add `strsplit` with simple and regular-expression delimiters, `CollapseDelimiters`, `DelimiterType`, and optional delimiter-match output
 
@@ -420,9 +439,9 @@ _April 24, 2026_
 
 #### Added
 - Add `cross` — MATLAB-compatible vector cross products across row vectors, column vectors, matrices, and higher-rank tensors, with GPU-resident execution for real-valued inputs when the active provider supports it
-- Add `gradient` — numerical gradients with MATLAB-compatible matrix output ordering, scalar spacing support, complex host support, and WGPU-backed GPU residency for scalar-spacing gradients
-- Add `trapz` and `cumtrapz` — trapezoidal and cumulative trapezoidal integration with scalar spacing, coordinate-vector spacing, explicit dimension selection, complex inputs, and GPU input fallback that re-uploads real-valued outputs for downstream GPU work
-- Add `sgtitle` — figure-level titles for subplot layouts with text styling, explicit figure-handle targeting, `get`/`set` support, scene replay, and vector/native export support
+- Add [`gradient`](https://runmat.com/docs/reference/builtins/gradient) — numerical gradients with MATLAB-compatible matrix output ordering, scalar spacing support, complex host support, and WGPU-backed GPU residency for scalar-spacing gradients
+- Add [`trapz`](https://runmat.com/docs/reference/builtins/trapz) and `cumtrapz` — trapezoidal and cumulative trapezoidal integration with scalar spacing, coordinate-vector spacing, explicit dimension selection, complex inputs, and GPU input fallback that re-uploads real-valued outputs for downstream GPU work
+- Add [`sgtitle`](https://runmat.com/docs/reference/builtins/sgtitle) — figure-level titles for subplot layouts with text styling, explicit figure-handle targeting, `get`/`set` support, scene replay, and vector/native export support
 - Add CLI artifact capture for script runs — `--artifacts-dir`, `--artifacts-manifest`, `--capture-figures`, `--figure-size`, and `--max-figures`
 
 #### Changed
@@ -456,7 +475,7 @@ _April 15, 2026_
 ### Runtime
 
 #### Added
-- Expand `input()` compatibility — numeric prompts now accept logical values, named constants (`pi`, `inf`, `nan`), and matrix/vector literals with MATLAB-compatible output types. Complex expressions such as `sqrt(2)` and `ones(3)` now evaluate through the full MATLAB pipeline when an eval hook is available
+- Expand [`input()`](https://runmat.com/docs/reference/builtins/input) compatibility — numeric prompts now accept logical values, named constants (`pi`, `inf`, `nan`), and matrix/vector literals with MATLAB-compatible output types. Complex expressions such as `sqrt(2)` and `ones(3)` now evaluate through the full MATLAB pipeline when an eval hook is available
 - Add configurable CLI credential storage for `runmat login` — `auto`, `secure`, `file`, and `memory`
 
 #### Changed
@@ -488,7 +507,7 @@ _April 13, 2026_
 
 #### Added
 
-New [plot types](/docs/matlab-function-reference#plotting):
+New [plot types](https://runmat.com/docs/reference/builtins#plotting):
 - Add `stem` with GPU-accelerated rendering
 - Add `errorbar` visualization
 - Add `area` filled area plots
@@ -511,14 +530,14 @@ Plotting infrastructure:
 
 Numerical computing:
 - Implement correct matrix division semantics — `\`, `/`, `.\`, `./` now have distinct, correct semantics through parser, HIR, bytecode, VM, and GPU paths. `mldivide` and `mrdivide` support triangular solves, dense square solves, tall least-squares, wide minimum-norm solves, transpose variants, and Cholesky-backed solves with GPU-resident F32 execution
-- Implement full FFT/IFFT family — `fft`, `ifft`, `fft2`, `ifft2`, `fftn`, `ifftn` now fully implemented with underlying RustFFT for CPU paths and high-performance staged GPU shaders supporting power-of-two, radix-3, radix-5, mixed compositions, and Bluestein fallback for non-smooth/prime lengths. Complex array indexing now works throughout (`Y = fft(x); Y = Y(1:N/2)`)
+- Implement full [FFT/IFFT family](https://runmat.com/blog/matlab-fft-guide) — `fft`, `ifft`, `fft2`, `ifft2`, `fftn`, `ifftn` now fully implemented with underlying RustFFT for CPU paths and high-performance staged GPU shaders supporting power-of-two, radix-3, radix-5, mixed compositions, and Bluestein fallback for non-smooth/prime lengths. Complex array indexing now works throughout (`Y = fft(x); Y = Y(1:N/2)`)
 - Add signal processing helpers — `hann`, `hamming`, `blackman` windowing functions and `nextpow2`, all with GPU acceleration. Supports `symmetric`/`periodic` modes and output type selection
 
 Other:
 - Add `clear`, `clc`, `close all` — session management commands now work in browser and native
 - Add `datetime` — MATLAB-compatible construction, formatting, string conversion, and subtraction
 - Add `duration` — display, arithmetic, and datetime interop
-- Add [`peaks`](/docs/matlab-function-reference) builtin — GPU-accelerated with mixed-residency tensor support and type inference
+- Add [`peaks`](https://runmat.com/docs/reference/builtins/peaks) builtin — GPU-accelerated with mixed-residency tensor support and type inference
 
 #### Changed
 - Expand GPU fusion coverage — `sign`, `fix`, `hypot`, `pow2`, `asinh`, `acosh`, `atanh`, `mod`, `rem` now fuse into single GPU kernels automatically
@@ -564,7 +583,7 @@ Other:
 ### App
 
 #### Added
-- Add durable persistence and replay for run artifacts
+- Add [durable persistence and replay](https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations) for run artifacts
 
 ---
 
@@ -583,13 +602,13 @@ _March 24, 2026_
 ### Runtime
 
 #### Added
-- WebAssembly (WASM) compile target — RunMat now runs entirely in the [browser](/docs/desktop-browser-guide) with WebGPU acceleration, published as the `runmat` npm package
+- WebAssembly (WASM) compile target — RunMat now runs entirely in the [browser](https://runmat.com/docs/desktop) with WebGPU acceleration, published as the `runmat` npm package
 - Add fused GPU rendering pipeline for 2D and 3D plots with zero-copy surface data path
 - Add 3D depth camera with reversed-Z and dynamic clip planes
 - Add type inference — context-aware shape resolvers track tensor shapes through the compiler
 - Add builtins: `int32`, `uint16`, `isgpuarray`, `magic`, `empty`, `frewind`, `rand(m,n,p)`, `uint8` elementwise ops, `isequal`, `logical`, `cellfun` handle support, `fullfile`, `erase`, `atanh`, `tempname`
 - Add full call stack in error diagnostics with stack depth limit and source location tracking
-- Add [MATLAB compatibility mode](/docs/language)
+- Add [MATLAB compatibility mode](https://runmat.com/docs/runtime/matlab-compatibility)
 
 #### Changed
 - Migrate the entire VM, all builtins, and the GPU provider to async
@@ -616,7 +635,7 @@ _March 24, 2026_
 ### App
 
 #### Added
-- Add organizations, projects, and team memberships
+- Add [organizations, projects, and team memberships](https://runmat.com/docs/desktop/collaboration)
 
 ---
 
@@ -627,7 +646,7 @@ _December 22, 2025_
 #### Added
 - Add complex number support — complex arithmetic works throughout the runtime
 - Add non-conjugate transpose (`.'`) — apostrophe handling now distinguishes from conjugate transpose
-- Add Homebrew installation — `brew install runmat` (see [CLI docs](/docs/cli))
+- Add Homebrew installation — `brew install runmat` (see [CLI docs](https://runmat.com/docs/runtime/getting-started/cli))
 
 #### Changed
 - Replace manual REPL input with `rustyline` for line editing, command history, and formatting
@@ -646,7 +665,7 @@ _December 22, 2025_
 _December 2, 2025_
 
 #### Added
-- Add anonymous telemetry to help improve RunMat. No code is ever captured — only internal error codes. See [Telemetry](/docs/telemetry) for details
+- Add anonymous telemetry to help improve RunMat. No code is ever captured — only internal error codes. See [Telemetry](https://runmat.com/docs/runtime/development/telemetry) for details
 
 #### Fixed
 - Fix CLI version display
@@ -661,12 +680,12 @@ Covers [v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) th
 
 #### Added
 
-_[Accelerate](/docs/accelerate/fusion-intro) (GPU backend):_
-- Add wgpu-based GPU backend — Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)
+_[Accelerate](https://runmat.com/docs/runtime/gpu) (GPU backend):_
+- Add [wgpu-based GPU backend](https://runmat.com/blog/runmat-accelerate-fastest-runtime-for-your-math) — Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)
 - Add cost model — runtime profiling routes work to CPU or GPU based on data size and transfer cost
 - Add f32/f64 compute shaders for a broad set of builtins — `ones`, `zeros`, `rand`, reductions, and many more now dispatch to the GPU automatically
 
-_[Fusion engine](/docs/fusion-guide):_
+_[Fusion engine](https://runmat.com/docs/runtime/gpu/fusion):_
 - Add computation graph pattern scanning — the runtime analyzes your code's computation graph, matches sequences against a library of fusible patterns, and replaces them with optimized GPU kernels automatically
 - Add 5–6 initial fusion operations including elementwise math chains, where multiple operations collapse into a single GPU kernel eliminating intermediate memory traffic
 
@@ -677,7 +696,7 @@ _[Fusion engine](/docs/fusion-guide):_
 _August 25, 2025_
 
 #### Added
-- Add PowerShell installer for Windows
+- Add [PowerShell installer](https://runmat.com/docs/runtime/getting-started/install) for Windows
 
 ---
 
@@ -686,7 +705,7 @@ _August 25, 2025_
 _August 19, 2025_
 
 #### Added
-- Implement interpretation for the core MATLAB language grammar and semantic surface, across the parser, HIR, and VM. See [Language Coverage](/docs/language-coverage) for the full matrix of implemented coverage
+- Implement interpretation for the core MATLAB language grammar and semantic surface, across the parser, HIR, and VM. See [Language Coverage](https://runmat.com/docs/runtime/matlab-compatibility) for the full matrix of implemented coverage
 
 ---
 
