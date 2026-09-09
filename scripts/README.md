@@ -21,3 +21,4 @@ Stable entrypoints:
 - `scripts/check-closed-world-binary.sh <executable> <link-plan.json>`: verifies that a linked closed-world executable's defined builtin symbols exactly match its plan and that compiler, VM, and JIT symbols were omitted. Qualification hosts need `nm`, `jq`, and `rg`.
 - `scripts/development/integer-storage-census.sh`: stable lexical baseline for the authoritative numeric-storage migration. Its output is a discovery frontier, not a defect count.
 - `scripts/development/check-architecture-boundaries.sh`: validates durable dependency-direction and ownership boundaries between the value, type, builtin catalog, frontend, and runtime crates.
+- `scripts/runtime/verify-builtin-examples.mjs`: verifies catalog and legacy builtin examples, with deterministic multi-worker sharding and mergeable reports documented in `docs/development/builtin-example-sharding.md`.
