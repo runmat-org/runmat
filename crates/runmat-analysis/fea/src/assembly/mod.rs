@@ -1739,6 +1739,52 @@ fn assemble_explicit_structural_system(
             Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
         )
     };
+    let stiffness = stiffness_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    let mass = RealSparseMatrix::diagonal(
+        mass_diag,
+        OperatorRole::Mass,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+    .with_contribution(ContributionProvenance {
+        domain: ContributionDomain::Structural,
+        contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
+    });
+    let damping = RealSparseMatrix::diagonal(
+        damping_diag,
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+    .with_contribution(ContributionProvenance {
+        domain: ContributionDomain::Structural,
+        contribution_id: ContributionId("explicit_beam_shell_damping".to_string()),
+    });
+    let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+        .expect("assembled explicit operator roles and dimensions are valid");
+    let nullspace_evidence = if !beam_elements.is_empty() {
+        match NullspaceEliminationEvidence::prove_beam(
+            structural,
+            &structural_dof_layout,
+            operators.stiffness(),
+            &constrained,
+        ) {
+            Ok(evidence) => Some(evidence),
+            Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
+            Err(error) => return Err(StructuralAssemblyError::SparseOperator(error.to_string())),
+        }
+    } else {
+        None
+    };
+    let operator = AssembledRealSystem::try_new_with_nullspace_evidence(
+        operators,
+        constrained,
+        rhs,
+        nullspace_evidence,
+    )
+    .expect("assembled explicit structural system is consistent");
 
     Ok(AssemblySummary {
         dof_count,
@@ -1779,35 +1825,7 @@ fn assemble_explicit_structural_system(
         structural_material,
         thermo_mechanical: None,
         electro_thermal: None,
-        operator: {
-            let stiffness = stiffness_assembler
-                .finish()
-                .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
-            let mass = RealSparseMatrix::diagonal(
-                mass_diag,
-                OperatorRole::Mass,
-                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-            )
-            .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
-            .with_contribution(ContributionProvenance {
-                domain: ContributionDomain::Structural,
-                contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
-            });
-            let damping = RealSparseMatrix::diagonal(
-                damping_diag,
-                OperatorRole::Damping,
-                MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-            )
-            .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
-            .with_contribution(ContributionProvenance {
-                domain: ContributionDomain::Structural,
-                contribution_id: ContributionId("explicit_beam_shell_damping".to_string()),
-            });
-            let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
-                .expect("assembled explicit operator roles and dimensions are valid");
-            AssembledRealSystem::try_new(operators, constrained, rhs)
-                .expect("assembled explicit structural system is consistent")
-        },
+        operator,
     })
 }
 
@@ -3612,6 +3630,7 @@ mod tests {
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("beam assembly should succeed");
+        assert!(beam.operator.nullspace_evidence().is_some());
         let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         let shell = assemble_structural_system(
             &shell_model,
@@ -3680,6 +3699,110 @@ mod tests {
             assert_eq!(summary.structural_sources, vec![source]);
             assert_eq!(summary.structural_boundary_transfers, vec![boundary]);
         }
+    }
+
+    #[test]
+    fn beam_nullspace_evidence_requires_every_disconnected_component_to_be_anchored() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let structural = model.structural.as_mut().unwrap();
+        structural.nodes.extend([
+            runmat_analysis_core::StructuralNode {
+                node_id: 3,
+                coordinates_m: [0.0, 2.0, 0.0],
+            },
+            runmat_analysis_core::StructuralNode {
+                node_id: 4,
+                coordinates_m: [1.0, 2.0, 0.0],
+            },
+        ]);
+        structural
+            .elements
+            .push(runmat_analysis_core::StructuralElement {
+                element_id: "beam_2".into(),
+                region_id: "beam_span_2".into(),
+                kind: StructuralElementKind::Beam(runmat_analysis_core::BeamElementModel {
+                    node_ids: [3, 4],
+                    section_id: "rect".into(),
+                    reference_axis: [0.0, 1.0, 0.0],
+                }),
+            });
+        let unanchored = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        assert!(unanchored.operator.nullspace_evidence().is_none());
+
+        let mut second_anchor = model.constraints[0].clone();
+        let structural_constraint = match &mut second_anchor {
+            runmat_analysis_core::AnalysisConstraint::Structural(constraint) => constraint,
+            _ => unreachable!(),
+        };
+        structural_constraint.constraint_id = "fixed_second_root".into();
+        second_anchor.visit_targets_mut(|target| target.region_id = "node:3".into());
+        model.constraints.push(second_anchor);
+        let anchored = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        assert!(anchored.operator.nullspace_evidence().is_some());
+        anchored.operator.prepare_linear().unwrap();
+
+        let stiffness = anchored.operator.operators().stiffness();
+        let mut perturbed = RealSparseAssembler::square(
+            stiffness.rows(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        for row in 0..stiffness.rows() {
+            for entry in stiffness.pattern().row_range(row) {
+                let column = stiffness.pattern().column(entry);
+                let increment = if row == 0 && column == 0 { 1.0 } else { 0.0 };
+                perturbed.add(row, column, stiffness.values()[entry] + increment);
+            }
+        }
+        let perturbed = perturbed.finish().unwrap();
+        assert_eq!(
+            NullspaceEliminationEvidence::prove_beam(
+                model.structural.as_ref().unwrap(),
+                &anchored.structural_dof_layout,
+                &perturbed,
+                anchored.operator.constrained_dofs(),
+            ),
+            Err(crate::algebra::NullspaceEvidenceError::NullModeViolation)
+        );
+    }
+
+    #[test]
+    fn shell_proxy_cannot_use_numerical_stabilization_to_hide_missing_supports() {
+        let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        model.constraints.clear();
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            None,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+
+        assert!(summary.operator.nullspace_evidence().is_none());
+        assert!(matches!(
+            summary.operator.prepare_linear(),
+            Err(crate::algebra::RealSystemError::Coercivity(
+                crate::algebra::CoercivityError::NonPositivePivot { .. }
+            ))
+        ));
     }
 
     fn tetrahedron4_mesh() -> SolverMeshArtifact {

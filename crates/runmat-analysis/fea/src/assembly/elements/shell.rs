@@ -140,10 +140,6 @@ pub fn global_stiffness_matrix(
         add_pair_spring(&mut k, a, b, 5, drilling_k);
     }
 
-    let stabilization = (membrane + shear + bending + drilling).max(1.0) * 1.0e-12;
-    for (index, row) in k.iter_mut().enumerate() {
-        row[index] += stabilization;
-    }
     Ok(k)
 }
 
@@ -240,6 +236,25 @@ mod tests {
         for row in 0..SHELL_ELEMENT_DOF_COUNT {
             for col in 0..SHELL_ELEMENT_DOF_COUNT {
                 assert_close(k[row][col], k[col][row], 1.0e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn shell_proxy_does_not_hide_its_six_constant_component_modes() {
+        let stiffness = global_stiffness_matrix(section(), material(), geometry()).unwrap();
+        for component in 0..SHELL_NODE_DOF_COUNT {
+            let mut mode = [0.0; SHELL_ELEMENT_DOF_COUNT];
+            for node in 0..SHELL_ELEMENT_NODE_COUNT {
+                mode[node * SHELL_NODE_DOF_COUNT + component] = 1.0;
+            }
+            for row in &stiffness {
+                let residual = row
+                    .iter()
+                    .zip(mode)
+                    .map(|(value, mode)| value * mode)
+                    .sum::<f64>();
+                assert_close(residual, 0.0, 1.0e-6);
             }
         }
     }

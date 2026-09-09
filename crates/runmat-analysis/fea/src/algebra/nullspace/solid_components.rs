@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::SolverMeshArtifact;
 
-use super::{connected_components, NullspaceEvidenceError};
+use super::{components::connected_components, NullspaceEvidenceError};
 
 pub(super) fn solid_face_connected_components(
     mesh: &SolverMeshArtifact,
