@@ -31,6 +31,7 @@ pub(super) struct WgpuDeviceCaches {
     pub(super) image_norm_pipelines:
         Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
     pub(super) fft_twiddles: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>,
+    pub(super) sparse_pipelines: super::sparse::SparsePipelines,
 }
 
 impl Default for WgpuDeviceCaches {
@@ -41,6 +42,7 @@ impl Default for WgpuDeviceCaches {
             bind_group_layout_tags: Mutex::new(HashMap::new()),
             image_norm_pipelines: Mutex::new(HashMap::new()),
             fft_twiddles: Mutex::new(HashMap::new()),
+            sparse_pipelines: super::sparse::SparsePipelines::default(),
         }
     }
 }
@@ -55,6 +57,7 @@ pub struct WgpuProvider {
     pub(super) adapter_limits: wgpu::Limits,
     pub(super) workgroup_config: WorkgroupConfig,
     pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
+    pub(super) sparse: super::sparse::SparseState,
     /// Physical storage allocation pool shared by logical sessions on this
     /// device. Handle ownership remains session-local in `buffers`.
     pub(super) buffer_residency: Arc<BufferResidency>,

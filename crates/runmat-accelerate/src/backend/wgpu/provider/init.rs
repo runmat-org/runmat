@@ -415,6 +415,7 @@ impl WgpuProvider {
             adapter_limits: satisfied_limits,
             workgroup_config,
             buffers: Mutex::new(HashMap::new()),
+            sparse: super::sparse::SparseState::default(),
             buffer_residency: Arc::new(BufferResidency::new(
                 buffer_pool_limit,
                 buffer_pool_total_limit,
@@ -479,6 +480,7 @@ impl WgpuProvider {
             adapter_limits: self.adapter_limits.clone(),
             workgroup_config: self.workgroup_config,
             buffers: Mutex::new(HashMap::new()),
+            sparse: super::sparse::SparseState::default(),
             buffer_residency: self.buffer_residency.clone(),
             buffer_residency_max_poolable_bytes: self.buffer_residency_max_poolable_bytes,
             next_id: AtomicU64::new(1),

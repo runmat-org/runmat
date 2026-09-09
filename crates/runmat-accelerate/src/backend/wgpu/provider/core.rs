@@ -115,6 +115,7 @@ impl WgpuProvider {
     pub(super) fn recycle_session_buffers(&self) {
         self.bind_group_cache.clear();
         self.kernel_resources.clear();
+        self.sparse.clear();
         if let Ok(mut cache) = self.pow2_of.lock() {
             cache.clear();
         }

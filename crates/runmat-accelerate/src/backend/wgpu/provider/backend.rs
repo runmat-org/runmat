@@ -101,6 +101,8 @@ mod reduction;
 mod signal;
 #[path = "ops/solve.rs"]
 mod solve;
+#[path = "ops/sparse/mod.rs"]
+mod sparse;
 #[path = "ops/telemetry.rs"]
 mod telemetry;
 #[path = "ops/tensor.rs"]

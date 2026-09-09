@@ -31,7 +31,9 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        crate::placement::wgpu_capability_snapshot(self)
+        let mut snapshot = crate::placement::wgpu_capability_snapshot(self);
+        snapshot.sparse = Some(sparse::capabilities(self));
+        snapshot
     }
 
     fn query_feasibility(
@@ -48,6 +50,59 @@ impl AccelProvider for WgpuProvider {
         Some(crate::placement::wgpu_cost_estimate(self, query))
     }
 
+    fn query_sparse_feasibility(
+        &self,
+        query: &runmat_accelerate_api::SparseFeasibilityQuery,
+    ) -> runmat_accelerate_api::SparseFeasibility {
+        sparse::feasibility(self, query)
+    }
+
+    fn estimate_sparse_cost(
+        &self,
+        query: &runmat_accelerate_api::SparseCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        sparse::cost(self, query)
+    }
+
+    fn upload_sparse_pattern(
+        &self,
+        pattern: runmat_accelerate_api::HostCsrPatternView<'_>,
+    ) -> Result<runmat_accelerate_api::SparsePatternHandle> {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sparse.upload_pattern(self, id, pattern)
+    }
+
+    fn bind_sparse_values(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+        values: &HostNumericTensorView<'_>,
+    ) -> Result<runmat_accelerate_api::SparseMatrixHandle> {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sparse.bind_values(self, id, pattern, *values)
+    }
+
+    fn free_sparse_pattern(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+    ) -> Result<()> {
+        self.sparse.free_pattern(self, pattern)
+    }
+
+    fn free_sparse_matrix(&self, matrix: &runmat_accelerate_api::SparseMatrixHandle) -> Result<()> {
+        self.sparse.free_matrix(self, matrix)
+    }
+
+    fn sparse_spmv<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseSpmvRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::execute_spmv(self, request)
+    }
+
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
         // WebGPU exposes a maximum single-buffer size, not a trustworthy total
         // device-memory budget. Keep total capacity unknown rather than
@@ -61,8 +116,11 @@ impl AccelProvider for WgpuProvider {
                 })
             })
             .unwrap_or(u64::MAX);
+        let sparse_bytes = self.sparse.resident_bytes();
         let reclaimable_bytes = self.buffer_residency.pooled_bytes(self.element_size);
-        let allocated_bytes = live_bytes.saturating_add(reclaimable_bytes);
+        let allocated_bytes = live_bytes
+            .saturating_add(sparse_bytes)
+            .saturating_add(reclaimable_bytes);
         runmat_execution::ProviderResourceSnapshot {
             device_id: self.runtime_device_id,
             capacity_bytes: None,
@@ -72,7 +130,9 @@ impl AccelProvider for WgpuProvider {
             queue_depth: None,
             queue_limit: None,
             lost: false,
-            epoch: allocated_bytes ^ reclaimable_bytes.rotate_left(32),
+            epoch: allocated_bytes
+                ^ reclaimable_bytes.rotate_left(32)
+                ^ sparse_bytes.rotate_left(17),
         }
     }
 

@@ -412,25 +412,24 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
     ) -> Result<HostNumericTensorOwned> {
         let entry = self.get_entry_raw(handle)?;
-        let bytes = if entry.allocated_bytes == 0 {
+        let transfer_bytes = if entry.len == 0 {
+            0
+        } else {
+            entry.allocated_bytes
+        };
+        let bytes = if transfer_bytes == 0 {
             Vec::new()
         } else {
-            let staging = self
-                .create_readback_buffer(entry.allocated_bytes, "runmat-numeric-download-staging");
+            let staging =
+                self.create_readback_buffer(transfer_bytes, "runmat-numeric-download-staging");
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("runmat-numeric-download-encoder"),
                 });
-            encoder.copy_buffer_to_buffer(
-                entry.buffer.as_ref(),
-                0,
-                &staging,
-                0,
-                entry.allocated_bytes,
-            );
+            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, transfer_bytes);
             self.submit(encoder);
-            self.map_readback_bytes(staging, entry.allocated_bytes, "numeric download")
+            self.map_readback_bytes(staging, transfer_bytes, "numeric download")
                 .await?
         };
         let mut data = numeric_data_from_bytes(entry.element_type, &bytes, entry.len)?;
@@ -453,7 +452,7 @@ impl WgpuProvider {
                 shape[1] = info.base_rows;
             }
         }
-        self.telemetry.record_download_bytes(entry.allocated_bytes);
+        self.telemetry.record_download_bytes(transfer_bytes);
         let owned = HostNumericTensorOwned {
             data,
             shape,
