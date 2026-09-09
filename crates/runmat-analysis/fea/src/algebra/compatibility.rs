@@ -22,7 +22,7 @@ pub enum CompatibilityError {
     NonSquare,
     ConjugateGradientRequiresSymmetry,
     ConjugateGradientRequiresPositiveDefiniteness,
-    ConjugateGradientRequiresNullspaceCompatibility,
+    ConjugateGradientRequiresCoercivityEvidence,
     Ilu0RequiresSquareOperator,
     UnsupportedOperatorRole,
 }
@@ -60,9 +60,8 @@ pub fn validate_solver_compatibility(
             return Err(CompatibilityError::ConjugateGradientRequiresSymmetry);
         }
         match matrix.properties().definiteness {
-            MatrixDefiniteness::PositiveDefinite => {}
-            MatrixDefiniteness::PositiveSemidefinite => {
-                return Err(CompatibilityError::ConjugateGradientRequiresNullspaceCompatibility)
+            MatrixDefiniteness::PositiveDefinite | MatrixDefiniteness::PositiveSemidefinite => {
+                return Err(CompatibilityError::ConjugateGradientRequiresCoercivityEvidence)
             }
             MatrixDefiniteness::Indefinite | MatrixDefiniteness::Unknown => {
                 return Err(CompatibilityError::ConjugateGradientRequiresPositiveDefiniteness)
@@ -78,8 +77,11 @@ pub fn validate_prepared_solver_compatibility(
     preconditioner: RealPreconditioner,
 ) -> Result<(), CompatibilityError> {
     match validate_solver_compatibility(system.matrix(), solver, preconditioner) {
-        Err(CompatibilityError::ConjugateGradientRequiresNullspaceCompatibility)
-            if solver == RealSolver::ConjugateGradient && system.nullspace_evidence().is_some() =>
+        Err(CompatibilityError::ConjugateGradientRequiresCoercivityEvidence)
+            if solver == RealSolver::ConjugateGradient
+                && system.admissibility().is_some_and(|evidence| {
+                    evidence.validate_for(system.matrix(), system.rhs()).is_ok()
+                }) =>
         {
             Ok(())
         }
@@ -111,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn semidefinite_cg_requires_explicit_nullspace_compatibility() {
+    fn raw_cg_admission_requires_prepared_coercivity_evidence() {
         let matrix = RealSparseMatrix::diagonal(
             vec![1.0, 0.0],
             OperatorRole::Stiffness,
@@ -124,7 +126,7 @@ mod tests {
                 RealSolver::ConjugateGradient,
                 RealPreconditioner::Jacobi,
             ),
-            Err(CompatibilityError::ConjugateGradientRequiresNullspaceCompatibility)
+            Err(CompatibilityError::ConjugateGradientRequiresCoercivityEvidence)
         );
     }
 }

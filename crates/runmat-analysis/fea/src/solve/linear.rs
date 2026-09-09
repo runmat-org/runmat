@@ -239,6 +239,11 @@ pub fn solve_operator_system(
         }
         None => vec![0.0; operator.dof_count()],
     };
+    for (index, constrained) in prepared.constrained_dofs().iter().copied().enumerate() {
+        if constrained {
+            x[index] = b[index];
+        }
+    }
 
     let mut r = algebra_backend.vec_sub(b, &crate::algebra::apply_prepared(&prepared, &x));
     let mut z = preconditioner.apply(&r);
@@ -280,7 +285,7 @@ pub fn solve_operator_system(
         }
         let ap = crate::algebra::apply_prepared(&prepared, &p);
         let denom = algebra_backend.dot(&p, &ap);
-        if denom.abs() <= 1.0e-18 {
+        if !denom.is_finite() || denom <= 1.0e-18 {
             break;
         }
         let alpha = rz_old / denom;
@@ -393,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn preconditioner_setup_failure_is_attributable() {
+    fn noncoercive_operator_is_rejected_before_preconditioner_setup() {
         let operator = system([0.0, 3.0]);
         let result = solve_operator_system(
             &operator,
@@ -403,10 +408,8 @@ mod tests {
             None,
         );
         assert!(!result.converged);
-        assert_eq!(
-            result.diagnostics[0].code,
-            "FEA_PRECONDITIONER_SETUP_FAILED"
-        );
+        assert_eq!(result.iterations, 0);
+        assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
     }
 
     #[test]
@@ -450,7 +453,7 @@ mod tests {
             assert!(!result.converged);
             assert_eq!(result.iterations, 0);
             assert_eq!(result.device_apply_k_attempt_count, 0);
-            assert_eq!(result.diagnostics[0].code, "FEA_INCOMPATIBLE_REAL_SOLVER");
+            assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
         }
     }
 }

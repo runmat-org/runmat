@@ -14,6 +14,10 @@ use crate::{
 
 use super::{spmv, MatrixDefiniteness, MatrixSymmetry, OperatorRole, RealSparseMatrix};
 
+mod solid_components;
+
+use solid_components::solid_face_connected_components;
+
 const EVIDENCE_PREFIX: &[u8] = b"runmat-fea-nullspace-evidence/v1\0";
 const EVIDENCE_DOMAIN: &str = "fea-nullspace-evidence";
 const BINDING_DOMAIN: &str = "fea-prepared-nullspace-binding";
@@ -85,6 +89,10 @@ pub enum NullspaceEvidenceError {
     UnderconstrainedComponent,
     #[error("a reference point cannot be assigned to one structural component")]
     AmbiguousReferencePoint,
+    #[error(
+        "solid elements touch only through a node or edge; an explicit contact or tie is required"
+    )]
+    AmbiguousStructuralConnectivity,
     #[error("nullspace evidence is malformed or has been altered")]
     InvalidEvidence,
     #[error("nullspace evidence does not match the operator or constraints")]
@@ -227,26 +235,7 @@ impl NullspaceEliminationEvidence {
             .enumerate()
             .map(|(index, node)| (node.node_id, index))
             .collect::<BTreeMap<_, _>>();
-        let mut neighbors = vec![Vec::new(); node_count];
-        for element in &mesh.topology.volume_elements {
-            let nodes = element
-                .node_ids
-                .iter()
-                .map(|node| node_by_id.get(node).copied())
-                .collect::<Option<Vec<_>>>()
-                .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-            for left in 0..nodes.len() {
-                for right in (left + 1)..nodes.len() {
-                    neighbors[nodes[left]].push(nodes[right]);
-                    neighbors[nodes[right]].push(nodes[left]);
-                }
-            }
-        }
-        for adjacent in &mut neighbors {
-            adjacent.sort_unstable();
-            adjacent.dedup();
-        }
-        let component_nodes = connected_components(&neighbors)?;
+        let component_nodes = solid_face_connected_components(mesh, &node_by_id)?;
         let component_frames = component_nodes
             .iter()
             .map(|nodes| component_frame(mesh, nodes))
@@ -498,25 +487,8 @@ impl NullspaceEliminationEvidence {
 }
 
 impl PreparedNullspaceEvidence {
-    pub(super) fn validate_for_system(
-        &self,
-        matrix: &RealSparseMatrix,
-        rhs: &[f64],
-    ) -> Result<(), NullspaceEvidenceError> {
-        self.validate()?;
-        if self.prepared_pattern_identity
-            != matrix
-                .pattern_identity()
-                .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))?
-            || self.prepared_values_identity
-                != matrix
-                    .values_identity()
-                    .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))?
-            || self.prepared_rhs_identity != digest(RHS_DOMAIN, &rhs)?
-        {
-            return Err(NullspaceEvidenceError::BindingMismatch);
-        }
-        Ok(())
+    pub(super) const fn identity(&self) -> Digest {
+        self.binding_identity
     }
 
     fn validate(&self) -> Result<(), NullspaceEvidenceError> {

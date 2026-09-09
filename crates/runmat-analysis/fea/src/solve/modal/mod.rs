@@ -62,7 +62,30 @@ pub fn solve_modal_system(
         };
     }
 
-    let prepared_modal = match summary.operator.prepare_modal() {
+    let prepared_modal_result = match summary.constraint_matrix.as_ref() {
+        Some(constraints)
+            if constraints
+                .right_hand_side
+                .iter()
+                .all(|value| *value == 0.0) =>
+        {
+            constraints.affine_reduction().and_then(|reduction| {
+                summary
+                    .operator
+                    .prepare_modal_with_reduction(reduction)
+                    .map_err(|error| {
+                        crate::constraints::ConstraintAlgebraError::InvalidMatrix(error.to_string())
+                    })
+            })
+        }
+        Some(_) => Err(crate::constraints::ConstraintAlgebraError::InvalidMatrix(
+            "modal constraints must be homogeneous".into(),
+        )),
+        None => summary.operator.prepare_modal().map_err(|error| {
+            crate::constraints::ConstraintAlgebraError::InvalidMatrix(error.to_string())
+        }),
+    };
+    let prepared_modal = match prepared_modal_result {
         Ok(prepared) => prepared,
         Err(error) => {
             return ModalSolveResult {
@@ -104,6 +127,26 @@ pub fn solve_modal_system(
             };
         }
     };
+    if let Err(error) = reduced_operator.prepare_linear() {
+        return ModalSolveResult {
+            converged: false,
+            frequencies_hz: Vec::new(),
+            mode_shapes: Vec::new(),
+            residual_norms: Vec::new(),
+            diagnostics: vec![FeaDiagnostic {
+                code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
+                severity: FeaDiagnosticSeverity::Error,
+                message: format!(
+                    "modal stiffness is not coercive on the constraint space: {error}"
+                ),
+            }],
+            solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+            solver_backend: LinearAlgebraBackendKind::CpuReference,
+            solver_host_sync_count: 0,
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+        };
+    }
     let mut solve_summary = summary.clone();
     solve_summary.dof_count = reduced_operator.dof_count();
     solve_summary.constrained_dof_count = 0;

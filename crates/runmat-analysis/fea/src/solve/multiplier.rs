@@ -1,7 +1,7 @@
 //! Exact sparse constraint enforcement through a matrix-free saddle-point system.
 
 use crate::{
-    algebra::apply_k,
+    algebra::{apply_k, PreparedRealLinearSystem},
     assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -41,6 +41,26 @@ pub(super) fn solve_multiplier_constraint_system(
                         .into(),
             }],
         };
+    }
+    let reduction = match constraints.affine_reduction() {
+        Ok(reduction) => reduction,
+        Err(error) => return rejected_multiplier_system(summary, &error.to_string()),
+    };
+    if reduction.reduced_dof_count > 0 {
+        let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
+            summary.operator.operators().stiffness(),
+            summary.operator.load(),
+        ) {
+            Ok(reduced) => reduced,
+            Err(error) => return rejected_multiplier_system(summary, &error.to_string()),
+        };
+        if let Err(error) = PreparedRealLinearSystem::try_new(
+            reduced_operator,
+            reduced_rhs,
+            vec![false; reduction.reduced_dof_count],
+        ) {
+            return rejected_multiplier_system(summary, &error.to_string());
+        }
     }
     let equation_scale = representative_stiffness(summary);
     let mut right_hand_side = summary.operator.load().to_vec();
@@ -187,6 +207,32 @@ pub(super) fn solve_multiplier_constraint_system(
         solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
         preconditioner: SolverPreconditioner::None,
         diagnostics,
+    }
+}
+
+fn rejected_multiplier_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
+    LinearSolveResult {
+        iterations: 0,
+        residual_norm: summary
+            .operator
+            .load()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt(),
+        converged: false,
+        host_sync_count: 0,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        solution: vec![0.0; summary.dof_count],
+        solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
+        preconditioner: SolverPreconditioner::None,
+        diagnostics: vec![FeaDiagnostic {
+            code: "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION".into(),
+            severity: FeaDiagnosticSeverity::Error,
+            message: message.into(),
+        }],
     }
 }
 

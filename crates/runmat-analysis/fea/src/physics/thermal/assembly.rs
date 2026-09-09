@@ -762,7 +762,7 @@ mod tests {
         .steady_operator()
         .unwrap();
         let prepared = system.prepare_linear().unwrap();
-        assert!(prepared.nullspace_evidence().is_some());
+        assert!(prepared.admissibility().is_some());
         assert!(crate::algebra::validate_prepared_solver_compatibility(
             &prepared,
             crate::algebra::RealSolver::ConjugateGradient,

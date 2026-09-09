@@ -176,6 +176,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
     let mut selected_preconditioner = SolverPreconditioner::None;
+    let mut linear_diagnostics = Vec::new();
     let mut prepared_runtime_systems_by_dt: HashMap<u64, RuntimeTensorPreparedLinearSystem> =
         HashMap::new();
     let mut prepared_runtime_system_lru = VecDeque::new();
@@ -293,6 +294,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             device_apply_k_count: step_device_apply_k_count,
             device_apply_k_attempt_count: step_device_apply_k_attempt_count,
             preconditioner,
+            diagnostics: step_diagnostics,
         }) = step_stats
         {
             solver_backend = step_solver_backend;
@@ -304,6 +306,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                 step_device_apply_k_attempt_count.saturating_sub(step_device_apply_k_count),
             );
             selected_preconditioner = preconditioner;
+            linear_diagnostics.extend(step_diagnostics);
         }
 
         x = next_x;
@@ -388,6 +391,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
         severity: FeaDiagnosticSeverity::Info,
         message: "solver=implicit_euler_pcg matrix_free=true".to_string(),
     }];
+    diagnostics.extend(linear_diagnostics);
     push_transient_quality_diagnostics(
         &mut diagnostics,
         TransientQualityDiagnosticInputs {

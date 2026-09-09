@@ -3,8 +3,8 @@ use runmat_accelerate_api::{provider, HostTensorView};
 
 use crate::{
     algebra::{
-        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner,
-        RealSolver, RealSparseMatrix,
+        validate_prepared_solver_compatibility, AssembledRealSystem, CoercivityCertificate,
+        PreparedSolverAdmissibility, RealPreconditioner, RealSolver, RealSparseMatrix,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -26,7 +26,10 @@ pub struct RuntimeTensorPreparedLinearSystem {
     pub(crate) dof_count: usize,
     pub(crate) shape: Vec<usize>,
     pub(crate) matrix: RealSparseMatrix,
+    pub(crate) constrained_dofs: Vec<bool>,
+    pub(crate) prepared_rhs: Vec<f64>,
     pub(crate) inv_diag: Vec<f64>,
+    pub(crate) coercivity: CoercivityCertificate,
 }
 
 pub(crate) struct RuntimeTensorWorkspace;
@@ -64,17 +67,11 @@ pub fn solve_operator_system_runtime_tensor_with_initial_guess(
     if preconditioner_kind != SpdPreconditionerKind::Jacobi {
         return None;
     }
-    let prepared = operator.prepare_linear().ok()?;
-    validate_prepared_solver_compatibility(
-        &prepared,
-        RealSolver::ConjugateGradient,
-        RealPreconditioner::Jacobi,
-    )
-    .ok()?;
+    let prepared = prepare_runtime_tensor_operator_system(operator)?;
     solve_runtime_tensor_linear_system_internal(
         operator,
-        None,
-        operator.load(),
+        Some(&prepared),
+        &prepared.prepared_rhs,
         preconditioner_kind,
         initial_guess,
     )
@@ -114,7 +111,10 @@ pub fn prepare_runtime_tensor_operator_system(
         dof_count: n,
         shape: vec![n],
         matrix: prepared_system.matrix().clone(),
+        constrained_dofs: prepared_system.constrained_dofs().to_vec(),
+        prepared_rhs: prepared_system.rhs().to_vec(),
         inv_diag,
+        coercivity: prepared_system.admissibility()?.coercivity().clone(),
     })
 }
 
@@ -141,42 +141,64 @@ fn solve_runtime_tensor_linear_system_internal(
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
-    let provider = provider()?;
     let dof_count = prepared
         .map(|value| value.dof_count)
         .unwrap_or(operator.dof_count());
     if dof_count == 0 || rhs.len() != dof_count {
         return None;
     }
-    let fallback_system = operator.prepare_linear().ok()?;
+    let fallback_system = if prepared.is_none() {
+        Some(operator.prepare_linear().ok()?)
+    } else {
+        None
+    };
 
-    let shape_storage = prepared
-        .map(|value| value.shape.clone())
-        .unwrap_or_else(|| vec![dof_count]);
+    let shape_storage = prepared.map_or_else(|| vec![dof_count], |value| value.shape.clone());
     let shape = shape_storage.as_slice();
     let zeros = vec![0.0; dof_count];
-    let inv_diag = prepared
-        .map(|value| value.inv_diag.clone())
-        .unwrap_or_else(|| {
-            (0..dof_count)
-                .map(|i| {
-                    if fallback_system.constrained_dofs()[i] {
+    let (matrix, inv_diag) = match prepared {
+        Some(prepared) => {
+            validate_runtime_prepared(operator, prepared, rhs)?;
+            (prepared.matrix.clone(), prepared.inv_diag.clone())
+        }
+        None => {
+            let fallback = fallback_system.as_ref()?;
+            let inverse = (0..dof_count)
+                .map(|index| {
+                    if fallback.constrained_dofs()[index] {
                         1.0
                     } else {
-                        1.0 / fallback_system.matrix().get(i, i).abs().max(1.0e-12)
+                        1.0 / fallback.matrix().get(index, index).abs().max(1.0e-12)
                     }
                 })
-                .collect()
-        });
-    let matrix = prepared
-        .map(|value| value.matrix.clone())
-        .unwrap_or_else(|| fallback_system.matrix().clone());
+                .collect();
+            (fallback.matrix().clone(), inverse)
+        }
+    };
+    let provider = provider()?;
     let mut workspace = RuntimeTensorWorkspace::new();
 
-    let initial_x = match initial_guess {
-        Some(values) if values.len() == dof_count => values.to_vec(),
-        _ => zeros.clone(),
+    let mut initial_x = match initial_guess {
+        Some(values)
+            if values.len() == dof_count && values.iter().all(|value| value.is_finite()) =>
+        {
+            values.to_vec()
+        }
+        Some(_) => return None,
+        None => zeros.clone(),
     };
+    let constrained_dofs = prepared
+        .map(|prepared| prepared.constrained_dofs.as_slice())
+        .or_else(|| {
+            fallback_system
+                .as_ref()
+                .map(|system| system.constrained_dofs())
+        })?;
+    for (index, constrained) in constrained_dofs.iter().copied().enumerate() {
+        if constrained {
+            initial_x[index] = rhs[index];
+        }
+    }
     let mut x = provider
         .upload(&HostTensorView {
             data: &initial_x,
@@ -210,8 +232,12 @@ fn solve_runtime_tensor_linear_system_internal(
         },
     };
 
-    let mut r = if initial_guess.is_some() {
+    let mut device_apply_k_count: u32 = 0;
+    let mut device_apply_k_attempt_count: u32 = 0;
+    let mut r = if initial_guess.is_some() || constrained_dofs.iter().any(|value| *value) {
+        device_apply_k_attempt_count = device_apply_k_attempt_count.saturating_add(1);
         let ax = apply_k_device(&device_operator, &x)?;
+        device_apply_k_count = device_apply_k_count.saturating_add(1);
         let residual = block_on(provider.elem_sub(&rhs_h, &ax)).ok()?;
         let _ = provider.free(&ax);
         residual
@@ -236,9 +262,6 @@ fn solve_runtime_tensor_linear_system_internal(
     let mut converged = false;
     let mut iterations = 0u32;
     let mut last_rr: Option<f64> = None;
-    let mut device_apply_k_count: u32 = 0;
-    let mut device_apply_k_attempt_count: u32 = 0;
-
     for _ in 0..max_iters {
         if crate::is_fea_cancelled() {
             break;
@@ -248,7 +271,7 @@ fn solve_runtime_tensor_linear_system_internal(
         device_apply_k_count = device_apply_k_count.saturating_add(1);
 
         let denom = dot_handle(provider, &p, &ap, &mut host_sync_count)?;
-        if denom.abs() <= 1.0e-18 {
+        if !denom.is_finite() || denom <= 1.0e-18 {
             let _ = provider.free(&ap);
             break;
         }
@@ -349,6 +372,41 @@ fn solve_runtime_tensor_linear_system_internal(
     })
 }
 
+fn validate_runtime_prepared(
+    operator: &AssembledRealSystem,
+    prepared: &RuntimeTensorPreparedLinearSystem,
+    rhs: &[f64],
+) -> Option<()> {
+    let expected_matrix = operator
+        .operators()
+        .stiffness()
+        .with_identity_constraints(operator.constrained_dofs())
+        .ok()?;
+    let expected_inverse_diagonal = (0..operator.dof_count())
+        .map(|index| {
+            if operator.constrained_dofs()[index] {
+                1.0
+            } else {
+                1.0 / expected_matrix.get(index, index).abs().max(1.0e-12)
+            }
+        })
+        .collect::<Vec<_>>();
+    if prepared.dof_count != operator.dof_count()
+        || prepared.shape != [operator.dof_count()]
+        || prepared.constrained_dofs != operator.constrained_dofs()
+        || prepared.prepared_rhs.len() != operator.dof_count()
+        || prepared.prepared_rhs.iter().any(|value| !value.is_finite())
+        || prepared.inv_diag != expected_inverse_diagonal
+        || expected_matrix.pattern_identity().ok()? != prepared.matrix.pattern_identity().ok()?
+        || expected_matrix.values_identity().ok()? != prepared.matrix.values_identity().ok()?
+    {
+        return None;
+    }
+    PreparedSolverAdmissibility::bind_existing(prepared.coercivity.clone(), &prepared.matrix, rhs)
+        .ok()?;
+    Some(())
+}
+
 pub fn estimate_runtime_tensor_pcg_host_syncs(max_iters: u32) -> u32 {
     let _ = max_iters;
     1
@@ -357,11 +415,58 @@ pub fn estimate_runtime_tensor_pcg_host_syncs(max_iters: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algebra::{
+        CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseMatrix,
+    };
+
+    fn system(diagonal: [f64; 2], rhs: [f64; 2]) -> AssembledRealSystem {
+        let stiffness = RealSparseMatrix::diagonal(
+            diagonal.to_vec(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+            vec![false; 2],
+            rhs.to_vec(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn host_sync_estimator_matches_formula() {
         assert_eq!(estimate_runtime_tensor_pcg_host_syncs(0), 1);
         assert_eq!(estimate_runtime_tensor_pcg_host_syncs(1), 1);
         assert_eq!(estimate_runtime_tensor_pcg_host_syncs(64), 1);
+    }
+
+    #[test]
+    fn cached_preparation_rejects_operator_and_preconditioner_substitution_before_provider_use() {
+        let source = system([2.0, 3.0], [1.0, 1.0]);
+        let substitute = system([2.0, 4.0], [1.0, 1.0]);
+        let mut prepared = prepare_runtime_tensor_operator_system(&source).unwrap();
+
+        assert_eq!(
+            validate_runtime_prepared(&substitute, &prepared, substitute.load()),
+            None
+        );
+        prepared.inv_diag[0] = 7.0;
+        assert_eq!(
+            validate_runtime_prepared(&source, &prepared, source.load()),
+            None
+        );
     }
 }

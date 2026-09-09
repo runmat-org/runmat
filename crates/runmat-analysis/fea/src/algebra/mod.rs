@@ -1,3 +1,4 @@
+mod coercivity;
 mod compatibility;
 mod matrix;
 mod nullspace;
@@ -5,6 +6,7 @@ mod operator;
 mod pattern;
 mod reference;
 
+pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};
 pub use compatibility::{
     validate_prepared_solver_compatibility, validate_solver_compatibility, CompatibilityError,
     RealPreconditioner, RealSolver,

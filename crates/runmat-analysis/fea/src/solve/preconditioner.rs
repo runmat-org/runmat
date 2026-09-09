@@ -225,18 +225,18 @@ mod tests {
     }
 
     #[test]
-    fn missing_pivot_is_attributable() {
+    fn missing_pivot_is_rejected_by_solver_admission() {
         let matrix = RealSparseMatrix::diagonal(
             vec![1.0, 0.0],
             OperatorRole::Stiffness,
             MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
         )
         .unwrap();
-        let system =
-            PreparedRealLinearSystem::try_new(matrix, vec![1.0; 2], vec![false; 2]).unwrap();
         assert!(matches!(
-            build_spd_preconditioner(&system, SpdPreconditionerKind::Ilu0),
-            Err(PreconditionerError::InvalidPivot { row: 1 })
+            PreparedRealLinearSystem::try_new(matrix, vec![1.0; 2], vec![false; 2]),
+            Err(crate::algebra::RealSystemError::Coercivity(
+                crate::algebra::CoercivityError::NonPositivePivot { pivot: 1 }
+            ))
         ));
     }
 }

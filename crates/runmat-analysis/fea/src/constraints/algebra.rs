@@ -4,6 +4,8 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::algebra::{spmv, RealSparseAssembler, RealSparseMatrix, RealSparseMatrixError};
+
 use super::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
     ConstraintPlanError, ReactionRecovery,
@@ -370,6 +372,73 @@ impl AffineConstraintReduction {
         }
         Ok((reduced_operator, reduced_rhs))
     }
+
+    pub fn reduce_sparse_system(
+        &self,
+        operator: &RealSparseMatrix,
+        right_hand_side: &[f64],
+    ) -> Result<(RealSparseMatrix, Vec<f64>), ConstraintAlgebraError> {
+        self.validate()?;
+        if operator.rows() != self.full_dof_count
+            || operator.columns() != self.full_dof_count
+            || right_hand_side.len() != self.full_dof_count
+        {
+            return Err(ConstraintAlgebraError::OperatorDimensionMismatch);
+        }
+        let applied_offset = spmv(operator, &self.offset)
+            .map_err(|_| ConstraintAlgebraError::OperatorDimensionMismatch)?;
+        let shifted_rhs = right_hand_side
+            .iter()
+            .zip(applied_offset)
+            .map(|(applied, internal)| applied - internal)
+            .collect::<Vec<_>>();
+        let reduced_rhs = self.transpose_apply(&shifted_rhs)?;
+        Ok((self.reduce_sparse_operator(operator)?, reduced_rhs))
+    }
+
+    pub fn reduce_sparse_operator(
+        &self,
+        operator: &RealSparseMatrix,
+    ) -> Result<RealSparseMatrix, ConstraintAlgebraError> {
+        self.validate()?;
+        if operator.rows() != self.full_dof_count || operator.columns() != self.full_dof_count {
+            return Err(ConstraintAlgebraError::OperatorDimensionMismatch);
+        }
+        let mut reduced = RealSparseAssembler::square(
+            self.reduced_dof_count,
+            operator.role(),
+            operator.properties(),
+        );
+        for contribution in operator.contributions() {
+            reduced.add_contribution(contribution.clone());
+        }
+        for full_row in 0..self.full_dof_count {
+            let left_start = self.recovery_row_offsets[full_row];
+            let left_end = self.recovery_row_offsets[full_row + 1];
+            for operator_entry in operator.pattern().row_range(full_row) {
+                let full_column = operator.pattern().column(operator_entry);
+                let value = operator.values()[operator_entry];
+                let right_start = self.recovery_row_offsets[full_column];
+                let right_end = self.recovery_row_offsets[full_column + 1];
+                for left in left_start..left_end {
+                    for right in right_start..right_end {
+                        reduced.add(
+                            self.recovery_column_indices[left],
+                            self.recovery_column_indices[right],
+                            self.recovery_coefficients[left]
+                                * value
+                                * self.recovery_coefficients[right],
+                        );
+                    }
+                }
+            }
+        }
+        reduced.finish().map_err(sparse_reduction_error)
+    }
+}
+
+fn sparse_reduction_error(error: RealSparseMatrixError) -> ConstraintAlgebraError {
+    ConstraintAlgebraError::InvalidMatrix(format!("sparse affine reduction failed: {error}"))
 }
 
 impl From<ConstraintPlanError> for ConstraintAlgebraError {
@@ -381,6 +450,7 @@ impl From<ConstraintPlanError> for ConstraintAlgebraError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algebra::{MatrixProperties, OperatorRole};
 
     fn matrix(
         full_dof_count: usize,
@@ -441,6 +511,42 @@ mod tests {
         assert!((solution[0] - 4.0 / 3.0).abs() <= 1.0e-12);
         assert!((solution[1] - 1.0 / 3.0).abs() <= 1.0e-12);
         assert!((solution[2] + 5.0 / 3.0).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn sparse_reduction_matches_dense_lifting_and_preserves_operator_properties() {
+        let first = [(0, 1.0), (1, -1.0)];
+        let second = [(1, 1.0), (2, -1.0)];
+        let reduction = matrix(3, &[&first, &second], vec![1.0, 2.0])
+            .affine_reduction()
+            .unwrap();
+        let dense = [4.0, 1.0, 0.5, 1.0, 3.0, 0.25, 0.5, 0.25, 2.0];
+        let load = [2.0, -1.0, 5.0];
+        let mut assembler = RealSparseAssembler::square(
+            3,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        for row in 0..3 {
+            for column in 0..3 {
+                assembler.add(row, column, dense[row * 3 + column]);
+            }
+        }
+        let sparse = assembler.finish().unwrap();
+
+        let (dense_operator, dense_rhs) = reduction.reduce_dense_operator(&dense, &load).unwrap();
+        let (sparse_operator, sparse_rhs) = reduction.reduce_sparse_system(&sparse, &load).unwrap();
+
+        assert_eq!(sparse_operator.properties(), sparse.properties());
+        assert_eq!(sparse_rhs, dense_rhs);
+        for row in 0..reduction.reduced_dof_count {
+            for column in 0..reduction.reduced_dof_count {
+                assert_eq!(
+                    sparse_operator.get(row, column),
+                    dense_operator[row * reduction.reduced_dof_count + column]
+                );
+            }
+        }
     }
 
     #[test]

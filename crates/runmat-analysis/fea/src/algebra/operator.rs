@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::constraints::AffineConstraintReduction;
+
 use super::{
-    spmv, NullspaceEliminationEvidence, NullspaceEvidenceError, OperatorRole,
-    PreparedNullspaceEvidence, RealSparseMatrix,
+    spmv, CoercivityError, NullspaceEliminationEvidence, NullspaceEvidenceError, OperatorRole,
+    PreparedSolverAdmissibility, RealSparseMatrix,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +36,7 @@ pub enum RealSystemError {
     RoleMismatch,
     NonFiniteLoad { index: usize },
     NullspaceEvidence(NullspaceEvidenceError),
+    Coercivity(CoercivityError),
 }
 
 impl std::fmt::Display for RealSystemError {
@@ -194,17 +197,11 @@ impl AssembledRealSystem {
         let matrix = stiffness
             .with_identity_constraints(&self.constrained_dofs)
             .map_err(|_| RealSystemError::ShapeMismatch)?;
-        let nullspace_evidence = self
-            .nullspace_evidence
-            .as_ref()
-            .map(|evidence| evidence.bind_prepared(&matrix, &rhs))
-            .transpose()
-            .map_err(RealSystemError::NullspaceEvidence)?;
-        PreparedRealLinearSystem::try_new_with_nullspace_evidence(
+        PreparedRealLinearSystem::try_new_with_source(
             matrix,
             rhs,
             self.constrained_dofs.clone(),
-            nullspace_evidence,
+            self.nullspace_evidence.as_ref(),
         )
     }
 
@@ -215,20 +212,64 @@ impl AssembledRealSystem {
             .enumerate()
             .filter_map(|(index, constrained)| (!constrained).then_some(index))
             .collect::<Vec<_>>();
-        let reduce = |matrix: &RealSparseMatrix| {
-            matrix
-                .principal_submatrix(&free_dofs)
-                .map_err(|_| RealSystemError::ShapeMismatch)
+        let free_columns = free_dofs
+            .iter()
+            .enumerate()
+            .map(|(column, dof)| (*dof, column))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut reduction = AffineConstraintReduction {
+            full_dof_count: self.dof_count(),
+            reduced_dof_count: free_dofs.len(),
+            free_dof_indices: free_dofs,
+            pivot_dof_indices: self
+                .constrained_dofs
+                .iter()
+                .enumerate()
+                .filter_map(|(dof, constrained)| constrained.then_some(dof))
+                .collect(),
+            recovery_row_offsets: vec![0],
+            recovery_column_indices: Vec::with_capacity(free_columns.len()),
+            recovery_coefficients: Vec::with_capacity(free_columns.len()),
+            offset: vec![0.0; self.dof_count()],
         };
+        for dof in 0..self.dof_count() {
+            if let Some(column) = free_columns.get(&dof) {
+                reduction.recovery_column_indices.push(*column);
+                reduction.recovery_coefficients.push(1.0);
+            }
+            reduction
+                .recovery_row_offsets
+                .push(reduction.recovery_column_indices.len());
+        }
+        self.prepare_modal_with_reduction(reduction)
+    }
+
+    pub fn prepare_modal_with_reduction(
+        &self,
+        reduction: AffineConstraintReduction,
+    ) -> Result<PreparedModalSystem, RealSystemError> {
+        reduction
+            .validate()
+            .map_err(|_| RealSystemError::ShapeMismatch)?;
+        if reduction.full_dof_count != self.dof_count()
+            || reduction.offset.iter().any(|value| *value != 0.0)
+        {
+            return Err(RealSystemError::ShapeMismatch);
+        }
         let operators = CanonicalRealOperators::try_new(
-            reduce(self.operators.stiffness())?,
-            reduce(self.operators.mass())?,
-            reduce(self.operators.damping())?,
+            reduction
+                .reduce_sparse_operator(self.operators.stiffness())
+                .map_err(|_| RealSystemError::ShapeMismatch)?,
+            reduction
+                .reduce_sparse_operator(self.operators.mass())
+                .map_err(|_| RealSystemError::ShapeMismatch)?,
+            reduction
+                .reduce_sparse_operator(self.operators.damping())
+                .map_err(|_| RealSystemError::ShapeMismatch)?,
         )?;
         Ok(PreparedModalSystem {
             operators,
-            free_dofs,
-            full_dof_count: self.dof_count(),
+            reduction,
         })
     }
 }
@@ -237,34 +278,28 @@ impl AssembledRealSystem {
 #[serde(try_from = "PreparedModalSystemData")]
 pub struct PreparedModalSystem {
     operators: CanonicalRealOperators,
-    free_dofs: Vec<usize>,
-    full_dof_count: usize,
+    reduction: AffineConstraintReduction,
 }
 
 #[derive(Deserialize)]
 struct PreparedModalSystemData {
     operators: CanonicalRealOperators,
-    free_dofs: Vec<usize>,
-    full_dof_count: usize,
+    reduction: AffineConstraintReduction,
 }
 
 impl TryFrom<PreparedModalSystemData> for PreparedModalSystem {
     type Error = RealSystemError;
 
     fn try_from(data: PreparedModalSystemData) -> Result<Self, Self::Error> {
-        if data.operators.dof_count() != data.free_dofs.len()
-            || data
-                .free_dofs
-                .iter()
-                .any(|index| *index >= data.full_dof_count)
-            || data.free_dofs.windows(2).any(|pair| pair[0] >= pair[1])
+        if data.reduction.validate().is_err()
+            || data.operators.dof_count() != data.reduction.reduced_dof_count
+            || data.reduction.offset.iter().any(|value| *value != 0.0)
         {
             return Err(RealSystemError::ShapeMismatch);
         }
         Ok(Self {
             operators: data.operators,
-            free_dofs: data.free_dofs,
-            full_dof_count: data.full_dof_count,
+            reduction: data.reduction,
         })
     }
 }
@@ -280,18 +315,13 @@ impl PreparedModalSystem {
     }
 
     pub fn free_dofs(&self) -> &[usize] {
-        &self.free_dofs
+        &self.reduction.free_dof_indices
     }
 
     pub fn expand(&self, reduced: &[f64]) -> Result<Vec<f64>, RealSystemError> {
-        if reduced.len() != self.free_dofs.len() {
-            return Err(RealSystemError::ShapeMismatch);
-        }
-        let mut full = vec![0.0; self.full_dof_count];
-        for (value, original) in reduced.iter().zip(&self.free_dofs) {
-            full[*original] = *value;
-        }
-        Ok(full)
+        self.reduction
+            .expand_linear(reduced)
+            .map_err(|_| RealSystemError::ShapeMismatch)
     }
 }
 
@@ -303,7 +333,7 @@ pub struct PreparedRealLinearSystem {
     constrained_dofs: Vec<bool>,
     /// Derived admission evidence is process-local and must be rebuilt after decoding.
     #[serde(skip)]
-    nullspace_evidence: Option<PreparedNullspaceEvidence>,
+    admissibility: Option<PreparedSolverAdmissibility>,
 }
 
 #[derive(Deserialize)]
@@ -318,7 +348,7 @@ impl TryFrom<PreparedRealLinearSystemData> for PreparedRealLinearSystem {
     type Error = RealSystemError;
 
     fn try_from(data: PreparedRealLinearSystemData) -> Result<Self, Self::Error> {
-        Self::try_new_with_nullspace_evidence(data.matrix, data.rhs, data.constrained_dofs, None)
+        Self::try_new(data.matrix, data.rhs, data.constrained_dofs)
     }
 }
 
@@ -328,14 +358,14 @@ impl PreparedRealLinearSystem {
         rhs: Vec<f64>,
         constrained_dofs: Vec<bool>,
     ) -> Result<Self, RealSystemError> {
-        Self::try_new_with_nullspace_evidence(matrix, rhs, constrained_dofs, None)
+        Self::try_new_with_source(matrix, rhs, constrained_dofs, None)
     }
 
-    fn try_new_with_nullspace_evidence(
+    fn try_new_with_source(
         matrix: RealSparseMatrix,
         rhs: Vec<f64>,
         constrained_dofs: Vec<bool>,
-        nullspace_evidence: Option<PreparedNullspaceEvidence>,
+        source: Option<&NullspaceEliminationEvidence>,
     ) -> Result<Self, RealSystemError> {
         if matrix.rows() != matrix.columns()
             || rhs.len() != matrix.rows()
@@ -346,16 +376,15 @@ impl PreparedRealLinearSystem {
         if let Some(index) = rhs.iter().position(|value| !value.is_finite()) {
             return Err(RealSystemError::NonFiniteLoad { index });
         }
-        if let Some(evidence) = &nullspace_evidence {
-            evidence
-                .validate_for_system(&matrix, &rhs)
-                .map_err(RealSystemError::NullspaceEvidence)?;
-        }
+        let admissibility = Some(
+            PreparedSolverAdmissibility::prove(&matrix, &rhs, source)
+                .map_err(RealSystemError::Coercivity)?,
+        );
         Ok(Self {
             matrix,
             rhs,
             constrained_dofs,
-            nullspace_evidence,
+            admissibility,
         })
     }
     pub fn dof_count(&self) -> usize {
@@ -370,8 +399,8 @@ impl PreparedRealLinearSystem {
     pub fn constrained_dofs(&self) -> &[bool] {
         &self.constrained_dofs
     }
-    pub fn nullspace_evidence(&self) -> Option<&PreparedNullspaceEvidence> {
-        self.nullspace_evidence.as_ref()
+    pub fn admissibility(&self) -> Option<&PreparedSolverAdmissibility> {
+        self.admissibility.as_ref()
     }
 }
 

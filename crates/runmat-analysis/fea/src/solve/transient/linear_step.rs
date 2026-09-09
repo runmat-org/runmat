@@ -28,6 +28,7 @@ pub(super) struct LinearStepStats {
     pub(super) device_apply_k_count: u32,
     pub(super) device_apply_k_attempt_count: u32,
     pub(super) preconditioner: SolverPreconditioner,
+    pub(super) diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
 }
 
 pub(super) struct RuntimeTensorStepCache<'a> {
@@ -62,6 +63,42 @@ pub(super) fn solve_implicit_step_system(
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
     let preconditioner_kind = SpdPreconditionerKind::Jacobi;
+    let implicit_summary = match build_implicit_summary(summary, rhs, dt) {
+        Ok(prepared) => prepared,
+        Err(_) => return (vec![0.0; summary.dof_count], f64::INFINITY, false, None),
+    };
+    if implicit_summary.constraint_matrix.is_some() {
+        let backend = if use_runtime_tensor {
+            LinearAlgebraBackendKind::RuntimeTensor
+        } else {
+            LinearAlgebraBackendKind::CpuReference
+        };
+        let result = crate::solve::linear::solve_linear_system(
+            &implicit_summary,
+            preconditioner_kind,
+            backend,
+            &crate::solve::backend::cpu_reference::CpuReferenceBackend,
+            None,
+        );
+        let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+        return (
+            result.solution,
+            result.residual_norm / rhs_norm,
+            result.converged,
+            Some(LinearStepStats {
+                solver_backend: result.solver_backend,
+                host_sync_count: result.host_sync_count,
+                device_apply_k_count: result.device_apply_k_count,
+                device_apply_k_attempt_count: result.device_apply_k_attempt_count,
+                preconditioner: result.preconditioner,
+                diagnostics: result.diagnostics,
+            }),
+        );
+    }
+    let prepared_cpu_system = match implicit_summary.operator.prepare_linear() {
+        Ok(prepared) => prepared,
+        Err(_) => return (vec![0.0; summary.dof_count], f64::INFINITY, false, None),
+    };
     if use_runtime_tensor {
         let dt_key = dt_cache_key(
             dt,
@@ -75,7 +112,6 @@ pub(super) fn solve_implicit_step_system(
         } else {
             *runtime_cache.cache_misses += 1;
             let prepare_start = Instant::now();
-            let implicit_summary = build_implicit_summary(summary, rhs, dt);
             if let Some(prepared) = prepare_runtime_tensor_linear_system(&implicit_summary) {
                 *runtime_cache.prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
                 if runtime_cache.prepared_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
@@ -94,13 +130,15 @@ pub(super) fn solve_implicit_step_system(
 
         if let Some(prepared) = runtime_cache.prepared_systems_by_dt.get(&dt_key) {
             if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                summary,
+                &implicit_summary,
                 prepared,
-                rhs,
+                prepared_cpu_system.rhs(),
                 preconditioner_kind,
                 None,
             ) {
-                let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+                let rhs_norm = dot(prepared_cpu_system.rhs(), prepared_cpu_system.rhs())
+                    .sqrt()
+                    .max(1.0);
                 let relative_residual = result.residual_norm / rhs_norm;
                 let converged = result.converged || relative_residual <= options.tolerance;
                 return (
@@ -113,12 +151,12 @@ pub(super) fn solve_implicit_step_system(
                         device_apply_k_count: result.device_apply_k_count,
                         device_apply_k_attempt_count: result.device_apply_k_attempt_count,
                         preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
+                        diagnostics: result.diagnostics.clone(),
                     }),
                 );
             }
         }
 
-        let implicit_summary = build_implicit_summary(summary, rhs, dt);
         if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
             &implicit_summary,
             preconditioner_kind,
@@ -137,15 +175,33 @@ pub(super) fn solve_implicit_step_system(
                     device_apply_k_count: result.device_apply_k_count,
                     device_apply_k_attempt_count: result.device_apply_k_attempt_count,
                     preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
+                    diagnostics: result.diagnostics.clone(),
                 }),
             );
         }
     }
 
-    let mut x = vec![0.0; summary.dof_count];
-    let mut r = rhs.to_vec();
+    let mut x = vec![0.0; prepared_cpu_system.dof_count()];
+    for (index, constrained) in prepared_cpu_system
+        .constrained_dofs()
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        if constrained {
+            x[index] = prepared_cpu_system.rhs()[index];
+        }
+    }
+    let mut r = prepared_cpu_system
+        .rhs()
+        .iter()
+        .zip(apply_prepared(&prepared_cpu_system, &x))
+        .map(|(right_hand_side, applied)| right_hand_side - applied)
+        .collect::<Vec<_>>();
     let mut p = r.clone();
-    let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+    let rhs_norm = dot(prepared_cpu_system.rhs(), prepared_cpu_system.rhs())
+        .sqrt()
+        .max(1.0);
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() / rhs_norm <= options.tolerance {
         return (x, rr_old.sqrt(), true, None);
@@ -153,8 +209,11 @@ pub(super) fn solve_implicit_step_system(
 
     let mut converged = false;
     for _ in 0..options.max_linear_iters {
-        let ap = apply_implicit_operator(summary, &p, dt);
-        let denom = dot(&p, &ap).abs().max(1.0e-18);
+        let ap = apply_prepared(&prepared_cpu_system, &p);
+        let denom = dot(&p, &ap);
+        if !denom.is_finite() || denom <= 1.0e-18 {
+            break;
+        }
         let alpha = rr_old / denom;
         for i in 0..x.len() {
             x[i] += alpha * p[i];
@@ -187,7 +246,11 @@ fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {
     bucket_idx as u64
 }
 
-fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> AssemblySummary {
+fn build_implicit_summary(
+    summary: &AssemblySummary,
+    rhs: &[f64],
+    dt: f64,
+) -> Result<AssemblySummary, String> {
     let mut implicit = summary.clone();
     let effective = RealSparseMatrix::scaled_sum(
         &[
@@ -197,29 +260,32 @@ fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> As
         OperatorRole::EffectiveTangent,
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )
-    .expect("transient mass and stiffness shapes agree");
+    .map_err(|error| error.to_string())?;
+    let mut prepared_rhs = rhs.to_vec();
+    for (dof, constrained) in summary
+        .operator
+        .constrained_dofs()
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        if constrained {
+            prepared_rhs[dof] = summary.operator.load()[dof];
+        }
+    }
     let operators = CanonicalRealOperators::try_new(
         effective,
         summary.operator.operators().mass().clone(),
         summary.operator.operators().damping().clone(),
     )
-    .expect("transient effective operator roles agree");
+    .map_err(|error| error.to_string())?;
     implicit.operator = AssembledRealSystem::try_new(
         operators,
         summary.operator.constrained_dofs().to_vec(),
-        rhs.to_vec(),
+        prepared_rhs,
     )
-    .expect("transient effective system dimensions agree");
-    implicit
-}
-
-fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec<f64> {
-    let implicit = build_implicit_summary(summary, &vec![0.0; x.len()], dt);
-    let prepared = implicit
-        .operator
-        .prepare_linear()
-        .expect("transient system prepares");
-    apply_prepared(&prepared, x)
+    .map_err(|error| error.to_string())?;
+    Ok(implicit)
 }
 
 pub(super) fn dot(a: &[f64], b: &[f64]) -> f64 {

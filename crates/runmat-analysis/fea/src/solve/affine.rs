@@ -1,5 +1,5 @@
 use crate::{
-    algebra::apply_k,
+    algebra::{apply_k, PreparedRealLinearSystem},
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -16,7 +16,23 @@ pub(super) fn solve_affine_constraint_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
-    let reduced_rhs = reduced_right_hand_side(summary, reduction);
+    let expected_reduction = summary
+        .constraint_matrix
+        .as_ref()
+        .and_then(|matrix| matrix.affine_reduction().ok());
+    if expected_reduction.as_ref() != Some(reduction) {
+        return rejected_affine_system(
+            summary,
+            "affine reduction differs from the canonical resolved constraint matrix",
+        );
+    }
+    let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
+        summary.operator.operators().stiffness(),
+        summary.operator.load(),
+    ) {
+        Ok(reduced) => reduced,
+        Err(error) => return rejected_affine_system(summary, &error.to_string()),
+    };
     let mut reduced_solution = initial_guess
         .map(|guess| {
             reduction
@@ -59,6 +75,14 @@ pub(super) fn solve_affine_constraint_system(
             preconditioner: SolverPreconditioner::None,
             diagnostics,
         };
+    }
+
+    if let Err(error) = PreparedRealLinearSystem::try_new(
+        reduced_operator,
+        reduced_rhs.clone(),
+        vec![false; reduction.reduced_dof_count],
+    ) {
+        return rejected_affine_system(summary, &error.to_string());
     }
 
     let mut residual = algebra_backend.vec_sub(
@@ -135,19 +159,30 @@ pub(super) fn solve_affine_constraint_system(
     }
 }
 
-fn reduced_right_hand_side(
-    summary: &AssemblySummary,
-    reduction: &AffineConstraintReduction,
-) -> Vec<f64> {
-    let internal_offset = apply_k(&summary.operator, &reduction.offset);
-    let shifted = summary
-        .operator
-        .load()
-        .iter()
-        .zip(internal_offset)
-        .map(|(applied, internal)| applied - internal)
-        .collect::<Vec<_>>();
-    transpose_apply(reduction, &shifted)
+fn rejected_affine_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
+    LinearSolveResult {
+        iterations: 0,
+        residual_norm: summary
+            .operator
+            .load()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt(),
+        converged: false,
+        host_sync_count: 0,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        solution: vec![0.0; summary.dof_count],
+        solver_method: SolverMethod::MatrixFreePcg,
+        preconditioner: SolverPreconditioner::None,
+        diagnostics: vec![FeaDiagnostic {
+            code: "FEA_INVALID_AFFINE_SOLVER_ADMISSION".into(),
+            severity: FeaDiagnosticSeverity::Error,
+            message: message.into(),
+        }],
+    }
 }
 
 fn apply_reduced_operator(

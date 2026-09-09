@@ -23,8 +23,12 @@ use crate::{
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
         linear::solve_linear_system,
+        modal::solve_modal_system,
+        nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
         preconditioner::SpdPreconditionerKind,
+        transient::{solve_transient_system, TransientSolveOptions},
     },
+    ComputeBackend,
 };
 
 fn static_excitations(model: &AnalysisModel) -> RealizedExcitations {
@@ -789,6 +793,59 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
 }
 
 #[test]
+fn affine_solver_rejects_a_substituted_reduction_before_iteration() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let mut summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    summary
+        .affine_constraint_reduction
+        .as_mut()
+        .unwrap()
+        .recovery_coefficients[0] += 0.25;
+
+    let solve = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+
+    assert_eq!(solve.iterations, 0);
+    assert!(!solve.converged);
+    assert!(solve
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FEA_INVALID_AFFINE_SOLVER_ADMISSION"));
+}
+
+#[test]
 fn canonical_solid_solve_enforces_exact_multiplier_equations() {
     let (mut model, mesh) = model_and_mesh();
     model.excitations.clear();
@@ -846,6 +903,307 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         .unwrap();
     assert!(equation.maximum_prescribed_error_meters <= 1.0e-9);
     assert!(equation.row_reactions[0].generalized_reaction.is_finite());
+}
+
+#[test]
+fn multiplier_solver_rejects_an_unremoved_mechanism_before_iteration() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint("insufficient_support", 1, &[StructuralTranslationDof::Ux]),
+        equation_constraint("insufficient_relation", 2, 3, 0.0),
+    ];
+    let mut summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    summary.affine_constraint_reduction = None;
+
+    let solve = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+
+    assert_eq!(solve.iterations, 0);
+    assert!(!solve.converged);
+    assert!(
+        solve
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION"),
+        "{:?}",
+        solve.diagnostics
+    );
+}
+
+#[test]
+fn modal_reduction_enforces_the_complete_homogeneous_constraint_matrix() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.0),
+    ];
+    let mut summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    // Modal semantics use a homogeneous null-space reduction even when static enforcement was
+    // authored as a multiplier system.
+    summary.affine_constraint_reduction = None;
+    let constraints = summary.constraint_matrix.clone().unwrap();
+    let result = solve_modal_system(&summary, 1, ComputeBackend::Cpu);
+
+    assert!(result.converged, "{:?}", result.diagnostics);
+    let mode = &result.mode_shapes[0];
+    for row in 0..constraints.row_count() {
+        let start = constraints.row_offsets[row];
+        let end = constraints.row_offsets[row + 1];
+        let residual = constraints.column_indices[start..end]
+            .iter()
+            .zip(&constraints.coefficients[start..end])
+            .map(|(column, coefficient)| coefficient * mode[*column])
+            .sum::<f64>();
+        assert!(residual.abs() <= 1.0e-9, "row {row} residual={residual}");
+    }
+}
+
+#[test]
+fn modal_reduction_rejects_nonhomogeneous_constraints_before_iteration() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![equation_constraint("offset", 2, 3, 0.001)];
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+
+    let result = solve_modal_system(&summary, 1, ComputeBackend::Cpu);
+
+    assert!(!result.converged);
+    assert!(result.frequencies_hz.is_empty());
+    assert_eq!(result.device_apply_k_attempt_count, 0);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "FEA_MODAL_PREPARATION_FAILED"));
+}
+
+#[test]
+fn transient_steps_enforce_affine_constraint_kinematics() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let constraints = summary.constraint_matrix.clone().unwrap();
+    for multiplier in [false, true] {
+        let mut enforced = summary.clone();
+        if multiplier {
+            enforced.affine_constraint_reduction = None;
+        }
+        let result = solve_transient_system(
+            &enforced,
+            TransientSolveOptions {
+                time_step_s: 0.01,
+                min_time_step_s: 0.01,
+                max_time_step_s: 0.01,
+                step_count: 2,
+                adaptive_time_step: false,
+                ..TransientSolveOptions::default()
+            },
+            ComputeBackend::Cpu,
+        );
+
+        assert_eq!(result.converged_steps, 2, "{:?}", result.diagnostics);
+        for state in result.displacement_snapshots.iter().skip(1) {
+            for row in 0..constraints.row_count() {
+                let start = constraints.row_offsets[row];
+                let end = constraints.row_offsets[row + 1];
+                let value = constraints.column_indices[start..end]
+                    .iter()
+                    .zip(&constraints.coefficients[start..end])
+                    .map(|(column, coefficient)| coefficient * state[*column])
+                    .sum::<f64>();
+                assert!(
+                    (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
+                    "multiplier={multiplier} row {row} expected={} actual={value}",
+                    constraints.right_hand_side[row]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn transient_steps_enforce_nonzero_direct_prescriptions() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+        constraint_id: "prescribed_x".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::point("node:1"),
+            translations: vec![TranslationDofValue {
+                dof: StructuralTranslationDof::Ux,
+                value: PrescribedValue::Constant(Displacement::new(0.001)),
+            }],
+            rotations: Vec::new(),
+        }),
+    })];
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert!(summary.constraint_matrix.is_none());
+    assert!(summary.operator.constrained_dofs()[0]);
+    assert_eq!(summary.operator.load()[0], 0.001);
+
+    let result = solve_transient_system(
+        &summary,
+        TransientSolveOptions {
+            time_step_s: 0.01,
+            min_time_step_s: 0.01,
+            max_time_step_s: 0.01,
+            step_count: 2,
+            adaptive_time_step: false,
+            ..TransientSolveOptions::default()
+        },
+        ComputeBackend::Cpu,
+    );
+
+    assert_eq!(result.converged_steps, 2, "{:?}", result.diagnostics);
+    for state in result.displacement_snapshots.iter().skip(1) {
+        assert!(
+            (state[0] - 0.001).abs() <= 1.0e-10,
+            "prescribed={} diagnostics={:?}",
+            state[0],
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
+    let (mut model, mesh) = model_and_mesh();
+    model.excitations.clear();
+    model.constraints = vec![
+        prescribed_constraint(
+            "anchor",
+            1,
+            &[
+                StructuralTranslationDof::Ux,
+                StructuralTranslationDof::Uy,
+                StructuralTranslationDof::Uz,
+            ],
+        ),
+        prescribed_constraint(
+            "guide_two",
+            2,
+            &[StructuralTranslationDof::Uy, StructuralTranslationDof::Uz],
+        ),
+        prescribed_constraint("guide_three", 3, &[StructuralTranslationDof::Uz]),
+        equation_constraint("relative_x", 2, 3, 0.001),
+    ];
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        Some(mesh),
+        None,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let constraints = summary.constraint_matrix.clone().unwrap();
+    let result = solve_nonlinear_system(
+        &summary,
+        NonlinearSolveOptions {
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            increment_count: 2,
+            max_newton_iters: 1,
+            ..NonlinearSolveOptions::default()
+        },
+        ComputeBackend::Cpu,
+    );
+
+    assert_eq!(result.displacement_snapshots.len(), 2);
+    for state in &result.displacement_snapshots {
+        for row in 0..constraints.row_count() {
+            let start = constraints.row_offsets[row];
+            let end = constraints.row_offsets[row + 1];
+            let value = constraints.column_indices[start..end]
+                .iter()
+                .zip(&constraints.coefficients[start..end])
+                .map(|(column, coefficient)| coefficient * state[*column])
+                .sum::<f64>();
+            assert!(
+                (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
+                "row {row} expected={} actual={value}",
+                constraints.right_hand_side[row]
+            );
+        }
+    }
 }
 
 #[test]

@@ -1370,7 +1370,7 @@ fn assemble_explicit_structural_system(
     let mut stiffness_assembler = RealSparseAssembler::square(
         dof_count,
         OperatorRole::Stiffness,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     );
     stiffness_assembler.add_contribution(ContributionProvenance {
         domain: ContributionDomain::Structural,

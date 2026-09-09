@@ -195,7 +195,28 @@ pub fn solve_nonlinear_system(
     let mut convergence_stall_count = 0usize;
     let mut backtrack_burst_count = 0usize;
     let mut tangent_age = tangent_refresh_interval;
-    let mut previous = vec![0.0; summary.dof_count];
+    let constraint_reduction = summary
+        .constraint_matrix
+        .as_ref()
+        .and_then(|constraints| constraints.affine_reduction().ok());
+    let mut previous = constraint_reduction
+        .as_ref()
+        .map(|reduction| reduction.offset.clone())
+        .unwrap_or_else(|| {
+            let mut state = vec![0.0; summary.dof_count];
+            for (index, constrained) in summary
+                .operator
+                .constrained_dofs()
+                .iter()
+                .copied()
+                .enumerate()
+            {
+                if constrained {
+                    state[index] = summary.operator.load()[index];
+                }
+            }
+            state
+        });
     let complexity_scale = ((summary.load_count as f64 / 512.0).max(1.0))
         * ((summary.dof_count as f64 / 384.0).max(1.0));
     let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
@@ -257,7 +278,7 @@ pub fn solve_nonlinear_system(
         contact_severity_sum += contact_severity;
         let candidate = transient
             .displacement_snapshots
-            .get(index)
+            .get(index + 1)
             .cloned()
             .unwrap_or_else(|| previous.clone());
         let mut increment_norm = structural::displacement_increment_norm(&candidate, &previous);
