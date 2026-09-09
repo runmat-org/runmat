@@ -1,10 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use runmat_analysis_core::{StructuralRotationDof, StructuralTranslationDof};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::algebra::{spmv, RealSparseAssembler, RealSparseMatrix, RealSparseMatrixError};
+use runmat_meshing_core::StableDigest;
+
+use crate::algebra::{
+    spmv, RealSparseAssembler, RealSparseMatrix, RealSparseMatrixError, SparsePattern,
+};
 
 use super::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
@@ -53,6 +58,65 @@ pub enum ConstraintAlgebraError {
 }
 
 impl ResolvedConstraintMatrix {
+    /// Resolves the canonical solid-mechanics numbering shared by planning and assembly:
+    /// three translational DOFs per mesh node followed by six DOFs per reference point.
+    pub fn from_solid_plan(
+        plan: &CanonicalStructuralConstraintPlan,
+        node_identities: &[StableDigest],
+    ) -> Result<Self, ConstraintAlgebraError> {
+        let mesh_dofs = node_identities.len().checked_mul(3).ok_or_else(|| {
+            ConstraintAlgebraError::InvalidMatrix("solid DOF count overflowed".into())
+        })?;
+        let reference_dofs = plan.reference_points.len().checked_mul(6).ok_or_else(|| {
+            ConstraintAlgebraError::InvalidMatrix("reference-point DOF count overflowed".into())
+        })?;
+        let full_dof_count = mesh_dofs.checked_add(reference_dofs).ok_or_else(|| {
+            ConstraintAlgebraError::InvalidMatrix("solid DOF count overflowed".into())
+        })?;
+        let node_indices = node_identities
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, identity)| (identity, index))
+            .collect::<BTreeMap<_, _>>();
+        if node_indices.len() != node_identities.len() {
+            return Err(ConstraintAlgebraError::InvalidMatrix(
+                "solid node identities are not unique".into(),
+            ));
+        }
+        let reference_indices = plan
+            .reference_points
+            .iter()
+            .enumerate()
+            .map(|(index, point)| (point.identity, index))
+            .collect::<BTreeMap<_, _>>();
+        Self::from_plan(plan, full_dof_count, |owner, dof| {
+            let component = match dof {
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => 0,
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => 1,
+                CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => 2,
+                CanonicalStructuralDof::Rotation(StructuralRotationDof::Rx) => 3,
+                CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => 4,
+                CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => 5,
+            };
+            match owner {
+                CanonicalStructuralDofOwner::MeshNode(identity) => (component < 3).then(|| {
+                    node_indices
+                        .get(&identity)
+                        .copied()?
+                        .checked_mul(3)?
+                        .checked_add(component)
+                })?,
+                CanonicalStructuralDofOwner::ReferencePoint(identity) => reference_indices
+                    .get(&identity)
+                    .copied()?
+                    .checked_mul(6)?
+                    .checked_add(mesh_dofs)?
+                    .checked_add(component),
+            }
+        })
+    }
+
     pub fn from_plan(
         plan: &CanonicalStructuralConstraintPlan,
         full_dof_count: usize,
@@ -329,6 +393,57 @@ impl AffineConstraintReduction {
         Ok(reduced)
     }
 
+    /// Computes the material-independent sparsity upper bound for `T' * K * T` without
+    /// allocating values or depending on cancellations in a particular assembled operator.
+    pub fn reduce_sparse_pattern(
+        &self,
+        operator: &SparsePattern,
+    ) -> Result<SparsePattern, ConstraintAlgebraError> {
+        self.validate()?;
+        if operator.rows() != self.full_dof_count || operator.columns() != self.full_dof_count {
+            return Err(ConstraintAlgebraError::OperatorDimensionMismatch);
+        }
+        let mut rows = vec![BTreeSet::<usize>::new(); self.reduced_dof_count];
+        for full_row in 0..self.full_dof_count {
+            let left = self.recovery_row_offsets[full_row]..self.recovery_row_offsets[full_row + 1];
+            for operator_entry in operator.row_range(full_row) {
+                let full_column = operator.column(operator_entry);
+                let right = self.recovery_row_offsets[full_column]
+                    ..self.recovery_row_offsets[full_column + 1];
+                for left_entry in left.clone() {
+                    for right_entry in right.clone() {
+                        rows[self.recovery_column_indices[left_entry]]
+                            .insert(self.recovery_column_indices[right_entry]);
+                    }
+                }
+            }
+        }
+        let mut offsets = Vec::with_capacity(rows.len() + 1);
+        let mut columns = Vec::new();
+        offsets.push(0_u64);
+        for row in rows {
+            for column in row {
+                columns.push(u64::try_from(column).map_err(|_| {
+                    ConstraintAlgebraError::InvalidMatrix(
+                        "reduced sparse column exceeds canonical index width".into(),
+                    )
+                })?);
+            }
+            offsets.push(u64::try_from(columns.len()).map_err(|_| {
+                ConstraintAlgebraError::InvalidMatrix(
+                    "reduced sparse offset exceeds canonical index width".into(),
+                )
+            })?);
+        }
+        let reduced_dof_count = u64::try_from(self.reduced_dof_count).map_err(|_| {
+            ConstraintAlgebraError::InvalidMatrix(
+                "reduced sparse dimension exceeds canonical index width".into(),
+            )
+        })?;
+        SparsePattern::try_new(reduced_dof_count, reduced_dof_count, offsets, columns)
+            .map_err(|error| ConstraintAlgebraError::InvalidMatrix(error.to_string()))
+    }
+
     pub fn reduce_dense_operator(
         &self,
         operator: &[f64],
@@ -536,8 +651,10 @@ mod tests {
 
         let (dense_operator, dense_rhs) = reduction.reduce_dense_operator(&dense, &load).unwrap();
         let (sparse_operator, sparse_rhs) = reduction.reduce_sparse_system(&sparse, &load).unwrap();
+        let reduced_pattern = reduction.reduce_sparse_pattern(sparse.pattern()).unwrap();
 
         assert_eq!(sparse_operator.properties(), sparse.properties());
+        assert_eq!(reduced_pattern, sparse_operator.pattern().clone());
         assert_eq!(sparse_rhs, dense_rhs);
         for row in 0..reduction.reduced_dof_count {
             for column in 0..reduction.reduced_dof_count {

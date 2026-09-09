@@ -1,5 +1,3 @@
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
-
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::Serialize;
@@ -15,8 +13,10 @@ const PREPARED_DOMAIN: &str = "fea-prepared-solver-admissibility";
 const RHS_DOMAIN: &str = "fea-coercivity-rhs";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
-const MAX_FACTOR_FILL_MULTIPLIER: u64 = 16;
-const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 512;
+
+mod symbolic;
+
+pub(crate) use symbolic::CoercivitySymbolicPlan;
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum CoercivityError {
@@ -30,6 +30,8 @@ pub enum CoercivityError {
     WorkOverflow,
     #[error("coercivity proof exceeded its bounded sparse fill or update envelope")]
     ResourceLimit,
+    #[error("coercivity symbolic ordering could not cover the complete operator graph")]
+    SymbolicOrdering,
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
@@ -80,13 +82,9 @@ impl CoercivityCertificate {
             .iter()
             .map(|value| value.sqrt())
             .collect::<Vec<_>>();
-        let mut rows = (0..dimension)
-            .map(|_| BTreeMap::<usize, f64>::new())
-            .collect::<Vec<_>>();
-        let mut columns = (0..dimension)
-            .map(|_| BTreeSet::<usize>::new())
-            .collect::<Vec<_>>();
-        let mut stored_entry_count = 0_u64;
+        let symbolic = CoercivitySymbolicPlan::derive(matrix.pattern())?;
+        symbolic.validate_for(matrix.pattern())?;
+        let mut rows = symbolic.factor_rows();
         for row in 0..dimension {
             for entry in matrix.pattern().row_range(row) {
                 let column = matrix.pattern().column(entry);
@@ -96,70 +94,39 @@ impl CoercivityCertificate {
                 if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
                     return Err(CoercivityError::AsymmetricValues);
                 }
-                if row >= column {
+                let ordered_row = symbolic.inverse_order()[row];
+                let ordered_column = symbolic.inverse_order()[column];
+                if ordered_row >= ordered_column {
                     let scaled = value / (scales[row] * scales[column]);
-                    if scaled != 0.0 {
-                        rows[row].insert(column, scaled);
-                        stored_entry_count = stored_entry_count
-                            .checked_add(1)
-                            .ok_or(CoercivityError::WorkOverflow)?;
-                        if row != column {
-                            columns[column].insert(row);
-                        }
-                    }
+                    let entry = factor_entry_mut(&mut rows, ordered_row, ordered_column)?;
+                    *entry = scaled;
                 }
             }
         }
 
-        let dimension_u64 = u64::try_from(dimension).map_err(|_| CoercivityError::WorkOverflow)?;
-        let factor_nonzero_limit = stored_entry_count
-            .checked_mul(MAX_FACTOR_FILL_MULTIPLIER)
-            .and_then(|limit| limit.checked_add(dimension_u64))
-            .ok_or(CoercivityError::WorkOverflow)?;
-        let update_limit = stored_entry_count
-            .checked_mul(MAX_FACTOR_UPDATE_MULTIPLIER)
-            .and_then(|limit| limit.checked_add(dimension_u64))
-            .ok_or(CoercivityError::WorkOverflow)?;
-
         let tolerance = f64::EPSILON * (dimension.max(1) as f64) * 64.0;
         let mut minimum_scaled_pivot = f64::INFINITY;
-        let mut factor_nonzero_count = 0_u64;
-        let mut update_count = 0_u64;
         for pivot_index in 0..dimension {
-            let pivot = rows[pivot_index].remove(&pivot_index).unwrap_or(0.0);
+            let pivot = *factor_entry_mut(&mut rows, pivot_index, pivot_index)?;
             if !pivot.is_finite() || pivot <= tolerance {
-                return Err(CoercivityError::NonPositivePivot { pivot: pivot_index });
+                return Err(CoercivityError::NonPositivePivot {
+                    pivot: symbolic.elimination_order()[pivot_index],
+                });
             }
             minimum_scaled_pivot = minimum_scaled_pivot.min(pivot);
-            factor_nonzero_count = factor_nonzero_count
-                .checked_add(1)
-                .ok_or(CoercivityError::WorkOverflow)?;
-            if factor_nonzero_count > factor_nonzero_limit {
-                return Err(CoercivityError::ResourceLimit);
-            }
-            let neighbors = columns[pivot_index]
-                .iter()
-                .copied()
-                .filter(|row| *row > pivot_index)
-                .collect::<Vec<_>>();
+            let neighbors = &symbolic.pivot_neighbors()[pivot_index];
             let mut factors = Vec::with_capacity(neighbors.len());
-            for row in neighbors {
-                let value = rows[row].remove(&pivot_index).unwrap_or(0.0);
+            for row in neighbors.iter().copied() {
+                let value = *factor_entry_mut(&mut rows, row, pivot_index)?;
                 let factor = value / pivot;
                 if !factor.is_finite() {
-                    return Err(CoercivityError::NonPositivePivot { pivot: pivot_index });
+                    return Err(CoercivityError::NonPositivePivot {
+                        pivot: symbolic.elimination_order()[pivot_index],
+                    });
                 }
-                if factor != 0.0 {
-                    factors.push((row, factor));
-                    factor_nonzero_count = factor_nonzero_count
-                        .checked_add(1)
-                        .ok_or(CoercivityError::WorkOverflow)?;
-                    if factor_nonzero_count > factor_nonzero_limit {
-                        return Err(CoercivityError::ResourceLimit);
-                    }
-                }
+                *factor_entry_mut(&mut rows, row, pivot_index)? = factor;
+                factors.push((row, factor));
             }
-            columns[pivot_index].clear();
             for left in 0..factors.len() {
                 for right in 0..=left {
                     let (left_row, left_factor) = factors[left];
@@ -170,30 +137,12 @@ impl CoercivityCertificate {
                         (right_row, left_row)
                     };
                     let update = left_factor * pivot * right_factor;
-                    let entry = match rows[row].entry(column) {
-                        Entry::Occupied(entry) => entry.into_mut(),
-                        Entry::Vacant(entry) => {
-                            stored_entry_count = stored_entry_count
-                                .checked_add(1)
-                                .ok_or(CoercivityError::WorkOverflow)?;
-                            if stored_entry_count > factor_nonzero_limit {
-                                return Err(CoercivityError::ResourceLimit);
-                            }
-                            entry.insert(0.0)
-                        }
-                    };
+                    let entry = factor_entry_mut(&mut rows, row, column)?;
                     *entry -= update;
                     if !entry.is_finite() {
-                        return Err(CoercivityError::NonPositivePivot { pivot: pivot_index });
-                    }
-                    if row != column {
-                        columns[column].insert(row);
-                    }
-                    update_count = update_count
-                        .checked_add(1)
-                        .ok_or(CoercivityError::WorkOverflow)?;
-                    if update_count > update_limit {
-                        return Err(CoercivityError::ResourceLimit);
+                        return Err(CoercivityError::NonPositivePivot {
+                            pivot: symbolic.elimination_order()[pivot_index],
+                        });
                     }
                 }
             }
@@ -209,8 +158,8 @@ impl CoercivityCertificate {
             values_identity,
             dimension,
             minimum_scaled_pivot_bits: minimum_scaled_pivot.to_bits(),
-            factor_nonzero_count,
-            update_count,
+            factor_nonzero_count: symbolic.factor_nonzero_count(),
+            update_count: symbolic.update_count(),
             identity: Digest::sha256([]),
         };
         certificate.identity = certificate.expected_identity()?;
@@ -249,6 +198,18 @@ impl CoercivityCertificate {
             ),
         )
     }
+}
+
+fn factor_entry_mut(
+    rows: &mut [Vec<(usize, f64)>],
+    row: usize,
+    column: usize,
+) -> Result<&mut f64, CoercivityError> {
+    let entries = rows.get_mut(row).ok_or(CoercivityError::SymbolicOrdering)?;
+    let entry = entries
+        .binary_search_by_key(&column, |(candidate, _)| *candidate)
+        .map_err(|_| CoercivityError::SymbolicOrdering)?;
+    Ok(&mut entries[entry].1)
 }
 
 impl PreparedSolverAdmissibility {
@@ -353,6 +314,12 @@ mod tests {
         let operator = matrix([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
         let evidence =
             PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
+        let symbolic = CoercivitySymbolicPlan::derive(operator.pattern()).unwrap();
+        assert_eq!(
+            evidence.coercivity.factor_nonzero_count,
+            symbolic.factor_nonzero_count()
+        );
+        assert_eq!(evidence.coercivity.update_count, symbolic.update_count());
         evidence.validate_for(&operator, &[1.0, 2.0, 3.0]).unwrap();
         assert_eq!(
             evidence.validate_for(&operator, &[1.0, 2.0, 4.0]),

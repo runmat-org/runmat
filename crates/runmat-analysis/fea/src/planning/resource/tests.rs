@@ -53,6 +53,12 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             vector_count: Count(5),
             scalar: NumericalScalar::RealF64,
             preconditioner: PreconditionerStorage::Diagonal,
+            admission: SolverAdmissionResourcePolicy {
+                dimension: Count(4),
+                factor_nonzero_upper_bound: Count(10),
+                update_count_upper_bound: Count(12),
+                resident_bytes_upper_bound: ByteCount(200),
+            },
         },
         recovery: RecoveryResourcePolicy {
             resident_value_count: Count(4),
@@ -197,6 +203,25 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         plan.input.constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
+    let operators = StructuralSymbolicOperators::derive(&projection, &constraints).unwrap();
+    let expected_admission =
+        crate::algebra::CoercivitySymbolicPlan::derive(operators.stiffness_upper_bound()).unwrap();
+    let SolveResourcePolicy::Iterative { admission, .. } = &plan.input.solve else {
+        panic!("structural preflight must authorize iterative solver admission");
+    };
+    assert_eq!(admission.dimension, Count(expected_admission.dimension()));
+    assert_eq!(
+        admission.factor_nonzero_upper_bound,
+        Count(expected_admission.factor_nonzero_count())
+    );
+    assert_eq!(
+        admission.update_count_upper_bound,
+        Count(expected_admission.update_count())
+    );
+    assert_eq!(
+        admission.resident_bytes_upper_bound,
+        ByteCount(expected_admission.resident_bytes_upper_bound())
+    );
     plan.validate_identity().unwrap();
 }
 
@@ -211,6 +236,7 @@ fn exact_small_estimate_separates_all_resource_classes() {
     assert_eq!(plan.breakdown.assembly_contribution_bytes, ByteCount(240));
     assert_eq!(plan.breakdown.solve_vector_bytes, ByteCount(160));
     assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(32));
+    assert_eq!(plan.breakdown.factorization_bytes, ByteCount(200));
     assert_eq!(plan.breakdown.constraint_bytes, ByteCount(120));
     assert_eq!(plan.breakdown.observation_operation_count, Count(100));
     assert_eq!(
@@ -219,7 +245,7 @@ fn exact_small_estimate_separates_all_resource_classes() {
     );
     assert_eq!(plan.breakdown.observation_produced_sample_count, Count(1));
     assert_eq!(plan.breakdown.observation_retained_sample_count, Count(1));
-    assert_eq!(plan.request.memory_bytes, 1_956);
+    assert_eq!(plan.request.memory_bytes, 2_108);
     assert_eq!(plan.request.scratch_bytes, 45);
     assert_eq!(plan.request.max_artifact_bytes, 302);
     assert_eq!(plan.request.max_egress_bytes, 220);
@@ -283,6 +309,12 @@ fn understated_resident_bounds_are_rejected() {
             nonzero_upper_bound: Count(10),
             resident_bytes_upper_bound: ByteCount(1),
         },
+        admission: SolverAdmissionResourcePolicy {
+            dimension: Count(4),
+            factor_nonzero_upper_bound: Count(10),
+            update_count_upper_bound: Count(12),
+            resident_bytes_upper_bound: ByteCount(200),
+        },
     };
     assert!(matches!(
         build_resource_plan(preconditioner),
@@ -300,6 +332,19 @@ fn understated_resident_bounds_are_rejected() {
         build_resource_plan(factor),
         Err(ResourcePlanningError::Invalid(_))
     ));
+
+    let mut admission = input(PartitioningPolicy::Monolithic);
+    let SolveResourcePolicy::Iterative {
+        admission: policy, ..
+    } = &mut admission.solve
+    else {
+        unreachable!()
+    };
+    policy.resident_bytes_upper_bound = ByteCount(1);
+    assert!(matches!(
+        build_resource_plan(admission),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
 }
 
 #[test]
@@ -310,6 +355,12 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
         vector_count: Count(5),
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
+        admission: SolverAdmissionResourcePolicy {
+            dimension: Count(4),
+            factor_nonzero_upper_bound: Count(10),
+            update_count_upper_bound: Count(12),
+            resident_bytes_upper_bound: ByteCount(280),
+        },
     };
     let complex = build_resource_plan(complex_input).unwrap();
 
@@ -342,7 +393,7 @@ fn inventory_admits_or_rejects_a_monolithic_plan() {
     assert!(matches!(
         admit_resource_plan(
             input(PartitioningPolicy::Monolithic),
-            &inventory(2_000, 100)
+            &inventory(2_200, 100)
         ),
         ResourceAdmission::Admit { .. }
     ));
@@ -378,7 +429,7 @@ fn operator_domain_work_gets_a_conservative_partition_recommendation() {
         panic!("operator/domain work should receive a partition recommendation");
     };
     assert_eq!(minimum_partition_count, 3);
-    assert_eq!(per_partition_request.memory_bytes, 749);
+    assert_eq!(per_partition_request.memory_bytes, 800);
     assert_eq!(per_partition_request.scratch_bytes, 24);
 }
 
@@ -445,7 +496,7 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
     let actual = AnalysisResourceUsage {
         scheduler: ResourceUsage {
             cpu_core_millis: 1_001,
-            memory_byte_millis: 1_956_001,
+            memory_byte_millis: u128::from(plan.request.memory_bytes) * 1_000 + 1,
             wall_millis: 1_001,
             egress_bytes: 221,
             relay_bytes: 13,

@@ -1,6 +1,9 @@
 use crate::{
-    constraints::CanonicalStructuralConstraintPlan, execution::StructuralLinearWorkload,
-    results::observation::ResolvedObservationPlan, solve::preconditioner::SpdPreconditionerKind,
+    algebra::CoercivitySymbolicPlan,
+    constraints::{CanonicalStructuralConstraintPlan, ResolvedConstraintMatrix},
+    execution::StructuralLinearWorkload,
+    results::observation::ResolvedObservationPlan,
+    solve::preconditioner::SpdPreconditionerKind,
     topology::AnalysisProjection,
 };
 
@@ -9,8 +12,8 @@ use super::{
     CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourcePlan,
     FeaResourcePlanningInput, NumericalScalar, ObservationResourceFacts, PartitioningPolicy,
     PreconditionerStorage, RecoveryResourcePolicy, ResourcePlanningError, SolveResourcePolicy,
-    SparseResourceFacts, StructuralSymbolicOperators, TopologyResourceFacts, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION,
+    SolverAdmissionResourcePolicy, SparseResourceFacts, StructuralSymbolicOperators,
+    TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
@@ -52,7 +55,30 @@ pub fn build_structural_resource_plan(
     let observations = ObservationResourceFacts::from_plan(observations)?;
     let dofs = sparse.rows.0;
     let stiffness_nonzeros = sparse.maximum_nonzeros();
-    let solve = solve_policy(workload.preconditioner, dofs, stiffness_nonzeros)?;
+    let node_identities = projection
+        .nodes
+        .iter()
+        .map(|node| node.stable_identity)
+        .collect::<Vec<_>>();
+    let constraint_matrix =
+        ResolvedConstraintMatrix::from_solid_plan(constraints, &node_identities)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let admission_pattern = if constraints.rows.iter().any(|row| row.terms.len() > 1) {
+        constraint_matrix
+            .affine_reduction()
+            .and_then(|reduction| reduction.reduce_sparse_pattern(symbolic.stiffness_upper_bound()))
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+    } else {
+        symbolic.stiffness_upper_bound().clone()
+    };
+    let admission = CoercivitySymbolicPlan::derive(&admission_pattern)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let solve = solve_policy(
+        workload.preconditioner,
+        dofs,
+        stiffness_nonzeros,
+        &admission,
+    )?;
     let recovery_values = projection
         .nodes
         .len()
@@ -129,6 +155,7 @@ fn solve_policy(
     preconditioner: SpdPreconditionerKind,
     dofs: u64,
     stiffness_nonzeros: u64,
+    admission: &CoercivitySymbolicPlan,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
     let storage = match preconditioner {
         SpdPreconditionerKind::Jacobi => PreconditionerStorage::Diagonal,
@@ -154,6 +181,12 @@ fn solve_policy(
         vector_count: Count(STRUCTURAL_SOLVE_VECTOR_COUNT),
         scalar: NumericalScalar::RealF64,
         preconditioner: storage,
+        admission: SolverAdmissionResourcePolicy {
+            dimension: Count(admission.dimension()),
+            factor_nonzero_upper_bound: Count(admission.factor_nonzero_count()),
+            update_count_upper_bound: Count(admission.update_count()),
+            resident_bytes_upper_bound: ByteCount(admission.resident_bytes_upper_bound()),
+        },
     })
 }
 

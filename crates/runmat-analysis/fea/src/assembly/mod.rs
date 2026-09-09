@@ -2195,43 +2195,19 @@ pub(crate) fn resolve_solid_constraint_matrix(
     mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
 ) -> Result<ResolvedConstraintMatrix, ConstraintAlgebraError> {
-    let node_indices = mesh
+    let node_identities = mesh
         .topology
         .nodes
         .iter()
-        .enumerate()
-        .map(|(index, node)| (node.stable_identity, index))
-        .collect::<BTreeMap<_, _>>();
-    let reference_point_indices = plan
-        .reference_points
-        .iter()
-        .enumerate()
-        .map(|(index, point)| (point.identity, index))
-        .collect::<BTreeMap<_, _>>();
-    ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |owner, dof| {
-        let kind = match dof {
-            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => {
-                StructuralDofKind::Ux
-            }
-            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => {
-                StructuralDofKind::Uy
-            }
-            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => {
-                StructuralDofKind::Uz
-            }
-            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rx) => StructuralDofKind::Rx,
-            CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => StructuralDofKind::Ry,
-            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => StructuralDofKind::Rz,
-        };
-        match owner {
-            CanonicalStructuralDofOwner::MeshNode(node) => {
-                layout.index(node_indices.get(&node).copied()?, kind)
-            }
-            CanonicalStructuralDofOwner::ReferencePoint(identity) => {
-                layout.reference_point_index(reference_point_indices.get(&identity).copied()?, kind)
-            }
-        }
-    })
+        .map(|node| node.stable_identity)
+        .collect::<Vec<_>>();
+    let matrix = ResolvedConstraintMatrix::from_solid_plan(plan, &node_identities)?;
+    if matrix.full_dof_count != layout.total_dof_count() {
+        return Err(ConstraintAlgebraError::InvalidMatrix(
+            "solid constraint numbering does not match the assembly layout".into(),
+        ));
+    }
+    Ok(matrix)
 }
 
 #[derive(Debug, Clone, Copy)]

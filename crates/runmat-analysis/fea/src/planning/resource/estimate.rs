@@ -438,7 +438,9 @@ fn solve_storage(
 ) -> Result<(ByteCount, ByteCount), ResourcePlanningError> {
     match input.solve {
         SolveResourcePolicy::Iterative {
-            ref preconditioner, ..
+            ref preconditioner,
+            ref admission,
+            ..
         } => {
             let value = match preconditioner {
                 PreconditionerStorage::None => 0,
@@ -477,7 +479,37 @@ fn solve_storage(
                     resident_bytes_upper_bound.0
                 }
             };
-            Ok((ByteCount(value), ByteCount(0)))
+            let factor_payload_lower_bound = sum(
+                &[
+                    bytes(
+                        admission.factor_nonzero_upper_bound.0,
+                        input.solve.scalar_bytes(),
+                        "solver-admission factor values",
+                    )?,
+                    bytes(
+                        admission.factor_nonzero_upper_bound.0,
+                        8,
+                        "solver-admission factor indices",
+                    )?,
+                    bytes(
+                        add(admission.dimension.0, 1, "solver-admission rows")?,
+                        8,
+                        "solver-admission row offsets",
+                    )?,
+                ],
+                "solver-admission factor payload",
+            )?;
+            if admission.dimension.0 == 0
+                || admission.dimension.0 > input.sparse.rows.0
+                || admission.factor_nonzero_upper_bound.0 < admission.dimension.0
+                || admission.resident_bytes_upper_bound.0 < factor_payload_lower_bound
+            {
+                return Err(ResourcePlanningError::Invalid(
+                    "solver-admission fill, work, and resident bounds must cover the symbolic factor"
+                        .into(),
+                ));
+            }
+            Ok((ByteCount(value), admission.resident_bytes_upper_bound))
         }
         SolveResourcePolicy::DirectFactorization {
             factor_nonzero_upper_bound,

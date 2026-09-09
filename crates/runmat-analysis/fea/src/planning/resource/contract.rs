@@ -121,12 +121,22 @@ pub enum NumericalScalar {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SolverAdmissionResourcePolicy {
+    pub dimension: Count,
+    pub factor_nonzero_upper_bound: Count,
+    pub update_count_upper_bound: Count,
+    pub resident_bytes_upper_bound: ByteCount,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveResourcePolicy {
     Iterative {
         vector_count: Count,
         scalar: NumericalScalar,
         preconditioner: PreconditionerStorage,
+        admission: SolverAdmissionResourcePolicy,
     },
     DirectFactorization {
         vector_count: Count,

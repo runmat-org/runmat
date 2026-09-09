@@ -17,8 +17,9 @@ pub use contract::{
     FeaResourcePlanIdentity, FeaResourcePlanningInput, NumericalScalar, ObservationResourceFacts,
     PartitioningPolicy, PreconditionerStorage, RecoveryResourcePolicy, ResourceAdmission,
     ResourceBreakdown, ResourceOverrun, ResourcePlanningError, ResourceUsageEvidence,
-    ResourceUsageEvidenceIdentity, SolveResourcePolicy, SparseResourceFacts, TopologyResourceFacts,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    ResourceUsageEvidenceIdentity, SolveResourcePolicy, SolverAdmissionResourcePolicy,
+    SparseResourceFacts, TopologyResourceFacts, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 pub use estimate::build_resource_plan;
 pub use preflight::build_structural_resource_plan;
