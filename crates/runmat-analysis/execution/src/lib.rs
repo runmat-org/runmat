@@ -54,8 +54,8 @@ pub use object::{
     ImportedAnalysisPartition, PreparedAnalysisObjects,
 };
 pub use observation_evaluation::{
-    import_structural_observations, prepare_structural_observation, ImportedObservations,
-    PreparedStructuralObservation, StructuralObservationPreparation,
+    import_observation_result, import_structural_observations, prepare_structural_observation,
+    ImportedObservations, PreparedStructuralObservation, StructuralObservationPreparation,
 };
 pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,

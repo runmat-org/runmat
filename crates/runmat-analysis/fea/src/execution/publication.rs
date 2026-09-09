@@ -2,7 +2,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::results::accuracy::{AccuracyArtifact, AccuracyArtifactIdentity};
-use crate::results::observation::{ObservationArtifact, ObservationArtifactIdentity};
+use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
 
 use super::{
     AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
@@ -58,7 +58,7 @@ impl TryFrom<ResultPublicationRequestWire> for ResultPublicationRequest {
 impl ResultPublicationRequest {
     pub fn new(
         accuracy: &AccuracyArtifact,
-        observations: Option<&ObservationArtifact>,
+        observations: Option<&ObservationArtifactManifest>,
     ) -> AnalysisExecutionResult<Self> {
         accuracy
             .validate()
@@ -70,13 +70,13 @@ impl ResultPublicationRequest {
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
                 if observations.producer != accuracy.producer
                     || observations.source_result != accuracy.source_result
-                    || Some(observations.identity()) != accuracy.source_observations
+                    || Some(observations.identity) != accuracy.source_observations
                 {
                     return Err(AnalysisExecutionError::Identity(
                         "publication observations differ from the accuracy source",
                     ));
                 }
-                Some(observations.identity())
+                Some(observations.identity)
             }
             None if accuracy.source_observations.is_none() => None,
             None => {

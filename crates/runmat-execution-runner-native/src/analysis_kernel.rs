@@ -23,6 +23,7 @@ use runmat_analysis_fea::results::field::{
 };
 use runmat_analysis_fea::results::observation::{
     evaluate_observations, ObservationArtifact, ObservationArtifactInput,
+    ObservationArtifactManifest,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_analysis_fea::{
@@ -58,7 +59,7 @@ fn execute_result_publication(
     let request = unique_input(&invocation, AnalysisNumericalObjectKind::PublicationRequest)?;
     let accuracy = unique_input(&invocation, AnalysisNumericalObjectKind::AccuracyReport)?;
     let observations =
-        optional_unique_input(&invocation, AnalysisNumericalObjectKind::Observation)?;
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
     if invocation.inputs.len() != 2 + usize::from(observations.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::PublishedResult]
     {
@@ -87,10 +88,10 @@ fn execute_result_publication(
     let observations = observations
         .map(|objects| {
             let manifest_identity = objects.manifest.logical_identity;
-            let artifact = ObservationArtifact::from_canonical_bytes(&objects.payload())
+            let artifact = ObservationArtifactManifest::from_canonical_bytes(&objects.payload())
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            if artifact.identity().digest() != manifest_identity
-                || Some(artifact.identity()) != request.source_observations
+            if artifact.identity.digest() != manifest_identity
+                || Some(artifact.identity) != request.source_observations
             {
                 return Err(AnalysisBridgeError::Identity(
                     "publication observations differ from the admitted request",
@@ -124,7 +125,7 @@ fn execute_accuracy_evaluation(
     let numerical_receipt =
         unique_input(&invocation, AnalysisNumericalObjectKind::NumericalReceipt)?;
     let observations =
-        optional_unique_input(&invocation, AnalysisNumericalObjectKind::Observation)?;
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
     if invocation.inputs.len() != 2 + usize::from(observations.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::AccuracyReport]
     {
@@ -145,10 +146,11 @@ fn execute_accuracy_evaluation(
     }
     if let Some(observations) = observations {
         let manifest_identity = observations.manifest.logical_identity;
-        let observations = ObservationArtifact::from_canonical_bytes(&observations.payload())
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        if observations.identity().digest() != manifest_identity
-            || Some(observations.identity()) != request.source_observations
+        let observations =
+            ObservationArtifactManifest::from_canonical_bytes(&observations.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if observations.identity.digest() != manifest_identity
+            || Some(observations.identity) != request.source_observations
             || Some(observations.evaluation_request) != request.observation_request
             || observations.producer != request.producer
             || observations.source_result != request.source_result
@@ -285,14 +287,29 @@ fn execute_observation_evaluation(
         results,
     })
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    Ok(vec![AnalysisKernelOutput {
-        kind: AnalysisNumericalObjectKind::Observation,
+    let manifest = artifact
+        .manifest()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mut partitions = Vec::with_capacity(artifact.results().len() + 1);
+    partitions.push(AnalysisKernelOutputPartition {
         logical_identity: artifact.identity().digest(),
-        payload: artifact
+        payload: manifest
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        partitions: Vec::new(),
-    }])
+    });
+    for result in artifact.results() {
+        partitions.push(AnalysisKernelOutputPartition {
+            logical_identity: result.logical_identity.digest(),
+            payload: result
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        });
+    }
+    Ok(vec![AnalysisKernelOutput::partitioned(
+        AnalysisNumericalObjectKind::Observation,
+        artifact.identity().digest(),
+        partitions,
+    )])
 }
 
 fn execute_field_recovery(
@@ -1033,8 +1050,30 @@ mod tests {
                 inputs: &observation_inputs,
             })
             .unwrap();
-        let observation =
-            ObservationArtifact::from_canonical_bytes(&observation_outputs[0].payload).unwrap();
+        let observation_objects = prepare_kernel_output(&observation_outputs[0]);
+        let observation_manifest = ObservationArtifactManifest::from_canonical_bytes(
+            &observation_objects
+                .partition_payload(observation_objects.manifest.logical_identity)
+                .unwrap(),
+        )
+        .unwrap();
+        let observation_results = observation_manifest
+            .results
+            .iter()
+            .map(|entry| {
+                runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
+                    &observation_objects
+                        .partition_payload(entry.result.digest())
+                        .unwrap(),
+                )
+                .unwrap()
+            })
+            .collect();
+        let observation = ObservationArtifact::from_manifest_and_results(
+            observation_manifest.clone(),
+            observation_results,
+        )
+        .unwrap();
         assert_eq!(observation.results().len(), 1);
         assert_eq!(
             observation.results()[0].observation_id.0,
@@ -1044,7 +1083,7 @@ mod tests {
         let accuracy_request = AccuracyEvaluationRequest::new(
             step,
             field_source_result,
-            Some(&observation),
+            Some(&observation_manifest),
             solve.formulation_requirement,
             solve.model.sequence.steps[0].accuracy.clone(),
         )
@@ -1059,9 +1098,9 @@ mod tests {
         )
         .unwrap();
         let observation_artifact = runmat_analysis_execution::prepare_analysis_objects(
-            observation_outputs[0].kind,
-            observation_outputs[0].logical_identity,
-            &observation_outputs[0].payload,
+            AnalysisNumericalObjectKind::ObservationCatalog,
+            observation_manifest.identity.digest(),
+            &observation_manifest.canonical_bytes().unwrap(),
             4096,
             ObjectNamespace::ResultValue,
             ObjectInventoryLimits::default(),
@@ -1077,7 +1116,7 @@ mod tests {
                 payload_digest: input.manifest.payload_digest,
                 manifest_digest: input.root.digest,
                 manifest_encoded_length: input.root.encoded_length,
-                reference_kind: if index == 0 {
+                reference_kind: if index == 0 || index == 2 {
                     ValueRefKind::DriverObject
                 } else {
                     ValueRefKind::ResultObject
@@ -1117,7 +1156,7 @@ mod tests {
         assert_eq!(accuracy.source_result, field_source_result);
 
         let publication_request =
-            ResultPublicationRequest::new(&accuracy, Some(&observation)).unwrap();
+            ResultPublicationRequest::new(&accuracy, Some(&observation_manifest)).unwrap();
         let publication_request = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::PublicationRequest,
             publication_request.identity().digest(),
@@ -1150,7 +1189,7 @@ mod tests {
                 payload_digest: input.manifest.payload_digest,
                 manifest_digest: input.root.digest,
                 manifest_encoded_length: input.root.encoded_length,
-                reference_kind: if index == 0 {
+                reference_kind: if index == 0 || index == 2 {
                     ValueRefKind::DriverObject
                 } else {
                     ValueRefKind::ResultObject
@@ -1183,7 +1222,10 @@ mod tests {
         let published =
             PublishedAnalysisResult::from_canonical_bytes(&publication_outputs[0].payload).unwrap();
         assert_eq!(published.source_result, field_source_result);
-        assert_eq!(published.source_observations, Some(observation.identity()));
+        assert_eq!(
+            published.source_observations,
+            Some(observation_manifest.identity)
+        );
         assert_eq!(published.source_accuracy, accuracy.identity());
 
         let mut substituted_accuracy_inputs = accuracy_inputs.clone();

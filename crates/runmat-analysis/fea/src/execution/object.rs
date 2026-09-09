@@ -36,6 +36,7 @@ pub enum AnalysisNumericalObjectKind {
     SemanticState,
     History,
     Observation,
+    ObservationCatalog,
     AccuracyEvidence,
     AccuracyReport,
     PublishedResult,

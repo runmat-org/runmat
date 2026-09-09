@@ -1,28 +1,29 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::ProcedureStep;
+use runmat_analysis_core::{ObservationId, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest,
     ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
 };
 use runmat_analysis_fea::results::field::RecoveredFieldSelection;
 use runmat_analysis_fea::results::observation::{
-    resolve_observation_plan, ObservationArtifact, ObservationLimits,
+    resolve_observation_plan, ObservationArtifactManifest, ObservationLimits, ObservationResult,
 };
 use runmat_analysis_fea::topology::AnalysisProjection;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
+use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutionResponse};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    import_analysis_objects, import_analysis_output_set, import_analysis_partition,
+    analysis_object_references, import_analysis_output_set, import_analysis_partition,
     prepare_analysis_objects, prepare_analysis_program, prepare_partitioned_analysis_objects,
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisPartitionImport, AnalysisWorkloadInput, AnalysisWorkloadRequest,
-    ImportedRecoveredFields, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    AnalysisOutputRoot, AnalysisPartitionImport, AnalysisWorkloadInput, AnalysisWorkloadRequest,
+    ImportedAnalysisPartition, ImportedRecoveredFields, PreparedAnalysisObjects,
+    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct StructuralObservationPreparation {
@@ -47,8 +48,10 @@ pub struct PreparedStructuralObservation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedObservations {
-    pub artifact: ObservationArtifact,
-    pub objects: PreparedAnalysisObjects,
+    pub manifest: ObservationArtifactManifest,
+    pub catalog_objects: ImportedAnalysisPartition,
+    pub output: AnalysisOutputRoot,
+    pub access: ArtifactAccess,
 }
 
 pub fn prepare_structural_observation(
@@ -244,42 +247,97 @@ pub fn import_structural_observations(
             "observation evaluation must return exactly one observation root".into(),
         ));
     };
-    let imported = import_analysis_objects(
+    let imported = import_analysis_partition(
         source,
-        &output.root,
-        AnalysisNumericalObjectKind::Observation,
-        output.logical_identity,
-        output.payload_digest,
-        &prepared.host.artifact_access,
-        limits,
+        AnalysisPartitionImport {
+            root: &output.root,
+            expected_kind: AnalysisNumericalObjectKind::Observation,
+            expected_logical_identity: output.logical_identity,
+            expected_payload_digest: output.payload_digest,
+            partition_identity: output.logical_identity,
+            access: &prepared.host.artifact_access,
+            limits,
+        },
     )?;
-    let mut expected =
-        imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    let mut expected = analysis_object_references(
+        &imported.manifest,
+        &output.root,
+        &prepared.host.artifact_access,
+        ValueRefKind::ResultObject,
+    )?;
     expected.push(output_set.root);
     if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(
             "observation result inventory differs from its canonical closure",
         ));
     }
-    let artifact = ObservationArtifact::from_canonical_bytes(&imported.payload())
+    let manifest = ObservationArtifactManifest::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if artifact.identity().digest() != output.logical_identity
-        || artifact.evaluation_request != prepared.request.identity()
-        || artifact.producer != prepared.request.producer
-        || artifact.field_recovery_request != prepared.request.field_recovery_request
-        || artifact.source_fields != prepared.request.source_fields
-        || artifact.source_result != prepared.request.source_result
-        || artifact.topology_digest != prepared.request.plan.topology_digest
-        || artifact.plan_identity != prepared.request.plan.identity
+    if manifest.identity.digest() != output.logical_identity
+        || manifest.evaluation_request != prepared.request.identity()
+        || manifest.producer != prepared.request.producer
+        || manifest.field_recovery_request != prepared.request.field_recovery_request
+        || manifest.source_fields != prepared.request.source_fields
+        || manifest.source_result != prepared.request.source_result
+        || manifest.topology_digest != prepared.request.plan.topology_digest
+        || manifest.plan_identity != prepared.request.plan.identity
     {
         return Err(AnalysisBridgeError::Identity(
             "observation artifact differs from its admitted evaluation request",
         ));
     }
     Ok(ImportedObservations {
-        artifact,
-        objects: imported,
+        manifest,
+        catalog_objects: imported,
+        output: output.clone(),
+        access: prepared.host.artifact_access.clone(),
     })
+}
+
+pub fn import_observation_result(
+    source: &impl CacheImport,
+    observations: &ImportedObservations,
+    observation_id: &ObservationId,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<ObservationResult> {
+    let entry = observations
+        .manifest
+        .results
+        .iter()
+        .find(|entry| &entry.observation_id == observation_id)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid(
+                "requested observation is absent from the observation manifest".into(),
+            )
+        })?;
+    let imported = import_analysis_partition(
+        source,
+        AnalysisPartitionImport {
+            root: &observations.output.root,
+            expected_kind: AnalysisNumericalObjectKind::Observation,
+            expected_logical_identity: observations.output.logical_identity,
+            expected_payload_digest: observations.output.payload_digest,
+            partition_identity: entry.result.digest(),
+            access: &observations.access,
+            limits,
+        },
+    )?;
+    let result = ObservationResult::from_canonical_bytes(&imported.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if result.logical_identity != entry.result
+        || result.observation_id != entry.observation_id
+        || result.quantity != entry.quantity
+        || result.location != entry.location
+        || result.value_shape != entry.value_shape
+        || result.partial_access != entry.partial_access
+        || result.plan_identity != observations.manifest.plan_identity
+        || result.topology_digest != observations.manifest.topology_digest
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "observation result differs from its semantic manifest entry",
+        ));
+    }
+    Ok(result)
 }
 
 fn unique_workload_input(

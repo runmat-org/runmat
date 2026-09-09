@@ -383,6 +383,114 @@ pub struct ObservationArtifact {
     results: Vec<ObservationResult>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationArtifactEntry {
+    pub result: ObservationResultIdentity,
+    pub observation_id: ObservationId,
+    pub quantity: ObservationQuantity,
+    pub location: FieldLocation,
+    pub value_shape: ObservationValueShape,
+    pub partial_access: PartialAccessPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "ObservationArtifactManifestWire")]
+pub struct ObservationArtifactManifest {
+    pub schema_version: u16,
+    pub identity: ObservationArtifactIdentity,
+    pub evaluation_request: ObservationEvaluationRequestIdentity,
+    pub producer: StepIdentity,
+    pub field_recovery_request: FieldRecoveryRequestIdentity,
+    pub source_fields: RecoveredFieldArtifactIdentity,
+    pub source_result: SolverResultIdentity,
+    pub topology_digest: Digest,
+    pub plan_identity: ResolvedObservationPlanIdentity,
+    pub results: Vec<ObservationArtifactEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservationArtifactManifestWire {
+    schema_version: u16,
+    identity: ObservationArtifactIdentity,
+    evaluation_request: ObservationEvaluationRequestIdentity,
+    producer: StepIdentity,
+    field_recovery_request: FieldRecoveryRequestIdentity,
+    source_fields: RecoveredFieldArtifactIdentity,
+    source_result: SolverResultIdentity,
+    topology_digest: Digest,
+    plan_identity: ResolvedObservationPlanIdentity,
+    results: Vec<ObservationArtifactEntry>,
+}
+
+impl TryFrom<ObservationArtifactManifestWire> for ObservationArtifactManifest {
+    type Error = ObservationError;
+
+    fn try_from(wire: ObservationArtifactManifestWire) -> Result<Self, Self::Error> {
+        let manifest = Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            evaluation_request: wire.evaluation_request,
+            producer: wire.producer,
+            field_recovery_request: wire.field_recovery_request,
+            source_fields: wire.source_fields,
+            source_result: wire.source_result,
+            topology_digest: wire.topology_digest,
+            plan_identity: wire.plan_identity,
+            results: wire.results,
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
+impl ObservationArtifactManifest {
+    pub fn validate(&self) -> Result<(), ObservationError> {
+        if self.schema_version != 1 || self.results.is_empty() {
+            return Err(ObservationError::Invalid(
+                "observation manifest requires a supported schema and results".into(),
+            ));
+        }
+        let mut result_ids = std::collections::BTreeSet::new();
+        let mut observation_ids = std::collections::BTreeSet::new();
+        if self.results.iter().any(|entry| {
+            !result_ids.insert(entry.result) || !observation_ids.insert(&entry.observation_id)
+        }) {
+            return Err(ObservationError::Identity(
+                "observation manifest contains duplicate results",
+            ));
+        }
+        if self.identity != derive_artifact_identity(self)? {
+            return Err(ObservationError::Identity(
+                "observation manifest identity does not converge",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
+        self.validate()?;
+        Ok(encode_contract(
+            OBSERVATION_PREFIX,
+            "observation-artifact-manifest",
+            self,
+            OBSERVATION_LIMITS,
+        )?)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ObservationError> {
+        let manifest: Self = decode_contract(
+            OBSERVATION_PREFIX,
+            "observation-artifact-manifest",
+            bytes,
+            OBSERVATION_LIMITS,
+        )?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ObservationArtifactWire {
@@ -457,6 +565,73 @@ impl ObservationArtifact {
         &self.results
     }
 
+    pub fn manifest(&self) -> Result<ObservationArtifactManifest, ObservationError> {
+        let manifest = ObservationArtifactManifest {
+            schema_version: self.schema_version,
+            identity: self.identity,
+            evaluation_request: self.evaluation_request,
+            producer: self.producer,
+            field_recovery_request: self.field_recovery_request,
+            source_fields: self.source_fields,
+            source_result: self.source_result,
+            topology_digest: self.topology_digest,
+            plan_identity: self.plan_identity,
+            results: self
+                .results
+                .iter()
+                .map(|result| ObservationArtifactEntry {
+                    result: result.logical_identity,
+                    observation_id: result.observation_id.clone(),
+                    quantity: result.quantity,
+                    location: result.location,
+                    value_shape: result.value_shape.clone(),
+                    partial_access: result.partial_access,
+                })
+                .collect(),
+        };
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn from_manifest_and_results(
+        manifest: ObservationArtifactManifest,
+        results: Vec<ObservationResult>,
+    ) -> Result<Self, ObservationError> {
+        manifest.validate()?;
+        if manifest.results.len() != results.len()
+            || manifest
+                .results
+                .iter()
+                .zip(&results)
+                .any(|(entry, result)| {
+                    entry.result != result.logical_identity
+                        || entry.observation_id != result.observation_id
+                        || entry.quantity != result.quantity
+                        || entry.location != result.location
+                        || entry.value_shape != result.value_shape
+                        || entry.partial_access != result.partial_access
+                })
+        {
+            return Err(ObservationError::Identity(
+                "observation results differ from their manifest",
+            ));
+        }
+        let artifact = Self {
+            schema_version: manifest.schema_version,
+            identity: manifest.identity,
+            evaluation_request: manifest.evaluation_request,
+            producer: manifest.producer,
+            field_recovery_request: manifest.field_recovery_request,
+            source_fields: manifest.source_fields,
+            source_result: manifest.source_result,
+            topology_digest: manifest.topology_digest,
+            plan_identity: manifest.plan_identity,
+            results,
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
     pub fn validate(&self) -> Result<(), ObservationError> {
         if self.schema_version != 1 || self.results.is_empty() {
             return Err(ObservationError::Invalid(
@@ -506,24 +681,52 @@ impl ObservationArtifact {
     }
 
     fn derive_identity(&self) -> Result<ObservationArtifactIdentity, ObservationError> {
-        let bytes = encode_contract(
-            OBSERVATION_PREFIX,
-            "observation-artifact-identity",
-            &(
-                self.schema_version,
-                self.evaluation_request,
-                self.producer,
-                self.field_recovery_request,
-                self.source_fields,
-                self.source_result,
-                self.topology_digest,
-                self.plan_identity,
-                &self.results,
-            ),
-            OBSERVATION_LIMITS,
-        )?;
-        Ok(ObservationArtifactIdentity(Digest::sha256(bytes)))
+        derive_artifact_identity(&ObservationArtifactManifest {
+            schema_version: self.schema_version,
+            identity: self.identity,
+            evaluation_request: self.evaluation_request,
+            producer: self.producer,
+            field_recovery_request: self.field_recovery_request,
+            source_fields: self.source_fields,
+            source_result: self.source_result,
+            topology_digest: self.topology_digest,
+            plan_identity: self.plan_identity,
+            results: self
+                .results
+                .iter()
+                .map(|result| ObservationArtifactEntry {
+                    result: result.logical_identity,
+                    observation_id: result.observation_id.clone(),
+                    quantity: result.quantity,
+                    location: result.location,
+                    value_shape: result.value_shape.clone(),
+                    partial_access: result.partial_access,
+                })
+                .collect(),
+        })
     }
+}
+
+fn derive_artifact_identity(
+    manifest: &ObservationArtifactManifest,
+) -> Result<ObservationArtifactIdentity, ObservationError> {
+    let bytes = encode_contract(
+        OBSERVATION_PREFIX,
+        "observation-artifact-identity",
+        &(
+            manifest.schema_version,
+            manifest.evaluation_request,
+            manifest.producer,
+            manifest.field_recovery_request,
+            manifest.source_fields,
+            manifest.source_result,
+            manifest.topology_digest,
+            manifest.plan_identity,
+            &manifest.results,
+        ),
+        OBSERVATION_LIMITS,
+    )?;
+    Ok(ObservationArtifactIdentity(Digest::sha256(bytes)))
 }
 
 fn validate_resolved_observation(

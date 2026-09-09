@@ -2,7 +2,7 @@ use runmat_analysis_core::{AccuracyPlan, FormulationRequirement};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::results::observation::{ObservationArtifact, ObservationArtifactIdentity};
+use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
 
 use super::{
     AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
@@ -62,7 +62,7 @@ impl AccuracyEvaluationRequest {
     pub fn new(
         producer: StepIdentity,
         source_result: SolverResultIdentity,
-        observations: Option<&ObservationArtifact>,
+        observations: Option<&ObservationArtifactManifest>,
         formulation_requirement: FormulationRequirement,
         plan: AccuracyPlan,
     ) -> AnalysisExecutionResult<Self> {
@@ -79,7 +79,7 @@ impl AccuracyEvaluationRequest {
                 }
                 (
                     Some(observations.evaluation_request),
-                    Some(observations.identity()),
+                    Some(observations.identity),
                 )
             }
             None => (None, None),

@@ -340,7 +340,7 @@ async fn execute_publication_chain_in_process(
     let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: solve_host.clone(),
         source_numerical_receipt,
-        source_observations: Some(imported_observations.objects.clone()),
+        source_observations: Some(imported_observations.clone()),
         sequence,
         step,
         formulation_requirement: solve.formulation_requirement,
@@ -377,7 +377,7 @@ async fn execute_publication_chain_in_process(
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
-        source_observations: Some(imported_observations.objects),
+        source_observations: Some(imported_observations),
         program_revision: revision(),
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,

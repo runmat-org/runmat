@@ -797,15 +797,29 @@ impl AnalysisKernel for ObservationKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::EvaluateObservation);
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::Observation,
+        let manifest = self
+            .0
+            .manifest()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        let mut partitions = vec![AnalysisKernelOutputPartition {
             logical_identity: self.0.identity().digest(),
-            payload: self
-                .0
+            payload: manifest
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-            partitions: Vec::new(),
-        }])
+        }];
+        for result in self.0.results() {
+            partitions.push(AnalysisKernelOutputPartition {
+                logical_identity: result.logical_identity.digest(),
+                payload: result
+                    .canonical_bytes()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            });
+        }
+        Ok(vec![AnalysisKernelOutput::partitioned(
+            AnalysisNumericalObjectKind::Observation,
+            self.0.identity().digest(),
+            partitions,
+        )])
     }
 }
 
@@ -900,7 +914,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut producer_step = model.sequence.steps[0].clone();
-    producer_step.observations = vec![structural_displacement_observation()];
+    let requested_observation = structural_displacement_observation();
+    let mut unrelated_observation = requested_observation.clone();
+    unrelated_observation.spec_mut().unwrap().observation_id =
+        runmat_analysis_core::ObservationId("unrelated_displacement".into());
+    producer_step.observations = vec![requested_observation, unrelated_observation];
     let state_id = producer_step.state_outputs[0].state_id.clone();
     let mut consumer_step = producer_step.clone();
     consumer_step.step_id = ProcedureStepId("branch".into());
@@ -1238,16 +1256,62 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    assert_eq!(imported_observations.artifact, observation_artifact);
     assert_eq!(
-        imported_observations.artifact.results()[0].observation_id.0,
-        "whole_displacement"
+        imported_observations.manifest,
+        observation_artifact.manifest().unwrap()
     );
+    let reconstructed =
+        runmat_analysis_fea::results::observation::ObservationArtifact::from_manifest_and_results(
+            imported_observations.manifest.clone(),
+            observation_artifact.results().to_vec(),
+        )
+        .unwrap();
+    assert_eq!(reconstructed, observation_artifact);
+    let mut reordered_results = observation_artifact.results().to_vec();
+    reordered_results.reverse();
+    assert!(
+        runmat_analysis_fea::results::observation::ObservationArtifact::from_manifest_and_results(
+            imported_observations.manifest.clone(),
+            reordered_results,
+        )
+        .is_err()
+    );
+    let mut invalid_manifest = serde_json::to_value(&imported_observations.manifest).unwrap();
+    invalid_manifest["schema_version"] = serde_json::json!(2);
+    assert!(serde_json::from_value::<
+        runmat_analysis_fea::results::observation::ObservationArtifactManifest,
+    >(invalid_manifest)
+    .is_err());
+    let unrelated_entry = imported_observations
+        .manifest
+        .results
+        .iter()
+        .find(|entry| entry.observation_id.0 == "unrelated_displacement")
+        .unwrap();
+    let unrelated_partition = observation_completed.outputs[0]
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == unrelated_entry.result.digest())
+        .unwrap();
+    let unrelated_start = unrelated_partition.first_chunk_ordinal as usize;
+    let unrelated_end = unrelated_start + unrelated_partition.chunk_count as usize;
+    for chunk in &observation_completed.outputs[0].manifest.chunks[unrelated_start..unrelated_end] {
+        store.0.remove(&chunk.digest);
+    }
+    let imported_observation = import_observation_result(
+        &store,
+        &imported_observations,
+        &runmat_analysis_core::ObservationId("whole_displacement".into()),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported_observation.observation_id.0, "whole_displacement");
 
     let accuracy_prepared = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: prepared.host.clone(),
         source_numerical_receipt: completed.outputs[1].clone(),
-        source_observations: Some(observation_completed.outputs[0].clone()),
+        source_observations: Some(imported_observations.clone()),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,
@@ -1291,7 +1355,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     assert!(prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: prepared.host.clone(),
         source_numerical_receipt: unrelated_receipt,
-        source_observations: Some(observation_completed.outputs[0].clone()),
+        source_observations: Some(imported_observations.clone()),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,
@@ -1376,7 +1440,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let publication_prepared = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
-        source_observations: Some(observation_completed.outputs[0].clone()),
+        source_observations: Some(imported_observations),
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),

@@ -10,10 +10,11 @@ mod publish;
 mod resolve;
 
 pub use contract::{
-    ObservationArtifact, ObservationArtifactIdentity, ObservationArtifactInput, ObservationEntity,
-    ObservationError, ObservationLimits, ObservationResult, ObservationResultIdentity,
-    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
+    ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
+    ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
+    ObservationLimits, ObservationResult, ObservationResultIdentity, ResolvedComponentProjection,
+    ResolvedObservation, ResolvedObservationPlan, ResolvedObservationPlanIdentity,
+    ResolvedObservationTarget,
 };
 pub use evaluate::evaluate_observations;
 pub use publish::publish_observation;

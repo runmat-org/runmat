@@ -8,7 +8,6 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyArtifact,
 };
-use runmat_analysis_fea::results::observation::ObservationArtifact;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -19,13 +18,14 @@ use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
     prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    AnalysisWorkloadRequest, ImportedObservations, PreparedAnalysisObjects,
+    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct StructuralAccuracyPreparation {
     pub solve_host: AnalysisHostWorkload,
     pub source_numerical_receipt: PreparedAnalysisObjects,
-    pub source_observations: Option<PreparedAnalysisObjects>,
+    pub source_observations: Option<ImportedObservations>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
     pub formulation_requirement: runmat_analysis_core::FormulationRequirement,
@@ -84,23 +84,25 @@ pub fn prepare_structural_accuracy(
     let observations = preparation
         .source_observations
         .as_ref()
-        .map(|objects| {
-            if objects.manifest.kind != AnalysisNumericalObjectKind::Observation {
+        .map(|observations| {
+            if observations.output.kind != AnalysisNumericalObjectKind::Observation {
                 return Err(AnalysisBridgeError::Invalid(
                     "accuracy observation input has the wrong numerical kind".into(),
                 ));
             }
-            let artifact = ObservationArtifact::from_canonical_bytes(&objects.payload())
+            observations
+                .manifest
+                .validate()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            if artifact.identity().digest() != objects.manifest.logical_identity
-                || artifact.producer != producer
-                || artifact.source_result != source_result
+            if observations.manifest.identity.digest() != observations.output.logical_identity
+                || observations.manifest.producer != producer
+                || observations.manifest.source_result != source_result
             {
                 return Err(AnalysisBridgeError::Identity(
                     "accuracy observations differ from their producing solve",
                 ));
             }
-            Ok(artifact)
+            Ok(observations.manifest.clone())
         })
         .transpose()?;
     let request = AccuracyEvaluationRequest::new(
@@ -127,7 +129,21 @@ pub fn prepare_structural_accuracy(
         ),
     ];
     if let Some(observations) = preparation.source_observations {
-        inputs.push((observations, ValueRefKind::ResultObject));
+        let bytes = observations
+            .manifest
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        inputs.push((
+            prepare_analysis_objects(
+                AnalysisNumericalObjectKind::ObservationCatalog,
+                observations.manifest.identity.digest(),
+                &bytes,
+                preparation.chunk_bytes,
+                ObjectNamespace::InputValue,
+                preparation.inventory_limits,
+            )?,
+            ValueRefKind::DriverObject,
+        ));
     }
     let workload_inputs = inputs
         .iter()
