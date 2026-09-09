@@ -11,20 +11,22 @@ import { combineMachineReports } from "./builtin-example-verifier/reporting.mjs"
 const args = process.argv.slice(2);
 let output = "";
 let source = "";
+let artifact = "";
 const inputs = [];
 for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--output") output = requireValue(args, ++index, "--output");
     else if (args[index] === "--source") source = requireValue(args, ++index, "--source");
+    else if (args[index] === "--artifact") artifact = requireValue(args, ++index, "--artifact");
     else inputs.push(args[index]);
 }
-if (!output || inputs.length === 0) {
-    throw new Error("Usage: combine-builtin-example-reports.mjs --output <report.json> [--source <source>] <shard.json>...");
+if (!output || !artifact || inputs.length === 0) {
+    throw new Error("Usage: combine-builtin-example-reports.mjs --output <report.json> --artifact <identity> [--source <source>] <shard.json>...");
 }
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "../..");
 const expectedSource = source || `git:${execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim()}`;
 const reports = inputs.map((path) => JSON.parse(readFileSync(resolve(path), "utf8")));
-const combined = combineMachineReports(reports, expectedSource);
+const combined = combineMachineReports(reports, expectedSource, artifact);
 const outputPath = resolve(output);
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, `${JSON.stringify(combined, null, 2)}\n`, "utf8");

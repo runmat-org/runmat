@@ -1,14 +1,25 @@
 import { compareCodePoint, sorted } from "./constants.mjs";
+import { evidenceDigest } from "./evidence.mjs";
 
-export function auditInventory(inventory, requestedIdentities) {
+export function auditInventory(inventory, requestedIdentities, evidence = {}) {
   const byIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
   const identities = sorted(new Set(requestedIdentities.map((entry) => entry.toLowerCase())));
   const results = identities.map((identity) => auditIdentity(identity, byIdentity));
   const globalErrors = inventory.diagnostics.filter((entry) => entry.severity === "error");
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-audit",
     authority: "development-verification-only",
+    metadata: {
+      source: evidence.source ?? "unspecified",
+      artifact: evidence.artifact ?? "factory-audit",
+      inventory: {
+        schema_version: inventory.schema_version,
+        kind: inventory.kind,
+        digest: evidenceDigest(inventory),
+        identities: inventory.identities.map((entry) => entry.identity),
+      },
+    },
     requested_identities: identities,
     global_diagnostics: globalErrors,
     summary: {

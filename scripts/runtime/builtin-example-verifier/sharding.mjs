@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 
-export const REPORT_SCHEMA = "runmat.builtin-example-report.v1";
+export const REPORT_SCHEMA = "runmat.builtin-example-report.v2";
 
 export function exampleKey(identity, example, exampleIndex) {
     const owner = normalizeKey(identity, "builtin identity");

@@ -1,6 +1,9 @@
 // @ts-check
 
+import { validateCombinedMachineReport, validateMachineReport } from "./report-schema.mjs";
 import { REPORT_SCHEMA, shardInventory } from "./sharding.mjs";
+
+export { validateCombinedMachineReport, validateMachineReport } from "./report-schema.mjs";
 
 export function buildMachineReport({ rows, inventory, shard, range, source, artifact }) {
     const results = rows.map((row) => ({
@@ -15,7 +18,7 @@ export function buildMachineReport({ rows, inventory, shard, range, source, arti
         imageError: row.imageError || null
     }));
     const failures = results.filter((result) => !result.matches).length;
-    return {
+    return validateMachineReport({
         schemaVersion: REPORT_SCHEMA,
         metadata: {
             index: shard.index,
@@ -32,12 +35,13 @@ export function buildMachineReport({ rows, inventory, shard, range, source, arti
         },
         summary: { total: results.length, passed: results.length - failures, failed: failures },
         results
-    };
+    });
 }
 
-export function combineMachineReports(reports, expectedSource) {
+export function combineMachineReports(reports, expectedSource, combinedArtifact) {
     if (!Array.isArray(reports) || reports.length === 0) throw new Error("No shard reports were provided");
-    const parsed = reports.map(validateReportShape);
+    if (typeof combinedArtifact !== "string" || !combinedArtifact.trim()) throw new Error("A combined artifact identity is required");
+    const parsed = reports.map(validateMachineReport);
     const first = parsed[0];
     const count = first.metadata.count;
     if (parsed.length !== count) throw new Error(`Missing shard reports: expected ${count}, received ${parsed.length}`);
@@ -90,54 +94,17 @@ export function combineMachineReports(reports, expectedSource) {
         ...first.metadata.inventory,
         range: { startInclusive: 0, endExclusive: first.metadata.inventory.count }
     };
-    return {
+    return validateCombinedMachineReport({
         schemaVersion: REPORT_SCHEMA,
         metadata: {
             source: first.metadata.source,
-            artifact: "combined",
+            artifact: combinedArtifact.trim(),
             lane: first.metadata.lane,
             inventory: combinedInventory,
-            shards: [...byIndex.keys()].sort((left, right) => left - right)
+            shards: [...byIndex.keys()].sort((left, right) => left - right),
+            constituentArtifacts: Array.from({ length: count }, (_, index) => byIndex.get(index).metadata.artifact)
         },
         summary: { total: results.length, passed: results.length - failed, failed },
         results
-    };
-}
-
-function validateReportShape(report) {
-    if (!report || typeof report !== "object" || report.schemaVersion !== REPORT_SCHEMA) {
-        throw new Error("Unsupported shard report schema");
-    }
-    const metadata = report.metadata;
-    if (!metadata || !Number.isInteger(metadata.index) || !Number.isInteger(metadata.count)
-        || metadata.index < 0 || metadata.count < 1 || metadata.index >= metadata.count) {
-        throw new Error("Invalid shard index/count metadata");
-    }
-    if (typeof metadata.source !== "string" || !metadata.source
-        || typeof metadata.artifact !== "string" || !metadata.artifact
-        || typeof metadata.lane !== "string" || !metadata.lane) {
-        throw new Error("Missing shard source/artifact/lane metadata");
-    }
-    if (!metadata.inventory || typeof metadata.inventory.digest !== "string"
-        || !Number.isInteger(metadata.inventory.count) || !Array.isArray(metadata.inventory.keys)
-        || !metadata.inventory.range || !Array.isArray(report.results)) {
-        throw new Error("Invalid shard inventory metadata");
-    }
-    const { startInclusive, endExclusive } = metadata.inventory.range;
-    if (metadata.inventory.keys.length !== metadata.inventory.count
-        || !metadata.inventory.keys.every((key) => typeof key === "string" && key.length > 0)
-        || !Number.isInteger(startInclusive) || !Number.isInteger(endExclusive)
-        || startInclusive < 0 || endExclusive < startInclusive || endExclusive > metadata.inventory.count) {
-        throw new Error("Invalid shard inventory keys/range metadata");
-    }
-    if (!report.results.every((result) => result && typeof result === "object"
-        && typeof result.key === "string" && typeof result.matches === "boolean")) {
-        throw new Error("Invalid shard result records");
-    }
-    const failed = report.results.filter((result) => !result.matches).length;
-    if (!report.summary || report.summary.total !== report.results.length
-        || report.summary.passed !== report.results.length - failed || report.summary.failed !== failed) {
-        throw new Error("Inconsistent shard summary");
-    }
-    return report;
+    });
 }
