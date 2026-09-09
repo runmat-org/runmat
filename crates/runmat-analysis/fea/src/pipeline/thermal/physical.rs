@@ -1,5 +1,6 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisModel, CoupledPhysicsFamily, IndependentDomain, PhysicsFamily,
+    SignalSampleApproach,
 };
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     diagnostics::{
         builders::material_assignment_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    excitation::{realize_step_excitations, ExcitationSamplePoint},
+    excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
     physics::thermal::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
         constitutive_stats, initial_state,
@@ -64,13 +65,15 @@ pub(super) fn run(
             ));
         }
     };
-    let initial_sample = sample_point(thermal_step, time_origin_s)?;
-    let initial_excitations = realize_excitations_for_step(model, thermal_step, initial_sample)?;
+    let active_model = super::super::activation::model_with_active_constraints(model, thermal_step);
+    let initial_sample = sample_point(thermal_step, time_origin_s, SignalSampleApproach::At)?;
+    let initial_excitations =
+        realize_excitations_for_step(&active_model, thermal_step, initial_sample)?;
     let initial_assembly =
-        assemble_thermal_operator(model, mesh, &initial_excitations, initial_sample)
+        assemble_thermal_operator(&active_model, mesh, &initial_excitations, initial_sample)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let initial = initial_state::realize(
-        model,
+        &active_model,
         &initial_assembly.projection,
         thermal_step.step_id.as_str(),
         domain.reference_temperature.kelvin,
@@ -116,7 +119,7 @@ pub(super) fn run(
             step_count,
             time_step_s,
         } => solve_transient(TransientSolveInput {
-            model,
+            model: &active_model,
             mesh,
             step: thermal_step,
             initial_assembly: &initial_assembly,
@@ -163,6 +166,7 @@ pub(super) fn run(
         solver_host_sync_count: outcome.host_sync_count,
         diagnostics,
         spatial_projection_evidence: outcome.source_evidence,
+        observations: Vec::new(),
         fields: Vec::new(),
     };
 
@@ -258,10 +262,19 @@ struct TransientSolveInput<'a> {
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
-    let mut time_points_s = Vec::with_capacity(input.step_count);
-    let mut recovered = RecoveredSnapshots::with_capacity(input.step_count);
-    let mut residual_norms = Vec::with_capacity(input.step_count - 1);
-    let mut energy_balances = Vec::with_capacity(input.step_count - 1);
+    let end_time_s = input.time_origin_s + (input.step_count - 1) as f64 * input.time_step_s;
+    let events = time_discontinuities(input.model, input.step, input.time_origin_s, end_time_s)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let mut solve_times = (0..input.step_count)
+        .map(|index| input.time_origin_s + index as f64 * input.time_step_s)
+        .chain(events.iter().copied())
+        .collect::<Vec<_>>();
+    solve_times.sort_by(f64::total_cmp);
+    solve_times.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let mut time_points_s = Vec::with_capacity(solve_times.len());
+    let mut recovered = RecoveredSnapshots::with_capacity(solve_times.len());
+    let mut residual_norms = Vec::with_capacity(solve_times.len() - 1);
+    let mut energy_balances = Vec::with_capacity(solve_times.len() - 1);
     let mut source_evidence = input.initial_assembly.source_evidence.clone();
     let mut previous = input.initial_temperature_k.to_vec();
     push_recovered_snapshot(
@@ -276,24 +289,34 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
     let mut host_sync_count = 0_u32;
     let mut device_apply_count = 0_u32;
     let mut device_apply_attempt_count = 0_u32;
-    for step_index in 1..input.step_count {
+    for step_index in 1..solve_times.len() {
         check_cancelled("fea.run_thermal")?;
-        let time_s = input.time_origin_s + step_index as f64 * input.time_step_s;
+        let previous_time_s = solve_times[step_index - 1];
+        let time_s = solve_times[step_index];
+        let time_step_s = time_s - previous_time_s;
         emit_phase(
             "fea.run_thermal",
             FeaProgressPhase::Solve,
             FeaProgressStatus::Advanced,
             format!("solving physical thermal step {}", step_index + 1),
             Some(step_index as u64),
-            Some(input.step_count as u64),
+            Some(solve_times.len() as u64),
         );
-        let sample = sample_point(input.step, time_s)?;
+        let approach = if events
+            .binary_search_by(|event| event.total_cmp(&time_s))
+            .is_ok()
+        {
+            SignalSampleApproach::LeftLimit
+        } else {
+            SignalSampleApproach::At
+        };
+        let sample = sample_point(input.step, time_s, approach)?;
         let excitations = realize_excitations_for_step(input.model, input.step, sample)?;
         let assembly = assemble_thermal_operator(input.model, input.mesh, &excitations, sample)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         source_evidence.extend(assembly.source_evidence.clone());
         let operator = assembly
-            .transient_operator(input.time_step_s, &previous)
+            .transient_operator(time_step_s, &previous)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let rhs_norm = rhs_norm(operator.load());
         let solve = solve_checked(
@@ -307,16 +330,12 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         device_apply_attempt_count =
             device_apply_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
         residual_norms.push(solve.residual_norm / rhs_norm);
-        energy_balances.push(assembly.energy_balance(
-            &previous,
-            &solve.solution,
-            input.time_step_s,
-        ));
+        energy_balances.push(assembly.energy_balance(&previous, &solve.solution, time_step_s));
         push_recovered_snapshot(
             &assembly,
             &solve.solution,
             Some(&previous),
-            input.time_step_s,
+            time_step_s,
             &mut recovered,
         )?;
         previous = solve.solution.clone();
@@ -401,9 +420,13 @@ fn realize_excitations_for_step(
 fn sample_point<'a>(
     step: &'a runmat_analysis_core::ProcedureStep,
     time_s: f64,
+    approach: SignalSampleApproach,
 ) -> Result<ExcitationSamplePoint<'a>, FeaRunError> {
     match &step.independent_domain {
-        IndependentDomain::TimeSeconds { .. } => Ok(ExcitationSamplePoint::TimeSeconds(time_s)),
+        IndependentDomain::TimeSeconds { .. } => Ok(ExcitationSamplePoint::TimeSeconds {
+            value: time_s,
+            approach,
+        }),
         IndependentDomain::Static => Ok(ExcitationSamplePoint::Static),
         _ => Err(FeaRunError::InvalidModel(
             "thermal solve requires a static or time-domain procedure step".into(),

@@ -2,20 +2,20 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::StateOutput;
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisWorkKind, CanonicalSemanticState,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
     SemanticStatePublicationRequest, SolverResultIdentity,
 };
-use runmat_execution::value::{ValuePayload, ValueRefKind};
+use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 
 use crate::{
-    import_analysis_objects, prepare_analysis_objects, prepare_analysis_program,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
+    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
+    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct SemanticStatePublicationPreparation {
@@ -104,7 +104,7 @@ pub fn prepare_semantic_state_publication(
         preparation.source_host.workload.study,
         preparation.source_host.workload.step,
         preparation.source_host.workload.execution_plan,
-        AnalysisWorkKind::RecoverField,
+        AnalysisWorkKind::PublishState,
         workload_inputs,
         vec![AnalysisNumericalObjectKind::SemanticState],
         required_capabilities,
@@ -135,42 +135,31 @@ pub fn import_semantic_state_completion(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedSemanticState> {
     response.validate_against(&prepared.program.request)?;
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs,
-        result_objects,
-    } = response
-    else {
-        return Err(AnalysisBridgeError::Invalid(
-            "semantic-state publication did not return an externalized success".into(),
-        ));
-    };
-    let [ValuePayload::Object(root)] = outputs.as_slice() else {
+    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
+    let [output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
             "semantic-state publication must return exactly one state root".into(),
         ));
     };
-    let manifest_bytes = source
-        .read_verified(root.logical_digest)?
-        .ok_or_else(|| AnalysisBridgeError::Invalid("semantic-state manifest is absent".into()))?;
-    let manifest = AnalysisObjectManifest::from_canonical_bytes(&manifest_bytes)?;
     let imported = import_analysis_objects(
         source,
-        root,
+        &output.root,
         AnalysisNumericalObjectKind::SemanticState,
-        manifest.logical_identity,
-        manifest.payload_digest,
+        output.logical_identity,
+        output.payload_digest,
         &prepared.host.artifact_access,
         limits,
     )?;
-    let expected =
+    let mut expected =
         imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
-    if result_objects != expected {
+    expected.push(output_set.root);
+    if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(
             "semantic-state result inventory differs from its canonical closure",
         ));
     }
     let state = CanonicalSemanticState::from_canonical_bytes(&imported.payload())?;
-    if manifest.logical_identity != state.identity.digest()
+    if output.logical_identity != state.identity.digest()
         || state.producer != prepared.request.producer
         || state.state_id != prepared.request.declaration.state_id
         || state.kind != prepared.request.declaration.kind

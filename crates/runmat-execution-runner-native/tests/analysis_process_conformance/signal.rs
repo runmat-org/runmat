@@ -79,7 +79,7 @@ impl SignalFixture {
             runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap();
-        let authored = generated_signal();
+        let mut authored = generated_signal();
         let symbols = runmat_package::source_symbols_from_frozen(&project, &source_path);
         let definition = symbols
             .definitions
@@ -116,6 +116,16 @@ impl SignalFixture {
             .function_analysis(executable.manifest.identity.entrypoint_function)
             .cloned()
             .unwrap();
+        let PhysicalSignal::Force(signal) = &mut authored else {
+            unreachable!("the conformance fixture authors a force signal")
+        };
+        let SignalRepresentation::Generator(generator) = &mut signal.representation else {
+            unreachable!("the conformance fixture authors a generated signal")
+        };
+        generator.callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
+            function: function.function,
+            display_name: "loads.pulse".into(),
+        };
         let capture = ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Dense(
             DenseValue {
                 element_type: ElementType::F64,
@@ -508,20 +518,22 @@ fn explicit_signal() -> PhysicalSignal {
         shape: SignalShape::Vector3,
         frame: Some(CoordinateFrame::Global),
         representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: runmat_analysis_core::SignalAxis::TimeSeconds(points.to_vec()),
-            values: points
+            domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+            knots: points
                 .into_iter()
                 .map(|point| {
-                    SignalOrdinate::Real(SignalValue::Vector3([
-                        Force::new(point),
-                        Force::new(-2.0 * point),
-                        Force::new(3.0 * point),
-                    ]))
+                    runmat_analysis_core::SignalKnot::continuous(
+                        point,
+                        SignalOrdinate::Real(SignalValue::Vector3([
+                            Force::new(point),
+                            Force::new(-2.0 * point),
+                            Force::new(3.0 * point),
+                        ])),
+                    )
                 })
                 .collect(),
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::Reject,
-            breakpoints: Vec::new(),
         }),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {

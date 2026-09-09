@@ -96,6 +96,21 @@ pub struct ProcedureStep {
     pub restart: RestartPolicy,
 }
 
+impl ProcedureStep {
+    /// Resolves whether an authored model object participates in this step.
+    ///
+    /// Empty activation inventories retain the concise single-step convention in which authored
+    /// objects are active. Once a step declares activations, the inventory is closed and a
+    /// deactivation explicitly removes its object.
+    pub fn object_is_active(&self, object: &StepObjectRef) -> bool {
+        self.activations.is_empty()
+            || self.activations.iter().any(|activation| {
+                &activation.object == object
+                    && !matches!(activation.lifecycle, ActivationLifecycle::Deactivate { .. })
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IndependentDomain {

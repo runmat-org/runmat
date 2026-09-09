@@ -7,7 +7,7 @@ fn tet4_and_tet10_mass_preserve_physical_total_and_rigid_translation() {
         let artifact = canonical_tetrahedron_solver_mesh(order);
         let material = material(2_700.0);
         let assembled =
-            assemble_solver_solid_mass(&artifact, Some(material), &BTreeMap::new(), 3).unwrap();
+            assemble_solver_solid_mass(&artifact, Some(material), &BTreeMap::new()).unwrap();
         let expected_mass = material.density_kg_per_m3 / 6.0;
         assert_relative(assembled.total_mass_kg, expected_mass, 2.0e-12);
         assert!(assembled.lumped_diag.iter().all(|value| *value > 0.0));
@@ -39,13 +39,11 @@ fn region_density_controls_mass_without_changing_topology() {
         .source_topology_id
         .clone();
     let baseline =
-        assemble_solver_solid_mass(&artifact, Some(material(1_000.0)), &BTreeMap::new(), 3)
-            .unwrap();
+        assemble_solver_solid_mass(&artifact, Some(material(1_000.0)), &BTreeMap::new()).unwrap();
     let selected = assemble_solver_solid_mass(
         &artifact,
         Some(material(1_000.0)),
         &BTreeMap::from([(region, material(2_500.0))]),
-        3,
     )
     .unwrap();
     assert_relative(

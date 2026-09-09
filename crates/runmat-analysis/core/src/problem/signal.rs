@@ -279,10 +279,10 @@ impl PhysicalSignal {
 fn signal_domain<Q>(signal: &Signal<Q>) -> SignalDomainKind {
     match &signal.representation {
         SignalRepresentation::Constant(_) => SignalDomainKind::Constant,
-        SignalRepresentation::Tabulated(table) => match &table.axis {
-            SignalAxis::TimeSeconds(_) => SignalDomainKind::Time,
-            SignalAxis::FrequencyHertz(_) => SignalDomainKind::Frequency,
-            SignalAxis::StudyParameter { .. } => SignalDomainKind::StudyParameter,
+        SignalRepresentation::Tabulated(table) => match &table.domain {
+            TabulatedSignalDomain::TimeSeconds => SignalDomainKind::Time,
+            TabulatedSignalDomain::FrequencyHertz => SignalDomainKind::Frequency,
+            TabulatedSignalDomain::StudyParameter { .. } => SignalDomainKind::StudyParameter,
         },
         SignalRepresentation::Waveform(_) => SignalDomainKind::Time,
         SignalRepresentation::Artifact(artifact) => artifact.domain.kind(),
@@ -386,31 +386,84 @@ pub enum SignalOrdinate<Q> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TabulatedSignal<Q> {
-    pub axis: SignalAxis,
-    pub values: Vec<SignalOrdinate<Q>>,
+    pub domain: TabulatedSignalDomain,
+    pub knots: Vec<SignalKnot<Q>>,
     pub interpolation: SignalInterpolation,
     pub extrapolation: SignalExtrapolation,
-    pub breakpoints: Vec<SignalBreakpoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabulatedSignalDomain {
+    TimeSeconds,
+    FrequencyHertz,
+    StudyParameter { parameter_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignalKnot<Q> {
+    pub abscissa: f64,
+    pub value: SignalKnotValue<Q>,
+}
+
+impl<Q> SignalKnot<Q> {
+    pub fn continuous(abscissa: f64, value: SignalOrdinate<Q>) -> Self {
+        Self {
+            abscissa,
+            value: SignalKnotValue::Continuous(value),
+        }
+    }
+
+    pub fn jump(
+        abscissa: f64,
+        left_limit: SignalOrdinate<Q>,
+        right_limit: SignalOrdinate<Q>,
+        continuity: SignalPointContinuity,
+    ) -> Self {
+        Self {
+            abscissa,
+            value: SignalKnotValue::Jump {
+                left_limit,
+                right_limit,
+                continuity,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SignalAxis {
-    TimeSeconds(Vec<f64>),
-    FrequencyHertz(Vec<f64>),
-    StudyParameter {
-        parameter_id: String,
-        canonical_values: Vec<f64>,
+pub enum SignalKnotValue<Q> {
+    Continuous(SignalOrdinate<Q>),
+    Jump {
+        left_limit: SignalOrdinate<Q>,
+        right_limit: SignalOrdinate<Q>,
+        continuity: SignalPointContinuity,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum SignalPointContinuity {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalSampleApproach {
+    At,
+    LeftLimit,
+    RightLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SignalInterpolation {
-    StepLeft,
-    StepRight,
+    LeftEndpoint,
+    RightEndpoint,
     Linear,
-    CubicHermite,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,21 +472,6 @@ pub enum SignalExtrapolation {
     Reject,
     HoldEndpoint,
     Zero,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SignalBreakpoint {
-    pub abscissa: f64,
-    pub side: BreakpointSide,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BreakpointSide {
-    Left,
-    Right,
-    Both,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

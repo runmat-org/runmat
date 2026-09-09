@@ -400,8 +400,7 @@ pub fn prepare_exact_structural_study_root(
         });
     }
     let AnalysisHostProgramArtifact { recipe, artifact } =
-        prepare_analysis_host_program(request.recipe.program_revision.clone(), 1)
-            .map_err(protocol)?;
+        prepare_analysis_host_program(request.recipe.program_revision.clone()).map_err(protocol)?;
     required_programs.push(RequiredStudyProgram { recipe, artifact });
     let mut seen = BTreeSet::new();
     required_programs.retain(|program| seen.insert(program.artifact.id));

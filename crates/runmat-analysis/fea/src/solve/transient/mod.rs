@@ -1,4 +1,4 @@
-use runmat_analysis_core::FormulationRequirement;
+use runmat_analysis_core::{FormulationRequirement, SignalSampleApproach};
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -25,7 +25,7 @@ mod linear_step;
 
 use diagnostics::{push_transient_quality_diagnostics, TransientQualityDiagnosticInputs};
 use linear_step::{
-    build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats,
+    build_step_rhs_with_load, solve_implicit_step_system, strain_energy, LinearStepStats,
     RuntimeTensorStepCache,
 };
 
@@ -108,11 +108,27 @@ pub fn solve_transient_system(
     options: TransientSolveOptions,
     backend: ComputeBackend,
 ) -> TransientSolveResult {
+    match solve_transient_system_with_forcing(summary, options, backend, 0.0, &[], |_, _| {
+        Ok::<_, std::convert::Infallible>(summary.operator.load().to_vec())
+    }) {
+        Ok(result) => result,
+        Err(error) => match error {},
+    }
+}
+
+pub(crate) fn solve_transient_system_with_forcing<E>(
+    summary: &AssemblySummary,
+    options: TransientSolveOptions,
+    backend: ComputeBackend,
+    start_time_s: f64,
+    discontinuities: &[f64],
+    mut load_at: impl FnMut(f64, SignalSampleApproach) -> Result<Vec<f64>, E>,
+) -> Result<TransientSolveResult, E> {
     if summary.dof_count == 0 || options.step_count == 0 {
-        return TransientSolveResult {
+        return Ok(TransientSolveResult {
             converged_steps: 0,
             total_steps: options.step_count,
-            time_points_s: vec![0.0],
+            time_points_s: vec![start_time_s],
             displacement_snapshots: vec![vec![0.0; summary.dof_count]],
             residual_norms: Vec::new(),
             accepted_time_steps_s: Vec::new(),
@@ -128,7 +144,7 @@ pub fn solve_transient_system(
             device_apply_k_count: 0,
             device_apply_k_attempt_count: 0,
             preconditioner: SolverPreconditioner::None,
-        };
+        });
     }
 
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
@@ -147,7 +163,7 @@ pub fn solve_transient_system(
     let max_dt = options.max_time_step_s.max(min_dt);
     let mut dt = options.time_step_s.clamp(min_dt, max_dt);
     let mut x = vec![0.0; summary.dof_count];
-    let mut time_points_s = vec![0.0];
+    let mut time_points_s = vec![start_time_s];
     let mut displacement_snapshots = vec![x.clone()];
     let mut residual_norms = Vec::with_capacity(options.step_count);
     let mut accepted_time_steps_s = Vec::with_capacity(options.step_count);
@@ -177,7 +193,13 @@ pub fn solve_transient_system(
     let dt_bucket_rel_tolerance = options.dt_bucket_rel_tolerance.max(0.0);
     let progress_operation = options.progress_operation.as_str();
 
-    for step_index in 0..options.step_count {
+    let nominal_step_count = options.step_count;
+    let final_time_s = start_time_s + nominal_step_count as f64 * options.time_step_s;
+    let mut step_index = 0_usize;
+    while time_points_s
+        .last()
+        .is_some_and(|time| *time < final_time_s)
+    {
         if is_cancelled() {
             emit_phase(
                 progress_operation,
@@ -185,7 +207,7 @@ pub fn solve_transient_system(
                 FeaProgressStatus::Cancelled,
                 "transient solve cancelled",
                 Some(step_index as u64),
-                Some(options.step_count as u64),
+                None,
             );
             break;
         }
@@ -195,7 +217,7 @@ pub fn solve_transient_system(
             FeaProgressStatus::Advanced,
             format!("solving transient step {}", step_index + 1),
             Some(step_index as u64),
-            Some(options.step_count as u64),
+            None,
         );
         let thermo_severity = thermo_severity_base;
         let electro_severity = electro_severity_base;
@@ -213,10 +235,16 @@ pub fn solve_transient_system(
         thermo_growth_limit_min = thermo_growth_limit_min.min(thermo_growth_limit);
         thermo_nonconverged_shrink_min =
             thermo_nonconverged_shrink_min.min(thermo_nonconverged_shrink);
-        let mut step_dt = dt;
+        let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
+        let mut step_dt = dt.min(final_time_s - current_time);
         let mut retries = 0usize;
         let (next_x, residual_norm, converged, step_stats) = loop {
-            let rhs = build_step_rhs(summary, &x, step_dt);
+            let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
+            let (next_time, approach) =
+                next_step_boundary(current_time, step_dt, final_time_s, discontinuities);
+            step_dt = next_time - current_time;
+            let load = load_at(next_time, approach)?;
+            let rhs = build_step_rhs_with_load(summary, &x, step_dt, &load);
             let solve_start = Instant::now();
             let solved = solve_implicit_step_system(
                 summary,
@@ -319,9 +347,12 @@ pub fn solve_transient_system(
             }
             dt = next_dt;
         } else {
-            dt = step_dt;
+            dt = options.time_step_s.clamp(min_dt, max_dt);
         }
+        step_index += 1;
     }
+
+    let total_steps = accepted_time_steps_s.len();
 
     emit_phase(
         progress_operation,
@@ -329,7 +360,7 @@ pub fn solve_transient_system(
         FeaProgressStatus::Advanced,
         "transient step solve loop complete",
         Some(accepted_time_steps_s.len() as u64),
-        Some(options.step_count as u64),
+        Some(total_steps as u64),
     );
 
     let mut max_step_l2_jump_ratio = 0.0_f64;
@@ -395,10 +426,10 @@ pub fn solve_transient_system(
             dt_bucket_rel_tolerance,
             max_step_l2_jump_ratio,
             nonfinite_displacement_count,
-            thermo_severity_mean: if options.step_count == 0 {
+            thermo_severity_mean: if total_steps == 0 {
                 0.0
             } else {
-                thermo_severity_sum / options.step_count as f64
+                thermo_severity_sum / total_steps as f64
             },
             thermo_severity_peak,
             effective_residual_target_peak,
@@ -416,19 +447,19 @@ pub fn solve_transient_system(
             },
             message: format!(
                 "severity_mean={} severity_peak={}",
-                if options.step_count == 0 {
+                if total_steps == 0 {
                     0.0
                 } else {
-                    electro_severity_sum / options.step_count as f64
+                    electro_severity_sum / total_steps as f64
                 },
                 electro_severity_peak,
             ),
         });
     }
 
-    TransientSolveResult {
+    Ok(TransientSolveResult {
         converged_steps,
-        total_steps: options.step_count,
+        total_steps,
         time_points_s,
         displacement_snapshots,
         residual_norms,
@@ -440,9 +471,51 @@ pub fn solve_transient_system(
         device_apply_k_count,
         device_apply_k_attempt_count,
         preconditioner: selected_preconditioner,
-    }
+    })
 }
 
 fn recommend_next_time_step(input: structural::TransientAdaptivityInput) -> f64 {
     structural::recommend_next_time_step(input)
+}
+
+fn next_step_boundary(
+    current_time_s: f64,
+    proposed_dt_s: f64,
+    final_time_s: f64,
+    discontinuities: &[f64],
+) -> (f64, SignalSampleApproach) {
+    let proposed_end = (current_time_s + proposed_dt_s).min(final_time_s);
+    match discontinuities
+        .iter()
+        .copied()
+        .find(|event| *event > current_time_s && *event <= proposed_end)
+    {
+        Some(event) => (event, SignalSampleApproach::LeftLimit),
+        None => (proposed_end, SignalSampleApproach::At),
+    }
+}
+
+#[cfg(test)]
+mod event_step_tests {
+    use super::*;
+
+    #[test]
+    fn event_substeps_preserve_the_nominal_horizon_and_never_cross_a_jump() {
+        let start = 0.0;
+        let final_time = 1.2;
+        let nominal_dt = 0.6;
+        let events = [0.5];
+        let mut time = start;
+        let mut steps = Vec::new();
+        while time < final_time {
+            let (next, _) = next_step_boundary(time, nominal_dt, final_time, &events);
+            steps.push((time, next));
+            time = next;
+        }
+        assert_eq!(time, final_time);
+        assert_eq!(steps, vec![(0.0, 0.5), (0.5, 1.1), (1.1, 1.2)]);
+        assert!(steps
+            .iter()
+            .all(|(left, right)| !(left < &events[0] && right > &events[0])));
+    }
 }

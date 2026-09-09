@@ -386,6 +386,8 @@ pub struct FeaRunResult {
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
     #[serde(default)]
     pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
+    #[serde(default)]
+    pub observations: Vec<crate::results::observation::ObservationResult>,
     pub fields: Vec<AnalysisField>,
 }
 
@@ -682,6 +684,8 @@ pub enum FeaRunError {
     InvalidModel(String),
     #[error("FEA_ASSEMBLY_FAILED: {0}")]
     Assembly(String),
+    #[error("FEA_OBSERVATION_FAILED: {0}")]
+    Observation(String),
     #[error(transparent)]
     FormulationAdmission(#[from] crate::admission::FormulationAdmissionRejection),
     #[error(transparent)]

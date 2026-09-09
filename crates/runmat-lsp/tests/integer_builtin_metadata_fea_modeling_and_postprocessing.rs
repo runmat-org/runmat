@@ -88,6 +88,33 @@ const FEA_SAMPLED_SIGNAL_CONSTRUCTORS: [&str; 22] = [
     "fea.MassFlowSignal.fromTimeSamples",
 ];
 
+const FEA_KNOT_SIGNAL_CONSTRUCTORS: [&str; 24] = [
+    "fea.SignalKnot.continuous",
+    "fea.SignalKnot.jump",
+    "fea.DisplacementSignal.fromTimeKnots",
+    "fea.RotationSignal.fromTimeKnots",
+    "fea.VelocitySignal.fromTimeKnots",
+    "fea.AccelerationSignal.fromTimeKnots",
+    "fea.AngularVelocitySignal.fromTimeKnots",
+    "fea.AngularAccelerationSignal.fromTimeKnots",
+    "fea.ForceSignal.fromTimeKnots",
+    "fea.MomentSignal.fromTimeKnots",
+    "fea.TractionSignal.fromTimeKnots",
+    "fea.PressureSignal.fromTimeKnots",
+    "fea.BodyForceSignal.fromTimeKnots",
+    "fea.TemperatureSignal.fromTimeKnots",
+    "fea.TemperatureDifferenceSignal.fromTimeKnots",
+    "fea.HeatFluxSignal.fromTimeKnots",
+    "fea.HeatGenerationSignal.fromTimeKnots",
+    "fea.ElectricPotentialSignal.fromTimeKnots",
+    "fea.ElectricCurrentSignal.fromTimeKnots",
+    "fea.ElectricChargeSignal.fromTimeKnots",
+    "fea.CurrentDensitySignal.fromTimeKnots",
+    "fea.ChargeDensitySignal.fromTimeKnots",
+    "fea.MagneticVectorPotentialSignal.fromTimeKnots",
+    "fea.MassFlowSignal.fromTimeKnots",
+];
+
 const FEA_INITIAL_CONSTRUCTORS: [&str; 10] = [
     "fea.InitialConditionTarget.wholeModel",
     "fea.StructuralInitialCondition.displacement",
@@ -113,15 +140,19 @@ const FEA_SPECTRUM_NUMERIC_CONSTRUCTORS: [&str; 9] = [
     "fea.ResponseSpectrum.new",
 ];
 
-const FEA_TYPED_POLICY_CONSTRUCTORS: [&str; 31] = [
+const FEA_TYPED_POLICY_CONSTRUCTORS: [&str; 35] = [
     "fea.CoordinateFrame.globalFrame",
-    "fea.SignalInterpolation.stepLeft",
-    "fea.SignalInterpolation.stepRight",
+    "fea.SignalInterpolation.leftEndpoint",
+    "fea.SignalInterpolation.rightEndpoint",
     "fea.SignalInterpolation.linear",
-    "fea.SignalInterpolation.cubicHermite",
     "fea.SignalExtrapolation.reject",
     "fea.SignalExtrapolation.holdEndpoint",
     "fea.SignalExtrapolation.zero",
+    "fea.SignalSampleApproach.at",
+    "fea.SignalSampleApproach.leftLimit",
+    "fea.SignalSampleApproach.rightLimit",
+    "fea.SignalPointContinuity.left",
+    "fea.SignalPointContinuity.right",
     "fea.SpectrumResponse.relativeDisplacement",
     "fea.SpectrumResponse.relativeVelocity",
     "fea.SpectrumResponse.relativeAcceleration",
@@ -312,6 +343,7 @@ fn fea_packet_is_public_and_has_settled_integer_metadata() {
         .into_iter()
         .chain(FEA_SIGNAL_CONSTRUCTORS)
         .chain(FEA_SAMPLED_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_KNOT_SIGNAL_CONSTRUCTORS)
         .chain(FEA_EXCITATION_CONSTRUCTORS)
         .chain(FEA_INITIAL_CONSTRUCTORS)
         .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
@@ -346,6 +378,7 @@ fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
         .into_iter()
         .chain(FEA_SIGNAL_CONSTRUCTORS)
         .chain(FEA_SAMPLED_SIGNAL_CONSTRUCTORS)
+        .chain(FEA_KNOT_SIGNAL_CONSTRUCTORS.into_iter().take(2))
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().skip(1))
         .chain(FEA_SPECTRUM_NUMERIC_CONSTRUCTORS)
     {
@@ -377,6 +410,7 @@ fn fea_numeric_constructor_forms_cover_every_integer_class_on_the_host() {
 fn fea_non_numeric_roles_have_explicit_not_applicable_audits() {
     for name in FEA_INTEGER_INAPPLICABLE
         .into_iter()
+        .chain(FEA_KNOT_SIGNAL_CONSTRUCTORS.into_iter().skip(2))
         .chain(FEA_EXCITATION_CONSTRUCTORS)
         .chain(FEA_TYPED_POLICY_CONSTRUCTORS)
         .chain(FEA_INITIAL_CONSTRUCTORS.into_iter().take(1))

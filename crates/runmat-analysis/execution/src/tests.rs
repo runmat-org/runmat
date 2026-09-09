@@ -6,9 +6,9 @@ use runmat_analysis_core::{
     SequenceDependencyReason,
 };
 use runmat_analysis_fea::execution::{
-    AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity,
-    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity, DiscretizationIdentity,
+    ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
+    SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
@@ -22,8 +22,9 @@ fn digest(label: &str) -> Digest {
 }
 
 fn execution_identities() -> (StudyIdentity, StepIdentity, ExecutionPlanIdentity) {
-    let study = StudyIdentity::new(digest("study"), Some(digest("project"))).unwrap();
-    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
+    let study =
+        StudyIdentity::from_authored_digest(digest("study"), Some(digest("project"))).unwrap();
+    let sequence = SequenceIdentity::new(digest("sequence")).unwrap();
     let step = StepIdentity::new(sequence, digest("step")).unwrap();
     let constraints =
         ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
@@ -32,8 +33,7 @@ fn execution_identities() -> (StudyIdentity, StepIdentity, ExecutionPlanIdentity
     let discretization =
         DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
     let operator = OperatorIdentity::new(discretization, digest("operator")).unwrap();
-    let accuracy = AccuracyIdentity::new(step, digest("accuracy")).unwrap();
-    let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest("solver")).unwrap();
     (
         study,
         step,
@@ -55,6 +55,38 @@ fn revision() -> ProgramRevision {
         ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
     )
     .unwrap()
+}
+
+fn structural_displacement_observation() -> runmat_analysis_core::ObservationRequest {
+    runmat_analysis_core::ObservationRequest::Field(runmat_analysis_core::ObservationSpec {
+        observation_id: runmat_analysis_core::ObservationId("whole_displacement".into()),
+        quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+        value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+        target: runmat_analysis_core::ObservationTarget::WholeModel,
+        source_location: runmat_analysis_core::FieldLocation::Node,
+        output_location: runmat_analysis_core::FieldLocation::Node,
+        recovery: runmat_analysis_core::RecoveryPolicy::Native,
+        component: runmat_analysis_core::ObservationComponent::All,
+        frame: runmat_analysis_core::CoordinateFrame::Global,
+        sign_convention: runmat_analysis_core::SignConvention::Native,
+        complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+        sampling: runmat_analysis_core::SamplingPolicy::Final,
+        reduction: None,
+        storage: runmat_analysis_core::ObservationStoragePolicy {
+            precision: runmat_analysis_core::SignalPrecision::Real64,
+            compression: runmat_analysis_core::CompressionPolicy::Lossless,
+            retention: runmat_analysis_core::RetentionPolicy::Canonical,
+            partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: runmat_analysis_core::ObservationPurpose::Publication,
+        cost: runmat_analysis_core::ObservationCostEstimate {
+            operation_count: 1_000,
+            peak_resident_bytes: 1_000_000,
+            stored_bytes: 1_000_000,
+            transfer_bytes: 1_000_000,
+            collective_count: 0,
+        },
+    })
 }
 
 #[test]
@@ -356,8 +388,8 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
         branches: Vec::new(),
     };
     let validated = validate_model_sequence(&model).unwrap();
-    let study = StudyIdentity::new(digest("parallel-study"), None).unwrap();
-    let sequence = SequenceIdentity::from_authored(study, validated.sequence()).unwrap();
+    let study = StudyIdentity::from_authored_digest(digest("parallel-study"), None).unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(validated.sequence()).unwrap();
     let (_, _, execution_plan) = execution_identities();
     let input = prepare_analysis_objects(
         AnalysisNumericalObjectKind::SolverInvocation,
@@ -380,7 +412,7 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
                 .iter()
                 .find(|step| step.step_id.as_str() == step_id)
                 .unwrap();
-            let step = StepIdentity::from_authored(sequence, authored_step).unwrap();
+            let step = StepIdentity::from_solver_contract(sequence, authored_step).unwrap();
             let workload = AnalysisWorkloadRequest::new(
                 study,
                 step,
@@ -394,7 +426,10 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
                     manifest_encoded_length: input.root.encoded_length,
                     reference_kind: ValueRefKind::DriverObject,
                 }],
-                vec![AnalysisNumericalObjectKind::SolverResult],
+                vec![
+                    AnalysisNumericalObjectKind::SolverResult,
+                    AnalysisNumericalObjectKind::NumericalReceipt,
+                ],
                 BTreeSet::from([AnalysisCapabilityRequirement::Host {
                     abi: ANALYSIS_HOST_ABI.into(),
                 }]),
@@ -557,11 +592,16 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     .unwrap();
     assert_eq!(completed.outputs[0].payload(), b"canonical field bytes");
     let response = AnalysisHostResponse::completed(&host, &completed).unwrap();
-    response.validate_against(&host).unwrap();
+    response.validate_against(&host, &completed).unwrap();
+    assert_eq!(completed.output_set.outputs.len(), 1);
+    assert_eq!(completed.output_set.outputs[0].root, completed.roots[0]);
+    let mut substituted_output_set = completed.output_set.clone();
+    substituted_output_set.outputs[0].payload_digest = digest("substituted-field-payload");
+    assert!(substituted_output_set.validate_against(&host).is_err());
     assert!(matches!(
         response.program_response(),
         runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess { outputs, result_objects }
-            if outputs.len() == 1 && result_objects.len() == 5
+            if outputs.len() == 1 && result_objects.len() == 6
     ));
 }
 
@@ -610,15 +650,102 @@ impl AnalysisKernel for StructuralResultKernel {
             invocation.host.workload.identity,
             Digest::sha256(&self.0),
         )?;
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::SolverResult,
-            logical_identity: result_identity.digest(),
-            payload: self.0.clone(),
-        }])
+        let result = StructuralLinearWorkloadResult::from_canonical_bytes(&self.0)?;
+        let receipt =
+            runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+                invocation.host.workload.identity,
+                &result,
+            )?;
+        assert_eq!(receipt.source_result, result_identity);
+        Ok(vec![
+            AnalysisKernelOutput {
+                kind: AnalysisNumericalObjectKind::SolverResult,
+                logical_identity: result_identity.digest(),
+                payload: self.0.clone(),
+            },
+            AnalysisKernelOutput {
+                kind: AnalysisNumericalObjectKind::NumericalReceipt,
+                logical_identity: receipt.identity().digest(),
+                payload: receipt.canonical_bytes()?,
+            },
+        ])
     }
 }
 
 struct StateProjectionKernel;
+
+struct RecoveredFieldKernel(runmat_analysis_fea::results::field::RecoveredFieldArtifact);
+
+impl AnalysisKernel for RecoveredFieldKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::RecoverField);
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::Field,
+            logical_identity: self.0.identity().digest(),
+            payload: self
+                .0
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        }])
+    }
+}
+
+struct ObservationKernel(runmat_analysis_fea::results::observation::ObservationArtifact);
+
+impl AnalysisKernel for ObservationKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::EvaluateObservation);
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::Observation,
+            logical_identity: self.0.identity().digest(),
+            payload: self
+                .0
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        }])
+    }
+}
+
+struct AccuracyKernel(runmat_analysis_fea::results::accuracy::AccuracyArtifact);
+
+impl AnalysisKernel for AccuracyKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::EvaluateAccuracy);
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::AccuracyReport,
+            logical_identity: self.0.identity().digest(),
+            payload: self
+                .0
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        }])
+    }
+}
+
+struct PublicationKernel(runmat_analysis_fea::results::publication::PublishedAnalysisResult);
+
+impl AnalysisKernel for PublicationKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::PublishResult);
+        Ok(vec![AnalysisKernelOutput {
+            kind: AnalysisNumericalObjectKind::PublishedResult,
+            logical_identity: self.0.identity().digest(),
+            payload: self.0.canonical_bytes()?,
+        }])
+    }
+}
 
 impl AnalysisKernel for StateProjectionKernel {
     fn execute(
@@ -672,7 +799,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     };
 
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    let producer_step = model.sequence.steps[0].clone();
+    let mut producer_step = model.sequence.steps[0].clone();
+    producer_step.observations = vec![structural_displacement_observation()];
     let state_id = producer_step.state_outputs[0].state_id.clone();
     let mut consumer_step = producer_step.clone();
     consumer_step.step_id = ProcedureStepId("branch".into());
@@ -816,13 +944,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             &raw.fields,
         )
         .unwrap();
-    let encoded = StructuralLinearWorkloadResult {
-        schema_version: 1,
-        run: raw.clone(),
-        constraint_result: constraint_result.clone(),
-    }
-    .canonical_bytes()
-    .unwrap();
+    let encoded = StructuralLinearWorkloadResult::new(raw.clone(), constraint_result.clone())
+        .unwrap()
+        .canonical_bytes()
+        .unwrap();
     let mut store = MemoryObjects::default();
     prepared.program.write_to(&mut store).unwrap();
     let completed = execute_serial_analysis(
@@ -833,6 +958,14 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    assert_eq!(completed.outputs.len(), 2);
+    assert_eq!(
+        completed.outputs[1].manifest.kind,
+        AnalysisNumericalObjectKind::NumericalReceipt
+    );
+    assert!(
+        completed.outputs[1].manifest.encoded_length < completed.outputs[0].manifest.encoded_length
+    );
     let response = AnalysisHostResponse::completed(&prepared.host, &completed)
         .unwrap()
         .program_response();
@@ -844,6 +977,301 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert_eq!(decoded.run, raw);
+
+    let field_prepared = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
+        source_host: prepared.host.clone(),
+        source_result: completed.outputs[0].clone(),
+        mesh: prepared.inputs[1].clone(),
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
+    assert_eq!(prepared.program.request.requested_outputs, 1);
+    assert_eq!(field_prepared.program.request.requested_outputs, 1);
+    assert_eq!(
+        prepared.program.request.artifact, field_prepared.program.request.artifact,
+        "every analysis stage must reuse the one bundle-authorized host artifact"
+    );
+    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let mut recoverable_storage = raw.fields.clone();
+    let recovered_fields = runmat_analysis_fea::post::fields::take_structural_observable_fields(
+        &mut recoverable_storage,
+    )
+    .unwrap();
+    let recovered_artifact = runmat_analysis_fea::results::field::RecoveredFieldArtifact::new(
+        field_prepared.request.identity(),
+        field_prepared.request.source_result,
+        projection.projection_digest,
+        projection.nodes.len(),
+        projection.elements.len(),
+        recovered_fields,
+    )
+    .unwrap();
+    field_prepared.program.write_to(&mut store).unwrap();
+    let field_completed = execute_serial_analysis(
+        &field_prepared.program.request,
+        &mut store,
+        &RecoveredFieldKernel(recovered_artifact.clone()),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let field_response = AnalysisHostResponse::completed(&field_prepared.host, &field_completed)
+        .unwrap()
+        .program_response();
+    let imported_fields = import_structural_recovered_fields(
+        &store,
+        field_response,
+        &field_prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported_fields.artifact, recovered_artifact);
+
+    let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
+    let observation_prepared = prepare_structural_observation(StructuralObservationPreparation {
+        source_host: field_prepared.host.clone(),
+        source_request: field_prepared.request.clone(),
+        source_fields: field_completed.outputs[0].clone(),
+        mesh: prepared.inputs[1].clone(),
+        sequence,
+        step: producer_step.clone(),
+        limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
+    let recovered_catalog =
+        runmat_analysis_fea::results::field::RecoveredFieldCatalog::from_artifact(
+            &projection,
+            recovered_artifact.clone(),
+        )
+        .unwrap();
+    let observation_results = runmat_analysis_fea::results::observation::evaluate_observations(
+        &observation_prepared.request.plan,
+        &projection,
+        &recovered_catalog,
+    )
+    .unwrap();
+    let observation_artifact = runmat_analysis_fea::results::observation::ObservationArtifact::new(
+        runmat_analysis_fea::results::observation::ObservationArtifactInput {
+            evaluation_request: observation_prepared.request.identity(),
+            producer: observation_prepared.request.producer,
+            field_recovery_request: observation_prepared.request.field_recovery_request,
+            source_fields: observation_prepared.request.source_fields,
+            source_result: observation_prepared.request.source_result,
+            topology_digest: observation_prepared.request.plan.topology_digest,
+            plan_identity: observation_prepared.request.plan.identity,
+            results: observation_results,
+        },
+    )
+    .unwrap();
+    observation_prepared.program.write_to(&mut store).unwrap();
+    let observation_completed = execute_serial_analysis(
+        &observation_prepared.program.request,
+        &mut store,
+        &ObservationKernel(observation_artifact.clone()),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let observation_response =
+        AnalysisHostResponse::completed(&observation_prepared.host, &observation_completed)
+            .unwrap()
+            .program_response();
+    let imported_observations = import_structural_observations(
+        &store,
+        observation_response,
+        &observation_prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported_observations.artifact, observation_artifact);
+    assert_eq!(
+        imported_observations.artifact.results()[0].observation_id.0,
+        "whole_displacement"
+    );
+
+    let accuracy_prepared = prepare_structural_accuracy(StructuralAccuracyPreparation {
+        solve_host: prepared.host.clone(),
+        source_numerical_receipt: completed.outputs[1].clone(),
+        source_observations: Some(observation_completed.outputs[0].clone()),
+        sequence,
+        step: producer_step.clone(),
+        formulation_requirement: solve.formulation_requirement,
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
+    assert!(accuracy_prepared
+        .inputs
+        .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::NumericalReceipt));
+    assert!(accuracy_prepared
+        .inputs
+        .iter()
+        .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::SolverResult));
+    let unrelated_workload = runmat_analysis_fea::execution::AnalysisWorkloadIdentity::new(
+        prepared.host.workload.study,
+        prepared.host.workload.step,
+        prepared.host.workload.execution_plan,
+        AnalysisWorkKind::Solve,
+        digest("unrelated-solve-contract"),
+        vec![digest("unrelated-solve-input")],
+    )
+    .unwrap();
+    let unrelated_receipt =
+        runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
+            unrelated_workload,
+            &decoded,
+        )
+        .unwrap();
+    let unrelated_receipt = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::NumericalReceipt,
+        unrelated_receipt.identity().digest(),
+        &unrelated_receipt.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::ResultValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert!(prepare_structural_accuracy(StructuralAccuracyPreparation {
+        solve_host: prepared.host.clone(),
+        source_numerical_receipt: unrelated_receipt,
+        source_observations: Some(observation_completed.outputs[0].clone()),
+        sequence,
+        step: producer_step.clone(),
+        formulation_requirement: solve.formulation_requirement,
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .is_err());
+    let accuracy_evidence = vec![
+        runmat_analysis_fea::results::accuracy::AccuracyEvidence::new(
+            runmat_analysis_core::AccuracyTarget::GlobalEquilibrium,
+            runmat_analysis_core::ErrorContributionKind::Algebraic,
+            runmat_analysis_core::RequiredAccuracyEvidence::ResidualBound,
+            runmat_analysis_fea::results::accuracy::AccuracyMeasure::Relative(
+                runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(
+                    &completed.outputs[1].payload(),
+                )
+                .unwrap()
+                .receipt()
+                .relative_equilibrium_residual,
+            ),
+            vec![
+                "canonical unconstrained equilibrium residual projected into the admissible constraint space"
+                    .into(),
+            ],
+            runmat_analysis_fea::results::accuracy::AccuracyEvidenceScope::SolverResult(
+                accuracy_prepared.request.source_result,
+            ),
+        )
+        .unwrap(),
+    ];
+    let accuracy_evaluation = runmat_analysis_fea::results::accuracy::evaluate_accuracy(
+        &accuracy_prepared.request.plan,
+        &accuracy_evidence,
+    )
+    .unwrap();
+    let accuracy_gate = runmat_analysis_fea::results::accuracy::publication_gate(
+        &accuracy_prepared.request.plan,
+        accuracy_prepared.request.formulation_requirement,
+        &accuracy_evaluation,
+    )
+    .unwrap();
+    let accuracy_artifact = runmat_analysis_fea::results::accuracy::AccuracyArtifact::new(
+        runmat_analysis_fea::results::accuracy::AccuracyArtifactInput {
+            evaluation_request: accuracy_prepared.request.identity(),
+            producer: accuracy_prepared.request.producer,
+            source_result: accuracy_prepared.request.source_result,
+            source_observations: accuracy_prepared.request.source_observations,
+            formulation_requirement: accuracy_prepared.request.formulation_requirement,
+            evidence: accuracy_evidence,
+            evaluation: accuracy_evaluation,
+            gate: accuracy_gate,
+        },
+    )
+    .unwrap();
+    accuracy_prepared.program.write_to(&mut store).unwrap();
+    let accuracy_completed = execute_serial_analysis(
+        &accuracy_prepared.program.request,
+        &mut store,
+        &AccuracyKernel(accuracy_artifact.clone()),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let accuracy_response =
+        AnalysisHostResponse::completed(&accuracy_prepared.host, &accuracy_completed)
+            .unwrap()
+            .program_response();
+    let imported_accuracy = import_structural_accuracy(
+        &store,
+        accuracy_response,
+        &accuracy_prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported_accuracy.artifact, accuracy_artifact);
+    assert_eq!(
+        imported_accuracy.artifact.gate().decision,
+        runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
+    );
+
+    let publication_prepared = prepare_result_publication(ResultPublicationPreparation {
+        accuracy_host: accuracy_prepared.host.clone(),
+        source_accuracy: accuracy_completed.outputs[0].clone(),
+        source_observations: Some(observation_completed.outputs[0].clone()),
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
+    let published_result = runmat_analysis_fea::results::publication::PublishedAnalysisResult::new(
+        &publication_prepared.request,
+        &accuracy_artifact,
+    )
+    .unwrap();
+    publication_prepared.program.write_to(&mut store).unwrap();
+    let publication_completed = execute_serial_analysis(
+        &publication_prepared.program.request,
+        &mut store,
+        &PublicationKernel(published_result.clone()),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let publication_response =
+        AnalysisHostResponse::completed(&publication_prepared.host, &publication_completed)
+            .unwrap()
+            .program_response();
+    let imported_publication = import_published_result(
+        &store,
+        publication_response,
+        &publication_prepared,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(imported_publication.result, published_result);
+
+    let mut substituted_result = completed.outputs[0].clone();
+    substituted_result.manifest.logical_identity = digest("substituted-solver-result");
+    assert!(
+        prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
+            source_host: prepared.host.clone(),
+            source_result: substituted_result,
+            mesh: prepared.inputs[1].clone(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        })
+        .is_err()
+    );
 
     let state_prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
         source_host: prepared.host.clone(),
@@ -1027,13 +1455,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let mut wrong_backend = raw;
     wrong_backend.requested_backend = ComputeBackend::Gpu;
-    let encoded = StructuralLinearWorkloadResult {
-        schema_version: 1,
-        run: wrong_backend,
-        constraint_result: constraint_result.clone(),
-    }
-    .canonical_bytes()
-    .unwrap();
+    let encoded = StructuralLinearWorkloadResult::new(wrong_backend, constraint_result.clone())
+        .unwrap()
+        .canonical_bytes()
+        .unwrap();
     let completed = execute_serial_analysis(
         &prepared.program.request,
         &mut store,
@@ -1055,13 +1480,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let mut substituted_constraint_result = constraint_result;
     substituted_constraint_result.constraint_plan_digest = digest("substituted-plan");
-    let encoded = StructuralLinearWorkloadResult {
-        schema_version: 1,
-        run: decoded.run,
-        constraint_result: substituted_constraint_result,
-    }
-    .canonical_bytes()
-    .unwrap();
+    let encoded = StructuralLinearWorkloadResult::new(decoded.run, substituted_constraint_result)
+        .unwrap()
+        .canonical_bytes()
+        .unwrap();
     let completed = execute_serial_analysis(
         &prepared.program.request,
         &mut store,
@@ -1220,13 +1642,10 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             &raw.fields,
         )
         .unwrap();
-    let encoded = StructuralLinearWorkloadResult {
-        schema_version: 1,
-        run: raw,
-        constraint_result,
-    }
-    .canonical_bytes()
-    .unwrap();
+    let encoded = StructuralLinearWorkloadResult::new(raw, constraint_result)
+        .unwrap()
+        .canonical_bytes()
+        .unwrap();
     let mut left_workload = workload.clone();
     left_workload.step_id = left.step_id.clone();
     left_workload.preconditioner = SpdPreconditionerKind::Ilu0;
@@ -1474,7 +1893,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         completed.steps[1].result.run.fields,
         completed.steps[2].result.run.fields
     );
-    let closures = completed.result_closures(&access()).unwrap();
+    let closures = completed.result_closures().unwrap();
     let imported = import_structural_sequence_completion(
         &store,
         StructuralSequencePreparation {

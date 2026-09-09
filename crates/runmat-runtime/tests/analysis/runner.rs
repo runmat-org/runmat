@@ -303,14 +303,16 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
                         SignalShape::Scalar,
                         SignalPrecision::Complex128,
                         SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
-                            axis: runmat_analysis_core::SignalAxis::FrequencyHertz(vec![1.0]),
-                            values: vec![runmat_analysis_core::SignalOrdinate::Complex {
-                                real: SignalValue::Scalar(real),
-                                imaginary: SignalValue::Scalar(imaginary),
-                            }],
+                            domain: runmat_analysis_core::TabulatedSignalDomain::FrequencyHertz,
+                            knots: vec![runmat_analysis_core::SignalKnot::continuous(
+                                1.0,
+                                runmat_analysis_core::SignalOrdinate::Complex {
+                                    real: SignalValue::Scalar(real),
+                                    imaginary: SignalValue::Scalar(imaginary),
+                                },
+                            )],
                             interpolation: runmat_analysis_core::SignalInterpolation::Linear,
                             extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
-                            breakpoints: Vec::new(),
                         }),
                     )),
                     ExcitationAction::ElectricCurrent,
@@ -340,14 +342,16 @@ fn append_fixture_excitations(model: &mut AnalysisModel, specs: Vec<FixtureExcit
                         SignalShape::Vector3,
                         SignalPrecision::Complex128,
                         SignalRepresentation::Tabulated(runmat_analysis_core::TabulatedSignal {
-                            axis: runmat_analysis_core::SignalAxis::FrequencyHertz(vec![1.0]),
-                            values: vec![runmat_analysis_core::SignalOrdinate::Complex {
-                                real: SignalValue::Vector3(real),
-                                imaginary: SignalValue::Vector3(imaginary),
-                            }],
+                            domain: runmat_analysis_core::TabulatedSignalDomain::FrequencyHertz,
+                            knots: vec![runmat_analysis_core::SignalKnot::continuous(
+                                1.0,
+                                runmat_analysis_core::SignalOrdinate::Complex {
+                                    real: SignalValue::Vector3(real),
+                                    imaginary: SignalValue::Vector3(imaginary),
+                                },
+                            )],
                             interpolation: runmat_analysis_core::SignalInterpolation::Linear,
                             extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
-                            breakpoints: Vec::new(),
                         }),
                     )),
                     ExcitationAction::CurrentDensity,
@@ -573,20 +577,20 @@ fn scalar_signal<Q>(
     } else {
         runmat_analysis_core::SignalRepresentation::Tabulated(
             runmat_analysis_core::TabulatedSignal {
-                axis: runmat_analysis_core::SignalAxis::TimeSeconds(
-                    points.iter().map(|point| point.0).collect(),
-                ),
-                values: points
+                domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+                knots: points
                     .iter()
                     .map(|point| {
-                        runmat_analysis_core::SignalOrdinate::Real(
-                            runmat_analysis_core::SignalValue::Scalar(value(point.1)),
+                        runmat_analysis_core::SignalKnot::continuous(
+                            point.0,
+                            runmat_analysis_core::SignalOrdinate::Real(
+                                runmat_analysis_core::SignalValue::Scalar(value(point.1)),
+                            ),
                         )
                     })
                     .collect(),
                 interpolation: runmat_analysis_core::SignalInterpolation::Linear,
                 extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
-                breakpoints: Vec::new(),
             },
         )
     };

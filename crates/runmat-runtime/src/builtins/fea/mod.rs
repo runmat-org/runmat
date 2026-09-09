@@ -3251,11 +3251,13 @@ mod tests {
                 sweep_id: "sweep".into(),
                 identity: runmat_analysis_fea::execution::SweepIdentity::new(
                     runmat_execution::Digest::sha256(b"sweep"),
-                    vec![runmat_analysis_fea::execution::StudyIdentity::new(
-                        runmat_execution::Digest::sha256(b"study"),
-                        None,
-                    )
-                    .expect("study identity")],
+                    vec![
+                        runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
+                            runmat_execution::Digest::sha256(b"study"),
+                            None,
+                        )
+                        .expect("study identity"),
+                    ],
                     runmat_execution::Digest::sha256(b"composition"),
                 )
                 .expect("sweep identity"),
@@ -4265,6 +4267,7 @@ execution:
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
+                observations: Vec::new(),
                 fields: vec![AnalysisField::host_f64(
                     "structural.von_mises",
                     vec![1],
@@ -4350,6 +4353,7 @@ execution:
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
+                observations: Vec::new(),
                 fields: Vec::new(),
             },
             render_topology: None,

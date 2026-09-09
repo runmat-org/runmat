@@ -260,9 +260,11 @@ pub(in crate::analysis) fn complete_study_run(
             ));
         }
     }
-    let study_identity = StudyIdentity::new(authored_study_digest, frozen_project_digest)
-        .map_err(|error| completion_error(&context, "RM.FEA.RUN_STUDY.IDENTITY_INVALID", error))?;
-    let sequence_identity = SequenceIdentity::from_authored(study_identity, &model.sequence)
+    let _study_identity =
+        StudyIdentity::from_authored_digest(authored_study_digest, frozen_project_digest).map_err(
+            |error| completion_error(&context, "RM.FEA.RUN_STUDY.IDENTITY_INVALID", error),
+        )?;
+    let sequence_identity = SequenceIdentity::from_solver_contract(&model.sequence)
         .map_err(|error| completion_error(&context, "RM.FEA.RUN_STUDY.IDENTITY_INVALID", error))?;
     let mut step_results = Vec::with_capacity(authored_steps.len());
     let mut runs_to_persist = Vec::with_capacity(authored_steps.len());
@@ -486,7 +488,7 @@ fn validate_and_persist_states(
         state
             .validate()
             .map_err(|error| completion_error(context, "RM.FEA.RUN_STUDY.STATE_INVALID", error))?;
-        let producer_identity = StepIdentity::from_authored(sequence_identity, producer)
+        let producer_identity = StepIdentity::from_solver_contract(sequence_identity, producer)
             .map_err(|error| completion_error(context, "RM.FEA.RUN_STUDY.STATE_INVALID", error))?;
         if state.producer != producer_identity
             || state.state_id != declaration.state_id

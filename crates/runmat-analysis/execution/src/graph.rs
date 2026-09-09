@@ -95,8 +95,7 @@ pub fn compile_analysis_sequence_graph(
             None => study = Some(task.host.workload.study),
             _ => {}
         }
-        let sequence_identity =
-            SequenceIdentity::from_authored(task.host.workload.study, sequence.sequence())?;
+        let sequence_identity = SequenceIdentity::from_solver_contract(sequence.sequence())?;
         let authored_step = sequence
             .sequence()
             .steps
@@ -105,7 +104,7 @@ pub fn compile_analysis_sequence_graph(
             .ok_or(AnalysisBridgeError::Identity(
                 "validated sequence topology references an absent procedure step",
             ))?;
-        let expected_step = StepIdentity::from_authored(sequence_identity, authored_step)?;
+        let expected_step = StepIdentity::from_solver_contract(sequence_identity, authored_step)?;
         if task.host.workload.step != expected_step {
             return Err(AnalysisBridgeError::Identity(
                 "prepared workload step identity differs from its authored procedure step",

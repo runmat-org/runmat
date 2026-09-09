@@ -1,12 +1,16 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
+mod accuracy_evaluation;
 mod callable;
 mod error;
+mod field_recovery;
 mod graph;
 mod host;
 mod materialized_signal;
 mod object;
+mod observation_evaluation;
 mod response;
+mod result_publication;
 mod serial;
 mod signal_input;
 mod signal_materialization;
@@ -18,10 +22,18 @@ mod task;
 mod transport;
 mod workload;
 
+pub use accuracy_evaluation::{
+    import_structural_accuracy, prepare_structural_accuracy, ImportedAccuracy,
+    PreparedStructuralAccuracy, StructuralAccuracyPreparation,
+};
 pub use callable::{
     admit_callable_signal_generator, admit_named_signal_generator, AdmittedSignalGenerator,
 };
 pub use error::{AnalysisBridgeError, AnalysisBridgeResult};
+pub use field_recovery::{
+    import_structural_recovered_fields, prepare_structural_field_recovery, ImportedRecoveredFields,
+    PreparedStructuralFieldRecovery, StructuralFieldRecoveryPreparation,
+};
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
     PreparedAnalysisStepTask,
@@ -36,7 +48,18 @@ pub use materialized_signal::{
     canonical_tabulated_signal_content_digest, materialize_signal_for_solver,
 };
 pub use object::{import_analysis_objects, prepare_analysis_objects, PreparedAnalysisObjects};
-pub use response::AnalysisHostResponse;
+pub use observation_evaluation::{
+    import_structural_observations, prepare_structural_observation, ImportedObservations,
+    PreparedStructuralObservation, StructuralObservationPreparation,
+};
+pub use response::{
+    import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,
+    ImportedAnalysisOutputSet, ANALYSIS_OUTPUT_SET_MEDIA_TYPE, ANALYSIS_OUTPUT_SET_VALUE_SCHEMA,
+};
+pub use result_publication::{
+    import_published_result, prepare_result_publication, ImportedPublishedResult,
+    PreparedResultPublication, ResultPublicationPreparation,
+};
 pub use runmat_analysis_fea::execution::SignalInputAdmission;
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,

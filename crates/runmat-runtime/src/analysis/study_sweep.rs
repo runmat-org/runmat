@@ -244,7 +244,9 @@ fn sweep_identity(spec: &AnalysisStudySweepSpec) -> Result<SweepIdentity, String
     let studies = spec
         .studies
         .iter()
-        .map(|study| StudyIdentity::new(super::analysis_study_content_digest(study), None))
+        .map(|study| {
+            StudyIdentity::from_authored_digest(super::analysis_study_content_digest(study), None)
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
     let sweep_contract_digest = Digest::sha256(

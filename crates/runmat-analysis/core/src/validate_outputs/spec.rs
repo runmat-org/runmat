@@ -44,7 +44,7 @@ fn validate_quantity_family(
     }
 }
 
-pub(crate) fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
+pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
     (match step.family {
         PhysicsFamily::Structural => is_structural(quantity),
         PhysicsFamily::Thermal => is_thermal(quantity),
@@ -141,39 +141,6 @@ fn is_universal(quantity: ObservationQuantity) -> bool {
     )
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CanonicalShape {
-    Scalar,
-    Vector,
-    SymmetricTensor,
-}
-
-fn canonical_shape(quantity: ObservationQuantity) -> CanonicalShape {
-    match quantity {
-        ObservationQuantity::Displacement
-        | ObservationQuantity::Rotation
-        | ObservationQuantity::Velocity
-        | ObservationQuantity::Acceleration
-        | ObservationQuantity::ReactionForce
-        | ObservationQuantity::ReactionMoment
-        | ObservationQuantity::TemperatureGradient
-        | ObservationQuantity::HeatFlux
-        | ObservationQuantity::ElectricField
-        | ObservationQuantity::ElectricCurrentDensity
-        | ObservationQuantity::MagneticVectorPotential
-        | ObservationQuantity::MagneticFluxDensity
-        | ObservationQuantity::MagneticFieldIntensity
-        | ObservationQuantity::AcousticParticleVelocity
-        | ObservationQuantity::FluidVelocity
-        | ObservationQuantity::Vorticity
-        | ObservationQuantity::WallShearStress => CanonicalShape::Vector,
-        ObservationQuantity::Strain | ObservationQuantity::Stress => {
-            CanonicalShape::SymmetricTensor
-        }
-        _ => CanonicalShape::Scalar,
-    }
-}
-
 fn validate_shape(
     request: &ObservationRequest,
     spec: &ObservationSpec,
@@ -192,16 +159,9 @@ fn validate_shape(
             );
         }
     }
-    let valid = match (canonical_shape(spec.quantity), &spec.value_shape) {
-        (CanonicalShape::Scalar, ObservationValueShape::Scalar) => true,
-        (CanonicalShape::Vector, ObservationValueShape::Vector3) => true,
-        (CanonicalShape::Vector, ObservationValueShape::Tensor { extents }) => extents == &[3],
-        (CanonicalShape::SymmetricTensor, ObservationValueShape::SymmetricTensor3) => true,
-        (CanonicalShape::SymmetricTensor, ObservationValueShape::Tensor { extents }) => {
-            extents == &[3, 3]
-        }
-        _ => false,
-    };
+    let valid = spec
+        .value_shape
+        .is_storage_equivalent_to(&spec.quantity.canonical_value_shape());
     if valid {
         Ok(())
     } else {
@@ -265,13 +225,13 @@ fn validate_component(
             "normal and tangent components require the boundary-normal/tangent frame",
         );
     }
-    let valid = match canonical_shape(spec.quantity) {
-        CanonicalShape::Scalar => matches!(spec.component, C::All),
-        CanonicalShape::Vector => matches!(
+    let valid = match spec.quantity.canonical_value_shape() {
+        ObservationValueShape::Scalar => matches!(spec.component, C::All),
+        ObservationValueShape::Vector3 => matches!(
             spec.component,
             C::All | C::X | C::Y | C::Z | C::Normal | C::Tangent1 | C::Tangent2 | C::Magnitude
         ),
-        CanonicalShape::SymmetricTensor => matches!(
+        ObservationValueShape::SymmetricTensor3 => matches!(
             spec.component,
             C::All
                 | C::Normal
@@ -284,6 +244,9 @@ fn validate_component(
                 | C::MaximumPrincipal
                 | C::MinimumPrincipal
         ),
+        ObservationValueShape::Tensor { .. } => {
+            unreachable!("canonical observation quantity shapes never use arbitrary tensor extents")
+        }
     };
     if valid {
         Ok(())
@@ -399,7 +362,7 @@ fn validate_recovery(
 }
 
 pub(super) fn is_scalar_result(spec: &ObservationSpec) -> bool {
-    canonical_shape(spec.quantity) == CanonicalShape::Scalar
+    spec.quantity.canonical_value_shape() == ObservationValueShape::Scalar
         || !matches!(
             spec.component,
             ObservationComponent::All | ObservationComponent::Deviatoric

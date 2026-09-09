@@ -667,7 +667,13 @@ export type FeaSignalValue<Q> = { scalar: Q } | { vector3: [Q, Q, Q] } | { tenso
 
 export type FeaSignalOrdinate<Q> = { real: FeaSignalValue<Q> } | { complex: { real: FeaSignalValue<Q>; imaginary: FeaSignalValue<Q> } };
 
-export type FeaSignalAxis = { time_seconds: number[] } | { frequency_hertz: number[] } | { study_parameter: { parameter_id: string; canonical_values: number[] } };
+export type FeaTabulatedSignalDomain = "time_seconds" | "frequency_hertz" | { study_parameter: { parameter_id: string } };
+
+export type FeaSignalPointContinuity = "left" | "right";
+
+export type FeaSignalKnotValue<Q> = { continuous: FeaSignalOrdinate<Q> } | { jump: { left_limit: FeaSignalOrdinate<Q>; right_limit: FeaSignalOrdinate<Q>; continuity: FeaSignalPointContinuity } };
+
+export interface FeaSignalKnot<Q> { abscissa: number; value: FeaSignalKnotValue<Q>; }
 
 export interface FeaSignalArtifact { artifact_id: string; content_digest: string; schema: string; domain: "constant" | { time_seconds: { start: number; end: number } } | { frequency_hertz: { start: number; end: number } } | { study_parameter: { parameter_id: string; start: number; end: number } }; topology_digest: string | null; sample_count: number; }
 
@@ -675,7 +681,7 @@ export type FeaGeneratorArgument = { boolean: boolean } | { signed_integer: numb
 
 export interface FeaSignalGenerator { qualified_function: string; arguments: FeaGeneratorArgument[]; domain: "time_seconds" | "frequency_hertz" | { study_parameter: { parameter_id: string } }; sampling: { uniform: { start: number; end: number; sample_count: number } } | { adaptive: { start: number; end: number; max_absolute_error: number; max_samples: number } } | { canonical_points: number[] }; effects: "pure" | "declared_immutable_artifacts" | { seeded_random: { seed: number; distribution: "uniform" | "normal" | "log_normal" } }; }
 
-export type FeaSignalRepresentation<Q> = { constant: FeaSignalValue<Q> } | { tabulated: { axis: FeaSignalAxis; values: FeaSignalOrdinate<Q>[]; interpolation: "step_left" | "step_right" | "linear" | "cubic_hermite"; extrapolation: "reject" | "hold_endpoint" | "zero"; breakpoints: { abscissa: number; side: "left" | "right" | "both" }[] } } | { waveform: { kind: "step" | "ramp" | "sine" | "half_sine_pulse" | "triangular_pulse" | "rectangular_pulse"; amplitude: FeaSignalValue<Q>; offset: FeaSignalValue<Q> | null; start_seconds: number; duration_seconds: number | null; frequency_hz: number | null; phase_radians: number; duty_cycle: number | null } } | { artifact: FeaSignalArtifact } | { generator: FeaSignalGenerator };
+export type FeaSignalRepresentation<Q> = { constant: FeaSignalValue<Q> } | { tabulated: { domain: FeaTabulatedSignalDomain; knots: FeaSignalKnot<Q>[]; interpolation: "left_endpoint" | "right_endpoint" | "linear"; extrapolation: "reject" | "hold_endpoint" | "zero" } } | { waveform: { kind: "step" | "ramp" | "sine" | "half_sine_pulse" | "triangular_pulse" | "rectangular_pulse"; amplitude: FeaSignalValue<Q>; offset: FeaSignalValue<Q> | null; start_seconds: number; duration_seconds: number | null; frequency_hz: number | null; phase_radians: number; duty_cycle: number | null } } | { artifact: FeaSignalArtifact } | { generator: FeaSignalGenerator };
 
 export type FeaSignalPrecision = "real32" | "real64" | "complex64" | "complex128";
 
@@ -691,7 +697,7 @@ export type FeaExcitationInput = { force: FeaExcitationBody } | { moment: FeaExc
 
 export interface FeaExcitationCaseInput { case_id: string; action_ids: string[]; activation: "always" | { steps: string[] } | { mutually_exclusive_group: { group_id: string } }; }
 
-export type FeaInitialValue<Q> = { uniform: Q } | { uniform_vector3: [Q, Q, Q] } | { signal_sample: { signal_id: string; abscissa: number } } | { field_artifact: { artifact_id: string; content_digest: string; topology_digest: string; field_id: string } };
+export type FeaInitialValue<Q> = { uniform: Q } | { uniform_vector3: [Q, Q, Q] } | { signal_sample: { signal_id: string; abscissa: number; approach: "at" | "left_limit" | "right_limit" } } | { field_artifact: { artifact_id: string; content_digest: string; topology_digest: string; field_id: string } };
 
 export interface FeaInitialConditionBody<Q> { initial_condition_id: string; target: { region: FeaRegionTarget } | "whole_model"; frame: FeaCoordinateFrame; value: FeaInitialValue<Q>; applies_before_step_id: string; }
 

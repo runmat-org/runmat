@@ -112,6 +112,37 @@ pub enum ObservationQuantity {
     ContactPressure,
 }
 
+impl ObservationQuantity {
+    /// Canonical component shape of this physical quantity.
+    ///
+    /// This is the shared authority used by authored-output validation, physics recovery, and
+    /// observation evaluation. Storage may use an equivalent explicit tensor extent, but it must
+    /// not redefine the quantity's semantics.
+    pub fn canonical_value_shape(self) -> ObservationValueShape {
+        match self {
+            Self::Displacement
+            | Self::Rotation
+            | Self::Velocity
+            | Self::Acceleration
+            | Self::ReactionForce
+            | Self::ReactionMoment
+            | Self::TemperatureGradient
+            | Self::HeatFlux
+            | Self::ElectricField
+            | Self::ElectricCurrentDensity
+            | Self::MagneticVectorPotential
+            | Self::MagneticFluxDensity
+            | Self::MagneticFieldIntensity
+            | Self::AcousticParticleVelocity
+            | Self::FluidVelocity
+            | Self::Vorticity
+            | Self::WallShearStress => ObservationValueShape::Vector3,
+            Self::Strain | Self::Stress => ObservationValueShape::SymmetricTensor3,
+            _ => ObservationValueShape::Scalar,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationValueShape {
@@ -119,6 +150,32 @@ pub enum ObservationValueShape {
     Vector3,
     SymmetricTensor3,
     Tensor { extents: Vec<usize> },
+}
+
+impl ObservationValueShape {
+    pub fn component_count(&self) -> Option<usize> {
+        match self {
+            Self::Scalar => Some(1),
+            Self::Vector3 => Some(3),
+            Self::SymmetricTensor3 => Some(6),
+            Self::Tensor { extents } if !extents.is_empty() && !extents.contains(&0) => extents
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent)),
+            Self::Tensor { .. } => None,
+        }
+    }
+
+    pub fn is_storage_equivalent_to(&self, canonical: &Self) -> bool {
+        match (self, canonical) {
+            (Self::Scalar, Self::Scalar)
+            | (Self::Vector3, Self::Vector3)
+            | (Self::SymmetricTensor3, Self::SymmetricTensor3) => true,
+            (Self::Tensor { extents }, Self::Vector3) => extents == &[3],
+            (Self::Tensor { extents }, Self::SymmetricTensor3) => extents == &[3, 3],
+            (Self::Tensor { extents: left }, Self::Tensor { extents: right }) => left == right,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

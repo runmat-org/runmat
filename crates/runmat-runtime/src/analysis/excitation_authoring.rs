@@ -3,9 +3,9 @@ use runmat_analysis_core::{
     ExcitationCase, ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution,
     ExcitationId, ExcitationKinematics, ExcitationTarget, Force, HeatGenerationDensity,
     PhysicalSignal, Pressure, ProjectionRequirement, RegionTarget, Signal,
-    SignalApproximationEvidence, SignalAxis, SignalBreakpoint, SignalExtrapolation, SignalId,
-    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalShape, SignalValue, TabulatedSignal,
+    SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot,
+    SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
+    SignalValue, TabulatedSignal, TabulatedSignalDomain,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -148,14 +148,16 @@ fn append_complex_scalar<Q>(
 ) {
     let representation = match frequency_hz {
         Some(frequency_hz) => SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::FrequencyHertz(vec![frequency_hz]),
-            values: vec![SignalOrdinate::Complex {
-                real: SignalValue::Scalar(real),
-                imaginary: SignalValue::Scalar(imaginary),
-            }],
+            domain: TabulatedSignalDomain::FrequencyHertz,
+            knots: vec![SignalKnot::continuous(
+                frequency_hz,
+                SignalOrdinate::Complex {
+                    real: SignalValue::Scalar(real),
+                    imaginary: SignalValue::Scalar(imaginary),
+                },
+            )],
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::Reject,
-            breakpoints: Vec::<SignalBreakpoint>::new(),
         }),
         None => SignalRepresentation::Constant(SignalValue::Scalar(real)),
     };

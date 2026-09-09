@@ -85,6 +85,9 @@ pub struct CompletedStructuralSequenceStep {
     pub result_identity: runmat_analysis_fea::execution::SolverResultIdentity,
     pub result: runmat_analysis_fea::execution::StructuralLinearWorkloadResult,
     pub objects: PreparedAnalysisObjects,
+    pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
+    pub numerical_receipt_objects: PreparedAnalysisObjects,
+    pub response: ProgramExecutionResponse,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,6 +96,7 @@ pub struct CompletedStructuralSequenceState {
     pub state_id: StateId,
     pub state: CanonicalSemanticState,
     pub objects: PreparedAnalysisObjects,
+    pub response: ProgramExecutionResponse,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -109,50 +113,26 @@ pub struct StructuralSequenceResultClosure {
 }
 
 impl CompletedStructuralSequence {
-    pub fn result_closures(
-        &self,
-        access: &ArtifactAccess,
-    ) -> AnalysisBridgeResult<Vec<StructuralSequenceResultClosure>> {
-        let steps = self.steps.iter().map(|step| {
-            result_closure(
-                StructuralSequenceNode::Solve(step.step_id.clone()),
-                &step.objects,
-                access,
-            )
-        });
-        let states = self.states.iter().map(|state| {
-            result_closure(
-                StructuralSequenceNode::PublishState {
+    pub fn result_closures(&self) -> AnalysisBridgeResult<Vec<StructuralSequenceResultClosure>> {
+        let steps = self
+            .steps
+            .iter()
+            .map(|step| StructuralSequenceResultClosure {
+                node: StructuralSequenceNode::Solve(step.step_id.clone()),
+                response: step.response.clone(),
+            });
+        let states = self
+            .states
+            .iter()
+            .map(|state| StructuralSequenceResultClosure {
+                node: StructuralSequenceNode::PublishState {
                     producer_step: state.producer_step.clone(),
                     state_id: state.state_id.clone(),
                 },
-                &state.objects,
-                access,
-            )
-        });
-        steps.chain(states).collect()
+                response: state.response.clone(),
+            });
+        Ok(steps.chain(states).collect())
     }
-}
-
-fn result_closure(
-    node: StructuralSequenceNode,
-    objects: &PreparedAnalysisObjects,
-    access: &ArtifactAccess,
-) -> AnalysisBridgeResult<StructuralSequenceResultClosure> {
-    let references =
-        objects.references(access, runmat_execution::value::ValueRefKind::ResultObject)?;
-    let root = references.first().cloned().ok_or_else(|| {
-        AnalysisBridgeError::Invalid("sequence result closure contains no root object".into())
-    })?;
-    Ok(StructuralSequenceResultClosure {
-        node,
-        response: ProgramExecutionResponse::ExternalizedSuccess {
-            outputs: vec![runmat_execution::value::ValuePayload::Object(Box::new(
-                root,
-            ))],
-            result_objects: references,
-        },
-    })
 }
 
 pub fn import_structural_sequence_completion(
@@ -380,6 +360,7 @@ impl StructuralSequenceCoordinator {
             let response = responses.remove(&task.node).ok_or_else(|| {
                 AnalysisBridgeError::Invalid("prepared solve response is absent".into())
             })?;
+            let retained_response = response.clone();
             let StructuralSequenceNode::Solve(step_id) = &task.node else {
                 return Err(AnalysisBridgeError::Identity(
                     "solve wave contains a non-solve node",
@@ -428,6 +409,9 @@ impl StructuralSequenceCoordinator {
                 result_identity: imported.identity,
                 result: imported.result,
                 objects: imported.objects,
+                numerical_receipt: imported.numerical_receipt,
+                numerical_receipt_objects: imported.numerical_receipt_objects,
+                response: retained_response,
             });
         }
         if completed_steps
@@ -475,6 +459,7 @@ impl StructuralSequenceCoordinator {
             let response = responses.remove(&task.node).ok_or_else(|| {
                 AnalysisBridgeError::Invalid("prepared state response is absent".into())
             })?;
+            let retained_response = response.clone();
             let StructuralSequenceNode::PublishState {
                 producer_step,
                 state_id,
@@ -500,6 +485,7 @@ impl StructuralSequenceCoordinator {
                 state_id: state_id.clone(),
                 state: imported.state,
                 objects: imported.objects,
+                response: retained_response,
             });
         }
         if completed_states.iter().any(|state| {

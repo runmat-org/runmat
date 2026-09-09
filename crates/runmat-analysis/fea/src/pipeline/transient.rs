@@ -19,11 +19,11 @@ use crate::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    excitation::{realize_step_excitations, ExcitationSamplePoint},
+    excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::transient::{solve_transient_system, TransientSolveOptions},
+    solve::transient::{solve_transient_system_with_forcing, TransientSolveOptions},
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -72,10 +72,11 @@ pub fn run_transient_with_options(
             ));
         }
     };
+    let active_model = super::activation::model_with_active_constraints(model, execution_step);
     let excitations = realize_step_excitations(
-        model,
+        &active_model,
         execution_step,
-        ExcitationSamplePoint::TimeSeconds(start_time_s),
+        ExcitationSamplePoint::time(start_time_s),
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let thermo_context = options.thermo_mechanical_context.clone();
@@ -90,7 +91,7 @@ pub fn run_transient_with_options(
         Some(5),
     );
     let summary = assemble_structural_system(
-        model,
+        &active_model,
         &excitations,
         options.solver_mesh.clone(),
         thermo_context,
@@ -122,7 +123,38 @@ pub fn run_transient_with_options(
         Some(2),
         Some(5),
     );
-    let transient = solve_transient_system(&summary, options.clone(), backend);
+    let end_time_s = start_time_s + options.step_count as f64 * options.time_step_s;
+    let discontinuities =
+        time_discontinuities(&active_model, execution_step, start_time_s, end_time_s)
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let transient = solve_transient_system_with_forcing(
+        &summary,
+        options.clone(),
+        backend,
+        start_time_s,
+        &discontinuities,
+        |time_s, approach| {
+            let excitations = realize_step_excitations(
+                &active_model,
+                execution_step,
+                ExcitationSamplePoint::TimeSeconds {
+                    value: time_s,
+                    approach,
+                },
+            )
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+            let assembly = assemble_structural_system(
+                &active_model,
+                &excitations,
+                options.solver_mesh.clone(),
+                options.thermo_mechanical_context.clone(),
+                options.electro_thermal_context.clone(),
+                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+            Ok::<Vec<f64>, FeaRunError>(assembly.operator.load().to_vec())
+        },
+    )?;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::Solve,
@@ -178,6 +210,7 @@ pub fn run_transient_with_options(
         solver_host_sync_count: transient.solver_host_sync_count,
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        observations: Vec::new(),
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,

@@ -7,6 +7,7 @@ pub mod thermal;
 pub mod thermo_mechanical;
 pub mod transient;
 
+mod activation;
 mod admission;
 
 use runmat_analysis_core::{

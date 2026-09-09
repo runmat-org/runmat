@@ -34,6 +34,7 @@ mod validate_sequence;
 mod validate_signals;
 
 pub use validate_authored::validate_coordinate_frame;
+pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
@@ -70,7 +71,10 @@ pub use problem::materials::{
     ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
 };
-pub use problem::model::{AnalysisModel, AnalysisModelId};
+pub use problem::model::{
+    AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
+    SolverProcedureStep,
+};
 pub use problem::prescribed_value::{PrescribedQuantity, PrescribedValue};
 pub use problem::quantity::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, CanonicalQuantity,
@@ -92,13 +96,13 @@ pub use problem::response_spectrum::{
     SpectrumInterpolation, SpectrumResponse,
 };
 pub use problem::signal::{
-    BreakpointSide, GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
+    GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy,
     GeneratorProvenance, PhysicalQuantityKind, PhysicalSignal, RandomDistribution, Signal,
-    SignalApproximationEvidence, SignalArtifactDomain, SignalArtifactRef, SignalAxis,
-    SignalBreakpoint, SignalDomainKind, SignalExtrapolation, SignalGenerator, SignalId,
-    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalSamplingPolicy, SignalShape, SignalValue, StandardWaveform, StandardWaveformKind,
-    TabulatedSignal,
+    SignalApproximationEvidence, SignalArtifactDomain, SignalArtifactRef, SignalDomainKind,
+    SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalKnot,
+    SignalKnotValue, SignalOrdinate, SignalPointContinuity, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalSampleApproach, SignalSamplingPolicy, SignalShape, SignalValue,
+    StandardWaveform, StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
     BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
@@ -108,10 +112,9 @@ pub use problem::target::{
     EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
 };
 pub use study::accuracy::{
-    AccuracyContribution, AccuracyCriterion, AccuracyLimitAction, AccuracyMeasure, AccuracyPlan,
-    AccuracyPlanId, AccuracyReport, AccuracyResourceCeiling, AccuracyStatus, AccuracyTarget,
-    AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy, RequiredAccuracyEvidence,
-    UnavailableEvidencePolicy,
+    AccuracyCriterion, AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyResourceCeiling,
+    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, NumericalEquivalencePolicy,
+    RequiredAccuracyEvidence, UnavailableEvidencePolicy,
 };
 pub use study::is_exposed_analysis_identity;
 pub use study::output::{
@@ -535,15 +538,23 @@ mod tests {
         model.signals = vec![force_signal(
             "force_history",
             SignalRepresentation::Tabulated(TabulatedSignal {
-                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0, 0.5]),
-                values: vec![
-                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(1.0))),
-                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(2.0))),
-                    SignalOrdinate::Real(SignalValue::Scalar(Force::new(3.0))),
+                domain: TabulatedSignalDomain::TimeSeconds,
+                knots: vec![
+                    SignalKnot::continuous(
+                        0.0,
+                        SignalOrdinate::Real(SignalValue::Scalar(Force::new(1.0))),
+                    ),
+                    SignalKnot::continuous(
+                        1.0,
+                        SignalOrdinate::Real(SignalValue::Scalar(Force::new(2.0))),
+                    ),
+                    SignalKnot::continuous(
+                        0.5,
+                        SignalOrdinate::Real(SignalValue::Scalar(Force::new(3.0))),
+                    ),
                 ],
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                breakpoints: Vec::new(),
             }),
         )];
         assert!(matches!(

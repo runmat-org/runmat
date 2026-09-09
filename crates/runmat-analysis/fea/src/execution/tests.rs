@@ -6,8 +6,8 @@ fn digest(label: &str) -> Digest {
     Digest::sha256(label)
 }
 
-fn step_identity(study: StudyIdentity) -> StepIdentity {
-    let sequence = SequenceIdentity::new(study, digest("sequence")).unwrap();
+fn step_identity() -> StepIdentity {
+    let sequence = SequenceIdentity::new(digest("sequence")).unwrap();
     StepIdentity::new(sequence, digest("step")).unwrap()
 }
 
@@ -16,8 +16,9 @@ fn identity_graph() -> (
     ExecutionPlanIdentity,
     SignalRealizationIdentity,
 ) {
-    let study = StudyIdentity::new(digest("study"), Some(digest("project"))).unwrap();
-    let step = step_identity(study);
+    let study =
+        StudyIdentity::from_authored_digest(digest("study"), Some(digest("project"))).unwrap();
+    let step = step_identity();
     let constraints =
         ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
     let generator =
@@ -35,8 +36,7 @@ fn identity_graph() -> (
     let discretization =
         DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
     let operator = OperatorIdentity::new(discretization, digest("operator")).unwrap();
-    let accuracy = AccuracyIdentity::new(step, digest("accuracy")).unwrap();
-    let numerical = NumericalPlanIdentity::new(operator, digest("solver"), accuracy).unwrap();
+    let numerical = NumericalPlanIdentity::new(operator, digest("solver")).unwrap();
     let execution = ExecutionPlanIdentity::new(numerical, digest("portable-execution")).unwrap();
     (study, execution, signal)
 }
@@ -49,7 +49,7 @@ fn layered_identities_are_deterministic_and_preserve_argument_order() {
 
     let workload_a = AnalysisWorkloadIdentity::new(
         first.0,
-        step_identity(first.0),
+        step_identity(),
         first.1,
         AnalysisWorkKind::Solve,
         digest("solve-contract"),
@@ -58,7 +58,7 @@ fn layered_identities_are_deterministic_and_preserve_argument_order() {
     .unwrap();
     let workload_b = AnalysisWorkloadIdentity::new(
         first.0,
-        step_identity(first.0),
+        step_identity(),
         first.1,
         AnalysisWorkKind::Solve,
         digest("solve-contract"),
@@ -122,8 +122,8 @@ fn generator_capture_and_realized_content_invalidate_the_realization() {
 
 #[test]
 fn sweep_identity_preserves_authored_order_and_rejects_duplicate_studies() {
-    let first = StudyIdentity::new(digest("study-a"), None).unwrap();
-    let second = StudyIdentity::new(digest("study-b"), None).unwrap();
+    let first = StudyIdentity::from_authored_digest(digest("study-a"), None).unwrap();
+    let second = StudyIdentity::from_authored_digest(digest("study-b"), None).unwrap();
     let forward =
         SweepIdentity::new(digest("sweep"), vec![first, second], digest("composition")).unwrap();
     let reverse =
@@ -137,13 +137,13 @@ fn sweep_identity_preserves_authored_order_and_rejects_duplicate_studies() {
 
 #[test]
 fn sweep_results_compose_in_authored_order_not_completion_order() {
-    let first = StudyIdentity::new(digest("sweep-study-a"), None).unwrap();
-    let second = StudyIdentity::new(digest("sweep-study-b"), None).unwrap();
+    let first = StudyIdentity::from_authored_digest(digest("sweep-study-a"), None).unwrap();
+    let second = StudyIdentity::from_authored_digest(digest("sweep-study-b"), None).unwrap();
     let (_, execution, _) = identity_graph();
     let result = |study, label| {
         let workload = AnalysisWorkloadIdentity::new(
             study,
-            step_identity(study),
+            step_identity(),
             execution,
             AnalysisWorkKind::Solve,
             digest(label),
@@ -219,8 +219,8 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
         TopologyTransitionPolicy, TransitionId,
     };
 
-    let study = StudyIdentity::new(digest("state-study"), None).unwrap();
-    let sequence = SequenceIdentity::new(study, digest("state-sequence")).unwrap();
+    let study = StudyIdentity::from_authored_digest(digest("state-study"), None).unwrap();
+    let sequence = SequenceIdentity::new(digest("state-sequence")).unwrap();
     let producer = StepIdentity::new(sequence, digest("producer")).unwrap();
     let consumer = StepIdentity::new(sequence, digest("consumer")).unwrap();
     let (_, execution_plan, _) = identity_graph();
@@ -329,8 +329,8 @@ fn semantic_state_rejects_unimplemented_projection_transitions() {
         TopologyTransitionPolicy, TransitionId,
     };
 
-    let study = StudyIdentity::new(digest("projection-study"), None).unwrap();
-    let sequence = SequenceIdentity::new(study, digest("projection-sequence")).unwrap();
+    let study = StudyIdentity::from_authored_digest(digest("projection-study"), None).unwrap();
+    let sequence = SequenceIdentity::new(digest("projection-sequence")).unwrap();
     let producer = StepIdentity::new(sequence, digest("producer")).unwrap();
     let consumer = StepIdentity::new(sequence, digest("consumer")).unwrap();
     let (_, execution_plan, _) = identity_graph();
@@ -437,7 +437,10 @@ fn signal_realization_with_precision(
         shape: SignalShape::Scalar,
         topology_entity_count: None,
         domain: GeneratorDomain::TimeSeconds,
-        sample_points: vec![0.0, 0.5, 1.0],
+        knots: [0.0, 0.5, 1.0]
+            .into_iter()
+            .map(CanonicalSignalKnot::continuous)
+            .collect(),
         precision,
         values: CanonicalSignalValues::real(values),
         interpolation: SignalInterpolation::Linear,
@@ -473,6 +476,81 @@ fn canonical_signal_realization_round_trips_and_layers_content_identity() {
     let mut tampered = first;
     tampered.values = CanonicalSignalValues::real([0.0, f64::NAN, 0.0]);
     assert!(tampered.validate().is_err());
+}
+
+#[test]
+fn direct_serde_rejects_a_nonconvergent_signal_realization() {
+    let mut malformed = signal_realization(vec![0.0, 4.0, 0.0]);
+    malformed.content_digest = digest("wrong-content");
+    let bytes = serde_json::to_vec(&malformed).unwrap();
+    assert!(serde_json::from_slice::<CanonicalSignalRealization>(&bytes).is_err());
+}
+
+#[test]
+fn canonical_signal_knots_normalize_and_reject_signed_zero() {
+    assert_eq!(
+        CanonicalSignalKnot::continuous(-0.0),
+        CanonicalSignalKnot::continuous(0.0)
+    );
+    let base = signal_realization(vec![0.0, 4.0, 0.0]);
+    let mut knots = base.knots.clone();
+    knots[0] = CanonicalSignalKnot {
+        abscissa: (-0.0_f64).to_bits(),
+        continuity: None,
+    };
+    assert!(
+        CanonicalSignalRealization::new(CanonicalSignalRealizationInput {
+            materialization: base.materialization,
+            signal_id: base.signal_id,
+            quantity: base.quantity,
+            shape: base.shape,
+            topology_entity_count: base.topology_entity_count,
+            domain: base.domain,
+            knots,
+            precision: base.precision,
+            values: base.values,
+            interpolation: base.interpolation,
+            extrapolation: base.extrapolation,
+            evidence: base.evidence,
+            provenance: base.provenance,
+            input_admissions: base.input_admissions,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn canonical_signal_identity_preserves_jump_limits_and_point_continuity() {
+    let base = signal_realization(vec![0.0, 1.0, 4.0]);
+    let build = |continuity| {
+        CanonicalSignalRealization::new(CanonicalSignalRealizationInput {
+            materialization: base.materialization,
+            signal_id: base.signal_id.clone(),
+            quantity: base.quantity,
+            shape: base.shape.clone(),
+            topology_entity_count: base.topology_entity_count,
+            domain: base.domain.clone(),
+            knots: vec![
+                CanonicalSignalKnot::continuous(0.0),
+                CanonicalSignalKnot::jump(0.5, continuity),
+                CanonicalSignalKnot::continuous(1.0),
+            ],
+            precision: base.precision,
+            values: CanonicalSignalValues::real([0.0, 1.0, 3.0, 4.0]),
+            interpolation: base.interpolation,
+            extrapolation: base.extrapolation,
+            evidence: base.evidence.clone(),
+            provenance: base.provenance.clone(),
+            input_admissions: base.input_admissions.clone(),
+        })
+        .unwrap()
+    };
+    let left = build(runmat_analysis_core::SignalPointContinuity::Left);
+    let decoded =
+        CanonicalSignalRealization::from_canonical_bytes(&left.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(decoded, left);
+    let right = build(runmat_analysis_core::SignalPointContinuity::Right);
+    assert_ne!(left.content_digest, right.content_digest);
 }
 
 #[test]
@@ -516,7 +594,10 @@ fn topology_signal_realization_requires_exact_entity_shape() {
         },
         topology_entity_count: Some(4),
         domain: GeneratorDomain::TimeSeconds,
-        sample_points: vec![0.0, 1.0],
+        knots: [0.0, 1.0]
+            .into_iter()
+            .map(CanonicalSignalKnot::continuous)
+            .collect(),
         precision: SignalPrecision::Real64,
         values: CanonicalSignalValues::real([300.0; 7]),
         interpolation: SignalInterpolation::Linear,

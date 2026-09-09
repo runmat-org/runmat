@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{spmv, OperatorRole, RealSparseMatrix};
+use super::{
+    spmv, NullspaceEliminationEvidence, NullspaceEvidenceError, OperatorRole,
+    PreparedNullspaceEvidence, RealSparseMatrix,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "CanonicalRealOperatorsData")]
@@ -30,6 +33,7 @@ pub enum RealSystemError {
     ShapeMismatch,
     RoleMismatch,
     NonFiniteLoad { index: usize },
+    NullspaceEvidence(NullspaceEvidenceError),
 }
 
 impl std::fmt::Display for RealSystemError {
@@ -89,9 +93,14 @@ pub struct AssembledRealSystem {
     operators: CanonicalRealOperators,
     constrained_dofs: Vec<bool>,
     load: Vec<f64>,
+    /// Admission evidence is regenerated from authoritative topology, operator, and constraint
+    /// inputs in the executing process. It is deliberately not a portable caller assertion.
+    #[serde(skip)]
+    nullspace_evidence: Option<NullspaceEliminationEvidence>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AssembledRealSystemData {
     operators: CanonicalRealOperators,
     constrained_dofs: Vec<bool>,
@@ -102,7 +111,12 @@ impl TryFrom<AssembledRealSystemData> for AssembledRealSystem {
     type Error = RealSystemError;
 
     fn try_from(data: AssembledRealSystemData) -> Result<Self, Self::Error> {
-        Self::try_new(data.operators, data.constrained_dofs, data.load)
+        Self::try_new_with_nullspace_evidence(
+            data.operators,
+            data.constrained_dofs,
+            data.load,
+            None,
+        )
     }
 }
 
@@ -112,6 +126,15 @@ impl AssembledRealSystem {
         constrained_dofs: Vec<bool>,
         load: Vec<f64>,
     ) -> Result<Self, RealSystemError> {
+        Self::try_new_with_nullspace_evidence(operators, constrained_dofs, load, None)
+    }
+
+    pub fn try_new_with_nullspace_evidence(
+        operators: CanonicalRealOperators,
+        constrained_dofs: Vec<bool>,
+        load: Vec<f64>,
+        nullspace_evidence: Option<NullspaceEliminationEvidence>,
+    ) -> Result<Self, RealSystemError> {
         let n = operators.dof_count();
         if constrained_dofs.len() != n || load.len() != n {
             return Err(RealSystemError::ShapeMismatch);
@@ -119,10 +142,16 @@ impl AssembledRealSystem {
         if let Some(index) = load.iter().position(|value| !value.is_finite()) {
             return Err(RealSystemError::NonFiniteLoad { index });
         }
+        if let Some(evidence) = &nullspace_evidence {
+            evidence
+                .validate_for_system(operators.stiffness(), &constrained_dofs)
+                .map_err(RealSystemError::NullspaceEvidence)?;
+        }
         Ok(Self {
             operators,
             constrained_dofs,
             load,
+            nullspace_evidence,
         })
     }
     pub fn dof_count(&self) -> usize {
@@ -137,8 +166,16 @@ impl AssembledRealSystem {
     pub fn load(&self) -> &[f64] {
         &self.load
     }
+    pub fn nullspace_evidence(&self) -> Option<&NullspaceEliminationEvidence> {
+        self.nullspace_evidence.as_ref()
+    }
     pub fn with_load(&self, load: Vec<f64>) -> Result<Self, RealSystemError> {
-        Self::try_new(self.operators.clone(), self.constrained_dofs.clone(), load)
+        Self::try_new_with_nullspace_evidence(
+            self.operators.clone(),
+            self.constrained_dofs.clone(),
+            load,
+            self.nullspace_evidence.clone(),
+        )
     }
     pub fn prepare_linear(&self) -> Result<PreparedRealLinearSystem, RealSystemError> {
         let stiffness = self.operators.stiffness();
@@ -157,7 +194,18 @@ impl AssembledRealSystem {
         let matrix = stiffness
             .with_identity_constraints(&self.constrained_dofs)
             .map_err(|_| RealSystemError::ShapeMismatch)?;
-        PreparedRealLinearSystem::try_new(matrix, rhs, self.constrained_dofs.clone())
+        let nullspace_evidence = self
+            .nullspace_evidence
+            .as_ref()
+            .map(|evidence| evidence.bind_prepared(&matrix, &rhs))
+            .transpose()
+            .map_err(RealSystemError::NullspaceEvidence)?;
+        PreparedRealLinearSystem::try_new_with_nullspace_evidence(
+            matrix,
+            rhs,
+            self.constrained_dofs.clone(),
+            nullspace_evidence,
+        )
     }
 
     pub fn prepare_modal(&self) -> Result<PreparedModalSystem, RealSystemError> {
@@ -253,9 +301,13 @@ pub struct PreparedRealLinearSystem {
     matrix: RealSparseMatrix,
     rhs: Vec<f64>,
     constrained_dofs: Vec<bool>,
+    /// Derived admission evidence is process-local and must be rebuilt after decoding.
+    #[serde(skip)]
+    nullspace_evidence: Option<PreparedNullspaceEvidence>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PreparedRealLinearSystemData {
     matrix: RealSparseMatrix,
     rhs: Vec<f64>,
@@ -266,7 +318,7 @@ impl TryFrom<PreparedRealLinearSystemData> for PreparedRealLinearSystem {
     type Error = RealSystemError;
 
     fn try_from(data: PreparedRealLinearSystemData) -> Result<Self, Self::Error> {
-        Self::try_new(data.matrix, data.rhs, data.constrained_dofs)
+        Self::try_new_with_nullspace_evidence(data.matrix, data.rhs, data.constrained_dofs, None)
     }
 }
 
@@ -275,6 +327,15 @@ impl PreparedRealLinearSystem {
         matrix: RealSparseMatrix,
         rhs: Vec<f64>,
         constrained_dofs: Vec<bool>,
+    ) -> Result<Self, RealSystemError> {
+        Self::try_new_with_nullspace_evidence(matrix, rhs, constrained_dofs, None)
+    }
+
+    fn try_new_with_nullspace_evidence(
+        matrix: RealSparseMatrix,
+        rhs: Vec<f64>,
+        constrained_dofs: Vec<bool>,
+        nullspace_evidence: Option<PreparedNullspaceEvidence>,
     ) -> Result<Self, RealSystemError> {
         if matrix.rows() != matrix.columns()
             || rhs.len() != matrix.rows()
@@ -285,10 +346,16 @@ impl PreparedRealLinearSystem {
         if let Some(index) = rhs.iter().position(|value| !value.is_finite()) {
             return Err(RealSystemError::NonFiniteLoad { index });
         }
+        if let Some(evidence) = &nullspace_evidence {
+            evidence
+                .validate_for_system(&matrix, &rhs)
+                .map_err(RealSystemError::NullspaceEvidence)?;
+        }
         Ok(Self {
             matrix,
             rhs,
             constrained_dofs,
+            nullspace_evidence,
         })
     }
     pub fn dof_count(&self) -> usize {
@@ -302,6 +369,9 @@ impl PreparedRealLinearSystem {
     }
     pub fn constrained_dofs(&self) -> &[bool] {
         &self.constrained_dofs
+    }
+    pub fn nullspace_evidence(&self) -> Option<&PreparedNullspaceEvidence> {
+        self.nullspace_evidence.as_ref()
     }
 }
 

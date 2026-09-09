@@ -8,8 +8,8 @@ use thiserror::Error;
 use crate::{
     algebra::{
         spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
-        ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
-        RealSparseMatrix,
+        ContributionProvenance, MatrixProperties, NullspaceEliminationEvidence, OperatorRole,
+        RealSparseAssembler, RealSparseMatrix,
     },
     excitation::{
         sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
@@ -33,6 +33,7 @@ pub(crate) struct ThermalOperatorAssembly {
     pub source: Vec<f64>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub prescribed_temperature_k: Vec<Option<f64>>,
+    pub positive_robin_weight: Vec<f64>,
     pub element_conductivity_w_per_mk: Vec<f64>,
     pub element_volumetric_capacity_j_per_m3k: Vec<f64>,
 }
@@ -56,7 +57,17 @@ impl ThermalOperatorAssembly {
         .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
         let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
-        AssembledRealSystem::try_new(operators, constrained, rhs)
+        let evidence = match NullspaceEliminationEvidence::prove_thermal(
+            &self.projection,
+            operators.stiffness(),
+            &constrained,
+            &self.positive_robin_weight,
+        ) {
+            Ok(evidence) => Some(evidence),
+            Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
+            Err(error) => return Err(ThermalAssemblyError::SparseOperator(error.to_string())),
+        };
+        AssembledRealSystem::try_new_with_nullspace_evidence(operators, constrained, rhs, evidence)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
     }
 
@@ -305,6 +316,7 @@ pub(crate) fn assemble(
     }
 
     let mut prescribed_temperature_k = vec![None; projection.nodes.len()];
+    let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
     for constraint in &model.constraints {
         let AnalysisConstraint::Thermal(constraint) = constraint else {
             continue;
@@ -408,6 +420,12 @@ pub(crate) fn assemble(
                         .visit_boundary_quadrature(face, |point| {
                             for (local_row, &row) in face.node_indices.iter().enumerate() {
                                 let row_shape = point.shape_values()[local_row];
+                                if heat_transfer > 0.0 {
+                                    positive_robin_weight[row] += heat_transfer
+                                        * row_shape
+                                        * row_shape
+                                        * point.area_weight_m2;
+                                }
                                 source[row] +=
                                     heat_transfer * ambient.real * row_shape * point.area_weight_m2;
                                 for (local_column, &column) in face.node_indices.iter().enumerate()
@@ -443,6 +461,7 @@ pub(crate) fn assemble(
         source,
         source_evidence,
         prescribed_temperature_k,
+        positive_robin_weight,
         element_conductivity_w_per_mk,
         element_volumetric_capacity_j_per_m3k,
     })
@@ -525,11 +544,13 @@ mod tests {
         AnalysisBoundary, AnalysisConstraint, CoordinateFrame, ExcitationCaseId,
         ExcitationDistribution, ExcitationId, ExcitationKinematics, HeatFlux,
         HeatTransferCoefficient, PhysicalQuantityKind, PhysicalSignal, PrescribedValue,
-        ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalAxis,
-        SignalExtrapolation, SignalId, SignalInterpolation, SignalOrdinate, SignalPrecision,
-        SignalProvenance, SignalRepresentation, SignalShape, SignalValue, TabulatedSignal,
-        Temperature, ThermalConstraint, ThermalConstraintKind,
+        ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence,
+        SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot, SignalOrdinate,
+        SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+        TabulatedSignal, TabulatedSignalDomain, Temperature, ThermalConstraint,
+        ThermalConstraintKind,
     };
+    use runmat_execution::Digest;
     use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind};
 
     use super::*;
@@ -636,19 +657,178 @@ mod tests {
             }));
     }
 
+    #[test]
+    fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
+        let (mut model, mesh, _, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 300.0);
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let anchored = assembly.steady_operator().unwrap();
+        assert!(anchored.nullspace_evidence().is_some());
+
+        let mut disconnected_projection = assembly.projection.clone();
+        disconnected_projection
+            .node_neighbors
+            .iter_mut()
+            .for_each(Vec::clear);
+        let constrained = assembly
+            .prescribed_temperature_k
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            NullspaceEliminationEvidence::prove_thermal(
+                &disconnected_projection,
+                &assembly.conductivity,
+                &constrained,
+                &assembly.positive_robin_weight,
+            ),
+            Err(crate::algebra::NullspaceEvidenceError::NullModeViolation)
+        );
+
+        let unanchored = assemble(
+            &thermal_reference_model().0,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+        .steady_operator()
+        .unwrap();
+        assert!(unanchored.nullspace_evidence().is_none());
+    }
+
+    #[test]
+    fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
+        let (mut model, mesh, _, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 300.0);
+        let assembly = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let constrained = assembly
+            .prescribed_temperature_k
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        let false_semidefinite = RealSparseMatrix::diagonal(
+            vec![1.0; assembly.projection.nodes.len()],
+            OperatorRole::Conductivity,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+
+        assert_eq!(
+            NullspaceEliminationEvidence::prove_thermal(
+                &assembly.projection,
+                &false_semidefinite,
+                &constrained,
+                &assembly.positive_robin_weight,
+            ),
+            Err(crate::algebra::NullspaceEvidenceError::NullModeViolation),
+        );
+    }
+
+    #[test]
+    fn positive_convection_anchors_a_steady_thermal_component() {
+        let (mut model, mesh, _, _) = thermal_reference_model();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let selector = projection.boundary_faces[0].provenance[0]
+            .analysis_selection_id()
+            .unwrap();
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "positive_robin_anchor".into(),
+            target: RegionTarget::boundary(selector),
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(295.0)),
+                coefficient: HeatTransferCoefficient::new(4.0),
+            },
+        });
+        let system = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+        .steady_operator()
+        .unwrap();
+        let prepared = system.prepare_linear().unwrap();
+        assert!(prepared.nullspace_evidence().is_some());
+        assert!(crate::algebra::validate_prepared_solver_compatibility(
+            &prepared,
+            crate::algebra::RealSolver::ConjugateGradient,
+            crate::algebra::RealPreconditioner::Jacobi,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn deserialization_discards_process_local_nullspace_proof() {
+        let (mut model, mesh, _, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 300.0);
+        let system = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+        .steady_operator()
+        .unwrap();
+        let encoded = serde_json::to_value(system).unwrap();
+        assert!(encoded.get("nullspace_evidence").is_none());
+        let decoded = serde_json::from_value::<AssembledRealSystem>(encoded).unwrap();
+        assert!(decoded.nullspace_evidence().is_none());
+    }
+
+    #[test]
+    fn deserialization_rejects_caller_asserted_nullspace_proof() {
+        let (mut model, mesh, _, base_region) = thermal_reference_model();
+        prescribe_base(&mut model, base_region, 300.0);
+        let system = assemble(
+            &model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+        .steady_operator()
+        .unwrap();
+        let mut encoded = serde_json::to_value(system).unwrap();
+        encoded["nullspace_evidence"] = serde_json::json!({
+            "proof_identity": Digest::sha256("caller-asserted").to_string()
+        });
+        assert!(serde_json::from_value::<AssembledRealSystem>(encoded).is_err());
+    }
+
     fn temperature_signal(signal_id: &str, values: [f64; 2]) -> PhysicalSignal {
         PhysicalSignal::Temperature(Signal {
             signal_id: SignalId(signal_id.into()),
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Tabulated(TabulatedSignal {
-                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0]),
-                values: values
-                    .map(|value| SignalOrdinate::Real(SignalValue::Scalar(Temperature::new(value))))
-                    .into(),
+                domain: TabulatedSignalDomain::TimeSeconds,
+                knots: [0.0, 1.0]
+                    .into_iter()
+                    .zip(values)
+                    .map(|(abscissa, value)| {
+                        SignalKnot::continuous(
+                            abscissa,
+                            SignalOrdinate::Real(SignalValue::Scalar(Temperature::new(value))),
+                        )
+                    })
+                    .collect(),
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                breakpoints: Vec::new(),
             }),
             precision: SignalPrecision::Real64,
             evidence: SignalApproximationEvidence {
@@ -667,13 +847,19 @@ mod tests {
             shape: SignalShape::Scalar,
             frame: None,
             representation: SignalRepresentation::Tabulated(TabulatedSignal {
-                axis: SignalAxis::TimeSeconds(vec![0.0, 1.0]),
-                values: values
-                    .map(|value| SignalOrdinate::Real(SignalValue::Scalar(HeatFlux::new(value))))
-                    .into(),
+                domain: TabulatedSignalDomain::TimeSeconds,
+                knots: [0.0, 1.0]
+                    .into_iter()
+                    .zip(values)
+                    .map(|(abscissa, value)| {
+                        SignalKnot::continuous(
+                            abscissa,
+                            SignalOrdinate::Real(SignalValue::Scalar(HeatFlux::new(value))),
+                        )
+                    })
+                    .collect(),
                 interpolation: SignalInterpolation::Linear,
                 extrapolation: SignalExtrapolation::Reject,
-                breakpoints: Vec::new(),
             }),
             precision: SignalPrecision::Real64,
             evidence: SignalApproximationEvidence {
@@ -724,14 +910,14 @@ mod tests {
             &model,
             &mesh,
             &RealizedExcitations::default(),
-            ExcitationSamplePoint::TimeSeconds(0.0),
+            ExcitationSamplePoint::time(0.0),
         )
         .unwrap();
         let at_end = assemble(
             &model,
             &mesh,
             &RealizedExcitations::default(),
-            ExcitationSamplePoint::TimeSeconds(1.0),
+            ExcitationSamplePoint::time(1.0),
         )
         .unwrap();
         assert!(at_start
@@ -762,14 +948,14 @@ mod tests {
             &model,
             &mesh,
             &RealizedExcitations::default(),
-            ExcitationSamplePoint::TimeSeconds(0.0),
+            ExcitationSamplePoint::time(0.0),
         )
         .unwrap();
         let hot = assemble(
             &model,
             &mesh,
             &RealizedExcitations::default(),
-            ExcitationSamplePoint::TimeSeconds(1.0),
+            ExcitationSamplePoint::time(1.0),
         )
         .unwrap();
         let cold_ambient_power = cold.source.iter().sum::<f64>();

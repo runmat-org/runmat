@@ -15,7 +15,7 @@ pub(crate) fn realize_step_excitations(
     step: &ProcedureStep,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
-    realize_excitations(model, Some(step.step_id.as_str()), sample)
+    realize_excitations_for_step(model, Some(step), sample)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,11 +39,28 @@ impl fmt::Display for RealizationError {
 
 impl std::error::Error for RealizationError {}
 
+#[cfg(test)]
 pub(crate) fn realize_excitations(
     model: &AnalysisModel,
     step_id: Option<&str>,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
+    let step = step_id.and_then(|id| {
+        model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id.as_str() == id)
+    });
+    realize_excitations_for_step(model, step, sample)
+}
+
+fn realize_excitations_for_step(
+    model: &AnalysisModel,
+    step: Option<&ProcedureStep>,
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<RealizedExcitations, RealizationError> {
+    let step_id = step.map(|step| step.step_id.as_str());
     let signals = model
         .signals
         .iter()
@@ -54,6 +71,11 @@ pub(crate) fn realize_excitations(
     for action in &model.excitations {
         let excitation = action.excitation();
         if !active_cases.contains(excitation.case_id.0.as_str())
+            || step.is_some_and(|step| {
+                !step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
+                    excitation.excitation_id.0.clone(),
+                ))
+            })
             || (!excitation.active_step_ids.is_empty()
                 && step_id.is_none_or(|step| {
                     !excitation

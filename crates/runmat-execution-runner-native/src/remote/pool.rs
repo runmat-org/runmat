@@ -639,43 +639,45 @@ impl RemotePoolDriver {
                             },
                             Some(FailedRoute::Observed(route_identity)),
                         ),
-                        Ok(()) => match super::pool_progress::execute(
-                            channel.as_ref(),
-                            RemoteAttempt {
-                                scheduling: request.clone(),
-                                program,
-                            },
-                            progress.as_deref(),
-                        )
-                        .await
-                        {
-                            Ok(AttemptReport::Succeeded { result }) => {
-                                match this
-                                    .execution_objects
-                                    .receive_results(
-                                        channel.as_ref(),
-                                        &result.result_objects,
-                                        &this.value_scope,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => (AttemptReport::Succeeded { result }, None),
-                                    Err(error) => (
-                                        AttemptReport::Lost {
-                                            message: error.to_string(),
-                                        },
-                                        Some(FailedRoute::Observed(route_identity)),
-                                    ),
-                                }
-                            }
-                            Ok(report) => (report, None),
-                            Err(error) => (
-                                AttemptReport::Lost {
-                                    message: error.to_string(),
+                        Ok(()) => {
+                            match super::pool_progress::execute(
+                                channel.as_ref(),
+                                RemoteAttempt {
+                                    scheduling: request.clone(),
+                                    program,
                                 },
-                                Some(FailedRoute::Observed(route_identity)),
-                            ),
-                        },
+                                progress.as_deref(),
+                            )
+                            .await
+                            {
+                                Ok(AttemptReport::Succeeded { result }) => {
+                                    match this
+                                        .execution_objects
+                                        .receive_results(
+                                            channel.as_ref(),
+                                            &result.result_objects,
+                                            &this.value_scope,
+                                        )
+                                        .await
+                                    {
+                                        Ok(()) => (AttemptReport::Succeeded { result }, None),
+                                        Err(error) => (
+                                            AttemptReport::Lost {
+                                                message: error.to_string(),
+                                            },
+                                            Some(FailedRoute::Observed(route_identity)),
+                                        ),
+                                    }
+                                }
+                                Ok(report) => (report, None),
+                                Err(error) => (
+                                    AttemptReport::Lost {
+                                        message: error.to_string(),
+                                    },
+                                    Some(FailedRoute::Observed(route_identity)),
+                                ),
+                            }
+                        }
                     }
                 }
                 (None, _) => (

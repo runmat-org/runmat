@@ -19,10 +19,10 @@ use runmat_analysis_core::{
     ExcitationKinematics, ExcitationTarget, Frequency, MassDensity, MaterialAssignment,
     MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
     PhysicalSignal, PhysicsFamily, ProcedureStep, ProjectionRequirement, RegionTarget, Signal,
-    SignalApproximationEvidence, SignalAxis, SignalExtrapolation, SignalId, SignalInterpolation,
+    SignalApproximationEvidence, SignalExtrapolation, SignalId, SignalInterpolation, SignalKnot,
     SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation, SignalShape,
     SignalValue, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
-    TabulatedSignal, Temperature, TurbulenceIntensity, Velocity,
+    TabulatedSignal, TabulatedSignalDomain, Temperature, TurbulenceIntensity, Velocity,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
@@ -109,19 +109,18 @@ fn test_structural_sequence_result(
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     result: runmat_analysis_fea::FeaRunResult,
 ) -> StructuralStudySequenceNumericalResult {
-    let study = runmat_analysis_fea::execution::StudyIdentity::new(
+    let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
         analysis_study_content_digest(spec),
         None,
     )
     .unwrap();
-    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_authored(
-        study,
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
         &workload.model.sequence,
     )
     .unwrap();
     let step = workload.procedure_step().unwrap();
     let producer =
-        runmat_analysis_fea::execution::StepIdentity::from_authored(sequence, step).unwrap();
+        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step).unwrap();
     let solver_result_identity = test_solver_result_identity("prepared-study-result");
     let fields = result
         .fields
@@ -405,14 +404,19 @@ fn append_scalar_history_excitation<Q>(
         shape: SignalShape::Scalar,
         frame: None,
         representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::TimeSeconds(axis),
-            values: values
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: axis
                 .into_iter()
-                .map(|value| SignalOrdinate::Real(SignalValue::Scalar(value)))
+                .zip(values)
+                .map(|(abscissa, value)| {
+                    SignalKnot::continuous(
+                        abscissa,
+                        SignalOrdinate::Real(SignalValue::Scalar(value)),
+                    )
+                })
                 .collect(),
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::HoldEndpoint,
-            breakpoints: Vec::new(),
         }),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {
@@ -2342,11 +2346,11 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
             )
             .map_err(|error| error.to_string())?;
         runmat_analysis_fea::execution::StructuralLinearWorkloadResult::from_canonical_bytes(
-            &runmat_analysis_fea::execution::StructuralLinearWorkloadResult {
-                schema_version: 1,
+            &runmat_analysis_fea::execution::StructuralLinearWorkloadResult::new(
                 run,
                 constraint_result,
-            }
+            )
+            .map_err(|error| error.to_string())?
             .canonical_bytes()
             .map_err(|error| error.to_string())?,
         )

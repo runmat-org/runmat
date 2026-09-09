@@ -82,7 +82,7 @@ fn validate_signal<Q: FiniteQuantity>(signal: &Signal<Q>) -> Result<(), String> 
             validate_declared_shape(validate_value(value)?, &expected_shape)
         }
         SignalRepresentation::Tabulated(table) => {
-            validate_sample_count(&signal.evidence, table.values.len())?;
+            validate_sample_count(&signal.evidence, table.knots.len())?;
             validate_table(table, signal.precision, &expected_shape)
         }
         SignalRepresentation::Waveform(waveform) => {
@@ -227,45 +227,67 @@ fn validate_table<Q: FiniteQuantity>(
     precision: SignalPrecision,
     declared_shape: &[usize],
 ) -> Result<(), String> {
-    let axis = match &table.axis {
-        SignalAxis::TimeSeconds(values) | SignalAxis::FrequencyHertz(values) => values,
-        SignalAxis::StudyParameter {
-            parameter_id,
-            canonical_values,
-        } => {
-            if parameter_id.trim().is_empty() {
-                return Err("study-parameter axis requires a parameter id".to_string());
-            }
-            canonical_values
+    if let TabulatedSignalDomain::StudyParameter { parameter_id } = &table.domain {
+        if parameter_id.trim().is_empty() {
+            return Err("study-parameter axis requires a parameter id".to_string());
         }
-    };
-    if axis.is_empty()
-        || axis.len() != table.values.len()
-        || axis.iter().any(|value| !value.is_finite())
-        || axis.windows(2).any(|pair| pair[0] >= pair[1])
-    {
-        return Err(
-            "tabulated axis must be finite, strictly increasing, and match values".to_string(),
-        );
     }
-    if matches!(table.axis, SignalAxis::FrequencyHertz(_)) && axis.iter().any(|value| *value < 0.0)
+    if table.knots.is_empty()
+        || table.knots.iter().any(|knot| {
+            !knot.abscissa.is_finite() || (knot.abscissa == 0.0 && knot.abscissa.is_sign_negative())
+        })
+        || table
+            .knots
+            .windows(2)
+            .any(|pair| pair[0].abscissa >= pair[1].abscissa)
+    {
+        return Err("tabulated knots must have finite, strictly increasing abscissae".to_string());
+    }
+    if matches!(table.domain, TabulatedSignalDomain::FrequencyHertz)
+        && table.knots.iter().any(|knot| knot.abscissa < 0.0)
     {
         return Err("frequency values cannot be negative".to_string());
     }
     let mut expected_shape = None;
-    let mut has_complex = false;
-    for ordinate in &table.values {
-        let (shape, complex) = validate_ordinate(ordinate)?;
-        validate_declared_shape(shape.clone(), declared_shape)?;
-        if expected_shape
-            .as_ref()
-            .is_some_and(|expected| expected != &shape)
+    let mut expected_complex = None;
+    for (index, knot) in table.knots.iter().enumerate() {
+        if matches!(knot.value, SignalKnotValue::Jump { .. })
+            && (index == 0 || index + 1 == table.knots.len())
         {
-            return Err("all signal ordinates must have the same shape".to_string());
+            return Err("jump knots must be interior so both one-sided limits exist".to_string());
         }
-        expected_shape.get_or_insert(shape);
-        has_complex |= complex;
+        let mut validate_one = |ordinate: &SignalOrdinate<Q>| -> Result<(), String> {
+            let (shape, complex) = validate_ordinate(ordinate)?;
+            validate_declared_shape(shape.clone(), declared_shape)?;
+            if expected_shape
+                .as_ref()
+                .is_some_and(|expected| expected != &shape)
+            {
+                return Err("all signal ordinates must have the same shape".to_string());
+            }
+            expected_shape.get_or_insert(shape);
+            if expected_complex.is_some_and(|expected| expected != complex) {
+                return Err(
+                    "all signal ordinates must use the same real or complex representation"
+                        .to_string(),
+                );
+            }
+            expected_complex.get_or_insert(complex);
+            Ok(())
+        };
+        match &knot.value {
+            SignalKnotValue::Continuous(value) => validate_one(value)?,
+            SignalKnotValue::Jump {
+                left_limit,
+                right_limit,
+                ..
+            } => {
+                validate_one(left_limit)?;
+                validate_one(right_limit)?;
+            }
+        }
     }
+    let has_complex = expected_complex.unwrap_or(false);
     if has_complex
         && !matches!(
             precision,
@@ -281,25 +303,6 @@ fn validate_table<Q: FiniteQuantity>(
         )
     {
         return Err("complex precision requires complex ordinates".to_string());
-    }
-    let mut previous_breakpoint = None;
-    for breakpoint in &table.breakpoints {
-        if !breakpoint.abscissa.is_finite()
-            || breakpoint.abscissa < axis[0]
-            || breakpoint.abscissa > axis[axis.len() - 1]
-        {
-            return Err("breakpoints must lie on the tabulated domain".to_string());
-        }
-        if previous_breakpoint.is_some_and(|previous| breakpoint.abscissa <= previous) {
-            return Err("breakpoints must be strictly increasing and unique".to_string());
-        }
-        if axis
-            .binary_search_by(|sample| sample.total_cmp(&breakpoint.abscissa))
-            .is_err()
-        {
-            return Err("breakpoints must identify tabulated axis samples".to_string());
-        }
-        previous_breakpoint = Some(breakpoint.abscissa);
     }
     Ok(())
 }
@@ -456,11 +459,11 @@ fn is_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        BreakpointSide, Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance,
-        PhysicalSignal, Signal, SignalApproximationEvidence, SignalAxis, SignalBreakpoint,
-        SignalExtrapolation, SignalGenerator, SignalId, SignalInterpolation, SignalOrdinate,
-        SignalPrecision, SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape,
-        SignalValue, TabulatedSignal,
+        Force, GeneratorDomain, GeneratorEffectPolicy, GeneratorProvenance, PhysicalSignal, Signal,
+        SignalApproximationEvidence, SignalExtrapolation, SignalGenerator, SignalId,
+        SignalInterpolation, SignalKnot, SignalOrdinate, SignalPointContinuity, SignalPrecision,
+        SignalProvenance, SignalRepresentation, SignalSamplingPolicy, SignalShape, SignalValue,
+        TabulatedSignal, TabulatedSignalDomain,
     };
 
     use super::validate_signals;
@@ -538,53 +541,74 @@ mod tests {
     }
 
     #[test]
-    fn tabulated_breakpoints_are_ordered_axis_samples() {
+    fn jump_knots_are_typed_and_must_be_interior() {
         let mut signal = generated_force(SignalProvenance::Authored);
         let PhysicalSignal::Force(signal) = &mut signal else {
             unreachable!()
         };
         signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::TimeSeconds(vec![0.0, 0.5, 1.0]),
-            values: vec![0.0, 1.0, 2.0]
-                .into_iter()
-                .map(|value| SignalOrdinate::Real(SignalValue::Scalar(Force::new(value))))
-                .collect(),
-            interpolation: SignalInterpolation::StepRight,
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: vec![
+                SignalKnot::continuous(0.0, force_ordinate(0.0)),
+                SignalKnot::jump(
+                    0.5,
+                    force_ordinate(1.0),
+                    force_ordinate(2.0),
+                    SignalPointContinuity::Right,
+                ),
+                SignalKnot::continuous(1.0, force_ordinate(3.0)),
+            ],
+            interpolation: SignalInterpolation::RightEndpoint,
             extrapolation: SignalExtrapolation::Reject,
-            breakpoints: vec![SignalBreakpoint {
-                abscissa: 0.5,
-                side: BreakpointSide::Both,
-            }],
         });
         signal.evidence.sample_count = 3;
         validate_signals(&[PhysicalSignal::Force(signal.clone())])
-            .expect("axis-aligned breakpoint should validate");
+            .expect("interior jump should validate");
 
         let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
             unreachable!()
         };
-        table.breakpoints[0].abscissa = 0.25;
+        table.knots.swap(0, 1);
         let error = validate_signals(&[PhysicalSignal::Force(signal.clone())]).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("breakpoints must identify tabulated axis samples"));
+        assert!(error.to_string().contains("strictly increasing"));
 
         let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
             unreachable!()
         };
-        table.breakpoints = vec![
-            SignalBreakpoint {
-                abscissa: 0.5,
-                side: BreakpointSide::Left,
-            },
-            SignalBreakpoint {
-                abscissa: 0.5,
-                side: BreakpointSide::Right,
-            },
-        ];
+        table.knots.swap(0, 1);
+        table.knots[0] = SignalKnot::jump(
+            0.0,
+            force_ordinate(0.0),
+            force_ordinate(1.0),
+            SignalPointContinuity::Left,
+        );
         let error = validate_signals(&[PhysicalSignal::Force(signal.clone())]).unwrap_err();
-        assert!(error
+        assert!(error.to_string().contains("jump knots must be interior"));
+    }
+
+    #[test]
+    fn authored_knots_reject_negative_zero_abscissae() {
+        let mut signal = generated_force(SignalProvenance::Authored);
+        let PhysicalSignal::Force(signal) = &mut signal else {
+            unreachable!()
+        };
+        signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: vec![
+                SignalKnot::continuous(-0.0, force_ordinate(0.0)),
+                SignalKnot::continuous(1.0, force_ordinate(1.0)),
+            ],
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::Reject,
+        });
+        signal.evidence.sample_count = 2;
+        assert!(validate_signals(&[PhysicalSignal::Force(signal.clone())])
+            .unwrap_err()
             .to_string()
-            .contains("breakpoints must be strictly increasing and unique"));
+            .contains("finite, strictly increasing"));
+    }
+
+    fn force_ordinate(value: f64) -> SignalOrdinate<Force> {
+        SignalOrdinate::Real(SignalValue::Scalar(Force::new(value)))
     }
 }

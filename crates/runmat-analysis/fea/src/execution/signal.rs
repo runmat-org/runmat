@@ -1,6 +1,7 @@
 use runmat_analysis_core::{
     GeneratorDomain, GeneratorProvenance, PhysicalQuantityKind, SignalApproximationEvidence,
-    SignalExtrapolation, SignalId, SignalInterpolation, SignalPrecision, SignalShape,
+    SignalExtrapolation, SignalId, SignalInterpolation, SignalPointContinuity, SignalPrecision,
+    SignalShape,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::value::{ValueAdmissionReceipt, EXTERNALIZED_VALUE_SCHEMA};
@@ -49,6 +50,41 @@ impl SignalInputAdmission {
 pub enum CanonicalSignalValues {
     Real { values: Vec<u64> },
     Complex { real: Vec<u64>, imaginary: Vec<u64> },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalSignalKnot {
+    pub abscissa: u64,
+    pub continuity: Option<SignalPointContinuity>,
+}
+
+impl CanonicalSignalKnot {
+    pub fn continuous(abscissa: f64) -> Self {
+        Self {
+            abscissa: canonical_zero(abscissa).to_bits(),
+            continuity: None,
+        }
+    }
+
+    pub fn jump(abscissa: f64, continuity: SignalPointContinuity) -> Self {
+        Self {
+            abscissa: canonical_zero(abscissa).to_bits(),
+            continuity: Some(continuity),
+        }
+    }
+
+    pub fn abscissa(self) -> f64 {
+        f64::from_bits(self.abscissa)
+    }
+
+    fn ordinate_count(self) -> usize {
+        if self.continuity.is_some() {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 impl CanonicalSignalValues {
@@ -123,7 +159,7 @@ impl CanonicalSignalValues {
 /// topology field additionally names its realized entity count; no solver callback survives this
 /// boundary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "CanonicalSignalRealizationWire")]
 pub struct CanonicalSignalRealization {
     pub schema_version: u16,
     pub materialization: SignalMaterializationIdentity,
@@ -134,7 +170,7 @@ pub struct CanonicalSignalRealization {
     pub shape: SignalShape,
     pub topology_entity_count: Option<u64>,
     pub domain: GeneratorDomain,
-    pub sample_points: Vec<u64>,
+    pub knots: Vec<CanonicalSignalKnot>,
     pub precision: SignalPrecision,
     pub values: CanonicalSignalValues,
     pub interpolation: SignalInterpolation,
@@ -144,6 +180,56 @@ pub struct CanonicalSignalRealization {
     pub input_admissions: Vec<SignalInputAdmission>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CanonicalSignalRealizationWire {
+    schema_version: u16,
+    materialization: SignalMaterializationIdentity,
+    identity: SignalRealizationIdentity,
+    content_digest: Digest,
+    signal_id: SignalId,
+    quantity: PhysicalQuantityKind,
+    shape: SignalShape,
+    topology_entity_count: Option<u64>,
+    domain: GeneratorDomain,
+    knots: Vec<CanonicalSignalKnot>,
+    precision: SignalPrecision,
+    values: CanonicalSignalValues,
+    interpolation: SignalInterpolation,
+    extrapolation: SignalExtrapolation,
+    evidence: SignalApproximationEvidence,
+    provenance: GeneratorProvenance,
+    input_admissions: Vec<SignalInputAdmission>,
+}
+
+impl TryFrom<CanonicalSignalRealizationWire> for CanonicalSignalRealization {
+    type Error = AnalysisExecutionError;
+
+    fn try_from(wire: CanonicalSignalRealizationWire) -> Result<Self, Self::Error> {
+        let realization = Self {
+            schema_version: wire.schema_version,
+            materialization: wire.materialization,
+            identity: wire.identity,
+            content_digest: wire.content_digest,
+            signal_id: wire.signal_id,
+            quantity: wire.quantity,
+            shape: wire.shape,
+            topology_entity_count: wire.topology_entity_count,
+            domain: wire.domain,
+            knots: wire.knots,
+            precision: wire.precision,
+            values: wire.values,
+            interpolation: wire.interpolation,
+            extrapolation: wire.extrapolation,
+            evidence: wire.evidence,
+            provenance: wire.provenance,
+            input_admissions: wire.input_admissions,
+        };
+        realization.validate()?;
+        Ok(realization)
+    }
+}
+
 pub struct CanonicalSignalRealizationInput {
     pub materialization: SignalMaterializationIdentity,
     pub signal_id: SignalId,
@@ -151,7 +237,7 @@ pub struct CanonicalSignalRealizationInput {
     pub shape: SignalShape,
     pub topology_entity_count: Option<u64>,
     pub domain: GeneratorDomain,
-    pub sample_points: Vec<f64>,
+    pub knots: Vec<CanonicalSignalKnot>,
     pub precision: SignalPrecision,
     pub values: CanonicalSignalValues,
     pub interpolation: SignalInterpolation,
@@ -167,7 +253,7 @@ pub struct CanonicalSignalContent<'a> {
     pub shape: &'a SignalShape,
     pub topology_entity_count: Option<u64>,
     pub domain: &'a GeneratorDomain,
-    pub sample_points: &'a [u64],
+    pub knots: &'a [CanonicalSignalKnot],
     pub precision: SignalPrecision,
     pub values: &'a CanonicalSignalValues,
     pub interpolation: SignalInterpolation,
@@ -187,7 +273,7 @@ impl CanonicalSignalContent<'_> {
     }
 
     fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.sample_points.len() < 2 || self.evidence.sample_count != self.sample_points.len() {
+        if self.knots.len() < 2 || self.evidence.sample_count != self.knots.len() {
             return Err(AnalysisExecutionError::Invalid(
                 "signal content sample metadata is incomplete or inconsistent".into(),
             ));
@@ -212,11 +298,15 @@ impl CanonicalSignalContent<'_> {
             }
         }
         let points = self
-            .sample_points
+            .knots
             .iter()
-            .map(|point| f64::from_bits(*point))
+            .map(|knot| knot.abscissa())
             .collect::<Vec<_>>();
         if points.iter().any(|point| !point.is_finite())
+            || self
+                .knots
+                .iter()
+                .any(|knot| knot.abscissa() == 0.0 && knot.abscissa != 0.0_f64.to_bits())
             || points.windows(2).any(|pair| pair[0] >= pair[1])
             || (self.domain == &GeneratorDomain::FrequencyHertz
                 && points.first().is_some_and(|point| *point < 0.0))
@@ -226,10 +316,28 @@ impl CanonicalSignalContent<'_> {
                     .into(),
             ));
         }
+        if self
+            .knots
+            .first()
+            .into_iter()
+            .chain(self.knots.last())
+            .any(|knot| knot.continuity.is_some())
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "signal content jump knots must be interior".into(),
+            ));
+        }
         self.values.validate(self.precision)?;
-        let expected_values = self
-            .sample_points
-            .len()
+        let ordinate_count = self
+            .knots
+            .iter()
+            .try_fold(0_usize, |count, knot| {
+                count.checked_add(knot.ordinate_count())
+            })
+            .ok_or(AnalysisExecutionError::Limit(
+                "signal content ordinate count",
+            ))?;
+        let expected_values = ordinate_count
             .checked_mul(component_count(self.shape, self.topology_entity_count)?)
             .ok_or(AnalysisExecutionError::Limit("signal content value count"))?;
         if self.values.len() != expected_values {
@@ -253,7 +361,7 @@ impl CanonicalSignalRealization {
             shape: input.shape,
             topology_entity_count: input.topology_entity_count,
             domain: input.domain,
-            sample_points: input.sample_points.into_iter().map(f64::to_bits).collect(),
+            knots: input.knots,
             precision: input.precision,
             values: input.values,
             interpolation: input.interpolation,
@@ -272,10 +380,12 @@ impl CanonicalSignalRealization {
         Ok(realization)
     }
 
+    pub fn knots(&self) -> impl ExactSizeIterator<Item = CanonicalSignalKnot> + '_ {
+        self.knots.iter().copied()
+    }
+
     pub fn sample_points(&self) -> impl ExactSizeIterator<Item = f64> + '_ {
-        self.sample_points
-            .iter()
-            .map(|point| f64::from_bits(*point))
+        self.knots.iter().map(|knot| knot.abscissa())
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
@@ -343,7 +453,7 @@ impl CanonicalSignalRealization {
             shape: &self.shape,
             topology_entity_count: self.topology_entity_count,
             domain: &self.domain,
-            sample_points: &self.sample_points,
+            knots: &self.knots,
             precision: self.precision,
             values: &self.values,
             interpolation: self.interpolation,
@@ -363,6 +473,14 @@ fn canonical_finite_bits(bits: u64, precision: SignalPrecision) -> bool {
             }
             SignalPrecision::Real64 | SignalPrecision::Complex128 => true,
         }
+}
+
+fn canonical_zero(value: f64) -> f64 {
+    if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
 }
 
 fn component_count(

@@ -351,17 +351,18 @@ fn sequence_result(
     result: runmat_analysis_fea::FeaRunResult,
 ) -> StructuralStudySequenceNumericalResult {
     let workload = only_workload(intent);
-    let study =
-        runmat_analysis_fea::execution::StudyIdentity::new(intent.authored_study_digest(), None)
-            .unwrap();
-    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_authored(
-        study,
+    let _study = runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(
+        intent.authored_study_digest(),
+        None,
+    )
+    .unwrap();
+    let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
         &workload.model.sequence,
     )
     .unwrap();
     let step = workload.procedure_step().unwrap();
     let producer =
-        runmat_analysis_fea::execution::StepIdentity::from_authored(sequence, step).unwrap();
+        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(sequence, step).unwrap();
     let solver_result_identity = test_solver_result_identity("intent-result");
     let fields = result
         .fields

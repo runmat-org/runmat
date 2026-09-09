@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AnalysisModel, EntityDimension, ExpectedTopology, InitialCondition, InitialConditionTarget,
-    InitialValue, PhysicalSignal, SignalAxis, SignalRepresentation,
+    InitialValue, PhysicalSignal, SignalRepresentation, TabulatedSignalDomain,
 };
 use thiserror::Error;
 
@@ -154,6 +154,7 @@ fn realize_value(
         InitialValue::SignalSample {
             signal_id,
             abscissa,
+            approach,
         } => {
             let signal = model
                 .signals
@@ -170,22 +171,29 @@ fn realize_value(
                 });
             };
             let sample = match &signal.representation {
-                SignalRepresentation::Tabulated(table) => match &table.axis {
-                    SignalAxis::TimeSeconds(_) => ExcitationSamplePoint::TimeSeconds(*abscissa),
-                    SignalAxis::StudyParameter { parameter_id, .. } => {
+                SignalRepresentation::Tabulated(table) => match &table.domain {
+                    TabulatedSignalDomain::TimeSeconds => ExcitationSamplePoint::TimeSeconds {
+                        value: *abscissa,
+                        approach: *approach,
+                    },
+                    TabulatedSignalDomain::StudyParameter { parameter_id } => {
                         ExcitationSamplePoint::StudyParameter {
                             parameter_id,
                             canonical_value: *abscissa,
+                            approach: *approach,
                         }
                     }
-                    SignalAxis::FrequencyHertz(_) => {
+                    TabulatedSignalDomain::FrequencyHertz => {
                         return Err(ThermalInitialStateError::SignalSample {
                             initial_condition_id: condition.initial_condition_id.clone(),
                             detail: "frequency signals cannot define an initial state".into(),
                         });
                     }
                 },
-                _ => ExcitationSamplePoint::TimeSeconds(*abscissa),
+                _ => ExcitationSamplePoint::TimeSeconds {
+                    value: *abscissa,
+                    approach: *approach,
+                },
             };
             let value = sample_signal(signal, sample, |value| value.kelvin)
                 .and_then(expect_scalar)

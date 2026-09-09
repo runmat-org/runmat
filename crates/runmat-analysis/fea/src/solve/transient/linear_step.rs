@@ -39,9 +39,14 @@ pub(super) struct RuntimeTensorStepCache<'a> {
     pub(super) dt_bucket_rel_tolerance: f64,
 }
 
-pub(super) fn build_step_rhs(summary: &AssemblySummary, x_prev: &[f64], dt: f64) -> Vec<f64> {
+pub(super) fn build_step_rhs_with_load(
+    summary: &AssemblySummary,
+    x_prev: &[f64],
+    dt: f64,
+    load: &[f64],
+) -> Vec<f64> {
     let mut rhs = apply_m(&summary.operator, x_prev);
-    for (value, load) in rhs.iter_mut().zip(summary.operator.load()) {
+    for (value, load) in rhs.iter_mut().zip(load) {
         *value += dt * load;
     }
     rhs

@@ -146,9 +146,11 @@ async fn exact_structural_sweep_reaches_ordered_admitted_results_over_encrypted_
     let identity = SweepIdentity::new(
         Digest::sha256(b"encrypted structural sweep"),
         vec![
-            StudyIdentity::new(first_study_digest, frozen_project_digest).unwrap(),
-            StudyIdentity::new(second_study_digest, frozen_project_digest).unwrap(),
-            StudyIdentity::new(invalid_study_digest, frozen_project_digest).unwrap(),
+            StudyIdentity::from_authored_digest(first_study_digest, frozen_project_digest).unwrap(),
+            StudyIdentity::from_authored_digest(second_study_digest, frozen_project_digest)
+                .unwrap(),
+            StudyIdentity::from_authored_digest(invalid_study_digest, frozen_project_digest)
+                .unwrap(),
         ],
         Digest::sha256(b"collect all outcomes"),
     )

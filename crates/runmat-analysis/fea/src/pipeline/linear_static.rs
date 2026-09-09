@@ -27,9 +27,16 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
-    post::fields::{recover_result_fields, structural_field_recovery_metrics},
+    post::fields::{
+        recover_result_fields, structural_field_recovery_metrics, take_structural_observable_fields,
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
+    results::{
+        field::RecoveredFieldCatalog,
+        observation::{evaluate_observations, resolve_observation_plan, ObservationLimits},
+    },
     solve::{backend::build_backend, linear::solve_linear_system},
+    topology::AnalysisProjection,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -222,6 +229,42 @@ fn run_linear_static_with_constraint_plan(
     fields.extend(electro_thermal_fields.static_fields);
     fields.extend(electro_thermal_fields.temperature_snapshots);
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
+    let observations = if execution_step.observations.is_empty() {
+        Vec::new()
+    } else {
+        let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
+            FeaRunError::Observation(
+                "spatial observations require the canonical solver mesh used by assembly".into(),
+            )
+        })?;
+        let projection = AnalysisProjection::derive(mesh)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let recovered = take_structural_observable_fields(&mut fields)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let catalog = RecoveredFieldCatalog::new(&projection, recovered)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let definitions = catalog
+            .fields()
+            .iter()
+            .map(|field| field.definition().clone())
+            .collect::<Vec<_>>();
+        let plan = resolve_observation_plan(
+            execution_step,
+            &projection,
+            &definitions,
+            ObservationLimits::default(),
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let observations = evaluate_observations(&plan, &projection, &catalog)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        fields.extend(
+            catalog
+                .into_fields()
+                .into_iter()
+                .map(|field| field.into_storage()),
+        );
+        observations
+    };
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,
@@ -389,6 +432,7 @@ fn run_linear_static_with_constraint_plan(
         solver_host_sync_count: solve_result.host_sync_count,
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        observations,
         fields,
     })
 }

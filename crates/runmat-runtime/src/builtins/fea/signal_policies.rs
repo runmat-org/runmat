@@ -2,13 +2,19 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
-use runmat_analysis_core::{SignalExtrapolation, SignalInterpolation};
+use runmat_analysis_core::{
+    SignalExtrapolation, SignalInterpolation, SignalPointContinuity, SignalSampleApproach,
+};
 
 pub(super) const INTERPOLATION_CLASS: &str = "fea.SignalInterpolation";
 pub(super) const EXTRAPOLATION_CLASS: &str = "fea.SignalExtrapolation";
+pub(super) const SAMPLE_APPROACH_CLASS: &str = "fea.SignalSampleApproach";
+pub(super) const POINT_CONTINUITY_CLASS: &str = "fea.SignalPointContinuity";
 
 const INTERPOLATION_FIELDS: &[&str] = &["interpolation"];
 const EXTRAPOLATION_FIELDS: &[&str] = &["extrapolation"];
+const SAMPLE_APPROACH_FIELDS: &[&str] = &["approach"];
+const POINT_CONTINUITY_FIELDS: &[&str] = &["continuity"];
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const POLICY_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
@@ -26,6 +32,18 @@ struct InterpolationObject {
 #[serde(deny_unknown_fields)]
 struct ExtrapolationObject {
     extrapolation: SignalExtrapolation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SampleApproachObject {
+    approach: SignalSampleApproach,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PointContinuityObject {
+    continuity: SignalPointContinuity,
 }
 
 macro_rules! policy_builtin {
@@ -61,27 +79,87 @@ macro_rules! policy_builtin {
 }
 
 policy_builtin!(
-    interpolation_step_left,
-    INTERPOLATION_STEP_LEFT_DESCRIPTOR,
-    INTERPOLATION_STEP_LEFT_SIGNATURES,
-    "fea.SignalInterpolation.stepLeft",
-    "policy = fea.SignalInterpolation.stepLeft()",
-    "Select left-continuous step interpolation.",
+    interpolation_left_endpoint,
+    INTERPOLATION_LEFT_ENDPOINT_DESCRIPTOR,
+    INTERPOLATION_LEFT_ENDPOINT_SIGNATURES,
+    "fea.SignalInterpolation.leftEndpoint",
+    "policy = fea.SignalInterpolation.leftEndpoint()",
+    "Use the outgoing value of each interval's left endpoint.",
     INTERPOLATION_CLASS,
     InterpolationObject {
-        interpolation: SignalInterpolation::StepLeft
+        interpolation: SignalInterpolation::LeftEndpoint
     }
 );
 policy_builtin!(
-    interpolation_step_right,
-    INTERPOLATION_STEP_RIGHT_DESCRIPTOR,
-    INTERPOLATION_STEP_RIGHT_SIGNATURES,
-    "fea.SignalInterpolation.stepRight",
-    "policy = fea.SignalInterpolation.stepRight()",
-    "Select right-continuous step interpolation.",
+    point_continuity_left,
+    POINT_CONTINUITY_LEFT_DESCRIPTOR,
+    POINT_CONTINUITY_LEFT_SIGNATURES,
+    "fea.SignalPointContinuity.left",
+    "continuity = fea.SignalPointContinuity.left()",
+    "Assign the value at a jump knot to its left-hand limit.",
+    POINT_CONTINUITY_CLASS,
+    PointContinuityObject {
+        continuity: SignalPointContinuity::Left
+    }
+);
+policy_builtin!(
+    point_continuity_right,
+    POINT_CONTINUITY_RIGHT_DESCRIPTOR,
+    POINT_CONTINUITY_RIGHT_SIGNATURES,
+    "fea.SignalPointContinuity.right",
+    "continuity = fea.SignalPointContinuity.right()",
+    "Assign the value at a jump knot to its right-hand limit.",
+    POINT_CONTINUITY_CLASS,
+    PointContinuityObject {
+        continuity: SignalPointContinuity::Right
+    }
+);
+policy_builtin!(
+    sample_approach_at,
+    SAMPLE_APPROACH_AT_DESCRIPTOR,
+    SAMPLE_APPROACH_AT_SIGNATURES,
+    "fea.SignalSampleApproach.at",
+    "approach = fea.SignalSampleApproach.at()",
+    "Sample the value assigned at an exact signal abscissa.",
+    SAMPLE_APPROACH_CLASS,
+    SampleApproachObject {
+        approach: SignalSampleApproach::At
+    }
+);
+policy_builtin!(
+    sample_approach_left_limit,
+    SAMPLE_APPROACH_LEFT_LIMIT_DESCRIPTOR,
+    SAMPLE_APPROACH_LEFT_LIMIT_SIGNATURES,
+    "fea.SignalSampleApproach.leftLimit",
+    "approach = fea.SignalSampleApproach.leftLimit()",
+    "Sample the limit approaching an exact knot from below.",
+    SAMPLE_APPROACH_CLASS,
+    SampleApproachObject {
+        approach: SignalSampleApproach::LeftLimit
+    }
+);
+policy_builtin!(
+    sample_approach_right_limit,
+    SAMPLE_APPROACH_RIGHT_LIMIT_DESCRIPTOR,
+    SAMPLE_APPROACH_RIGHT_LIMIT_SIGNATURES,
+    "fea.SignalSampleApproach.rightLimit",
+    "approach = fea.SignalSampleApproach.rightLimit()",
+    "Sample the limit approaching an exact knot from above.",
+    SAMPLE_APPROACH_CLASS,
+    SampleApproachObject {
+        approach: SignalSampleApproach::RightLimit
+    }
+);
+policy_builtin!(
+    interpolation_right_endpoint,
+    INTERPOLATION_RIGHT_ENDPOINT_DESCRIPTOR,
+    INTERPOLATION_RIGHT_ENDPOINT_SIGNATURES,
+    "fea.SignalInterpolation.rightEndpoint",
+    "policy = fea.SignalInterpolation.rightEndpoint()",
+    "Use the incoming value of each interval's right endpoint.",
     INTERPOLATION_CLASS,
     InterpolationObject {
-        interpolation: SignalInterpolation::StepRight
+        interpolation: SignalInterpolation::RightEndpoint
     }
 );
 policy_builtin!(
@@ -94,18 +172,6 @@ policy_builtin!(
     INTERPOLATION_CLASS,
     InterpolationObject {
         interpolation: SignalInterpolation::Linear
-    }
-);
-policy_builtin!(
-    interpolation_cubic_hermite,
-    INTERPOLATION_CUBIC_HERMITE_DESCRIPTOR,
-    INTERPOLATION_CUBIC_HERMITE_SIGNATURES,
-    "fea.SignalInterpolation.cubicHermite",
-    "policy = fea.SignalInterpolation.cubicHermite()",
-    "Select cubic-Hermite interpolation.",
-    INTERPOLATION_CLASS,
-    InterpolationObject {
-        interpolation: SignalInterpolation::CubicHermite
     }
 );
 policy_builtin!(
@@ -161,6 +227,22 @@ pub(super) fn extrapolation_from_value(
     Ok(payload.extrapolation)
 }
 
+pub(super) fn sample_approach_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<SignalSampleApproach> {
+    let payload: SampleApproachObject = object_payload(builtin, value, SAMPLE_APPROACH_CLASS)?;
+    Ok(payload.approach)
+}
+
+pub(super) fn point_continuity_from_value(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<SignalPointContinuity> {
+    let payload: PointContinuityObject = object_payload(builtin, value, POINT_CONTINUITY_CLASS)?;
+    Ok(payload.continuity)
+}
+
 pub(super) fn ensure_signal_policy_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
@@ -176,6 +258,16 @@ pub(super) fn ensure_signal_policy_classes_registered() {
                 EXTRAPOLATION_CLASS,
                 "runmat.fea.signal-extrapolation",
                 EXTRAPOLATION_FIELDS,
+            ),
+            (
+                SAMPLE_APPROACH_CLASS,
+                "runmat.fea.signal-sample-approach",
+                SAMPLE_APPROACH_FIELDS,
+            ),
+            (
+                POINT_CONTINUITY_CLASS,
+                "runmat.fea.signal-point-continuity",
+                POINT_CONTINUITY_FIELDS,
             ),
         ] {
             crate::execution::value_codec::register_immutable_value_class(
@@ -195,13 +287,29 @@ pub(super) fn ensure_signal_policy_classes_registered() {
     });
     RUNTIME_CLASSES.ensure(|| {
         register_policy_class(
+            POINT_CONTINUITY_CLASS,
+            POINT_CONTINUITY_FIELDS,
+            &[
+                ("left", "fea.SignalPointContinuity.left"),
+                ("right", "fea.SignalPointContinuity.right"),
+            ],
+        );
+        register_policy_class(
             INTERPOLATION_CLASS,
             INTERPOLATION_FIELDS,
             &[
-                ("stepLeft", "fea.SignalInterpolation.stepLeft"),
-                ("stepRight", "fea.SignalInterpolation.stepRight"),
+                ("leftEndpoint", "fea.SignalInterpolation.leftEndpoint"),
+                ("rightEndpoint", "fea.SignalInterpolation.rightEndpoint"),
                 ("linear", "fea.SignalInterpolation.linear"),
-                ("cubicHermite", "fea.SignalInterpolation.cubicHermite"),
+            ],
+        );
+        register_policy_class(
+            SAMPLE_APPROACH_CLASS,
+            SAMPLE_APPROACH_FIELDS,
+            &[
+                ("at", "fea.SignalSampleApproach.at"),
+                ("leftLimit", "fea.SignalSampleApproach.leftLimit"),
+                ("rightLimit", "fea.SignalSampleApproach.rightLimit"),
             ],
         );
         register_policy_class(
@@ -278,6 +386,8 @@ mod tests {
     fn policies_are_closed_typed_and_portable() {
         let interpolation = block_on(interpolation_linear()).unwrap();
         let extrapolation = block_on(extrapolation_reject()).unwrap();
+        let approach = block_on(sample_approach_left_limit()).unwrap();
+        let continuity = block_on(point_continuity_right()).unwrap();
         assert_eq!(
             interpolation_from_value("test", &interpolation).unwrap(),
             SignalInterpolation::Linear
@@ -286,7 +396,15 @@ mod tests {
             extrapolation_from_value("test", &extrapolation).unwrap(),
             SignalExtrapolation::Reject
         );
-        for value in [interpolation, extrapolation] {
+        assert_eq!(
+            sample_approach_from_value("test", &approach).unwrap(),
+            SignalSampleApproach::LeftLimit
+        );
+        assert_eq!(
+            point_continuity_from_value("test", &continuity).unwrap(),
+            SignalPointContinuity::Right
+        );
+        for value in [interpolation, extrapolation, approach, continuity] {
             let encoded = crate::execution::value_codec::encode_inline_value(&value).unwrap();
             assert_eq!(
                 crate::execution::value_codec::decode_inline_value(&encoded).unwrap(),

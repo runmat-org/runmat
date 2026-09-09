@@ -13,8 +13,10 @@ pub mod fixtures;
 pub mod parity;
 pub mod physics;
 pub mod pipeline;
+pub mod planning;
 pub mod post;
 pub mod progress;
+pub mod results;
 pub mod solve;
 pub mod topology;
 

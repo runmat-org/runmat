@@ -19,7 +19,11 @@ use super::{
     signal::PhysicalSignal,
     structure::StructuralModel,
 };
-use crate::AnalysisSequence;
+use crate::{
+    AnalysisSequence, IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    RestartPolicy, SequenceBranch, SequenceDependency, SolutionSpace, StateInput, StateTransition,
+    StepObjectActivation,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisModelId(pub String);
@@ -60,4 +64,119 @@ pub struct AnalysisModel {
     pub initial_conditions: Vec<InitialCondition>,
     pub response_spectra: Vec<ResponseSpectrum>,
     pub sequence: AnalysisSequence,
+}
+
+/// Canonical solver semantics of an authored step.
+///
+/// Observation, accuracy, and state-publication declarations intentionally do not appear here:
+/// they consume a solver state but cannot change the equations that produce it.
+#[derive(Serialize)]
+pub struct SolverProcedureStep<'a> {
+    pub step_id: &'a ProcedureStepId,
+    pub family: PhysicsFamily,
+    pub procedure: crate::AnalysisProcedure,
+    pub solution_space: SolutionSpace,
+    pub independent_domain: &'a IndependentDomain,
+    pub activations: &'a [StepObjectActivation],
+    pub state_inputs: &'a [StateInput],
+    pub restart: RestartPolicy,
+}
+
+/// Canonical solver semantics of an authored procedure graph.
+#[derive(Serialize)]
+pub struct SolverAnalysisSequence<'a> {
+    pub sequence_id: &'a str,
+    pub steps: Vec<SolverProcedureStep<'a>>,
+    pub dependencies: &'a [SequenceDependency],
+    pub transitions: &'a [StateTransition],
+    pub branches: &'a [SequenceBranch],
+}
+
+/// Canonical solver semantics of an analysis model, excluding downstream result policies.
+#[derive(Serialize)]
+pub struct SolverAnalysisModel<'a> {
+    pub model_id: &'a AnalysisModelId,
+    pub geometry_id: &'a str,
+    pub geometry_revision: u32,
+    pub units: UnitSystem,
+    pub frame: &'a CoordinateFrame,
+    pub materials: &'a [MaterialModel],
+    pub material_assignments: &'a [MaterialAssignment],
+    pub structural: &'a Option<StructuralModel>,
+    pub thermal: &'a Option<ThermalDomain>,
+    pub thermo_mechanical: &'a Option<ThermoMechanicalDomain>,
+    pub electro_thermal: &'a Option<ElectroThermalDomain>,
+    pub electromagnetic: &'a Option<ElectromagneticDomain>,
+    pub cfd: &'a Option<CfdDomain>,
+    pub interfaces: &'a [AnalysisInterface],
+    pub constraints: &'a [AnalysisConstraint],
+    pub boundaries: &'a [AnalysisBoundary],
+    pub connectors: &'a [AnalysisConnector],
+    pub signals: &'a [PhysicalSignal],
+    pub excitations: &'a [ExcitationAction],
+    pub excitation_cases: &'a [ExcitationCase],
+    pub initial_conditions: &'a [InitialCondition],
+    pub response_spectra: &'a [ResponseSpectrum],
+    pub sequence: SolverAnalysisSequence<'a>,
+}
+
+impl AnalysisModel {
+    pub fn solver_identity_contract(&self) -> SolverAnalysisModel<'_> {
+        SolverAnalysisModel {
+            model_id: &self.model_id,
+            geometry_id: &self.geometry_id,
+            geometry_revision: self.geometry_revision,
+            units: self.units,
+            frame: &self.frame,
+            materials: &self.materials,
+            material_assignments: &self.material_assignments,
+            structural: &self.structural,
+            thermal: &self.thermal,
+            thermo_mechanical: &self.thermo_mechanical,
+            electro_thermal: &self.electro_thermal,
+            electromagnetic: &self.electromagnetic,
+            cfd: &self.cfd,
+            interfaces: &self.interfaces,
+            constraints: &self.constraints,
+            boundaries: &self.boundaries,
+            connectors: &self.connectors,
+            signals: &self.signals,
+            excitations: &self.excitations,
+            excitation_cases: &self.excitation_cases,
+            initial_conditions: &self.initial_conditions,
+            response_spectra: &self.response_spectra,
+            sequence: self.sequence.solver_identity_contract(),
+        }
+    }
+}
+
+impl AnalysisSequence {
+    pub fn solver_identity_contract(&self) -> SolverAnalysisSequence<'_> {
+        SolverAnalysisSequence {
+            sequence_id: &self.sequence_id,
+            steps: self
+                .steps
+                .iter()
+                .map(ProcedureStep::solver_identity_contract)
+                .collect(),
+            dependencies: &self.dependencies,
+            transitions: &self.transitions,
+            branches: &self.branches,
+        }
+    }
+}
+
+impl crate::ProcedureStep {
+    pub fn solver_identity_contract(&self) -> SolverProcedureStep<'_> {
+        SolverProcedureStep {
+            step_id: &self.step_id,
+            family: self.family,
+            procedure: self.procedure,
+            solution_space: self.solution_space,
+            independent_domain: &self.independent_domain,
+            activations: &self.activations,
+            state_inputs: &self.state_inputs,
+            restart: self.restart.clone(),
+        }
+    }
 }

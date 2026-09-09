@@ -2,15 +2,16 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
 use runmat_analysis_fea::execution::{
-    AccuracyIdentity, AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisWorkKind,
-    CanonicalSemanticState, CanonicalStateTransition, CanonicalStateTransitionInput,
-    ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity,
-    OperatorIdentity, ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity,
-    SignalRealizationIdentity, SolverExcitationIdentity, SolverResultIdentity, StepIdentity,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult, StudyIdentity,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
+    CanonicalStateTransition, CanonicalStateTransitionInput, ConstraintPlanIdentity,
+    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
+    ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
+    SolverExcitationIdentity, SolverResultIdentity, StepIdentity,
+    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
+    StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
-use runmat_execution::value::{ValuePayload, ValueRefKind};
+use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -19,10 +20,10 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use serde::Serialize;
 
 use crate::{
-    import_analysis_objects, prepare_analysis_objects, prepare_analysis_program,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
+    prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
+    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-plan/v1\0";
@@ -52,6 +53,8 @@ pub struct ImportedStructuralLinearResult {
     pub identity: SolverResultIdentity,
     pub result: StructuralLinearWorkloadResult,
     pub objects: PreparedAnalysisObjects,
+    pub numerical_receipt: StructuralLinearNumericalReceiptArtifact,
+    pub numerical_receipt_objects: PreparedAnalysisObjects,
 }
 
 /// Resolves one authored sequence step against an optional completed upstream state before
@@ -116,12 +119,8 @@ pub fn prepare_structural_sequence_step(
                         "stateful sequence step has no matching authored transition".into(),
                     )
                 })?;
-            let study = StudyIdentity::new(
-                preparation.authored_study_digest,
-                preparation.frozen_project_digest,
-            )?;
             let sequence =
-                SequenceIdentity::from_authored(study, &preparation.workload.model.sequence)?;
+                SequenceIdentity::from_solver_contract(&preparation.workload.model.sequence)?;
             let producer_contract = preparation
                 .workload
                 .model
@@ -134,8 +133,8 @@ pub fn prepare_structural_sequence_step(
                         "state transition producer is absent from the authored sequence".into(),
                     )
                 })?;
-            let producer = StepIdentity::from_authored(sequence, producer_contract)?;
-            let consumer = StepIdentity::from_authored(sequence, &step)?;
+            let producer = StepIdentity::from_solver_contract(sequence, producer_contract)?;
+            let consumer = StepIdentity::from_solver_contract(sequence, &step)?;
             if state.producer != producer {
                 return Err(AnalysisBridgeError::Identity(
                     "upstream semantic state names a different producer step",
@@ -247,7 +246,7 @@ pub fn prepare_structural_linear_program(
                     "initial-guess transition producer is absent from the authored sequence".into(),
                 )
             })?;
-        let expected_producer = StepIdentity::from_authored(identities.sequence, producer)?;
+        let expected_producer = StepIdentity::from_solver_contract(identities.sequence, producer)?;
         if transition.sequence != identities.sequence
             || transition.producer != expected_producer
             || transition.consumer != identities.step
@@ -314,7 +313,10 @@ pub fn prepare_structural_linear_program(
         identities.execution_plan,
         AnalysisWorkKind::Solve,
         workload_inputs,
-        vec![AnalysisNumericalObjectKind::SolverResult],
+        vec![
+            AnalysisNumericalObjectKind::SolverResult,
+            AnalysisNumericalObjectKind::NumericalReceipt,
+        ],
         required_capabilities,
     )?;
     let host = AnalysisHostWorkload::new(workload, preparation.artifact_access)?;
@@ -342,43 +344,54 @@ pub fn import_structural_linear_completion(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedStructuralLinearResult> {
     response.validate_against(&prepared.program.request)?;
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs,
-        result_objects,
-    } = response
-    else {
+    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
+    let [result_output, receipt_output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
-            "structural analysis did not return an externalized success".into(),
+            "structural analysis must return result and numerical-receipt roots".into(),
         ));
     };
-    let [ValuePayload::Object(root)] = outputs.as_slice() else {
-        return Err(AnalysisBridgeError::Invalid(
-            "structural analysis must return one externalized result root".into(),
-        ));
-    };
-    let manifest_bytes = source
-        .read_verified(root.logical_digest)?
-        .ok_or_else(|| AnalysisBridgeError::Invalid("analysis result manifest is absent".into()))?;
-    let manifest = AnalysisObjectManifest::from_canonical_bytes(&manifest_bytes)?;
-    let expected_result =
-        SolverResultIdentity::new(prepared.host.workload.identity, manifest.payload_digest)?;
+    let expected_result = SolverResultIdentity::new(
+        prepared.host.workload.identity,
+        result_output.payload_digest,
+    )?;
     let imported = import_analysis_objects(
         source,
-        root,
+        &result_output.root,
         AnalysisNumericalObjectKind::SolverResult,
         expected_result.digest(),
-        manifest.payload_digest,
+        result_output.payload_digest,
         &prepared.host.artifact_access,
         limits,
     )?;
-    let expected =
+    let receipt_objects = import_analysis_objects(
+        source,
+        &receipt_output.root,
+        AnalysisNumericalObjectKind::NumericalReceipt,
+        receipt_output.logical_identity,
+        receipt_output.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
+    let mut expected =
         imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
-    if result_objects != expected {
+    expected.extend(
+        receipt_objects.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
+    expected.push(output_set.root);
+    if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(
             "analysis result inventory differs from its canonical closure",
         ));
     }
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
+    let numerical_receipt =
+        StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
+    if numerical_receipt.identity().digest() != receipt_output.logical_identity {
+        return Err(AnalysisBridgeError::Identity(
+            "numerical receipt manifest differs from its canonical identity",
+        ));
+    }
+    numerical_receipt.validate_against(expected_result, &result)?;
     let constraint_plan = prepared
         .inputs
         .iter()
@@ -393,6 +406,8 @@ pub fn import_structural_linear_completion(
         identity: expected_result,
         result,
         objects: imported,
+        numerical_receipt,
+        numerical_receipt_objects: receipt_objects,
     })
 }
 
@@ -413,9 +428,9 @@ fn derive_identities(
     constraint_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
     let step_contract = workload.procedure_step()?;
-    let study = StudyIdentity::new(authored_study_digest, frozen_project_digest)?;
-    let sequence = SequenceIdentity::from_authored(study, &workload.model.sequence)?;
-    let step = StepIdentity::from_authored(sequence, step_contract)?;
+    let study = StudyIdentity::from_authored_digest(authored_study_digest, frozen_project_digest)?;
+    let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence)?;
+    let step = StepIdentity::from_solver_contract(sequence, step_contract)?;
     let constraints = ConstraintPlanIdentity::new(step, mesh_digest, constraint_plan_digest)?;
     let excitations = workload
         .model
@@ -440,7 +455,7 @@ fn derive_identities(
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     let problem = ProblemIdentity::new(
         step,
-        contract_digest("model", &workload.model)?,
+        contract_digest("solver-model", &workload.model.solver_identity_contract())?,
         workload
             .initial_guess_transition
             .as_ref()
@@ -467,8 +482,6 @@ fn derive_identities(
             ),
         )?,
     )?;
-    let accuracy =
-        AccuracyIdentity::new(step, contract_digest("accuracy", &step_contract.accuracy)?)?;
     let numerical = NumericalPlanIdentity::new(
         operator,
         contract_digest(
@@ -479,7 +492,6 @@ fn derive_identities(
                 workload.algebra_backend,
             ),
         )?,
-        accuracy,
     )?;
     let execution_plan = ExecutionPlanIdentity::new(
         numerical,

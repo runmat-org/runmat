@@ -172,12 +172,16 @@ fn values<'a, Q>(
 ) -> Option<Box<dyn Iterator<Item = &'a SignalValue<Q>> + 'a>> {
     match representation {
         SignalRepresentation::Constant(value) => Some(Box::new(std::iter::once(value))),
-        SignalRepresentation::Tabulated(table) => Some(Box::new(table.values.iter().filter_map(
-            |value| match value {
-                SignalOrdinate::Real(value) => Some(value),
-                SignalOrdinate::Complex { .. } => None,
-            },
-        ))),
+        SignalRepresentation::Tabulated(table) => Some(Box::new(
+            table
+                .knots
+                .iter()
+                .flat_map(knot_ordinates)
+                .filter_map(|value| match value {
+                    SignalOrdinate::Real(value) => Some(value),
+                    SignalOrdinate::Complex { .. } => None,
+                }),
+        )),
         SignalRepresentation::Waveform(waveform) => {
             Some(Box::new(std::iter::once(&waveform.amplitude)))
         }
@@ -253,18 +257,38 @@ fn representation_has_nonzero<Q>(
     match representation {
         SignalRepresentation::Constant(value) => value_has_nonzero(value, &component),
         SignalRepresentation::Tabulated(table) => {
-            table.values.iter().any(|ordinate| match ordinate {
-                SignalOrdinate::Real(value) => value_has_nonzero(value, &component),
-                SignalOrdinate::Complex { real, imaginary } => {
-                    value_has_nonzero(real, &component) || value_has_nonzero(imaginary, &component)
-                }
-            })
+            table
+                .knots
+                .iter()
+                .flat_map(knot_ordinates)
+                .any(|ordinate| match ordinate {
+                    SignalOrdinate::Real(value) => value_has_nonzero(value, &component),
+                    SignalOrdinate::Complex { real, imaginary } => {
+                        value_has_nonzero(real, &component)
+                            || value_has_nonzero(imaginary, &component)
+                    }
+                })
         }
         SignalRepresentation::Waveform(waveform) => {
             value_has_nonzero(&waveform.amplitude, &component)
         }
         SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => false,
     }
+}
+
+fn knot_ordinates<Q>(
+    knot: &runmat_analysis_core::SignalKnot<Q>,
+) -> impl Iterator<Item = &SignalOrdinate<Q>> {
+    match &knot.value {
+        runmat_analysis_core::SignalKnotValue::Continuous(value) => [Some(value), None],
+        runmat_analysis_core::SignalKnotValue::Jump {
+            left_limit,
+            right_limit,
+            ..
+        } => [Some(left_limit), Some(right_limit)],
+    }
+    .into_iter()
+    .flatten()
 }
 
 fn value_has_nonzero<Q>(value: &SignalValue<Q>, component: &impl Fn(&Q) -> f64) -> bool {

@@ -346,8 +346,23 @@ launchAcceleration = fea.AccelerationSignal.fromTimeSamples( ...
 
 The time axis must contain at least two finite, strictly increasing samples. Scalar signals accept
 one value per time. Vector signals accept either an N-by-3 or 3-by-N matrix and retain the sample
-ordering. Interpolation is one of `stepLeft`, `stepRight`, `linear`, or `cubicHermite`;
-extrapolation is `reject`, `holdEndpoint`, or `zero`.
+ordering. Interpolation is `leftEndpoint`, `rightEndpoint`, or `linear`; extrapolation is `reject`,
+`holdEndpoint`, or `zero`.
+
+Represent a physical jump with its two limits and say which limit owns the value at the jump.
+This keeps the function value distinct from either one-sided query and lets transient solvers land
+on the event instead of stepping across it:
+
+```matlab
+leftContinuous = fea.SignalPointContinuity.left();
+knots = {
+    fea.SignalKnot.continuous(0, 0)
+    fea.SignalKnot.jump(0.5, 0, 100, leftContinuous)
+    fea.SignalKnot.continuous(1, 100)
+};
+temperature = fea.TemperatureSignal.fromTimeKnots( ...
+    "boundary.temperature", knots, interpolation, extrapolation);
+```
 
 Initial conditions do not copy anonymous numbers into a solver option. They identify the typed
 signal sample that establishes state and the step that consumes it:
@@ -357,7 +372,8 @@ zeroDisplacement = fea.DisplacementSignal.constantMeters( ...
     "initial.displacement", [0 0 0]);
 wholeModel = fea.InitialConditionTarget.wholeModel();
 initialDisplacement = fea.StructuralInitialCondition.displacement( ...
-    "initial", wholeModel, zeroDisplacement, 0, "transient");
+    "initial", wholeModel, zeroDisplacement, 0, ...
+    fea.SignalSampleApproach.at(), "transient");
 ```
 
 Use a `geometry.Region` instead of `wholeModel` to bind an initial condition to a volume region.

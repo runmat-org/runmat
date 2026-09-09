@@ -1,4 +1,6 @@
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{
+    AnalysisField, FieldLocation, ObservationQuantity, ObservationValueShape,
+};
 
 use crate::contracts::{
     FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
@@ -21,6 +23,10 @@ use crate::{
         elements::solid::{strain_displacement_matrix, Tetrahedron4ElementGeometry},
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
         SolidRecoveryElementSummary, StructuralMaterialSummary,
+    },
+    results::field::{
+        RecoveredField, RecoveredFieldDefinition, RecoveredFieldError,
+        RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
     solve::linear::LinearSolveResult,
 };
@@ -135,6 +141,67 @@ pub fn recover_result_fields(
         fields.extend(shell_fields);
     }
     fields
+}
+
+/// Moves spatial fields with stable physical semantics into the observation domain.
+///
+/// Diagnostics, global summaries, derived display conveniences, and unsupported beam/shell
+/// resultants remain in `fields`; they are not mislabeled merely to make them observable.
+pub fn take_structural_observable_fields(
+    fields: &mut Vec<AnalysisField>,
+) -> Result<Vec<RecoveredField>, RecoveredFieldError> {
+    let declarations = [
+        (
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            ObservationQuantity::Displacement,
+            FieldLocation::Node,
+            ObservationValueShape::Vector3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            ObservationQuantity::Strain,
+            FieldLocation::Element,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_STRESS,
+            ObservationQuantity::Stress,
+            FieldLocation::Element,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            ObservationQuantity::StrainEnergy,
+            FieldLocation::Element,
+            ObservationValueShape::Scalar,
+        ),
+        (
+            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            ObservationQuantity::ReactionForce,
+            FieldLocation::Node,
+            ObservationValueShape::Vector3,
+        ),
+    ];
+    let mut recovered = Vec::with_capacity(declarations.len());
+    for (field_id, quantity, location, value_shape) in declarations {
+        let Some(index) = fields.iter().position(|field| field.field_id == field_id) else {
+            continue;
+        };
+        let storage = fields.remove(index);
+        let definition = RecoveredFieldDefinition::new(
+            field_id,
+            quantity,
+            location,
+            value_shape,
+            RecoveredFieldNumericRepresentation::Real,
+        )?;
+        recovered.push(RecoveredField::new(
+            definition,
+            RecoveredFieldSample::Final,
+            storage,
+        )?);
+    }
+    Ok(recovered)
 }
 
 pub fn recover_structural_stress_from_displacement(

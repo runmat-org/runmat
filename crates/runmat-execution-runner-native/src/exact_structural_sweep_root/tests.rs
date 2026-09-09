@@ -21,8 +21,8 @@ fn identity(first: Digest, second: Digest) -> SweepIdentity {
     SweepIdentity::new(
         Digest::sha256(b"sweep"),
         vec![
-            StudyIdentity::new(first, Some(Digest::sha256(b"project"))).unwrap(),
-            StudyIdentity::new(second, Some(Digest::sha256(b"project"))).unwrap(),
+            StudyIdentity::from_authored_digest(first, Some(Digest::sha256(b"project"))).unwrap(),
+            StudyIdentity::from_authored_digest(second, Some(Digest::sha256(b"project"))).unwrap(),
         ],
         Digest::sha256(b"fail-fast"),
     )

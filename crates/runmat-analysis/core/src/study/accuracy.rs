@@ -116,36 +116,6 @@ pub struct AccuracyResourceCeiling {
     pub maximum_resident_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AccuracyReport {
-    pub accuracy_plan_id: AccuracyPlanId,
-    pub status: AccuracyStatus,
-    pub contributions: Vec<AccuracyContribution>,
-    pub governing_criterion_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AccuracyStatus {
-    Satisfied,
-    NotSatisfied,
-    Indeterminate,
-    NotApplicable,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AccuracyContribution {
-    pub criterion_id: String,
-    pub contribution: ErrorContributionKind,
-    pub status: AccuracyStatus,
-    pub measured: Option<AccuracyMeasure>,
-    pub estimator_assumptions: Vec<String>,
-    pub scope_digest: String,
-    pub evidence_digest: String,
-}
-
 impl AccuracyPlan {
     /// Explicit baseline for formulations that have not yet earned production accuracy evidence.
     pub fn experimental_baseline(id: impl Into<String>) -> Self {
@@ -171,14 +141,4 @@ impl AccuracyPlan {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AccuracyMeasure {
-    Relative(f64),
-    Absolute {
-        quantity: ObservationQuantity,
-        canonical_value: f64,
-    },
 }

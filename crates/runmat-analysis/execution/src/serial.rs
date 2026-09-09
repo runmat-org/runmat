@@ -9,8 +9,9 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionRequest};
 
 use crate::{
-    import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisHostWorkload, PreparedAnalysisObjects,
+    import_analysis_objects, prepare_analysis_objects,
+    response::{publish_analysis_output_set, AnalysisOutputSet},
+    AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,18 +41,15 @@ pub struct CompletedAnalysisWorkload {
     pub identity: AnalysisResultIdentity,
     pub outputs: Vec<PreparedAnalysisObjects>,
     pub roots: Vec<ValueRef>,
+    pub output_set: AnalysisOutputSet,
+    pub output_set_root: ValueRef,
     pub result_objects: Vec<ValueRef>,
 }
 
 impl CompletedAnalysisWorkload {
     pub fn attempt_success(&self) -> runmat_execution_runner::AttemptSuccess {
         runmat_execution_runner::AttemptSuccess {
-            outputs: self
-                .roots
-                .iter()
-                .cloned()
-                .map(|root| ValuePayload::Object(Box::new(root)))
-                .collect(),
+            outputs: vec![ValuePayload::Object(Box::new(self.output_set_root.clone()))],
             result_objects: self.result_objects.clone(),
         }
     }
@@ -145,10 +143,15 @@ where
             .map(|output| output.manifest.payload_digest)
             .collect(),
     )?;
+    let (output_set, output_set_root) =
+        publish_analysis_output_set(store, &host, identity, &outputs, &roots)?;
+    result_objects.push(output_set_root.clone());
     Ok(CompletedAnalysisWorkload {
         identity,
         outputs,
         roots,
+        output_set,
+        output_set_root,
         result_objects,
     })
 }

@@ -9,9 +9,10 @@ use crate::builtins::fea::values::{
 use runmat_analysis_core::{
     Acceleration, AngularAcceleration, AngularVelocity, BodyForceDensity, ElectricCharge,
     ElectricChargeDensity, ElectricCurrentDensity, Force, HeatGenerationDensity, MassFlowRate,
-    Moment, Signal, SignalApproximationEvidence, SignalAxis, SignalExtrapolation, SignalId,
-    SignalInterpolation, SignalOrdinate, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalShape, SignalValue, TabulatedSignal, Traction,
+    Moment, Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId,
+    SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
+    Traction,
 };
 use runmat_execution::value::CallableValue;
 
@@ -511,6 +512,7 @@ scalar_signal!(
 
 pub(super) mod bindings;
 pub(super) mod callable;
+pub(super) mod knots;
 pub(super) mod materialize;
 pub(crate) mod time_samples;
 
@@ -684,6 +686,7 @@ fn signal_class_quantity(class_name: &str) -> Option<runmat_analysis_core::Physi
 }
 
 pub(super) fn ensure_signal_classes_registered() {
+    knots::ensure_signal_knot_class_registered();
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
         crate::class_registry::ClassRegistration::new(DISPLACEMENT_SIGNAL_CLASS);
@@ -713,6 +716,10 @@ pub(super) fn ensure_signal_classes_registered() {
                 static_method("fromTimeSamples", time_sample_builtin(class_name)),
             );
             methods.insert(
+                "fromTimeKnots".into(),
+                static_method("fromTimeKnots", time_knot_builtin(class_name)),
+            );
+            methods.insert(
                 "fromFunction".into(),
                 static_method("fromFunction", callable::callable_builtin(class_name)),
             );
@@ -724,6 +731,34 @@ pub(super) fn ensure_signal_classes_registered() {
             });
         }
     });
+}
+
+fn time_knot_builtin(class_name: &str) -> &'static str {
+    match class_name {
+        DISPLACEMENT_SIGNAL_CLASS => "fea.DisplacementSignal.fromTimeKnots",
+        ROTATION_SIGNAL_CLASS => "fea.RotationSignal.fromTimeKnots",
+        VELOCITY_SIGNAL_CLASS => "fea.VelocitySignal.fromTimeKnots",
+        ACCELERATION_SIGNAL_CLASS => "fea.AccelerationSignal.fromTimeKnots",
+        ANGULAR_VELOCITY_SIGNAL_CLASS => "fea.AngularVelocitySignal.fromTimeKnots",
+        ANGULAR_ACCELERATION_SIGNAL_CLASS => "fea.AngularAccelerationSignal.fromTimeKnots",
+        FORCE_SIGNAL_CLASS => "fea.ForceSignal.fromTimeKnots",
+        MOMENT_SIGNAL_CLASS => "fea.MomentSignal.fromTimeKnots",
+        TRACTION_SIGNAL_CLASS => "fea.TractionSignal.fromTimeKnots",
+        PRESSURE_SIGNAL_CLASS => "fea.PressureSignal.fromTimeKnots",
+        BODY_FORCE_SIGNAL_CLASS => "fea.BodyForceSignal.fromTimeKnots",
+        TEMPERATURE_SIGNAL_CLASS => "fea.TemperatureSignal.fromTimeKnots",
+        TEMPERATURE_DIFFERENCE_SIGNAL_CLASS => "fea.TemperatureDifferenceSignal.fromTimeKnots",
+        HEAT_FLUX_SIGNAL_CLASS => "fea.HeatFluxSignal.fromTimeKnots",
+        HEAT_GENERATION_SIGNAL_CLASS => "fea.HeatGenerationSignal.fromTimeKnots",
+        ELECTRIC_POTENTIAL_SIGNAL_CLASS => "fea.ElectricPotentialSignal.fromTimeKnots",
+        ELECTRIC_CURRENT_SIGNAL_CLASS => "fea.ElectricCurrentSignal.fromTimeKnots",
+        ELECTRIC_CHARGE_SIGNAL_CLASS => "fea.ElectricChargeSignal.fromTimeKnots",
+        CURRENT_DENSITY_SIGNAL_CLASS => "fea.CurrentDensitySignal.fromTimeKnots",
+        CHARGE_DENSITY_SIGNAL_CLASS => "fea.ChargeDensitySignal.fromTimeKnots",
+        MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS => "fea.MagneticVectorPotentialSignal.fromTimeKnots",
+        MASS_FLOW_SIGNAL_CLASS => "fea.MassFlowSignal.fromTimeKnots",
+        _ => unreachable!("signal schemas contain only known classes"),
+    }
 }
 
 fn time_sample_builtin(class_name: &str) -> &'static str {
@@ -965,8 +1000,11 @@ fn signal_schemas() -> [SignalSchema; 22] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::fea::signal_policies::{extrapolation_reject, interpolation_linear};
+    use crate::builtins::fea::signal_policies::{
+        extrapolation_reject, interpolation_linear, point_continuity_right,
+    };
     use futures::executor::block_on;
+    use runmat_value::CellArray;
 
     #[test]
     fn force_signal_is_typed_portable_and_rejects_bad_shape() {
@@ -1026,18 +1064,18 @@ mod tests {
         assert_eq!(table.interpolation, SignalInterpolation::Linear);
         assert_eq!(table.extrapolation, SignalExtrapolation::Reject);
         assert_eq!(
-            table.values,
+            table
+                .knots
+                .into_iter()
+                .map(|knot| knot.value)
+                .collect::<Vec<_>>(),
             vec![
-                SignalOrdinate::Real(SignalValue::Vector3([
-                    Force::new(0.0),
-                    Force::new(1.0),
-                    Force::new(2.0),
-                ])),
-                SignalOrdinate::Real(SignalValue::Vector3([
-                    Force::new(10.0),
-                    Force::new(11.0),
-                    Force::new(12.0),
-                ])),
+                runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(
+                    SignalValue::Vector3([Force::new(0.0), Force::new(1.0), Force::new(2.0),])
+                )),
+                runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(
+                    SignalValue::Vector3([Force::new(10.0), Force::new(11.0), Force::new(12.0),])
+                )),
             ]
         );
     }
@@ -1065,6 +1103,80 @@ mod tests {
             values,
             interpolation,
             extrapolation,
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn time_knots_author_a_typed_jump_without_losing_its_sides() {
+        let scalar = |value| Value::Num(value);
+        let first = block_on(knots::continuous(scalar(0.0), scalar(273.0))).unwrap();
+        let jump = block_on(knots::jump(
+            scalar(0.5),
+            scalar(273.0),
+            scalar(373.0),
+            block_on(point_continuity_right()).unwrap(),
+        ))
+        .unwrap();
+        let last = block_on(knots::continuous(scalar(1.0), scalar(373.0))).unwrap();
+        let knots = Value::Cell(CellArray::new(vec![first, jump, last], 3, 1).unwrap());
+        let value = block_on(knots::temperature(
+            "thermal.step".into(),
+            knots,
+            block_on(interpolation_linear()).unwrap(),
+            block_on(extrapolation_reject()).unwrap(),
+        ))
+        .unwrap();
+        let PhysicalSignal::Temperature(signal) =
+            physical_signal_from_value("test", &value).unwrap()
+        else {
+            panic!("typed class must contain a temperature signal")
+        };
+        let SignalRepresentation::Tabulated(table) = signal.representation else {
+            panic!("time knots must create a tabulated signal")
+        };
+        assert!(matches!(
+            &table.knots[1].value,
+            runmat_analysis_core::SignalKnotValue::Jump {
+                left_limit: SignalOrdinate::Real(SignalValue::Scalar(left)),
+                right_limit: SignalOrdinate::Real(SignalValue::Scalar(right)),
+                continuity: runmat_analysis_core::SignalPointContinuity::Right,
+            } if left.kelvin == 273.0 && right.kelvin == 373.0
+        ));
+    }
+
+    #[test]
+    fn time_knots_reject_endpoint_jumps_and_mixed_shapes() {
+        let scalar = |value| Value::Num(value);
+        let jump = block_on(knots::jump(
+            scalar(0.0),
+            scalar(0.0),
+            scalar(1.0),
+            block_on(point_continuity_right()).unwrap(),
+        ))
+        .unwrap();
+        let last = block_on(knots::continuous(scalar(1.0), scalar(1.0))).unwrap();
+        let endpoint_jump = Value::Cell(CellArray::new(vec![jump, last], 1, 2).unwrap());
+        assert!(block_on(knots::temperature(
+            "bad.endpoint".into(),
+            endpoint_jump,
+            block_on(interpolation_linear()).unwrap(),
+            block_on(extrapolation_reject()).unwrap(),
+        ))
+        .is_err());
+
+        let first = block_on(knots::continuous(scalar(0.0), scalar(0.0))).unwrap();
+        let vector = block_on(knots::continuous(
+            scalar(1.0),
+            Value::Tensor(Tensor::new_2d(vec![1.0, 2.0, 3.0], 1, 3).unwrap()),
+        ))
+        .unwrap();
+        let mixed = Value::Cell(CellArray::new(vec![first, vector], 1, 2).unwrap());
+        assert!(block_on(knots::temperature(
+            "bad.shape".into(),
+            mixed,
+            block_on(interpolation_linear()).unwrap(),
+            block_on(extrapolation_reject()).unwrap(),
         ))
         .is_err());
     }

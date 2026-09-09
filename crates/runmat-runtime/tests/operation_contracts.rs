@@ -4,9 +4,10 @@ use runmat_analysis_core::{
     ExcitationAction, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
     ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget, Force,
     MaterialAssignment, MaterialElectricalModel, PhysicalSignal, PhysicsFamily, ProcedureStep,
-    ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalAxis,
-    SignalExtrapolation, SignalId, SignalInterpolation, SignalOrdinate, SignalPrecision,
-    SignalProvenance, SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, Velocity,
+    ProjectionRequirement, RegionTarget, Signal, SignalApproximationEvidence, SignalExtrapolation,
+    SignalId, SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
+    Velocity,
 };
 
 fn magnetic_ground(
@@ -162,13 +163,18 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
         shape: SignalShape::Scalar,
         frame: None,
         representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::TimeSeconds(samples.map(|sample| sample.0).to_vec()),
-            values: samples
-                .map(|sample| SignalOrdinate::Real(SignalValue::Scalar(Velocity::new(sample.1))))
-                .to_vec(),
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: samples
+                .into_iter()
+                .map(|sample| {
+                    SignalKnot::continuous(
+                        sample.0,
+                        SignalOrdinate::Real(SignalValue::Scalar(Velocity::new(sample.1))),
+                    )
+                })
+                .collect(),
             interpolation: SignalInterpolation::Linear,
             extrapolation: SignalExtrapolation::HoldEndpoint,
-            breakpoints: Vec::new(),
         }),
         precision: SignalPrecision::Real64,
         evidence: exact_signal_evidence(samples.len()),

@@ -1,0 +1,159 @@
+use runmat_analysis_core::FormulationRequirement;
+use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use serde::{Deserialize, Serialize};
+
+use crate::execution::{
+    AnalysisExecutionError, AnalysisExecutionResult, PublicationIdentity,
+    PublicationRequestIdentity, ResultPublicationRequest, SolverResultIdentity, StepIdentity,
+};
+
+use super::accuracy::{
+    AccuracyArtifact, AccuracyArtifactIdentity, AccuracyPublicationGate, AccuracyStatus,
+    PublicationDecision,
+};
+use super::observation::ObservationArtifactIdentity;
+
+const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v1\0";
+const PUBLICATION_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
+
+/// Immutable terminal receipt for a result set admitted by its typed accuracy policy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "PublishedAnalysisResultWire")]
+pub struct PublishedAnalysisResult {
+    pub schema_version: u16,
+    identity: PublicationIdentity,
+    pub request: PublicationRequestIdentity,
+    pub producer: StepIdentity,
+    pub source_result: SolverResultIdentity,
+    pub source_observations: Option<ObservationArtifactIdentity>,
+    pub source_accuracy: AccuracyArtifactIdentity,
+    pub formulation_requirement: FormulationRequirement,
+    pub accuracy_status: AccuracyStatus,
+    pub gate: AccuracyPublicationGate,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublishedAnalysisResultWire {
+    schema_version: u16,
+    identity: PublicationIdentity,
+    request: PublicationRequestIdentity,
+    producer: StepIdentity,
+    source_result: SolverResultIdentity,
+    source_observations: Option<ObservationArtifactIdentity>,
+    source_accuracy: AccuracyArtifactIdentity,
+    formulation_requirement: FormulationRequirement,
+    accuracy_status: AccuracyStatus,
+    gate: AccuracyPublicationGate,
+}
+
+impl TryFrom<PublishedAnalysisResultWire> for PublishedAnalysisResult {
+    type Error = AnalysisExecutionError;
+
+    fn try_from(wire: PublishedAnalysisResultWire) -> Result<Self, Self::Error> {
+        let result = Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            request: wire.request,
+            producer: wire.producer,
+            source_result: wire.source_result,
+            source_observations: wire.source_observations,
+            source_accuracy: wire.source_accuracy,
+            formulation_requirement: wire.formulation_requirement,
+            accuracy_status: wire.accuracy_status,
+            gate: wire.gate,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+}
+
+impl PublishedAnalysisResult {
+    pub fn new(
+        request: &ResultPublicationRequest,
+        accuracy: &AccuracyArtifact,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        accuracy
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if request.producer != accuracy.producer
+            || request.source_result != accuracy.source_result
+            || request.source_observations != accuracy.source_observations
+            || request.accuracy_request != accuracy.evaluation_request
+            || request.source_accuracy != accuracy.identity()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "published result sources differ from the admitted request",
+            ));
+        }
+        let identity = PublicationIdentity::new(
+            request.identity(),
+            request.source_result,
+            request
+                .source_observations
+                .map(|identity| identity.digest()),
+            request.source_accuracy.digest(),
+        )?;
+        let result = Self {
+            schema_version: 1,
+            identity,
+            request: request.identity(),
+            producer: request.producer,
+            source_result: request.source_result,
+            source_observations: request.source_observations,
+            source_accuracy: request.source_accuracy,
+            formulation_requirement: accuracy.formulation_requirement,
+            accuracy_status: accuracy.evaluation().report().status,
+            gate: accuracy.gate().clone(),
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    pub const fn identity(&self) -> PublicationIdentity {
+        self.identity
+    }
+
+    pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        let expected = PublicationIdentity::new(
+            self.request,
+            self.source_result,
+            self.source_observations.map(|identity| identity.digest()),
+            self.source_accuracy.digest(),
+        )?;
+        if self.schema_version != 1
+            || self.identity != expected
+            || self.gate.decision != PublicationDecision::Allow
+            || self.gate.status != self.accuracy_status
+            || (self.formulation_requirement == FormulationRequirement::Production
+                && self.accuracy_status != AccuracyStatus::Satisfied)
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "published result lacks a convergent identity or an allowing accuracy gate".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
+        self.validate()?;
+        Ok(encode_contract(
+            PUBLICATION_PREFIX,
+            "published-analysis-result",
+            self,
+            PUBLICATION_LIMITS,
+        )?)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisExecutionResult<Self> {
+        let result = decode_contract(
+            PUBLICATION_PREFIX,
+            "published-analysis-result",
+            bytes,
+            PUBLICATION_LIMITS,
+        )?;
+        Ok(result)
+    }
+}

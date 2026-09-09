@@ -39,7 +39,7 @@ pub(super) fn map_fea_run_error(
             "FEA run cancelled by user",
             model_details(),
         ),
-        FeaRunError::InvalidModel(message) => operation_error(
+        FeaRunError::InvalidModel(message) | FeaRunError::Observation(message) => operation_error(
             operation.name(),
             operation.version(),
             context,

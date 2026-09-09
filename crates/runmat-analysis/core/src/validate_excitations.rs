@@ -414,6 +414,7 @@ fn validate_initial<Q: FiniteQuantity>(
         InitialValue::SignalSample {
             signal_id,
             abscissa,
+            approach: _,
         } if abscissa.is_finite() => match signals.get(signal_id) {
             Some(signal)
                 if signal.quantity() == expected

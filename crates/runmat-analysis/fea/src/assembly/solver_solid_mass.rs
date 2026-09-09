@@ -24,9 +24,8 @@ pub fn assemble_solver_solid_mass(
     artifact: &SolverMeshArtifact,
     default_material: Option<SolidMaterial>,
     materials_by_region: &BTreeMap<String, SolidMaterial>,
-    base_dof_count: usize,
 ) -> Result<SolverSolidMassAssembly, SolverSolidAssemblyError> {
-    let topology = solver_solid_topology(artifact, base_dof_count)?;
+    let topology = solver_solid_topology(artifact)?;
     let nodes = artifact
         .topology
         .nodes

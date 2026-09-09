@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     algebra::{
-        validate_solver_compatibility, AssembledRealSystem, CompatibilityError, RealPreconditioner,
-        RealSolver, RealSystemError,
+        validate_prepared_solver_compatibility, AssembledRealSystem, CompatibilityError,
+        RealPreconditioner, RealSolver, RealSystemError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -136,18 +136,6 @@ pub fn solve_operator_system(
 ) -> LinearSolveResult {
     let mut effective_backend_kind = backend_kind;
     let mut runtime_tensor_fallback = false;
-    if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
-        if let Some(result) = solve_operator_system_runtime_tensor_with_initial_guess(
-            operator,
-            preconditioner_kind,
-            initial_guess,
-        ) {
-            return result;
-        }
-        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
-        runtime_tensor_fallback = true;
-    }
-
     let has_dofs = operator.dof_count() > 0;
     if !has_dofs {
         return LinearSolveResult {
@@ -170,15 +158,6 @@ pub fn solve_operator_system(
     }
 
     let tol = 1.0e-8;
-    let mut initial_diagnostics = Vec::new();
-    if runtime_tensor_fallback {
-        initial_diagnostics.push(FeaDiagnostic {
-            code: "FEA_RUNTIME_TENSOR_FALLBACK".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: "runtime-tensor backend unavailable for current provider; fell back to cpu_reference solver"
-                .to_string(),
-        });
-    }
     let prepared = match operator.prepare_linear() {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -190,8 +169,8 @@ pub fn solve_operator_system(
             )
         }
     };
-    if let Err(error) = validate_solver_compatibility(
-        prepared.matrix(),
+    if let Err(error) = validate_prepared_solver_compatibility(
+        &prepared,
         RealSolver::ConjugateGradient,
         match preconditioner_kind {
             SpdPreconditionerKind::Jacobi => RealPreconditioner::Jacobi,
@@ -204,6 +183,29 @@ pub fn solve_operator_system(
             preconditioner_kind,
             error,
         );
+    }
+    // Compatibility is a solver-independent admission boundary. A runtime provider must never
+    // receive a system that the reference path would reject, and provider fallback must not alter
+    // that decision.
+    if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
+        if let Some(result) = solve_operator_system_runtime_tensor_with_initial_guess(
+            operator,
+            preconditioner_kind,
+            initial_guess,
+        ) {
+            return result;
+        }
+        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
+        runtime_tensor_fallback = true;
+    }
+    let mut initial_diagnostics = Vec::new();
+    if runtime_tensor_fallback {
+        initial_diagnostics.push(FeaDiagnostic {
+            code: "FEA_RUNTIME_TENSOR_FALLBACK".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "runtime-tensor backend unavailable for current provider; fell back to cpu_reference solver"
+                .to_string(),
+        });
     }
     let max_iters = iteration_limit(operator, 64);
     let preconditioner = match build_spd_preconditioner(&prepared, preconditioner_kind) {
@@ -405,5 +407,50 @@ mod tests {
             result.diagnostics[0].code,
             "FEA_PRECONDITIONER_SETUP_FAILED"
         );
+    }
+
+    #[test]
+    fn cpu_and_runtime_tensor_reject_unproved_semidefinite_system_before_iteration() {
+        let stiffness = RealSparseMatrix::diagonal(
+            vec![1.0, 0.0],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        let operator = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+            vec![false; 2],
+            vec![1.0, 0.0],
+        )
+        .unwrap();
+
+        for backend in [
+            LinearAlgebraBackendKind::CpuReference,
+            LinearAlgebraBackendKind::RuntimeTensor,
+        ] {
+            let result = solve_operator_system(
+                &operator,
+                SpdPreconditionerKind::Jacobi,
+                backend,
+                &CpuReferenceBackend,
+                None,
+            );
+            assert!(!result.converged);
+            assert_eq!(result.iterations, 0);
+            assert_eq!(result.device_apply_k_attempt_count, 0);
+            assert_eq!(result.diagnostics[0].code, "FEA_INCOMPATIBLE_REAL_SOLVER");
+        }
     }
 }

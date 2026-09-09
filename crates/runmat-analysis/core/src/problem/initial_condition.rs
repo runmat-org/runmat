@@ -6,7 +6,7 @@ use super::{
         AngularVelocity, Displacement, ElectricPotential, MagneticVectorPotential, Pressure,
         Temperature, Velocity,
     },
-    signal::SignalId,
+    signal::{SignalId, SignalSampleApproach},
     target::RegionTarget,
 };
 
@@ -80,7 +80,11 @@ pub enum InitialConditionTarget {
 pub enum InitialValue<Q> {
     Uniform(Q),
     UniformVector3([Q; 3]),
-    SignalSample { signal_id: SignalId, abscissa: f64 },
+    SignalSample {
+        signal_id: SignalId,
+        abscissa: f64,
+        approach: SignalSampleApproach,
+    },
     FieldArtifact(InitialFieldArtifactRef),
 }
 

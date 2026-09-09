@@ -102,7 +102,7 @@ pub fn run_electromagnetic_with_options(
     let excitations = realize_step_excitations(
         model,
         electromagnetic_step,
-        ExcitationSamplePoint::FrequencyHertz(domain.reference_frequency.hertz),
+        ExcitationSamplePoint::frequency(domain.reference_frequency.hertz),
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
 
@@ -1384,6 +1384,7 @@ pub fn run_electromagnetic_with_options(
         solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        observations: Vec::new(),
         fields: Vec::new(),
     };
 

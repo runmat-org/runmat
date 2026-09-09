@@ -48,7 +48,8 @@ use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::algebra::{
     AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
-    ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler, RealSparseMatrix,
+    ContributionProvenance, MatrixProperties, NullspaceEliminationEvidence, OperatorRole,
+    RealSparseAssembler, RealSparseMatrix,
 };
 use crate::constraints::{
     AffineConstraintReduction, CanonicalStructuralConstraintPlan, CanonicalStructuralDof,
@@ -662,7 +663,7 @@ fn assemble_linear_system_impl(
     let base_dof_count = (excitations.len() * 3).max(3);
     let solid_topology = solver_mesh
         .as_ref()
-        .map(|mesh| solver_solid_topology(mesh, base_dof_count))
+        .map(solver_solid_topology)
         .transpose()
         .map_err(LinearAssemblyError::SolidStiffness)?;
     if structural_requirement.is_some() {
@@ -1023,7 +1024,6 @@ fn assemble_linear_system_impl(
                 mesh,
                 default_solid_material,
                 &solid_materials_by_region,
-                base_dof_count,
             )
             .map_err(LinearAssemblyError::SolidStiffness)?,
         ),
@@ -1036,7 +1036,6 @@ fn assemble_linear_system_impl(
                 mesh,
                 default_solid_material,
                 &solid_materials_by_region,
-                base_dof_count,
             )
             .map_err(LinearAssemblyError::SolidStiffness)?;
             structural_solid_total_mass_kg = assembled.total_mass_kg;
@@ -1096,7 +1095,7 @@ fn assemble_linear_system_impl(
             .unwrap_or(0),
         structural_solid_total_mass_kg,
         structural_solid_recovery,
-        structural_dof_layout,
+        structural_dof_layout: structural_dof_layout.clone(),
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
         structural_formulation: structural_requirement.and_then(|requirement| {
@@ -1152,7 +1151,7 @@ fn assemble_linear_system_impl(
             },
         ),
         constrained_dof_count,
-        constraint_matrix,
+        constraint_matrix: constraint_matrix.clone(),
         affine_constraint_reduction,
         load_count: excitations.len(),
         structural_material,
@@ -1205,8 +1204,44 @@ fn assemble_linear_system_impl(
             });
             let operators = CanonicalRealOperators::try_new(raw_stiffness, mass, damping)
                 .expect("assembled structural operator roles and dimensions are valid");
-            AssembledRealSystem::try_new(operators, constrained, rhs)
-                .expect("assembled structural system is finite and dimensionally consistent")
+            let nullspace_evidence = if let (Some(mesh), Some(plan), Some(_)) = (
+                solver_mesh.as_ref(),
+                constraint_plan,
+                solid_topology.as_ref(),
+            ) {
+                let resolved_storage;
+                let resolved = if let Some(matrix) = constraint_matrix.as_ref() {
+                    matrix
+                } else {
+                    resolved_storage =
+                        resolve_solid_constraint_matrix(plan, mesh, &structural_dof_layout)
+                            .map_err(LinearAssemblyError::ConstraintAlgebra)?;
+                    &resolved_storage
+                };
+                match NullspaceEliminationEvidence::prove_solid(
+                    mesh,
+                    &structural_dof_layout,
+                    plan,
+                    resolved,
+                    operators.stiffness(),
+                    &constrained,
+                ) {
+                    Ok(evidence) => Some(evidence),
+                    Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
+                    Err(error) => {
+                        return Err(LinearAssemblyError::SparseOperator(error.to_string()))
+                    }
+                }
+            } else {
+                None
+            };
+            AssembledRealSystem::try_new_with_nullspace_evidence(
+                operators,
+                constrained,
+                rhs,
+                nullspace_evidence,
+            )
+            .expect("assembled structural system is finite and dimensionally consistent")
         },
     })
 }
@@ -2155,7 +2190,7 @@ fn apply_solid_constraint_plan(
     Ok(())
 }
 
-fn resolve_solid_constraint_matrix(
+pub(crate) fn resolve_solid_constraint_matrix(
     plan: &CanonicalStructuralConstraintPlan,
     mesh: &SolverMeshArtifact,
     layout: &StructuralDofLayout,
@@ -2480,6 +2515,7 @@ mod tests {
 
         assert_eq!(summary.dof_count, 12);
         assert_eq!(summary.structural_solid_element_count, 1);
+        assert!(summary.operator.nullspace_evidence().is_none());
         assert_eq!(summary.structural_solid_recovery.len(), 1);
         assert_eq!(
             summary.structural_solid_recovery[0].node_indices,
@@ -2708,6 +2744,7 @@ mod tests {
         assert!(summary.operator.constrained_dofs()[1]);
         assert!(summary.operator.constrained_dofs()[2]);
         assert_eq!(summary.operator.load()[10], -4.0);
+        assert!(summary.operator.nullspace_evidence().is_some());
     }
 
     #[test]
@@ -3053,6 +3090,7 @@ mod tests {
                 ),
             },
         )];
+        model.constraints.push(fixed_constraint("root"));
         replace_fixture_excitations(
             &mut model,
             vec![FixtureExcitation {
@@ -3066,6 +3104,7 @@ mod tests {
             }],
         );
         let mut mesh = tetrahedron4_mesh();
+        set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["tip"]);
         reseal(&mut mesh);
 
@@ -3080,6 +3119,7 @@ mod tests {
         .expect("valid wrench boundary should assemble");
 
         assert!(summary.structural_moment_projection.is_empty());
+        assert!(summary.operator.nullspace_evidence().is_some());
         assert_eq!(summary.structural_dof_layout.reference_point_count(), 1);
         let reference_ry = summary
             .structural_dof_layout

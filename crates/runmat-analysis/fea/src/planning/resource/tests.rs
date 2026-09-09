@@ -1,0 +1,396 @@
+use std::collections::BTreeSet;
+
+use runmat_analysis_core::AccuracyResourceCeiling;
+use runmat_execution::{
+    resource::{AcceleratorRequest, Capability, ResourceInventory, ResourceUsage},
+    Digest,
+};
+
+use super::*;
+
+fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
+    FeaResourcePlanningInput {
+        estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
+        topology_digest: Digest::sha256("topology"),
+        operator_pattern_digest: Digest::sha256("pattern"),
+        topology: TopologyResourceFacts {
+            nodes: Count(4),
+            elements: Count(1),
+            boundary_faces: Count(4),
+            element_node_references: Count(4),
+            boundary_node_references: Count(12),
+            node_neighbor_references: Count(12),
+            resident_bytes_upper_bound: ByteCount(1_088),
+        },
+        sparse: SparseResourceFacts {
+            rows: Count(4),
+            columns: Count(4),
+            nonzeros: Count(10),
+            value_array_count: Count(3),
+        },
+        constraints: ConstraintResourceFacts {
+            rows: Count(1),
+            coefficients: Count(1),
+            reference_points: Count(0),
+            resident_bytes_upper_bound: ByteCount(120),
+        },
+        assembly: AssemblyResourcePolicy {
+            contribution_nonzero_upper_bound: Count(10),
+            contribution_bytes_upper_bound: ByteCount(240),
+            scratch_bytes_per_element: ByteCount(10),
+            fixed_scratch_bytes_per_worker: ByteCount(20),
+        },
+        solve: SolveResourcePolicy::Iterative {
+            vector_count: Count(5),
+            scalar: NumericalScalar::RealF64,
+            preconditioner: PreconditionerStorage::Diagonal,
+        },
+        recovery: RecoveryResourcePolicy {
+            resident_value_count: Count(4),
+            resident_bytes_upper_bound: ByteCount(32),
+            scratch_bytes: ByteCount(40),
+            retained_bytes: ByteCount(32),
+        },
+        observations: ObservationResourceFacts {
+            sample_count: Count(1),
+            operation_count: Count(100),
+            peak_resident_bytes: ByteCount(64),
+            stored_bytes: ByteCount(200),
+            transfer_bytes: ByteCount(150),
+            collective_count: Count(0),
+        },
+        publication: CheckpointArtifactPolicy {
+            checkpoint_bytes: ByteCount(50),
+            artifact_overhead_bytes: ByteCount(20),
+            relay_bytes: ByteCount(12),
+            result_egress_bytes: ByteCount(30),
+            checkpoint_egress_bytes: ByteCount(40),
+        },
+        worker: WorkerResourcePolicy {
+            cpu_millicores: 1_000,
+            maximum_wall_milliseconds: 1_000,
+            fixed_memory_bytes: ByteCount(100),
+            fixed_scratch_bytes: ByteCount(5),
+            required_capabilities: BTreeSet::from([Capability::NetworkDenied]),
+            accelerators: Vec::new(),
+        },
+        partitioning,
+        accuracy_demand: AccuracyResourceDemand {
+            refinement_cycles: Count(0),
+            solver_tightenings: Count(0),
+            samples: Count(1),
+        },
+        accuracy_ceiling: AccuracyResourceCeiling {
+            maximum_refinement_cycles: 1,
+            maximum_solver_tightenings: 1,
+            maximum_samples: 4,
+            maximum_wall_time_milliseconds: 10_000,
+            maximum_resident_bytes: 10_000,
+        },
+    }
+}
+
+fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
+    ResourceInventory {
+        cpu_millicores: 2_000,
+        memory_bytes,
+        scratch_bytes,
+        accelerators: Vec::new(),
+        capabilities: BTreeSet::from([Capability::NetworkDenied]),
+    }
+}
+
+#[test]
+fn exact_small_estimate_separates_all_resource_classes() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+
+    assert_eq!(plan.breakdown.topology_bytes, ByteCount(1_088));
+    assert_eq!(plan.breakdown.csr_row_offset_bytes, ByteCount(40));
+    assert_eq!(plan.breakdown.csr_column_index_bytes, ByteCount(80));
+    assert_eq!(plan.breakdown.csr_value_bytes, ByteCount(240));
+    assert_eq!(plan.breakdown.assembly_contribution_bytes, ByteCount(240));
+    assert_eq!(plan.breakdown.solve_vector_bytes, ByteCount(160));
+    assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(32));
+    assert_eq!(plan.breakdown.constraint_bytes, ByteCount(120));
+    assert_eq!(plan.breakdown.observation_operation_count, Count(100));
+    assert_eq!(plan.request.memory_bytes, 1_908);
+    assert_eq!(plan.request.scratch_bytes, 45);
+    assert_eq!(plan.request.max_artifact_bytes, 302);
+    assert_eq!(plan.request.max_egress_bytes, 220);
+    assert_eq!(plan.request.max_relay_bytes, 12);
+    plan.validate_identity().unwrap();
+}
+
+#[test]
+fn overflow_and_impossible_sparse_facts_are_rejected() {
+    let mut overflow = input(PartitioningPolicy::Monolithic);
+    overflow.sparse.rows = Count(u64::MAX);
+    overflow.sparse.columns = Count(u64::MAX);
+    assert!(matches!(
+        build_resource_plan(overflow),
+        Err(ResourcePlanningError::Overflow("sparse dense bound"))
+    ));
+
+    let mut impossible = input(PartitioningPolicy::Monolithic);
+    impossible.sparse.nonzeros = Count(17);
+    assert!(matches!(
+        build_resource_plan(impossible),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+}
+
+#[test]
+fn understated_resident_bounds_are_rejected() {
+    let mut topology = input(PartitioningPolicy::Monolithic);
+    topology.topology.resident_bytes_upper_bound = ByteCount(1);
+    assert!(matches!(
+        build_resource_plan(topology),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut constraints = input(PartitioningPolicy::Monolithic);
+    constraints.constraints.resident_bytes_upper_bound = ByteCount(1);
+    assert!(matches!(
+        build_resource_plan(constraints),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut contributions = input(PartitioningPolicy::Monolithic);
+    contributions.assembly.contribution_bytes_upper_bound = ByteCount(1);
+    assert!(matches!(
+        build_resource_plan(contributions),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut recovery = input(PartitioningPolicy::Monolithic);
+    recovery.recovery.resident_bytes_upper_bound = ByteCount(1);
+    assert!(matches!(
+        build_resource_plan(recovery),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut preconditioner = input(PartitioningPolicy::Monolithic);
+    preconditioner.solve = SolveResourcePolicy::Iterative {
+        vector_count: Count(2),
+        scalar: NumericalScalar::RealF64,
+        preconditioner: PreconditionerStorage::SparseCsr {
+            nonzero_upper_bound: Count(10),
+            resident_bytes_upper_bound: ByteCount(1),
+        },
+    };
+    assert!(matches!(
+        build_resource_plan(preconditioner),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+
+    let mut factor = input(PartitioningPolicy::Monolithic);
+    factor.solve = SolveResourcePolicy::DirectFactorization {
+        vector_count: Count(2),
+        scalar: NumericalScalar::RealF64,
+        factor_nonzero_upper_bound: Count(10),
+        factor_bytes_upper_bound: ByteCount(1),
+    };
+    assert!(matches!(
+        build_resource_plan(factor),
+        Err(ResourcePlanningError::Invalid(_))
+    ));
+}
+
+#[test]
+fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
+    let real = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut complex_input = input(PartitioningPolicy::Monolithic);
+    complex_input.solve = SolveResourcePolicy::Iterative {
+        vector_count: Count(5),
+        scalar: NumericalScalar::ComplexF64,
+        preconditioner: PreconditionerStorage::Diagonal,
+    };
+    let complex = build_resource_plan(complex_input).unwrap();
+
+    assert_eq!(complex.breakdown.solve_vector_bytes, ByteCount(320));
+    assert_eq!(complex.breakdown.preconditioner_bytes, ByteCount(64));
+    assert!(complex.request.memory_bytes > real.request.memory_bytes);
+}
+
+#[test]
+fn accuracy_ceiling_is_enforced_before_inventory_admission() {
+    let mut memory = input(PartitioningPolicy::Monolithic);
+    memory.accuracy_ceiling.maximum_resident_bytes = 1_000;
+    assert!(matches!(
+        admit_resource_plan(memory, &inventory(10_000, 10_000)),
+        ResourceAdmission::Reject {
+            reason: ResourcePlanningError::AccuracyCeiling("resident memory")
+        }
+    ));
+
+    let mut samples = input(PartitioningPolicy::Monolithic);
+    samples.accuracy_demand.samples = Count(5);
+    assert!(matches!(
+        build_resource_plan(samples),
+        Err(ResourcePlanningError::AccuracyCeiling("samples"))
+    ));
+}
+
+#[test]
+fn inventory_admits_or_rejects_a_monolithic_plan() {
+    assert!(matches!(
+        admit_resource_plan(
+            input(PartitioningPolicy::Monolithic),
+            &inventory(2_000, 100)
+        ),
+        ResourceAdmission::Admit { .. }
+    ));
+    assert!(matches!(
+        admit_resource_plan(
+            input(PartitioningPolicy::Monolithic),
+            &inventory(1_000, 100)
+        ),
+        ResourceAdmission::Reject {
+            reason: ResourcePlanningError::Inventory("memory or scratch")
+        }
+    ));
+}
+
+#[test]
+fn operator_domain_work_gets_a_conservative_partition_recommendation() {
+    let decision = admit_resource_plan(
+        input(PartitioningPolicy::OperatorDomain {
+            maximum_partitions: 4,
+            replicated_memory_bytes_per_partition: ByteCount(20),
+            halo_memory_bytes_per_partition: ByteCount(10),
+            replicated_scratch_bytes_per_partition: ByteCount(2),
+            halo_scratch_bytes_per_partition: ByteCount(3),
+        }),
+        &inventory(1_040, 100),
+    );
+    let ResourceAdmission::RequiresPartitioning {
+        minimum_partition_count,
+        per_partition_request,
+        ..
+    } = decision
+    else {
+        panic!("operator/domain work should receive a partition recommendation");
+    };
+    assert_eq!(minimum_partition_count, 2);
+    assert_eq!(per_partition_request.memory_bytes, 1_034);
+    assert_eq!(per_partition_request.scratch_bytes, 30);
+}
+
+#[test]
+fn missing_capability_or_accelerator_rejects_before_memory_admission() {
+    let no_capability = ResourceInventory {
+        capabilities: BTreeSet::new(),
+        ..inventory(10_000, 10_000)
+    };
+    assert!(matches!(
+        admit_resource_plan(input(PartitioningPolicy::Monolithic), &no_capability),
+        ResourceAdmission::Reject {
+            reason: ResourcePlanningError::Capability(Capability::NetworkDenied)
+        }
+    ));
+
+    let mut accelerated = input(PartitioningPolicy::Monolithic);
+    accelerated.worker.accelerators = vec![AcceleratorRequirement {
+        class: "gpu".into(),
+        count: 1,
+        memory_bytes_each: ByteCount(4_096),
+    }];
+    let inadequate = ResourceInventory {
+        accelerators: vec![AcceleratorRequest {
+            class: "gpu".into(),
+            count: 1,
+            memory_bytes_each: 2_048,
+        }],
+        ..inventory(10_000, 10_000)
+    };
+    assert!(matches!(
+        admit_resource_plan(accelerated, &inadequate),
+        ResourceAdmission::Reject {
+            reason: ResourcePlanningError::Accelerator { .. }
+        }
+    ));
+}
+
+#[test]
+fn observation_cost_changes_memory_artifacts_transfer_and_identity() {
+    let baseline = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut changed_input = input(PartitioningPolicy::Monolithic);
+    changed_input.observations.peak_resident_bytes = ByteCount(400);
+    changed_input.observations.stored_bytes = ByteCount(500);
+    changed_input.observations.transfer_bytes = ByteCount(450);
+    let changed = build_resource_plan(changed_input).unwrap();
+
+    assert!(changed.request.memory_bytes > baseline.request.memory_bytes);
+    assert!(changed.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
+    assert!(changed.request.max_egress_bytes > baseline.request.max_egress_bytes);
+    assert_ne!(changed.identity, baseline.identity);
+    assert_eq!(
+        build_resource_plan(input(PartitioningPolicy::Monolithic))
+            .unwrap()
+            .identity,
+        baseline.identity
+    );
+}
+
+#[test]
+fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let identity = plan.identity;
+    let actual = AnalysisResourceUsage {
+        scheduler: ResourceUsage {
+            cpu_core_millis: 1_001,
+            memory_byte_millis: 1_908_001,
+            wall_millis: 1_001,
+            egress_bytes: 221,
+            relay_bytes: 13,
+            retained_byte_millis: 302_001,
+            ..ResourceUsage::default()
+        },
+        peak_cpu_millicores: 1_001,
+        peak_memory_bytes: ByteCount(plan.request.memory_bytes + 1),
+        peak_scratch_bytes: ByteCount(plan.request.scratch_bytes + 1),
+        artifact_bytes: ByteCount(plan.request.max_artifact_bytes + 1),
+    };
+    let overruns = reconcile_resource_usage(&plan, &actual).unwrap();
+
+    assert_eq!(overruns.len(), 10);
+    assert_eq!(plan.identity, identity);
+    plan.validate_identity().unwrap();
+}
+
+#[test]
+fn reconciliation_checks_accelerator_device_time() {
+    let mut accelerated = input(PartitioningPolicy::Monolithic);
+    accelerated.worker.accelerators = vec![AcceleratorRequirement {
+        class: "gpu".into(),
+        count: 1,
+        memory_bytes_each: ByteCount(4_096),
+    }];
+    let plan = build_resource_plan(accelerated).unwrap();
+    let actual = AnalysisResourceUsage {
+        scheduler: ResourceUsage {
+            accelerator_millis: vec![runmat_execution::resource::AcceleratorUsage {
+                class: "gpu".into(),
+                device_millis: 1_001,
+            }],
+            ..ResourceUsage::default()
+        },
+        peak_cpu_millicores: 0,
+        peak_memory_bytes: ByteCount(0),
+        peak_scratch_bytes: ByteCount(0),
+        artifact_bytes: ByteCount(0),
+    };
+
+    assert!(matches!(
+        reconcile_resource_usage(&plan, &actual).unwrap().as_slice(),
+        [ResourceOverrun::AcceleratorTime { .. }]
+    ));
+}
+
+#[test]
+fn deserialization_revalidates_derived_plan_fields() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut encoded = serde_json::to_value(plan).unwrap();
+    encoded["request"]["memory_bytes"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<FeaResourcePlan>(encoded).is_err());
+}

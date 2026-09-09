@@ -265,9 +265,7 @@ pub(crate) fn package_exact_structural_study_result(
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let signal_objects = unique_references(signal_closures.into_iter().flatten())?;
-    let analysis_closures = sequence
-        .result_closures(&decoded.artifact_access)
-        .map_err(protocol)?;
+    let analysis_closures = sequence.result_closures().map_err(protocol)?;
     let analysis_objects =
         unique_references(
             analysis_closures

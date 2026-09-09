@@ -50,18 +50,14 @@ pub struct PreparedAnalysisHostInvocation {
 
 pub fn prepare_analysis_host_program(
     program_revision: ProgramRevision,
-    requested_outputs: u16,
 ) -> AnalysisBridgeResult<AnalysisHostProgramArtifact> {
-    if requested_outputs == 0 {
-        return Err(AnalysisBridgeError::Invalid(
-            "analysis host output count must be non-zero".into(),
-        ));
-    }
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision,
         entrypoint: "analysis_workload".into(),
-        outputs: OutputContract { requested_outputs },
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
         execution_mode: ANALYSIS_HOST_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(ANALYSIS_HOST_TARGET_PROFILE),
         features: Default::default(),
@@ -155,9 +151,6 @@ impl AnalysisHostWorkload {
         input_roots: &[ValueRef],
     ) -> AnalysisBridgeResult<PreparedAnalysisHostInvocation> {
         self.validate_inputs(input_roots)?;
-        let requested_outputs = u16::try_from(self.workload.outputs.len()).map_err(|_| {
-            AnalysisBridgeError::Invalid("analysis output count is not representable".into())
-        })?;
         let descriptor = LogicalObject::new(
             ObjectNamespace::InputValue,
             format!(
@@ -173,7 +166,7 @@ impl AnalysisHostWorkload {
             ANALYSIS_HOST_INVOCATION_VALUE_SCHEMA,
         )?;
         let AnalysisHostProgramArtifact { recipe, artifact } =
-            prepare_analysis_host_program(program_revision, requested_outputs)?;
+            prepare_analysis_host_program(program_revision)?;
         let mut arguments = Vec::with_capacity(input_roots.len() + 1);
         arguments.push(ValuePayload::Object(Box::new(descriptor_root)));
         arguments.extend(
@@ -188,7 +181,7 @@ impl AnalysisHostWorkload {
             artifact,
             function: 0,
             arguments,
-            requested_outputs,
+            requested_outputs: 1,
         };
         request.validate()?;
         Ok(PreparedAnalysisHostInvocation {

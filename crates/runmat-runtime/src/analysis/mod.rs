@@ -1283,11 +1283,11 @@ fn analysis_run_study_with_structural_executor(
             BTreeMap::from([("study_id".to_string(), prepared.spec.study_id.clone())]),
         ));
     }
-    let study_identity = StudyIdentity::new(analysis_study_content_digest(&prepared.spec), None)
-        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-    let sequence_identity =
-        SequenceIdentity::from_authored(study_identity, &prepared.model.sequence)
+    let _study_identity =
+        StudyIdentity::from_authored_digest(analysis_study_content_digest(&prepared.spec), None)
             .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
+    let sequence_identity = SequenceIdentity::from_solver_contract(&prepared.model.sequence)
+        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
     let topology_digest = in_process_study_topology_digest(&prepared)?;
     let mut completed = Vec::with_capacity(prepared.steps.len());
     let mut states = Vec::new();
@@ -1300,8 +1300,9 @@ fn analysis_run_study_with_structural_executor(
             &prepared.context,
             structural_executor,
         )?;
-        let step_identity = StepIdentity::from_authored(sequence_identity, &step.procedure_step)
-            .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
+        let step_identity =
+            StepIdentity::from_solver_contract(sequence_identity, &step.procedure_step)
+                .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
         let result_bytes = serde_json::to_vec(&run.data.run)
             .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
         let solver_result_identity = SolverResultIdentity::from_step_result(
@@ -2657,6 +2658,7 @@ fn solve_acoustic_harmonic(
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
         spatial_projection_evidence: Vec::new(),
+        observations: Vec::new(),
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
                 code: "FEA_ACOUSTIC_HELMHOLTZ_RESIDUAL".to_string(),
@@ -4473,6 +4475,7 @@ fn solve_cfd_finite_volume_run(
         preconditioner: SolverPreconditioner::FiniteVolumePressureBalance,
         solver_host_sync_count: 0,
         spatial_projection_evidence: Vec::new(),
+        observations: Vec::new(),
         diagnostics: vec![
             runmat_analysis_fea::diagnostics::FeaDiagnostic {
                 code: "FEA_CFD_RESIDUAL".to_string(),
@@ -7217,6 +7220,7 @@ pub fn analysis_run_fsi_with_options_op(
         solver_host_sync_count: 0,
         diagnostics: Vec::new(),
         spatial_projection_evidence: Vec::new(),
+        observations: Vec::new(),
         fields: fsi_fields,
     };
     let reynolds_number = cfd_reynolds_number_for_velocity(

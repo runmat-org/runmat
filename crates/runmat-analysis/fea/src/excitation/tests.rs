@@ -19,7 +19,8 @@ fn realize_static(
 }
 
 fn tabulated_force_model(
-    axis: runmat_analysis_core::SignalAxis,
+    domain: runmat_analysis_core::TabulatedSignalDomain,
+    axis: Vec<f64>,
 ) -> runmat_analysis_core::AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
@@ -27,20 +28,23 @@ fn tabulated_force_model(
     };
     signal.representation = runmat_analysis_core::SignalRepresentation::Tabulated(
         runmat_analysis_core::TabulatedSignal {
-            axis,
-            values: [[0.0, 0.0, 0.0], [20.0, 40.0, 60.0]]
+            domain,
+            knots: axis
                 .into_iter()
-                .map(|value| {
-                    runmat_analysis_core::SignalOrdinate::Real(
-                        runmat_analysis_core::SignalValue::Vector3(
-                            value.map(runmat_analysis_core::Force::new),
+                .zip([[0.0, 0.0, 0.0], [20.0, 40.0, 60.0]])
+                .map(|(abscissa, value)| {
+                    runmat_analysis_core::SignalKnot::continuous(
+                        abscissa,
+                        runmat_analysis_core::SignalOrdinate::Real(
+                            runmat_analysis_core::SignalValue::Vector3(
+                                value.map(runmat_analysis_core::Force::new),
+                            ),
                         ),
                     )
                 })
                 .collect(),
             interpolation: runmat_analysis_core::SignalInterpolation::Linear,
             extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
-            breakpoints: Vec::new(),
         },
     );
     signal.evidence.sample_count = 2;
@@ -63,6 +67,56 @@ fn set_table_policy(
     table.extrapolation = extrapolation;
 }
 
+fn force_ordinate(x: f64) -> runmat_analysis_core::SignalOrdinate<runmat_analysis_core::Force> {
+    runmat_analysis_core::SignalOrdinate::Real(runmat_analysis_core::SignalValue::Vector3([
+        runmat_analysis_core::Force::new(x),
+        runmat_analysis_core::Force::new(0.0),
+        runmat_analysis_core::Force::new(0.0),
+    ]))
+}
+
+fn jump_force_model(
+    continuity: runmat_analysis_core::SignalPointContinuity,
+) -> runmat_analysis_core::AnalysisModel {
+    let mut model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        unreachable!()
+    };
+    let runmat_analysis_core::SignalRepresentation::Tabulated(table) = &mut signal.representation
+    else {
+        unreachable!()
+    };
+    table.knots = vec![
+        runmat_analysis_core::SignalKnot::continuous(0.0, force_ordinate(0.0)),
+        runmat_analysis_core::SignalKnot::jump(
+            0.5,
+            force_ordinate(10.0),
+            force_ordinate(30.0),
+            continuity,
+        ),
+        runmat_analysis_core::SignalKnot::continuous(1.0, force_ordinate(40.0)),
+    ];
+    signal.evidence.sample_count = 3;
+    model
+}
+
+fn force_x(model: &runmat_analysis_core::AnalysisModel, sample: ExcitationSamplePoint<'_>) -> f64 {
+    let step = &model.sequence.steps[0].step_id.0;
+    match &realize_excitations(model, Some(step), sample)
+        .unwrap()
+        .iter()
+        .next()
+        .unwrap()
+        .kind
+    {
+        RealizedExcitationKind::Force(value) => value.real[0],
+        _ => unreachable!(),
+    }
+}
+
 #[test]
 fn realizes_typed_force_signal() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -79,9 +133,10 @@ fn realizes_typed_force_signal() {
 
 #[test]
 fn static_realization_does_not_implicitly_take_the_first_time_sample() {
-    let model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 1.0,
-    ]));
+    let model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
 
     let error = realize_static(&model).unwrap_err();
 
@@ -106,34 +161,32 @@ fn mutually_exclusive_cases_require_an_explicit_selection() {
 
 #[test]
 fn malformed_tabulated_shape_fails_before_ordinate_indexing() {
-    let model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 0.5, 1.0,
-    ]));
+    let model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 0.0],
+    );
     let step = model.sequence.steps[0].step_id.clone();
 
-    let error = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(0.25),
-    )
-    .unwrap_err();
+    let error =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(0.25)).unwrap_err();
 
     assert_eq!(
         error.to_string(),
-        "tabulated axis must be finite, strictly increasing, and match values"
+        "tabulated knots must have finite, strictly increasing abscissae"
     );
 }
 
 #[test]
 fn explicit_time_and_parameter_samples_use_the_matching_domain() {
-    let time_model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 1.0,
-    ]));
+    let time_model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
     let time_step = time_model.sequence.steps[0].step_id.clone();
     let time = realize_excitations(
         &time_model,
         Some(&time_step.0),
-        ExcitationSamplePoint::TimeSeconds(0.25),
+        ExcitationSamplePoint::time(0.25),
     )
     .unwrap();
     assert!(matches!(
@@ -141,10 +194,12 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
         RealizedExcitationKind::Force(value) if value.real == [5.0, 10.0, 15.0]
     ));
 
-    let parameter_model = tabulated_force_model(runmat_analysis_core::SignalAxis::StudyParameter {
-        parameter_id: "load_scale".into(),
-        canonical_values: vec![0.0, 1.0],
-    });
+    let parameter_model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
+            parameter_id: "load_scale".into(),
+        },
+        vec![0.0, 1.0],
+    );
     let parameter_step = parameter_model.sequence.steps[0].step_id.clone();
     let parameter = realize_excitations(
         &parameter_model,
@@ -152,6 +207,7 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
         ExcitationSamplePoint::StudyParameter {
             parameter_id: "load_scale",
             canonical_value: 0.5,
+            approach: runmat_analysis_core::SignalSampleApproach::At,
         },
     )
     .unwrap();
@@ -163,21 +219,18 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
 
 #[test]
 fn step_interpolation_selects_the_documented_side_of_an_interval() {
-    let mut model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 1.0,
-    ]));
+    let mut model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
     let step = model.sequence.steps[0].step_id.clone();
     set_table_policy(
         &mut model,
-        runmat_analysis_core::SignalInterpolation::StepLeft,
+        runmat_analysis_core::SignalInterpolation::LeftEndpoint,
         runmat_analysis_core::SignalExtrapolation::Reject,
     );
-    let left = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(0.5),
-    )
-    .unwrap();
+    let left =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(0.5)).unwrap();
     assert!(matches!(
         left.iter().next().unwrap().kind,
         RealizedExcitationKind::Force(value) if value.real == [0.0; 3]
@@ -185,15 +238,11 @@ fn step_interpolation_selects_the_documented_side_of_an_interval() {
 
     set_table_policy(
         &mut model,
-        runmat_analysis_core::SignalInterpolation::StepRight,
+        runmat_analysis_core::SignalInterpolation::RightEndpoint,
         runmat_analysis_core::SignalExtrapolation::Reject,
     );
-    let right = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(0.5),
-    )
-    .unwrap();
+    let right =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(0.5)).unwrap();
     assert!(matches!(
         right.iter().next().unwrap().kind,
         RealizedExcitationKind::Force(value) if value.real == [20.0, 40.0, 60.0]
@@ -201,22 +250,144 @@ fn step_interpolation_selects_the_documented_side_of_an_interval() {
 }
 
 #[test]
+fn jump_knots_have_distinct_point_and_one_sided_values() {
+    let left = jump_force_model(runmat_analysis_core::SignalPointContinuity::Left);
+    assert_eq!(force_x(&left, ExcitationSamplePoint::time(0.5)), 10.0);
+    assert_eq!(
+        force_x(
+            &left,
+            ExcitationSamplePoint::TimeSeconds {
+                value: 0.5,
+                approach: runmat_analysis_core::SignalSampleApproach::LeftLimit,
+            },
+        ),
+        10.0
+    );
+    assert_eq!(
+        force_x(
+            &left,
+            ExcitationSamplePoint::TimeSeconds {
+                value: 0.5,
+                approach: runmat_analysis_core::SignalSampleApproach::RightLimit,
+            },
+        ),
+        30.0
+    );
+
+    let right = jump_force_model(runmat_analysis_core::SignalPointContinuity::Right);
+    assert_eq!(force_x(&right, ExcitationSamplePoint::time(0.5)), 30.0);
+    assert_eq!(force_x(&right, ExcitationSamplePoint::time(0.25)), 5.0);
+    assert_eq!(force_x(&right, ExcitationSamplePoint::time(0.75)), 35.0);
+}
+
+#[test]
+fn one_sided_sampling_rejects_missing_endpoint_limits() {
+    let model = jump_force_model(runmat_analysis_core::SignalPointContinuity::Right);
+    let step = &model.sequence.steps[0].step_id.0;
+    let error = realize_excitations(
+        &model,
+        Some(step),
+        ExcitationSamplePoint::TimeSeconds {
+            value: 0.0,
+            approach: runmat_analysis_core::SignalSampleApproach::LeftLimit,
+        },
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("does not exist at the domain endpoint"));
+}
+
+#[test]
+fn event_inventory_ignores_unreferenced_signal_jumps() {
+    let mut model = jump_force_model(runmat_analysis_core::SignalPointContinuity::Right);
+    model.sequence.steps[0].activations = vec![runmat_analysis_core::StepObjectActivation {
+        object: runmat_analysis_core::StepObjectRef::Excitation("tip_load".into()),
+        lifecycle: runmat_analysis_core::ActivationLifecycle::Activate,
+    }];
+    let mut unused = model.signals[0].clone();
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut unused else {
+        unreachable!()
+    };
+    signal.signal_id = runmat_analysis_core::SignalId("unused.force".into());
+    let runmat_analysis_core::SignalRepresentation::Tabulated(table) = &mut signal.representation
+    else {
+        unreachable!()
+    };
+    table.knots[1].abscissa = 0.25;
+    model.signals.push(unused);
+
+    let displacement_id = runmat_analysis_core::SignalId("inactive.displacement".into());
+    let displacement = |value: f64| {
+        runmat_analysis_core::SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(
+            runmat_analysis_core::Displacement::new(value),
+        ))
+    };
+    model
+        .signals
+        .push(runmat_analysis_core::PhysicalSignal::Displacement(
+            runmat_analysis_core::Signal {
+                signal_id: displacement_id.clone(),
+                shape: runmat_analysis_core::SignalShape::Scalar,
+                frame: None,
+                representation: runmat_analysis_core::SignalRepresentation::Tabulated(
+                    runmat_analysis_core::TabulatedSignal {
+                        domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+                        knots: vec![
+                            runmat_analysis_core::SignalKnot::continuous(0.0, displacement(0.0)),
+                            runmat_analysis_core::SignalKnot::jump(
+                                0.25,
+                                displacement(0.0),
+                                displacement(1.0),
+                                runmat_analysis_core::SignalPointContinuity::Right,
+                            ),
+                            runmat_analysis_core::SignalKnot::continuous(1.0, displacement(1.0)),
+                        ],
+                        interpolation: runmat_analysis_core::SignalInterpolation::LeftEndpoint,
+                        extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
+                    },
+                ),
+                precision: runmat_analysis_core::SignalPrecision::Real64,
+                evidence: runmat_analysis_core::SignalApproximationEvidence {
+                    max_absolute_error: Some(0.0),
+                    max_relative_error: Some(0.0),
+                    derivative_max_absolute_error: None,
+                    sample_count: 3,
+                },
+                provenance: runmat_analysis_core::SignalProvenance::Authored,
+            },
+        ));
+    model
+        .constraints
+        .push(runmat_analysis_core::AnalysisConstraint::Structural(
+            runmat_analysis_core::StructuralConstraint {
+                constraint_id: "inactive_constraint".into(),
+                frame: runmat_analysis_core::CoordinateFrame::Global,
+                kind: runmat_analysis_core::StructuralConstraintKind::NormalDisplacement {
+                    target: runmat_analysis_core::RegionTarget::boundary("fixed"),
+                    value: runmat_analysis_core::PrescribedValue::Signal(displacement_id),
+                },
+            },
+        ));
+
+    let events = super::time_discontinuities(&model, &model.sequence.steps[0], 0.0, 1.0).unwrap();
+    assert_eq!(events, vec![0.5]);
+}
+
+#[test]
 fn extrapolation_policy_is_applied_without_numeric_sentinels() {
-    let mut model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 1.0,
-    ]));
+    let mut model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
     let step = model.sequence.steps[0].step_id.clone();
     set_table_policy(
         &mut model,
         runmat_analysis_core::SignalInterpolation::Linear,
         runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
     );
-    let held = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(2.0),
-    )
-    .unwrap();
+    let held =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(2.0)).unwrap();
     assert!(matches!(
         held.iter().next().unwrap().kind,
         RealizedExcitationKind::Force(value) if value.real == [20.0, 40.0, 60.0]
@@ -227,12 +398,8 @@ fn extrapolation_policy_is_applied_without_numeric_sentinels() {
         runmat_analysis_core::SignalInterpolation::Linear,
         runmat_analysis_core::SignalExtrapolation::Zero,
     );
-    let zero = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(-1.0),
-    )
-    .unwrap();
+    let zero =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(-1.0)).unwrap();
     assert!(matches!(
         zero.iter().next().unwrap().kind,
         RealizedExcitationKind::Force(value) if value.real == [0.0; 3]
@@ -243,33 +410,32 @@ fn extrapolation_policy_is_applied_without_numeric_sentinels() {
         runmat_analysis_core::SignalInterpolation::Linear,
         runmat_analysis_core::SignalExtrapolation::Reject,
     );
-    let error = realize_excitations(
-        &model,
-        Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(-1.0),
-    )
-    .unwrap_err();
+    let error =
+        realize_excitations(&model, Some(&step.0), ExcitationSamplePoint::time(-1.0)).unwrap_err();
     assert_eq!(error.to_string(), "sample lies outside signal domain");
 }
 
 #[test]
 fn rejects_nonfinite_and_mismatched_parameter_samples() {
-    let time_model = tabulated_force_model(runmat_analysis_core::SignalAxis::TimeSeconds(vec![
-        0.0, 1.0,
-    ]));
+    let time_model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        vec![0.0, 1.0],
+    );
     let step = time_model.sequence.steps[0].step_id.clone();
     let error = realize_excitations(
         &time_model,
         Some(&step.0),
-        ExcitationSamplePoint::TimeSeconds(f64::NAN),
+        ExcitationSamplePoint::time(f64::NAN),
     )
     .unwrap_err();
     assert_eq!(error.to_string(), "excitation sample point must be finite");
 
-    let parameter_model = tabulated_force_model(runmat_analysis_core::SignalAxis::StudyParameter {
-        parameter_id: "load_scale".into(),
-        canonical_values: vec![0.0, 1.0],
-    });
+    let parameter_model = tabulated_force_model(
+        runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
+            parameter_id: "load_scale".into(),
+        },
+        vec![0.0, 1.0],
+    );
     let step = parameter_model.sequence.steps[0].step_id.clone();
     let error = realize_excitations(
         &parameter_model,
@@ -277,6 +443,7 @@ fn rejects_nonfinite_and_mismatched_parameter_samples() {
         ExcitationSamplePoint::StudyParameter {
             parameter_id: "temperature_scale",
             canonical_value: 0.5,
+            approach: runmat_analysis_core::SignalSampleApproach::At,
         },
     )
     .unwrap_err();
@@ -376,20 +543,22 @@ fn preserves_complex_frequency_domain_current_density() {
                 frame: Some(runmat_analysis_core::CoordinateFrame::Global),
                 representation: runmat_analysis_core::SignalRepresentation::Tabulated(
                     runmat_analysis_core::TabulatedSignal {
-                        axis: runmat_analysis_core::SignalAxis::FrequencyHertz(vec![60.0]),
-                        values: vec![runmat_analysis_core::SignalOrdinate::Complex {
-                            real: runmat_analysis_core::SignalValue::Vector3(
-                                [1.0, 2.0, 3.0]
-                                    .map(runmat_analysis_core::ElectricCurrentDensity::new),
-                            ),
-                            imaginary: runmat_analysis_core::SignalValue::Vector3(
-                                [4.0, 5.0, 6.0]
-                                    .map(runmat_analysis_core::ElectricCurrentDensity::new),
-                            ),
-                        }],
+                        domain: runmat_analysis_core::TabulatedSignalDomain::FrequencyHertz,
+                        knots: vec![runmat_analysis_core::SignalKnot::continuous(
+                            60.0,
+                            runmat_analysis_core::SignalOrdinate::Complex {
+                                real: runmat_analysis_core::SignalValue::Vector3(
+                                    [1.0, 2.0, 3.0]
+                                        .map(runmat_analysis_core::ElectricCurrentDensity::new),
+                                ),
+                                imaginary: runmat_analysis_core::SignalValue::Vector3(
+                                    [4.0, 5.0, 6.0]
+                                        .map(runmat_analysis_core::ElectricCurrentDensity::new),
+                                ),
+                            },
+                        )],
                         interpolation: runmat_analysis_core::SignalInterpolation::Linear,
                         extrapolation: runmat_analysis_core::SignalExtrapolation::HoldEndpoint,
-                        breakpoints: Vec::new(),
                     },
                 ),
                 precision: runmat_analysis_core::SignalPrecision::Complex64,
@@ -412,7 +581,7 @@ fn preserves_complex_frequency_domain_current_density() {
     let realized = realize_step_excitations(
         &model,
         &model.sequence.steps[0],
-        ExcitationSamplePoint::FrequencyHertz(60.0),
+        ExcitationSamplePoint::frequency(60.0),
     )
     .expect("complex current should realize");
     assert!(matches!(

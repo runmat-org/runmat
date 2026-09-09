@@ -74,11 +74,14 @@ fn time_signal<Q>(
         shape,
         frame,
         representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: SignalAxis::TimeSeconds(times),
-            values,
+            domain: TabulatedSignalDomain::TimeSeconds,
+            knots: times
+                .into_iter()
+                .zip(values)
+                .map(|(abscissa, value)| SignalKnot::continuous(abscissa, value))
+                .collect(),
             interpolation,
             extrapolation,
-            breakpoints: Vec::new(),
         }),
         precision: SignalPrecision::Real64,
         evidence: SignalApproximationEvidence {
@@ -91,7 +94,7 @@ fn time_signal<Q>(
     }))
 }
 
-fn policies(
+pub(super) fn policies(
     builtin: &'static str,
     interpolation: &Value,
     extrapolation: &Value,

@@ -3,23 +3,31 @@
 //! This module identifies analysis work and numerical objects. Scheduling, placement, transport,
 //! encryption, and object storage remain owned by RunMat's generic execution crates.
 
+mod accuracy;
 mod error;
+mod field;
 mod identity;
 mod object;
+mod observation;
+mod publication;
 mod signal;
 mod solve;
 mod state;
 mod sweep;
 
+pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
+pub use field::FieldRecoveryRequest;
 pub use identity::{
-    AccuracyIdentity, AnalysisAttemptIdentity, AnalysisResultIdentity, AnalysisTaskIdentity,
-    AnalysisWorkKind, AnalysisWorkloadIdentity, ConstraintPlanIdentity, DiscretizationIdentity,
-    ExecutionPlanIdentity, GeneratorIdentity, NumericalPlanIdentity, ObservationIdentity,
-    OperatorIdentity, ProblemIdentity, PublicationIdentity, SequenceIdentity,
-    SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
-    SolverResultIdentity, StateIdentity, StateTransitionIdentity, StepIdentity, StudyIdentity,
-    SweepIdentity, SweepResultIdentity,
+    AccuracyEvaluationRequestIdentity, AccuracyIdentity, AnalysisAttemptIdentity,
+    AnalysisResultIdentity, AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
+    ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
+    FieldRecoveryRequestIdentity, GeneratorIdentity, NumericalPlanIdentity,
+    NumericalReceiptIdentity, ObservationEvaluationRequestIdentity, ObservationIdentity,
+    OperatorIdentity, ProblemIdentity, PublicationIdentity, PublicationRequestIdentity,
+    SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
+    SolverExcitationIdentity, SolverResultIdentity, StateIdentity, StateTransitionIdentity,
+    StepIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, AnalysisChunkDescriptor, AnalysisNumericalObjectKind,
@@ -27,11 +35,16 @@ pub use object::{
     ANALYSIS_CHUNK_VALUE_SCHEMA, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
+pub use observation::ObservationEvaluationRequest;
+pub use publication::ResultPublicationRequest;
 pub use signal::{
-    CanonicalSignalContent, CanonicalSignalRealization, CanonicalSignalRealizationInput,
-    CanonicalSignalValues, SignalInputAdmission,
+    CanonicalSignalContent, CanonicalSignalKnot, CanonicalSignalRealization,
+    CanonicalSignalRealizationInput, CanonicalSignalValues, SignalInputAdmission,
 };
-pub use solve::{StructuralLinearWorkload, StructuralLinearWorkloadResult};
+pub use solve::{
+    StructuralLinearNumericalReceipt, StructuralLinearNumericalReceiptArtifact,
+    StructuralLinearWorkload, StructuralLinearWorkloadResult,
+};
 pub use state::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalStateTransition,
     CanonicalStateTransitionInput, SemanticStatePublicationRequest,

@@ -1,9 +1,10 @@
 use runmat_analysis_core::{
-    CanonicalQuantity, GeneratorDomain, PhysicalSignal, Signal, SignalAxis, SignalOrdinate,
-    SignalProvenance, SignalRepresentation, SignalShape, SignalValue, TabulatedSignal,
+    CanonicalQuantity, GeneratorDomain, PhysicalSignal, Signal, SignalKnot, SignalKnotValue,
+    SignalOrdinate, SignalProvenance, SignalRepresentation, SignalShape, SignalValue,
+    TabulatedSignal, TabulatedSignalDomain,
 };
 use runmat_analysis_fea::execution::{
-    CanonicalSignalContent, CanonicalSignalRealization, CanonicalSignalValues,
+    CanonicalSignalContent, CanonicalSignalKnot, CanonicalSignalRealization, CanonicalSignalValues,
 };
 use runmat_execution::Digest;
 
@@ -11,9 +12,8 @@ use crate::{AdmittedSignalGenerator, AnalysisBridgeError, AnalysisBridgeResult};
 
 /// Derive the same provider-neutral numerical content identity used by generated realizations.
 ///
-/// Authorship and callable provenance deliberately do not enter this digest. Breakpoints are not
-/// silently discarded: generated tables currently cannot encode them, so a table with authored
-/// breakpoint semantics is outside this equivalence contract.
+/// Authorship and callable provenance deliberately do not enter this digest. Knot discontinuities
+/// and point-continuity choices are numerical content and therefore participate in the identity.
 pub fn canonical_tabulated_signal_content_digest(
     signal: &PhysicalSignal,
 ) -> AnalysisBridgeResult<Digest> {
@@ -57,36 +57,42 @@ fn canonicalize_typed_table<Q: CanonicalQuantity>(
             "canonical table content requires a tabulated signal".into(),
         ));
     };
-    if !table.breakpoints.is_empty() {
-        return Err(AnalysisBridgeError::Invalid(
-            "a table with authored breakpoints is not equivalent to a generated realization".into(),
-        ));
-    }
-    let (domain, sample_points) = match &table.axis {
-        SignalAxis::TimeSeconds(points) => (GeneratorDomain::TimeSeconds, points),
-        SignalAxis::FrequencyHertz(points) => (GeneratorDomain::FrequencyHertz, points),
-        SignalAxis::StudyParameter {
-            parameter_id,
-            canonical_values,
-        } => (
-            GeneratorDomain::StudyParameter {
-                parameter_id: parameter_id.clone(),
-            },
-            canonical_values,
-        ),
+    let domain = match &table.domain {
+        TabulatedSignalDomain::TimeSeconds => GeneratorDomain::TimeSeconds,
+        TabulatedSignalDomain::FrequencyHertz => GeneratorDomain::FrequencyHertz,
+        TabulatedSignalDomain::StudyParameter { parameter_id } => GeneratorDomain::StudyParameter {
+            parameter_id: parameter_id.clone(),
+        },
     };
-    let sample_point_bits = sample_points
+    let knots = table
+        .knots
         .iter()
-        .copied()
-        .map(f64::to_bits)
+        .map(|knot| match &knot.value {
+            SignalKnotValue::Continuous(_) => CanonicalSignalKnot::continuous(knot.abscissa),
+            SignalKnotValue::Jump { continuity, .. } => {
+                CanonicalSignalKnot::jump(knot.abscissa, *continuity)
+            }
+        })
         .collect::<Vec<_>>();
-    let values = canonical_table_values(&signal.shape, &table.values, signal.precision)?;
+    let ordinates = table
+        .knots
+        .iter()
+        .flat_map(|knot| match &knot.value {
+            SignalKnotValue::Continuous(value) => vec![value],
+            SignalKnotValue::Jump {
+                left_limit,
+                right_limit,
+                ..
+            } => vec![left_limit, right_limit],
+        })
+        .collect::<Vec<_>>();
+    let values = canonical_table_values(&signal.shape, &ordinates, signal.precision)?;
     CanonicalSignalContent {
         quantity,
         shape: &signal.shape,
         topology_entity_count: None,
         domain: &domain,
-        sample_points: &sample_point_bits,
+        knots: &knots,
         precision: signal.precision,
         values: &values,
         interpolation: table.interpolation,
@@ -99,12 +105,12 @@ fn canonicalize_typed_table<Q: CanonicalQuantity>(
 
 fn canonical_table_values<Q: CanonicalQuantity>(
     shape: &SignalShape,
-    ordinates: &[SignalOrdinate<Q>],
+    ordinates: &[&SignalOrdinate<Q>],
     precision: runmat_analysis_core::SignalPrecision,
 ) -> AnalysisBridgeResult<CanonicalSignalValues> {
     let mut real = Vec::new();
     let mut imaginary = Vec::new();
-    for ordinate in ordinates {
+    for &ordinate in ordinates {
         match ordinate {
             SignalOrdinate::Real(value) if imaginary.is_empty() => {
                 append_signal_value(shape, value, precision, &mut real)?;
@@ -300,17 +306,39 @@ fn materialize_typed_signal<Q: CanonicalQuantity>(
             ))
         }
     };
-    let values = ordinates::<Q>(&authored.shape, component_count, &realization.values)?;
+    let mut ordinates =
+        ordinates::<Q>(&authored.shape, component_count, &realization.values)?.into_iter();
+    let knots = realization
+        .knots()
+        .map(|knot| {
+            let first = ordinates.next().ok_or(AnalysisBridgeError::Identity(
+                "canonical signal realization has fewer ordinates than knots",
+            ))?;
+            Ok(match knot.continuity {
+                None => SignalKnot::continuous(knot.abscissa(), first),
+                Some(continuity) => {
+                    let right_limit = ordinates.next().ok_or(AnalysisBridgeError::Identity(
+                        "canonical signal jump is missing its right limit",
+                    ))?;
+                    SignalKnot::jump(knot.abscissa(), first, right_limit, continuity)
+                }
+            })
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    if ordinates.next().is_some() {
+        return Err(AnalysisBridgeError::Identity(
+            "canonical signal realization has excess ordinates",
+        ));
+    }
     Ok(Signal {
         signal_id: authored.signal_id.clone(),
         shape: authored.shape.clone(),
         frame: authored.frame.clone(),
         representation: SignalRepresentation::Tabulated(TabulatedSignal {
-            axis: signal_axis(&realization.domain, realization.sample_points().collect()),
-            values,
+            domain: signal_domain(&realization.domain),
+            knots,
             interpolation: realization.interpolation,
             extrapolation: realization.extrapolation,
-            breakpoints: Vec::new(),
         }),
         precision: realization.precision,
         evidence: realization.evidence.clone(),
@@ -318,13 +346,12 @@ fn materialize_typed_signal<Q: CanonicalQuantity>(
     })
 }
 
-fn signal_axis(domain: &GeneratorDomain, points: Vec<f64>) -> SignalAxis {
+fn signal_domain(domain: &GeneratorDomain) -> TabulatedSignalDomain {
     match domain {
-        GeneratorDomain::TimeSeconds => SignalAxis::TimeSeconds(points),
-        GeneratorDomain::FrequencyHertz => SignalAxis::FrequencyHertz(points),
-        GeneratorDomain::StudyParameter { parameter_id } => SignalAxis::StudyParameter {
+        GeneratorDomain::TimeSeconds => TabulatedSignalDomain::TimeSeconds,
+        GeneratorDomain::FrequencyHertz => TabulatedSignalDomain::FrequencyHertz,
+        GeneratorDomain::StudyParameter { parameter_id } => TabulatedSignalDomain::StudyParameter {
             parameter_id: parameter_id.clone(),
-            canonical_values: points,
         },
     }
 }

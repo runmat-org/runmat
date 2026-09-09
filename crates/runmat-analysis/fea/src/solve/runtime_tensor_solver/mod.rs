@@ -2,7 +2,10 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{provider, HostTensorView};
 
 use crate::{
-    algebra::{AssembledRealSystem, RealSparseMatrix},
+    algebra::{
+        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner,
+        RealSolver, RealSparseMatrix,
+    },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
@@ -61,6 +64,13 @@ pub fn solve_operator_system_runtime_tensor_with_initial_guess(
     if preconditioner_kind != SpdPreconditionerKind::Jacobi {
         return None;
     }
+    let prepared = operator.prepare_linear().ok()?;
+    validate_prepared_solver_compatibility(
+        &prepared,
+        RealSolver::ConjugateGradient,
+        RealPreconditioner::Jacobi,
+    )
+    .ok()?;
     solve_runtime_tensor_linear_system_internal(
         operator,
         None,
@@ -80,6 +90,12 @@ pub fn prepare_runtime_tensor_operator_system(
     operator: &AssembledRealSystem,
 ) -> Option<RuntimeTensorPreparedLinearSystem> {
     let prepared_system = operator.prepare_linear().ok()?;
+    validate_prepared_solver_compatibility(
+        &prepared_system,
+        RealSolver::ConjugateGradient,
+        RealPreconditioner::Jacobi,
+    )
+    .ok()?;
     let n = prepared_system.dof_count();
     if n == 0 {
         return None;

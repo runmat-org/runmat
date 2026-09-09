@@ -494,12 +494,20 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
         panic!("solver input must be a typed table")
     };
     assert_eq!(
-        table.axis,
-        runmat_analysis_core::SignalAxis::TimeSeconds(vec![0.0, 0.25, 0.5, 0.75, 1.0])
+        table.domain,
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds
+    );
+    assert_eq!(
+        table
+            .knots
+            .iter()
+            .map(|knot| knot.abscissa)
+            .collect::<Vec<_>>(),
+        vec![0.0, 0.25, 0.5, 0.75, 1.0]
     );
     assert!(matches!(
-        &table.values[2],
-        SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(value))
+        &table.knots[2].value,
+        runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(value)))
             if value.newtons == 30.0
     ));
     assert!(matches!(signal.provenance, SignalProvenance::Generated(_)));
@@ -512,7 +520,7 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
 }
 
 #[test]
-fn table_content_identity_rejects_semantics_a_generator_cannot_represent() {
+fn table_content_identity_includes_typed_jump_semantics() {
     let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);
     let admitted = admitted();
     let chunks = plan_signal_generator_chunks(
@@ -543,13 +551,17 @@ fn table_content_identity_rejects_semantics_a_generator_cannot_represent() {
     let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
         unreachable!()
     };
-    table
-        .breakpoints
-        .push(runmat_analysis_core::SignalBreakpoint {
-            abscissa: 0.5,
-            side: runmat_analysis_core::BreakpointSide::Both,
-        });
-    assert!(
-        canonical_tabulated_signal_content_digest(&PhysicalSignal::Force(signal.clone())).is_err()
+    let left = match table.knots[2].value.clone() {
+        runmat_analysis_core::SignalKnotValue::Continuous(value) => value,
+        _ => unreachable!(),
+    };
+    table.knots[2] = runmat_analysis_core::SignalKnot::jump(
+        0.5,
+        left,
+        SignalOrdinate::Real(runmat_analysis_core::SignalValue::Scalar(Force::new(31.0))),
+        runmat_analysis_core::SignalPointContinuity::Right,
     );
+    let jump_digest =
+        canonical_tabulated_signal_content_digest(&PhysicalSignal::Force(signal.clone())).unwrap();
+    assert_ne!(jump_digest, realization.content_digest);
 }

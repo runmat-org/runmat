@@ -2386,6 +2386,7 @@ mod tests {
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
+                observations: Vec::new(),
                 fields,
             },
             render_topology: Some(render_topology),

@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisSequence, ProcedureStep};
+use runmat_analysis_core::{AnalysisModel, AnalysisSequence, ProcedureStep};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
@@ -54,8 +54,13 @@ identity_type!(ObservationIdentity);
 identity_type!(AccuracyIdentity);
 identity_type!(AnalysisResultIdentity);
 identity_type!(SolverResultIdentity);
+identity_type!(NumericalReceiptIdentity);
+identity_type!(FieldRecoveryRequestIdentity);
+identity_type!(ObservationEvaluationRequestIdentity);
+identity_type!(AccuracyEvaluationRequestIdentity);
 identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
+identity_type!(PublicationRequestIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,17 +70,28 @@ pub enum AnalysisWorkKind {
     AssembleOperator,
     Solve,
     RecoverField,
+    PublishState,
     EvaluateObservation,
     EvaluateAccuracy,
     PublishResult,
 }
 
 impl StudyIdentity {
-    pub fn new(
+    pub fn from_authored_digest(
         authored_study_digest: Digest,
         frozen_project_digest: Option<Digest>,
     ) -> AnalysisExecutionResult<Self> {
-        Self::derive("study", &(authored_study_digest, frozen_project_digest))
+        Self::derive(
+            "authored-study",
+            &(authored_study_digest, frozen_project_digest),
+        )
+    }
+
+    pub fn from_authored_contract(
+        model: &AnalysisModel,
+        frozen_project_digest: Option<Digest>,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("authored-study", &(model, frozen_project_digest))
     }
 }
 
@@ -106,15 +122,15 @@ impl SweepIdentity {
 }
 
 impl SequenceIdentity {
-    pub fn new(study: StudyIdentity, sequence_digest: Digest) -> AnalysisExecutionResult<Self> {
-        Self::derive("sequence", &(study, sequence_digest))
+    pub fn new(sequence_digest: Digest) -> AnalysisExecutionResult<Self> {
+        Self::derive("solver-sequence", &sequence_digest)
     }
 
-    pub fn from_authored(
-        study: StudyIdentity,
-        sequence: &AnalysisSequence,
-    ) -> AnalysisExecutionResult<Self> {
-        Self::new(study, derive_digest("authored-sequence", sequence)?)
+    pub fn from_solver_contract(sequence: &AnalysisSequence) -> AnalysisExecutionResult<Self> {
+        Self::new(derive_digest(
+            "solver-sequence-contract",
+            &sequence.solver_identity_contract(),
+        )?)
     }
 }
 
@@ -123,11 +139,14 @@ impl StepIdentity {
         Self::derive("step", &(sequence, step_digest))
     }
 
-    pub fn from_authored(
+    pub fn from_solver_contract(
         sequence: SequenceIdentity,
         step: &ProcedureStep,
     ) -> AnalysisExecutionResult<Self> {
-        Self::new(sequence, derive_digest("authored-step", step)?)
+        Self::new(
+            sequence,
+            derive_digest("solver-step", &step.solver_identity_contract())?,
+        )
     }
 }
 
@@ -303,12 +322,8 @@ impl NumericalPlanIdentity {
     pub fn new(
         operator: OperatorIdentity,
         solver_contract_digest: Digest,
-        accuracy: AccuracyIdentity,
     ) -> AnalysisExecutionResult<Self> {
-        Self::derive(
-            "numerical-plan",
-            &(operator, solver_contract_digest, accuracy),
-        )
+        Self::derive("numerical-plan", &(operator, solver_contract_digest))
     }
 }
 
@@ -414,13 +429,26 @@ impl SolverResultIdentity {
     }
 }
 
+impl NumericalReceiptIdentity {
+    pub(super) fn new(
+        source_result: SolverResultIdentity,
+        receipt_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("numerical-receipt", &(source_result, receipt_digest))
+    }
+}
+
 impl PublicationIdentity {
     pub fn new(
-        result: AnalysisResultIdentity,
-        accuracy: AccuracyIdentity,
-        evidence_digest: Digest,
+        request: PublicationRequestIdentity,
+        source_result: SolverResultIdentity,
+        observations: Option<Digest>,
+        accuracy: Digest,
     ) -> AnalysisExecutionResult<Self> {
-        Self::derive("publication", &(result, accuracy, evidence_digest))
+        Self::derive(
+            "publication",
+            &(request, source_result, observations, accuracy),
+        )
     }
 }
 

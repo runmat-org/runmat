@@ -50,18 +50,12 @@ pub enum SolverSolidAssemblyError {
 
 pub fn solver_solid_topology(
     artifact: &SolverMeshArtifact,
-    base_dof_count: usize,
 ) -> Result<SolverSolidTopology, SolverSolidAssemblyError> {
     artifact
         .validate()
         .map_err(|failure| SolverSolidAssemblyError::InvalidArtifact(failure.to_string()))?;
     Ok(SolverSolidTopology {
-        dof_count: artifact
-            .topology
-            .nodes
-            .len()
-            .saturating_mul(3)
-            .max(base_dof_count),
+        dof_count: artifact.topology.nodes.len().saturating_mul(3),
         node_count: artifact.topology.nodes.len(),
         volume_element_count: artifact.topology.volume_elements.len(),
         order: artifact.resolved_request.element_order,
@@ -72,9 +66,8 @@ pub fn assemble_solver_solid_stiffness_csr(
     artifact: &SolverMeshArtifact,
     default_material: Option<SolidMaterial>,
     materials_by_region: &BTreeMap<String, SolidMaterial>,
-    base_dof_count: usize,
 ) -> Result<RealSparseMatrix, SolverSolidAssemblyError> {
-    let topology = solver_solid_topology(artifact, base_dof_count)?;
+    let topology = solver_solid_topology(artifact)?;
     let nodes = artifact
         .topology
         .nodes

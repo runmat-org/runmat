@@ -5,7 +5,8 @@ use runmat_analysis_core::{
     SignalPrecision, SignalShape,
 };
 use runmat_analysis_fea::execution::{
-    CanonicalSignalRealization, CanonicalSignalRealizationInput, CanonicalSignalValues,
+    CanonicalSignalKnot, CanonicalSignalRealization, CanonicalSignalRealizationInput,
+    CanonicalSignalValues,
 };
 use runmat_execution::value::{DenseValue, ElementType, InlineValue, ValueLimits, ValuePayload};
 use runmat_execution::Digest;
@@ -208,7 +209,12 @@ pub fn canonicalize_signal_generator_outputs(
             shape: signal.shape().clone(),
             topology_entity_count,
             domain: generator.domain.clone(),
-            sample_points: admitted.sample_points.clone(),
+            knots: admitted
+                .sample_points
+                .iter()
+                .copied()
+                .map(CanonicalSignalKnot::continuous)
+                .collect(),
             precision: signal.precision(),
             values: values.finish(),
             interpolation: generator.interpolation,

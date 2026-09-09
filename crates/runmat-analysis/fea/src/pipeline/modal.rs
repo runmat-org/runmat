@@ -174,6 +174,7 @@ pub fn run_modal_with_options(
         solver_host_sync_count: modal.solver_host_sync_count,
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        observations: Vec::new(),
         fields: run_fields,
     };
 

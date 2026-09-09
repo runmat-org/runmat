@@ -890,7 +890,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
     );
     assert_eq!(
         field(&result, &fea_thermo_mechanical_temperature_field_id(0)).shape,
-        vec![240]
+        vec![4]
     );
     assert_eq!(
         field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0)).field_id,
@@ -1124,6 +1124,68 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
     );
     assert_eq!(evidence.signal_id, "tip_load.signal");
     assert!(evidence.accepted);
+}
+
+#[test]
+fn linear_static_executes_authored_displacement_observation() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps[0].observations = vec![runmat_analysis_core::ObservationRequest::Field(
+        runmat_analysis_core::ObservationSpec {
+            observation_id: runmat_analysis_core::ObservationId("whole_displacement".into()),
+            quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+            value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+            target: runmat_analysis_core::ObservationTarget::WholeModel,
+            source_location: runmat_analysis_core::FieldLocation::Node,
+            output_location: runmat_analysis_core::FieldLocation::Node,
+            recovery: runmat_analysis_core::RecoveryPolicy::Native,
+            component: runmat_analysis_core::ObservationComponent::All,
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            sign_convention: runmat_analysis_core::SignConvention::Native,
+            complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+            sampling: runmat_analysis_core::SamplingPolicy::Final,
+            reduction: None,
+            storage: runmat_analysis_core::ObservationStoragePolicy {
+                precision: runmat_analysis_core::SignalPrecision::Real64,
+                compression: runmat_analysis_core::CompressionPolicy::Lossless,
+                retention: runmat_analysis_core::RetentionPolicy::Canonical,
+                partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: runmat_analysis_core::ObservationPurpose::Publication,
+            cost: runmat_analysis_core::ObservationCostEstimate {
+                operation_count: 1_000,
+                peak_resident_bytes: 1_000_000,
+                stored_bytes: 1_000_000,
+                transfer_bytes: 1_000_000,
+                collective_count: 0,
+            },
+        },
+    )];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("authored observation should execute after physical field recovery");
+
+    let observation = result
+        .observations
+        .first()
+        .expect("the authored observation must be published");
+    assert_eq!(
+        observation.observation_id.0,
+        "whole_displacement".to_string()
+    );
+    assert_eq!(
+        observation.field.as_host_f64(),
+        result
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+    );
+    assert_eq!(observation.entities.len(), 4);
 }
 
 #[test]
@@ -1714,6 +1776,60 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
 }
 
 #[test]
+fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_transient(
+        "transient_jump".to_string(),
+    )];
+    let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+        unreachable!()
+    };
+    let ordinate = |y: f64| {
+        runmat_analysis_core::SignalOrdinate::Real(runmat_analysis_core::SignalValue::Vector3([
+            runmat_analysis_core::Force::new(0.0),
+            runmat_analysis_core::Force::new(y),
+            runmat_analysis_core::Force::new(0.0),
+        ]))
+    };
+    signal.representation = runmat_analysis_core::SignalRepresentation::Tabulated(
+        runmat_analysis_core::TabulatedSignal {
+            domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+            knots: vec![
+                runmat_analysis_core::SignalKnot::continuous(0.0, ordinate(0.0)),
+                runmat_analysis_core::SignalKnot::jump(
+                    0.5,
+                    ordinate(0.0),
+                    ordinate(-1000.0),
+                    runmat_analysis_core::SignalPointContinuity::Right,
+                ),
+                runmat_analysis_core::SignalKnot::continuous(1.2, ordinate(-1000.0)),
+            ],
+            interpolation: runmat_analysis_core::SignalInterpolation::LeftEndpoint,
+            extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
+        },
+    );
+    signal.evidence.sample_count = 3;
+    let options = TransientSolveOptions {
+        time_step_s: 0.6,
+        min_time_step_s: 0.6,
+        max_time_step_s: 0.6,
+        step_count: 2,
+        adaptive_time_step: false,
+        ..experimental_transient_options()
+    };
+
+    let result = crate::run_transient_with_options(&model, ComputeBackend::Cpu, options)
+        .expect("jump-aware structural transient should solve");
+
+    assert_eq!(result.time_points_s.last().copied(), Some(1.2));
+    assert!(result.time_points_s.contains(&0.5));
+    assert!(result
+        .time_points_s
+        .windows(2)
+        .all(|window| !(window[0] < 0.5 && window[1] > 0.5)));
+}
+
+#[test]
 fn transient_beam_moment_emits_rotational_snapshots() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     model.sequence.steps = vec![ProcedureStep::structural_transient(
@@ -1873,7 +1989,6 @@ fn steady_thermal_solver_is_a_distinct_static_procedure() {
                 },
             },
         ));
-
     let result = crate::run_thermal_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -1924,20 +2039,41 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
                 frame: None,
                 representation: runmat_analysis_core::SignalRepresentation::Tabulated(
                     runmat_analysis_core::TabulatedSignal {
-                        axis: runmat_analysis_core::SignalAxis::TimeSeconds(vec![0.0, 1.0]),
-                        values: vec![300.0, 320.0]
-                            .into_iter()
-                            .map(|temperature_k| {
+                        domain: runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+                        knots: vec![
+                            runmat_analysis_core::SignalKnot::continuous(
+                                0.0,
                                 runmat_analysis_core::SignalOrdinate::Real(
                                     runmat_analysis_core::SignalValue::Scalar(
-                                        runmat_analysis_core::Temperature::new(temperature_k),
+                                        runmat_analysis_core::Temperature::new(300.0),
                                     ),
-                                )
-                            })
-                            .collect(),
-                        interpolation: runmat_analysis_core::SignalInterpolation::Linear,
+                                ),
+                            ),
+                            runmat_analysis_core::SignalKnot::jump(
+                                0.5,
+                                runmat_analysis_core::SignalOrdinate::Real(
+                                    runmat_analysis_core::SignalValue::Scalar(
+                                        runmat_analysis_core::Temperature::new(300.0),
+                                    ),
+                                ),
+                                runmat_analysis_core::SignalOrdinate::Real(
+                                    runmat_analysis_core::SignalValue::Scalar(
+                                        runmat_analysis_core::Temperature::new(320.0),
+                                    ),
+                                ),
+                                runmat_analysis_core::SignalPointContinuity::Right,
+                            ),
+                            runmat_analysis_core::SignalKnot::continuous(
+                                1.0,
+                                runmat_analysis_core::SignalOrdinate::Real(
+                                    runmat_analysis_core::SignalValue::Scalar(
+                                        runmat_analysis_core::Temperature::new(320.0),
+                                    ),
+                                ),
+                            ),
+                        ],
+                        interpolation: runmat_analysis_core::SignalInterpolation::LeftEndpoint,
                         extrapolation: runmat_analysis_core::SignalExtrapolation::Reject,
-                        breakpoints: Vec::new(),
                     },
                 ),
                 precision: runmat_analysis_core::SignalPrecision::Real64,
@@ -1945,7 +2081,7 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
                     max_absolute_error: Some(0.0),
                     max_relative_error: Some(0.0),
                     derivative_max_absolute_error: None,
-                    sample_count: 2,
+                    sample_count: 3,
                 },
                 provenance: runmat_analysis_core::SignalProvenance::Authored,
             },
@@ -1956,11 +2092,41 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
             runmat_analysis_core::ThermalConstraint {
                 constraint_id: "time_temperature".into(),
                 kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
-                    target: runmat_analysis_core::RegionTarget::boundary(prescribed_selector),
+                    target: runmat_analysis_core::RegionTarget::boundary(
+                        prescribed_selector.clone(),
+                    ),
                     value: runmat_analysis_core::PrescribedValue::Signal(signal_id),
                 },
             },
         ));
+    let mut inactive_signal = model.signals.last().unwrap().clone();
+    let runmat_analysis_core::PhysicalSignal::Temperature(inactive) = &mut inactive_signal else {
+        unreachable!()
+    };
+    inactive.signal_id = runmat_analysis_core::SignalId("inactive_temperature_history".into());
+    let runmat_analysis_core::SignalRepresentation::Tabulated(inactive_table) =
+        &mut inactive.representation
+    else {
+        unreachable!()
+    };
+    inactive_table.knots[1].abscissa = 0.25;
+    let inactive_id = inactive.signal_id.clone();
+    model.signals.push(inactive_signal);
+    model
+        .constraints
+        .push(runmat_analysis_core::AnalysisConstraint::Thermal(
+            runmat_analysis_core::ThermalConstraint {
+                constraint_id: "inactive_time_temperature".into(),
+                kind: runmat_analysis_core::ThermalConstraintKind::Prescribed {
+                    target: runmat_analysis_core::RegionTarget::boundary(prescribed_selector),
+                    value: runmat_analysis_core::PrescribedValue::Signal(inactive_id),
+                },
+            },
+        ));
+    model.sequence.steps[0].activations = vec![runmat_analysis_core::StepObjectActivation {
+        object: runmat_analysis_core::StepObjectRef::Constraint("time_temperature".into()),
+        lifecycle: runmat_analysis_core::ActivationLifecycle::Activate,
+    }];
 
     let result = crate::run_thermal_with_options(
         &model,
@@ -1976,9 +2142,11 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
     )
     .expect("time-dependent prescribed temperature should solve");
 
-    assert_eq!(result.time_points_s, vec![0.0, 1.0]);
-    for (snapshot, expected_temperature_k) in
-        result.temperature_snapshots.iter().zip([300.0, 320.0])
+    assert_eq!(result.time_points_s, vec![0.0, 0.5, 1.0]);
+    for (snapshot, expected_temperature_k) in result
+        .temperature_snapshots
+        .iter()
+        .zip([300.0, 300.0, 320.0])
     {
         let values = snapshot.as_host_f64().unwrap();
         for &node in &prescribed_face.node_indices {
@@ -2697,7 +2865,7 @@ fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
 }
 
 #[test]
-fn load_sweep_fixture_uses_solver_mesh_gate() {
+fn load_sweep_preserves_solver_mesh_dof_count() {
     let baseline = run_linear_static_with_single_tetrahedron_mesh(
         &fixture_model(FixtureId::CantileverLinearStatic),
         ComputeBackend::Cpu,
@@ -2720,11 +2888,19 @@ fn load_sweep_fixture_uses_solver_mesh_gate() {
         .find(|diag| diag.code == "FEA_CONVERGENCE")
         .expect("convergence diagnostic should be present");
     assert!(convergence.message.contains("residual_norm="));
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
-    assert!(field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count() >= 384);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_SOLVER_METHOD"),
+        "diagnostics={:#?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count(),
+        12,
+        "four Tet4 nodes must own exactly three displacement components each",
+    );
 
     let baseline_max = baseline
         .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
@@ -2746,7 +2922,7 @@ fn load_sweep_fixture_uses_solver_mesh_gate() {
 }
 
 #[test]
-fn large_load_sweep_fixture_scales_dof_count() {
+fn large_load_sweep_does_not_fabricate_dofs_from_excitation_count() {
     let mut model = fixture_model(FixtureId::CantileverLargeLoadSweep);
     for action in &mut model.excitations {
         if let runmat_analysis_core::ExcitationTarget::Region(target) =
@@ -2758,11 +2934,19 @@ fn large_load_sweep_fixture_scales_dof_count() {
     let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
         .expect("solve should succeed");
 
-    assert!(field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count() >= 1536);
-    assert!(result
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT).element_count(),
+        12,
+        "excitation count must not alter canonical mesh topology",
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_SOLVER_METHOD"),
+        "diagnostics={:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -2798,7 +2982,11 @@ fn structural_bar_and_beam_reference_fixtures_emit_known_answer_checks() {
     let bending_x = component_peak(bending_displacement, 0);
     let bending_y = component_peak(bending_displacement, 1);
 
-    assert!(axial_x > axial_y, "axial reference should be x dominated");
+    assert!(
+        axial_x > axial_y,
+        "axial reference should be x dominated: axial_x={axial_x} axial_y={axial_y} diagnostics={:#?}",
+        axial.diagnostics,
+    );
     assert!(
         bending_y > bending_x,
         "bending reference should be transverse-load dominated"
