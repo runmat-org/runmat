@@ -10,7 +10,7 @@ export function buildMachineReport({ rows, inventory, shard, range, source, arti
         harness: row.testCase.harness,
         matches: row.matches,
         expected: row.normalizedExpected,
-        actual: row.normalizedWasm,
+        actual: row.normalizedActual,
         image: row.imageRelPath || null,
         imageError: row.imageError || null
     }));

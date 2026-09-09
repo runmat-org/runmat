@@ -127,9 +127,9 @@ mkdirSync(imageOutputDir, { recursive: true });
 
 const rows = cases.map((testCase) => {
     const result = resultsById.get(testCase.id);
-    const wasmOutput = formatWasmOutput(result);
+    const executionOutput = formatExecutionOutput(result);
     const normalizedExpected = normalizeOutput(testCase.expectedOutput);
-    const normalizedWasm = normalizeOutput(wasmOutput);
+    const normalizedActual = normalizeOutput(executionOutput);
     const imageRelPath = writePlotImageArtifact(imageOutputDir, testCase, result);
     const captureError = result && typeof result.figureImageError === "string" ? result.figureImageError : "";
     const executionError = result && typeof result.errorText === "string" ? result.errorText : "";
@@ -138,10 +138,10 @@ const rows = cases.map((testCase) => {
     return {
         testCase,
         normalizedExpected,
-        normalizedWasm,
+        normalizedActual,
         imageRelPath,
         imageError,
-        matches: matchesVerification(testCase, result, normalizedExpected, normalizedWasm, hasExecutionError, imageRelPath)
+        matches: matchesVerification(testCase, result, normalizedExpected, normalizedActual, hasExecutionError, imageRelPath)
     };
 });
 
@@ -1170,7 +1170,7 @@ function resolveReportMode() {
 }
 
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedActual: string, matches: boolean }[]} rows
  * @param {"all" | "errors-only"} reportMode
  */
 function filterReportRows(rows, reportMode) {
@@ -1269,7 +1269,7 @@ function normalizeOutput(text) {
 /**
  * @param {RunnerResult | undefined} result
  */
-function formatWasmOutput(result) {
+function formatExecutionOutput(result) {
     if (!result) {
         return "";
     }
@@ -1303,7 +1303,7 @@ function formatWasmOutput(result) {
  * @param {ExampleCase} testCase
  */
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} rows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedActual: string, imageRelPath: string, imageError: string, matches: boolean }[]} rows
  */
 function buildReportHtml(allRows, reportRows, reportMode) {
     const title = "RunMat Builtins Example Output Report";
@@ -1321,7 +1321,7 @@ function buildReportHtml(allRows, reportRows, reportMode) {
         );
         const input = escapeHtml(row.testCase.input ?? "");
         const expected = escapeHtml(row.testCase.hasExpectedOutput ? row.testCase.expectedOutput : "(execution-only: no expected output)");
-        const actual = escapeHtml(row.normalizedWasm);
+        const actual = escapeHtml(row.normalizedActual);
         const imageCell = row.testCase.isPlotExample
             ? row.imageRelPath
                 ? `<a href="${escapeHtml(row.imageRelPath)}" target="_blank" rel="noopener"><img src="${escapeHtml(row.imageRelPath)}" alt="${escapeHtml(row.testCase.builtin)} plot image" class="plot-preview" /></a>`
@@ -1436,8 +1436,8 @@ function buildReportHtml(allRows, reportRows, reportMode) {
 }
 
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} allRows
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} reportRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedActual: string, imageRelPath: string, imageError: string, matches: boolean }[]} allRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedActual: string, imageRelPath: string, imageError: string, matches: boolean }[]} reportRows
  * @param {"all" | "errors-only"} reportMode
  */
 function buildReportMarkdown(allRows, reportRows, reportMode) {
@@ -1457,7 +1457,7 @@ function buildReportMarkdown(allRows, reportRows, reportMode) {
         const input = (row.testCase.input ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
         const expectedRaw = row.testCase.hasExpectedOutput ? row.testCase.expectedOutput : "(execution-only: no expected output)";
         const expected = expectedRaw.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-        const actual = row.normalizedWasm.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const actual = row.normalizedActual.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
         const imageCell = row.testCase.isPlotExample
             ? row.imageRelPath
                 ? `[image](${row.imageRelPath.replace(/\|/g, "\\|")})`
