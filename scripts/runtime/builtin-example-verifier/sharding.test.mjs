@@ -49,7 +49,7 @@ function reports(count = 2) {
     return Array.from({ length: count }, (_, index) => {
         const selected = shardInventory(inventory, { index, count });
         const rows = selected.cases.map((testCase) => ({
-            testCase, normalizedExpected: "", normalizedWasm: "", imageRelPath: "", imageError: "", matches: true
+            testCase, normalizedExpected: "", normalizedActual: "", imageRelPath: "", imageError: "", matches: true
         }));
         return buildMachineReport({ rows, inventory, shard: { index, count }, range: selected.range, source: "commit:abc", artifact: `shard-${index}` });
     });
