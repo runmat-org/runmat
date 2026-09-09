@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    algebra::{
+        validate_solver_compatibility, AssembledRealSystem, CompatibilityError, RealPreconditioner,
+        RealSolver, RealSystemError,
+    },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, csr_stiffness, dense_stiffness, OperatorSystem},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         affine::solve_affine_constraint_system,
@@ -27,6 +30,67 @@ pub struct LinearSolveResult {
     pub solver_method: SolverMethod,
     pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
+}
+
+fn invalid_system_result(
+    operator: &AssembledRealSystem,
+    backend: LinearAlgebraBackendKind,
+    preconditioner: SpdPreconditionerKind,
+    error: RealSystemError,
+) -> LinearSolveResult {
+    rejected_system_result(
+        operator,
+        backend,
+        preconditioner,
+        "FEA_INVALID_REAL_SYSTEM",
+        format!("real linear-system preparation failed: {error:?}"),
+    )
+}
+
+fn incompatible_system_result(
+    operator: &AssembledRealSystem,
+    backend: LinearAlgebraBackendKind,
+    preconditioner: SpdPreconditionerKind,
+    error: CompatibilityError,
+) -> LinearSolveResult {
+    rejected_system_result(
+        operator,
+        backend,
+        preconditioner,
+        "FEA_INCOMPATIBLE_REAL_SOLVER",
+        error.to_string(),
+    )
+}
+
+fn rejected_system_result(
+    operator: &AssembledRealSystem,
+    backend: LinearAlgebraBackendKind,
+    preconditioner: SpdPreconditionerKind,
+    code: &str,
+    message: String,
+) -> LinearSolveResult {
+    LinearSolveResult {
+        iterations: 0,
+        residual_norm: operator
+            .load()
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt(),
+        converged: false,
+        host_sync_count: 0,
+        solver_backend: backend,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        solution: vec![0.0; operator.dof_count()],
+        solver_method: SolverMethod::MatrixFreePcg,
+        preconditioner: SolverPreconditioner::from_spd(preconditioner),
+        diagnostics: vec![FeaDiagnostic {
+            code: code.to_string(),
+            severity: FeaDiagnosticSeverity::Error,
+            message,
+        }],
+    }
 }
 
 pub fn solve_linear_system(
@@ -64,7 +128,7 @@ pub fn solve_linear_system(
 }
 
 pub fn solve_operator_system(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
@@ -84,7 +148,7 @@ pub fn solve_operator_system(
         runtime_tensor_fallback = true;
     }
 
-    let has_dofs = operator.dof_count > 0;
+    let has_dofs = operator.dof_count() > 0;
     if !has_dofs {
         return LinearSolveResult {
             iterations: 0,
@@ -115,86 +179,66 @@ pub fn solve_operator_system(
                 .to_string(),
         });
     }
-    if let Some(dense) = dense_stiffness(operator) {
-        match solve_dense_direct(operator, dense) {
-            Ok(solution) => {
-                let b = &operator.rhs;
-                let residual = algebra_backend.vec_sub(b, &apply_k(operator, &solution));
-                let residual_norm = algebra_backend.dot(&residual, &residual).sqrt();
-                let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
-                let converged = residual_norm / b_norm <= tol;
-                let mut diagnostics = initial_diagnostics;
-                diagnostics.push(FeaDiagnostic {
-                    code: "FEA_SOLVER_METHOD".to_string(),
-                    severity: FeaDiagnosticSeverity::Info,
-                    message:
-                        "solver=dense_direct factorization=gaussian_partial_pivot matrix_free=false"
-                            .to_string(),
-                });
-                if !converged {
-                    diagnostics.push(FeaDiagnostic {
-                        code: "FEA_DENSE_DIRECT_RESIDUAL".to_string(),
-                        severity: FeaDiagnosticSeverity::Warning,
-                        message: format!(
-                            "dense direct solve residual_norm={residual_norm} relative_residual={}",
-                            residual_norm / b_norm
-                        ),
-                    });
-                }
-                return LinearSolveResult {
-                    iterations: 1,
-                    residual_norm,
-                    converged,
-                    host_sync_count: 0,
-                    solver_backend: effective_backend_kind,
-                    device_apply_k_count: 0,
-                    device_apply_k_attempt_count: 0,
-                    solution,
-                    solver_method: SolverMethod::DenseDirect,
-                    preconditioner: SolverPreconditioner::None,
-                    diagnostics,
-                };
-            }
-            Err(DenseSolveError::Cancelled) => {
-                initial_diagnostics.push(FeaDiagnostic {
-                    code: "FEA_SOLVER_CANCELLED".to_string(),
-                    severity: FeaDiagnosticSeverity::Warning,
-                    message: "dense direct solve cancelled".to_string(),
-                });
-                return LinearSolveResult {
-                    iterations: 0,
-                    residual_norm: algebra_backend.dot(&operator.rhs, &operator.rhs).sqrt(),
-                    converged: false,
-                    host_sync_count: 0,
-                    solver_backend: effective_backend_kind,
-                    device_apply_k_count: 0,
-                    device_apply_k_attempt_count: 0,
-                    solution: vec![0.0; operator.dof_count],
-                    solver_method: SolverMethod::DenseDirect,
-                    preconditioner: SolverPreconditioner::None,
-                    diagnostics: initial_diagnostics,
-                };
-            }
-            Err(DenseSolveError::Numerical(message)) => {
-                initial_diagnostics.push(FeaDiagnostic {
-                    code: "FEA_DENSE_DIRECT_FALLBACK".to_string(),
-                    severity: FeaDiagnosticSeverity::Warning,
-                    message,
-                });
-            }
+    let prepared = match operator.prepare_linear() {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return invalid_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                error,
+            )
         }
+    };
+    if let Err(error) = validate_solver_compatibility(
+        prepared.matrix(),
+        RealSolver::ConjugateGradient,
+        match preconditioner_kind {
+            SpdPreconditionerKind::Jacobi => RealPreconditioner::Jacobi,
+            SpdPreconditionerKind::Ilu0 => RealPreconditioner::Ilu0,
+        },
+    ) {
+        return incompatible_system_result(
+            operator,
+            effective_backend_kind,
+            preconditioner_kind,
+            error,
+        );
     }
+    let max_iters = iteration_limit(operator, 64);
+    let preconditioner = match build_spd_preconditioner(&prepared, preconditioner_kind) {
+        Ok(preconditioner) => preconditioner,
+        Err(error) => {
+            return rejected_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                "FEA_PRECONDITIONER_SETUP_FAILED",
+                error.to_string(),
+            )
+        }
+    };
+    let b = prepared.rhs();
+    let mut x = match initial_guess {
+        Some(values)
+            if values.len() == operator.dof_count()
+                && values.iter().all(|value| value.is_finite()) =>
+        {
+            values.to_vec()
+        }
+        Some(_) => {
+            return rejected_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                "FEA_INVALID_INITIAL_GUESS",
+                "initial guess must contain one finite value per solver DOF".to_string(),
+            )
+        }
+        None => vec![0.0; operator.dof_count()],
+    };
 
-    let tuned_preconditioner_kind = graph_tuned_preconditioner(operator, preconditioner_kind);
-    let max_iters = graph_tuned_max_iters(operator, 64);
-    let preconditioner = build_spd_preconditioner(operator, tuned_preconditioner_kind);
-    let traversal_order = graph_solver_traversal_order(operator);
-    let b = &operator.rhs;
-    let mut x = initial_guess
-        .map(<[f64]>::to_vec)
-        .unwrap_or_else(|| vec![0.0; operator.dof_count]);
-
-    let mut r = algebra_backend.vec_sub(b, &apply_k(operator, &x));
+    let mut r = algebra_backend.vec_sub(b, &crate::algebra::apply_prepared(&prepared, &x));
     let mut z = preconditioner.apply(&r);
     let mut p = z.clone();
     let mut rz_old = algebra_backend.dot(&r, &z);
@@ -209,17 +253,6 @@ pub fn solve_operator_system(
             preconditioner.kind().as_str()
         ),
     });
-    if tuned_preconditioner_kind != preconditioner_kind {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_GRAPH_PRECONDITIONER_TUNING".to_string(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "requested_preconditioner={} tuned_preconditioner={}",
-                preconditioner_kind.as_str(),
-                tuned_preconditioner_kind.as_str()
-            ),
-        });
-    }
 
     if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
         return LinearSolveResult {
@@ -243,7 +276,7 @@ pub fn solve_operator_system(
         if crate::is_fea_cancelled() {
             break;
         }
-        let ap = apply_k(operator, &p);
+        let ap = crate::algebra::apply_prepared(&prepared, &p);
         let denom = algebra_backend.dot(&p, &ap);
         if denom.abs() <= 1.0e-18 {
             break;
@@ -264,8 +297,8 @@ pub fn solve_operator_system(
             break;
         }
         let beta = rz_new / rz_old;
-        for i in &traversal_order {
-            p[*i] = z[*i] + beta * p[*i];
+        for i in 0..p.len() {
+            p[i] = z[i] + beta * p[i];
         }
         rz_old = rz_new;
     }
@@ -296,408 +329,81 @@ pub fn solve_operator_system(
     }
 }
 
-enum DenseSolveError {
-    Cancelled,
-    Numerical(String),
-}
-
-fn solve_dense_direct(
-    operator: &OperatorSystem,
-    dense: &[f64],
-) -> Result<Vec<f64>, DenseSolveError> {
-    let n = operator.dof_count;
-    if dense.len() != n.saturating_mul(n) || operator.rhs.len() != n {
-        return Err(DenseSolveError::Numerical(
-            "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        ));
-    }
-    let free_dofs = (0..n)
-        .filter(|idx| !operator.constrained[*idx])
-        .collect::<Vec<_>>();
-    let mut x = vec![0.0_f64; n];
-    for (row, value) in x.iter_mut().enumerate().take(n) {
-        if operator.constrained[row] {
-            *value = operator.rhs[row];
-        }
-    }
-    if free_dofs.is_empty() {
-        return Ok(x);
-    }
-
-    let free_n = free_dofs.len();
-    let mut a = vec![0.0_f64; free_n * free_n];
-    let mut b = vec![0.0_f64; free_n];
-    for (local_row, &global_row) in free_dofs.iter().enumerate() {
-        b[local_row] = operator.rhs[global_row];
-        for (local_col, &global_col) in free_dofs.iter().enumerate() {
-            a[local_row * free_n + local_col] = dense[global_row * n + global_col];
-        }
-    }
-
-    let mut free_solution = solve_dense_square(&a, &b)?;
-    for _ in 0..3 {
-        if crate::is_fea_cancelled() {
-            return Err(DenseSolveError::Cancelled);
-        }
-        let residual = dense_residual(&a, &free_solution, &b);
-        let residual_norm = residual
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt();
-        let rhs_norm = b
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt()
-            .max(1.0);
-        if residual_norm / rhs_norm <= 1.0e-10 {
-            break;
-        }
-        let correction = solve_dense_square(&a, &residual)?;
-        for (value, delta) in free_solution.iter_mut().zip(correction) {
-            *value += delta;
-        }
-    }
-
-    for (local, &global) in free_dofs.iter().enumerate() {
-        x[global] = free_solution[local];
-        if !x[global].is_finite() {
-            return Err(DenseSolveError::Numerical(format!(
-                "dense direct solve skipped because solution component {global} is non-finite"
-            )));
-        }
-    }
-    Ok(x)
-}
-
-fn solve_dense_square(a: &[f64], b: &[f64]) -> Result<Vec<f64>, DenseSolveError> {
-    let n = b.len();
-    if a.len() != n.saturating_mul(n) {
-        return Err(DenseSolveError::Numerical(
-            "dense direct solve skipped because matrix or rhs dimensions are invalid".to_string(),
-        ));
-    }
-    let mut a = a.to_vec();
-    let mut b = b.to_vec();
-    let row_scales = (0..n)
-        .map(|row| {
-            (0..n)
-                .map(|col| a[row * n + col].abs())
-                .fold(0.0_f64, f64::max)
-        })
-        .collect::<Vec<_>>();
-
-    for pivot in 0..n {
-        if crate::is_fea_cancelled() {
-            return Err(DenseSolveError::Cancelled);
-        }
-        let mut pivot_row = pivot;
-        let mut pivot_score = scaled_pivot_score(&a, &row_scales, n, pivot, pivot);
-        for row in (pivot + 1)..n {
-            let candidate_score = scaled_pivot_score(&a, &row_scales, n, row, pivot);
-            if candidate_score > pivot_score {
-                pivot_score = candidate_score;
-                pivot_row = row;
-            }
-        }
-        let pivot_abs = a[pivot_row * n + pivot].abs();
-        if pivot_abs <= 1.0e-18 || !pivot_abs.is_finite() || !pivot_score.is_finite() {
-            return Err(DenseSolveError::Numerical(format!(
-                "dense direct solve skipped because pivot {pivot} is singular or non-finite"
-            )));
-        }
-        if pivot_row != pivot {
-            for col in 0..n {
-                a.swap(pivot * n + col, pivot_row * n + col);
-            }
-            b.swap(pivot, pivot_row);
-        }
-
-        for row in (pivot + 1)..n {
-            if crate::is_fea_cancelled() {
-                return Err(DenseSolveError::Cancelled);
-            }
-            let factor = a[row * n + pivot] / a[pivot * n + pivot];
-            if factor == 0.0 {
-                continue;
-            }
-            a[row * n + pivot] = 0.0;
-            for col in (pivot + 1)..n {
-                a[row * n + col] -= factor * a[pivot * n + col];
-            }
-            b[row] -= factor * b[pivot];
-        }
-    }
-
-    let mut x = vec![0.0_f64; n];
-    for row in (0..n).rev() {
-        if crate::is_fea_cancelled() {
-            return Err(DenseSolveError::Cancelled);
-        }
-        let mut rhs = b[row];
-        for col in (row + 1)..n {
-            rhs -= a[row * n + col] * x[col];
-        }
-        let diag = a[row * n + row];
-        if diag.abs() <= 1.0e-18 || !diag.is_finite() {
-            return Err(DenseSolveError::Numerical(format!(
-                "dense direct solve skipped because diagonal {row} is singular or non-finite"
-            )));
-        }
-        x[row] = rhs / diag;
-        if !x[row].is_finite() {
-            return Err(DenseSolveError::Numerical(format!(
-                "dense direct solve skipped because solution component {row} is non-finite"
-            )));
-        }
-    }
-    Ok(x)
-}
-
-fn scaled_pivot_score(a: &[f64], row_scales: &[f64], n: usize, row: usize, col: usize) -> f64 {
-    let scale = row_scales[row].max(1.0e-30);
-    a[row * n + col].abs() / scale
-}
-
-fn dense_residual(a: &[f64], x: &[f64], b: &[f64]) -> Vec<f64> {
-    let n = b.len();
-    let mut residual = b.to_vec();
-    for row in 0..n {
-        let ax = (0..n).map(|col| a[row * n + col] * x[col]).sum::<f64>();
-        residual[row] -= ax;
-    }
-    residual
-}
-
-fn graph_tuned_preconditioner(
-    operator: &OperatorSystem,
-    requested: SpdPreconditionerKind,
-) -> SpdPreconditionerKind {
-    if dense_stiffness(operator).is_some() || csr_stiffness(operator).is_some() {
-        return SpdPreconditionerKind::Jacobi;
-    }
-    requested
-}
-
-fn graph_tuned_max_iters(operator: &OperatorSystem, base_max_iters: usize) -> usize {
-    if dense_stiffness(operator).is_some() || csr_stiffness(operator).is_some() {
-        return base_max_iters
-            .max(operator.dof_count.saturating_mul(2))
-            .max(256);
-    }
+fn iteration_limit(operator: &AssembledRealSystem, base_max_iters: usize) -> usize {
     base_max_iters
-}
-
-fn graph_solver_traversal_order(operator: &OperatorSystem) -> Vec<usize> {
-    (0..operator.dof_count).collect()
+        .max(operator.dof_count().saturating_mul(2))
+        .max(256)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        assembly::{AssemblySummary, StructuralMaterialSummary},
-        operator::OperatorSystem,
+        algebra::{
+            CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseAssembler,
+            RealSparseMatrix,
+        },
         solve::backend::cpu_reference::CpuReferenceBackend,
     };
 
-    fn dense_summary(dof_count: usize) -> AssemblySummary {
-        AssemblySummary {
-            dof_count,
-            structural_node_count: dof_count / 3,
-            structural_translational_dof_count: dof_count,
-            structural_rotational_dof_count: 0,
-            structural_rotation_node_count: 0,
-            structural_moment_load_count: 0,
-            structural_direct_rotational_moment_load_count: 0,
-            structural_requested_moment_norm_n_m: 0.0,
-            structural_moment_projection: Vec::new(),
-            spatial_projection_evidence: Vec::new(),
-            structural_rotational_constraint_count: 0,
-            structural_beam_element_count: 0,
-            structural_shell_element_count: 0,
-            structural_solid_element_count: dof_count / 12,
-            structural_solid_total_mass_kg: 0.0,
-            structural_solid_recovery: Vec::new(),
-            structural_dof_layout: Default::default(),
-            structural_beam_recovery: Vec::new(),
-            structural_shell_recovery: Vec::new(),
-            structural_formulation: None,
-            structural_sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
-            structural_boundary_transfers: vec![
-                runmat_analysis_core::BoundaryTransferImplementation::NotApplicable,
-            ],
-            constrained_dof_count: 0,
-            constraint_matrix: None,
-            affine_constraint_reduction: None,
-            load_count: 1,
-            structural_material: StructuralMaterialSummary {
-                youngs_modulus_pa: 1.0,
-                poisson_ratio: 0.3,
-                density_kg_per_m3: 1.0,
-                lame_lambda_pa: 1.0,
-                shear_modulus_pa: 1.0,
-            },
-            thermo_mechanical: None,
-            electro_thermal: None,
-            operator: OperatorSystem {
-                dof_count,
-                constrained: vec![false; dof_count],
-                stiffness_dense: Some(vec![0.0; dof_count * dof_count]),
-                stiffness_csr: None,
-                stiffness_diag: vec![1.0; dof_count],
-                stiffness_upper: vec![0.0; dof_count.saturating_sub(1)],
-                mass_csr: None,
-                mass_diag: vec![1.0; dof_count],
-                damping_diag: vec![0.0; dof_count],
-                rhs: vec![1.0; dof_count],
-            },
-        }
+    fn system(stiffness_diagonal: [f64; 2]) -> AssembledRealSystem {
+        let mut stiffness = RealSparseAssembler::square(
+            2,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        stiffness.add(0, 0, stiffness_diagonal[0]);
+        stiffness.add(0, 1, -1.0);
+        stiffness.add(1, 0, -1.0);
+        stiffness.add(1, 1, stiffness_diagonal[1]);
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness.finish().unwrap(), mass, damping).unwrap(),
+            vec![false; 2],
+            vec![1.0, 2.0],
+        )
+        .unwrap()
     }
 
     #[test]
-    fn dense_stiffness_max_iterations_scale_with_dof_count() {
-        let summary = dense_summary(144);
-
-        assert_eq!(graph_tuned_max_iters(&summary.operator, 64), 288);
-    }
-
-    #[test]
-    fn dense_stiffness_uses_direct_solver() {
-        let mut summary = dense_summary(2);
-        summary.operator.stiffness_dense = Some(vec![4.0, 1.0, 1.0, 3.0]);
-        summary.operator.stiffness_diag = vec![4.0, 3.0];
-        summary.operator.rhs = vec![1.0, 2.0];
-        let backend = CpuReferenceBackend;
-
-        let result = solve_linear_system(
-            &summary,
+    fn cpu_reference_solve_converges_with_small_canonical_residual() {
+        let operator = system([4.0, 3.0]);
+        let result = solve_operator_system(
+            &operator,
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
-            &backend,
+            &CpuReferenceBackend,
             None,
         );
-
         assert!(result.converged);
-        assert_eq!(result.solver_method, SolverMethod::DenseDirect);
-        assert_eq!(result.preconditioner, SolverPreconditioner::None);
-        assert!((result.solution[0] - 1.0 / 11.0).abs() <= 1.0e-12);
-        assert!((result.solution[1] - 7.0 / 11.0).abs() <= 1.0e-12);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "FEA_SOLVER_METHOD"
-                && diag.message.contains("solver=dense_direct")));
+        assert!(result.residual_norm <= 1.0e-8);
     }
 
     #[test]
-    fn assembly_metadata_does_not_change_the_unconstrained_operator_solve() {
-        let mut summary = dense_summary(2);
-        summary.operator.stiffness_dense = Some(vec![4.0, 1.0, 1.0, 3.0]);
-        summary.operator.stiffness_diag = vec![4.0, 3.0];
-        summary.operator.rhs = vec![1.0, 2.0];
-        let backend = CpuReferenceBackend;
-
-        let assembled = solve_linear_system(
-            &summary,
+    fn preconditioner_setup_failure_is_attributable() {
+        let operator = system([0.0, 3.0]);
+        let result = solve_operator_system(
+            &operator,
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
-            &backend,
+            &CpuReferenceBackend,
             None,
         );
-        let operator = solve_operator_system(
-            &summary.operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &backend,
-            None,
-        );
-
-        assert_eq!(operator, assembled);
-    }
-
-    #[test]
-    fn matrix_free_pcg_stops_before_an_iteration_when_cancelled() {
-        let mut summary = dense_summary(12);
-        summary.operator.stiffness_dense = None;
-        summary.operator.rhs = vec![1.0; summary.dof_count];
-        let cancellation =
-            crate::replace_fea_progress_context(None, Some(std::sync::Arc::new(|| true)));
-        let backend = CpuReferenceBackend;
-
-        let result = solve_linear_system(
-            &summary,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &backend,
-            None,
-        );
-
-        drop(cancellation);
-        assert_eq!(result.iterations, 0);
         assert!(!result.converged);
-    }
-
-    #[test]
-    fn dense_elimination_observes_cancellation_after_work_begins() {
-        let mut summary = dense_summary(8);
-        let mut stiffness = vec![0.0; 64];
-        for index in 0..8 {
-            stiffness[index * 8 + index] = 2.0;
-        }
-        summary.operator.stiffness_dense = Some(stiffness);
-        summary.operator.stiffness_diag = vec![2.0; 8];
-        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let polls_for_cancellation = std::sync::Arc::clone(&polls);
-        let cancellation = crate::replace_fea_progress_context(
-            None,
-            Some(std::sync::Arc::new(move || {
-                polls_for_cancellation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
-            })),
+        assert_eq!(
+            result.diagnostics[0].code,
+            "FEA_PRECONDITIONER_SETUP_FAILED"
         );
-        let backend = CpuReferenceBackend;
-
-        let result = solve_linear_system(
-            &summary,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &backend,
-            None,
-        );
-
-        drop(cancellation);
-        assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 2);
-        assert_eq!(result.solver_method, SolverMethod::DenseDirect);
-        assert_eq!(result.iterations, 0);
-        assert!(!result.converged);
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "FEA_SOLVER_CANCELLED"));
-        assert!(!result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "FEA_DENSE_DIRECT_FALLBACK"));
-    }
-
-    #[test]
-    fn matrix_free_pcg_uses_an_exact_initial_guess() {
-        let mut summary = dense_summary(4);
-        summary.operator.stiffness_dense = None;
-        summary.operator.rhs = vec![1.0; summary.dof_count];
-        let backend = CpuReferenceBackend;
-
-        let result = solve_linear_system(
-            &summary,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &backend,
-            Some(&[1.0; 4]),
-        );
-
-        assert!(result.converged);
-        assert_eq!(result.iterations, 0);
-        assert_eq!(result.solution, vec![1.0; 4]);
     }
 }

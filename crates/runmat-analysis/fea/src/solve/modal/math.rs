@@ -1,10 +1,10 @@
-use crate::operator::{apply_m, OperatorSystem};
+use crate::algebra::{apply_m, AssembledRealSystem};
 
 pub(super) fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
 }
 
-pub(super) fn normalize_mass(system: &OperatorSystem, vector: &mut [f64]) {
+pub(super) fn normalize_mass(system: &AssembledRealSystem, vector: &mut [f64]) {
     let mv = apply_m(system, vector);
     let mass_norm = dot(vector, &mv).abs().sqrt().max(1.0e-12);
     for value in vector.iter_mut() {
@@ -12,7 +12,11 @@ pub(super) fn normalize_mass(system: &OperatorSystem, vector: &mut [f64]) {
     }
 }
 
-pub(super) fn orthonormalize_mass(system: &OperatorSystem, vector: &mut [f64], basis: &[Vec<f64>]) {
+pub(super) fn orthonormalize_mass(
+    system: &AssembledRealSystem,
+    vector: &mut [f64],
+    basis: &[Vec<f64>],
+) {
     for mode in basis {
         let mv = apply_m(system, mode);
         let projection = dot(vector, &mv);

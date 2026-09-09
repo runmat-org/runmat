@@ -499,8 +499,11 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .expect("signal-backed prescribed value should assemble");
-    assert_eq!(referenced.operator.constrained, inline.operator.constrained);
-    assert_eq!(referenced.operator.rhs, inline.operator.rhs);
+    assert_eq!(
+        referenced.operator.constrained_dofs(),
+        inline.operator.constrained_dofs()
+    );
+    assert_eq!(referenced.operator.load(), inline.operator.load());
 }
 
 #[test]
@@ -542,7 +545,7 @@ fn beam_assembly_uses_lumped_rotational_inertia() {
     .expect("beam operator should assemble");
     let layout = &summary.structural_dof_layout;
     let node = 0usize;
-    let mass = &summary.operator.mass_diag;
+    let mass = &summary.operator.operators().mass().diagonal_values();
 
     let translational_mass = 7850.0 * 2.0e-4 / 2.0;
     let torsion_inertia = 7850.0 * 2.4e-9 / 2.0;

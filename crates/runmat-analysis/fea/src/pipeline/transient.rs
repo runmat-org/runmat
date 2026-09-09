@@ -4,6 +4,7 @@ use runmat_analysis_core::{
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
+    algebra::{apply_k, apply_m},
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
@@ -19,7 +20,6 @@ use crate::{
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    operator::{apply_k_unconstrained, apply_m},
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
@@ -557,7 +557,7 @@ fn recover_strain_energy_snapshots(
     displacement_snapshots
         .iter()
         .map(|displacement| {
-            let internal_force = apply_k_unconstrained(&summary.operator, displacement);
+            let internal_force = apply_k(&summary.operator, displacement);
             0.5 * displacement
                 .iter()
                 .zip(internal_force.iter())

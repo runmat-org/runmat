@@ -2,20 +2,20 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
-use crate::operator::CsrMatrix;
+use crate::algebra::{OperatorRole, RealSparseMatrix};
 
 use super::{
     elements::solid::{
         tetrahedron10_consistent_mass_matrix, tetrahedron4_consistent_mass_matrix, SolidMaterial,
         Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
     },
-    solid_matrix::{empty_rows, rows_to_csr, scatter_csr},
+    solid_matrix::{empty_rows, rows_to_sparse, scatter_csr},
     solver_solid::{element_geometry, solver_solid_topology, SolverSolidAssemblyError},
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SolverSolidMassAssembly {
-    pub consistent: CsrMatrix,
+    pub consistent: RealSparseMatrix,
     pub lumped_diag: Vec<f64>,
     pub total_mass_kg: f64,
 }
@@ -88,7 +88,8 @@ pub fn assemble_solver_solid_mass(
     }
 
     Ok(SolverSolidMassAssembly {
-        consistent: rows_to_csr(rows),
+        consistent: rows_to_sparse(rows, OperatorRole::Mass)
+            .map_err(|error| SolverSolidAssemblyError::SparseOperator(format!("{error:?}")))?,
         lumped_diag,
         total_mass_kg,
     })

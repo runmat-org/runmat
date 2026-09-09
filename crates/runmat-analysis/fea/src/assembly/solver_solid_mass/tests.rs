@@ -53,10 +53,7 @@ fn region_density_controls_mass_without_changing_topology() {
         2.5,
         1.0e-12,
     );
-    assert_eq!(
-        baseline.consistent.column_indices,
-        selected.consistent.column_indices
-    );
+    assert_eq!(baseline.consistent.pattern(), selected.consistent.pattern());
 }
 
 fn material(density_kg_per_m3: f64) -> SolidMaterial {
@@ -67,14 +64,8 @@ fn material(density_kg_per_m3: f64) -> SolidMaterial {
     }
 }
 
-fn apply_csr(matrix: &CsrMatrix, input: &[f64]) -> Vec<f64> {
-    (0..input.len())
-        .map(|row| {
-            (matrix.row_offsets[row]..matrix.row_offsets[row + 1])
-                .map(|entry| matrix.values[entry] * input[matrix.column_indices[entry]])
-                .sum()
-        })
-        .collect()
+fn apply_csr(matrix: &crate::algebra::RealSparseMatrix, input: &[f64]) -> Vec<f64> {
+    crate::algebra::spmv(matrix, input).unwrap()
 }
 
 fn assert_relative(actual: f64, expected: f64, tolerance: f64) {

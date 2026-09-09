@@ -69,7 +69,9 @@ fn transient_slab_has_second_order_spatial_convergence() {
             .map(|node| 300.0 + 20.0 * (std::f64::consts::PI * node.coordinates_m[0]).sin())
             .collect::<Vec<_>>();
         for _ in 0..256 {
-            let operator = assembly.transient_operator(time_step_s, &temperature);
+            let operator = assembly
+                .transient_operator(time_step_s, &temperature)
+                .unwrap();
             let solve = solve_operator_system(
                 &operator,
                 SpdPreconditionerKind::Jacobi,

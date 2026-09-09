@@ -1,6 +1,6 @@
 use crate::{
+    algebra::{apply_k, AssembledRealSystem},
     assembly::AssemblySummary,
-    operator::{apply_k, OperatorSystem},
     solve::{
         preconditioner::SpdPreconditionerKind,
         runtime_tensor_solver::{
@@ -27,7 +27,7 @@ pub(super) struct CgSolveOptions<'a> {
 
 pub(super) fn solve_k_system_cg(
     summary: &AssemblySummary,
-    system: &OperatorSystem,
+    system: &AssembledRealSystem,
     rhs: &[f64],
     options: CgSolveOptions<'_>,
 ) -> LinearSolveAttempt {

@@ -1,11 +1,11 @@
 //! Exact sparse constraint enforcement through a matrix-free saddle-point system.
 
 use crate::{
+    algebra::apply_k,
     assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::apply_k_unconstrained,
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         linear::LinearSolveResult,
@@ -43,7 +43,7 @@ pub(super) fn solve_multiplier_constraint_system(
         };
     }
     let equation_scale = representative_stiffness(summary);
-    let mut right_hand_side = summary.operator.rhs.clone();
+    let mut right_hand_side = summary.operator.load().to_vec();
     right_hand_side.extend(
         constraints
             .right_hand_side
@@ -197,7 +197,7 @@ fn apply_saddle(
     equation_scale: f64,
 ) -> Vec<f64> {
     let dofs = summary.dof_count;
-    let mut physical = apply_k_unconstrained(&summary.operator, &value[..dofs]);
+    let mut physical = apply_k(&summary.operator, &value[..dofs]);
     let transpose = constraints.transpose_apply_validated(&value[dofs..]);
     for (target, contribution) in physical.iter_mut().zip(transpose) {
         *target += equation_scale * contribution;
@@ -214,7 +214,9 @@ fn apply_saddle(
 fn representative_stiffness(summary: &AssemblySummary) -> f64 {
     summary
         .operator
-        .stiffness_diag
+        .operators()
+        .stiffness()
+        .diagonal_values()
         .iter()
         .copied()
         .filter(|value| value.is_finite() && *value > 0.0)

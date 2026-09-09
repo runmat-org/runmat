@@ -1,4 +1,6 @@
-use crate::operator::OperatorSystem;
+use std::{collections::BTreeMap, fmt};
+
+use crate::algebra::PreparedRealLinearSystem;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,135 +13,54 @@ pub enum SpdPreconditionerKind {
 impl SpdPreconditionerKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            SpdPreconditionerKind::Jacobi => "jacobi",
-            SpdPreconditionerKind::Ilu0 => "ilu0",
+            Self::Jacobi => "jacobi",
+            Self::Ilu0 => "ilu0",
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreconditionerError {
+    MissingDiagonal { row: usize },
+    InvalidPivot { row: usize },
+}
+
+impl fmt::Display for PreconditionerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "preconditioner setup failed: {self:?}")
+    }
+}
+
+impl std::error::Error for PreconditionerError {}
 
 pub trait SpdPreconditioner {
     fn kind(&self) -> SpdPreconditionerKind;
     fn apply(&self, residual: &[f64]) -> Vec<f64>;
 }
 
-pub struct JacobiPreconditioner {
-    inv_diag: Vec<f64>,
-    constrained: Vec<bool>,
+struct JacobiPreconditioner {
+    inverse_diagonal: Vec<f64>,
 }
 
 impl JacobiPreconditioner {
-    pub fn from_operator(operator: &OperatorSystem) -> Self {
-        let inv_diag = operator
-            .stiffness_diag
-            .iter()
-            .map(|value| 1.0 / value.abs().max(1.0e-12))
-            .collect();
-
-        Self {
-            inv_diag,
-            constrained: operator.constrained.clone(),
-        }
-    }
-}
-
-pub struct Ilu0TridiagonalPreconditioner {
-    constrained: Vec<bool>,
-    lower: Vec<f64>,
-    upper: Vec<f64>,
-    u_diag: Vec<f64>,
-}
-
-impl Ilu0TridiagonalPreconditioner {
-    pub fn from_operator(operator: &OperatorSystem) -> Self {
-        let n = operator.dof_count;
-        let constrained = operator.constrained.clone();
-
-        let mut lower = vec![0.0; n.saturating_sub(1)];
-        let mut upper = vec![0.0; n.saturating_sub(1)];
-        for i in 0..n.saturating_sub(1) {
-            if constrained[i] || constrained[i + 1] {
-                continue;
+    fn try_new(system: &PreparedRealLinearSystem) -> Result<Self, PreconditionerError> {
+        let mut inverse_diagonal = Vec::with_capacity(system.dof_count());
+        for row in 0..system.dof_count() {
+            let diagonal = system.matrix().get(row, row);
+            if !diagonal.is_finite() {
+                return Err(PreconditionerError::InvalidPivot { row });
             }
-            let coupling = operator.stiffness_upper[i];
-            lower[i] = -coupling;
-            upper[i] = -coupling;
-        }
-
-        let mut u_diag = vec![1.0; n];
-        if n > 0 {
-            u_diag[0] = if constrained[0] {
-                1.0
-            } else {
-                operator.stiffness_diag[0].max(1.0e-12)
-            };
-        }
-
-        for i in 1..n {
-            if constrained[i] {
-                u_diag[i] = 1.0;
-                continue;
-            }
-            let prev_u = u_diag[i - 1].abs().max(1.0e-12);
-            let l = if constrained[i - 1] {
-                0.0
-            } else {
-                lower[i - 1] / prev_u
-            };
-            let mut value = operator.stiffness_diag[i] - l * upper[i - 1];
-            if value.abs() < 1.0e-12 {
-                value = value.signum() * 1.0e-12;
-                if value == 0.0 {
-                    value = 1.0e-12;
+            if diagonal.abs() <= 1.0e-14 {
+                let row_is_empty = system.matrix().pattern().row_range(row).is_empty();
+                if row_is_empty && system.rhs()[row] == 0.0 {
+                    inverse_diagonal.push(1.0);
+                    continue;
                 }
+                return Err(PreconditionerError::InvalidPivot { row });
             }
-            u_diag[i] = value;
+            inverse_diagonal.push(diagonal.recip());
         }
-
-        Self {
-            constrained,
-            lower,
-            upper,
-            u_diag,
-        }
-    }
-}
-
-impl SpdPreconditioner for Ilu0TridiagonalPreconditioner {
-    fn kind(&self) -> SpdPreconditionerKind {
-        SpdPreconditionerKind::Ilu0
-    }
-
-    fn apply(&self, residual: &[f64]) -> Vec<f64> {
-        let n = residual.len();
-        let mut y = vec![0.0; n];
-        for i in 0..n {
-            if self.constrained[i] {
-                y[i] = residual[i];
-                continue;
-            }
-            let mut value = residual[i];
-            if i > 0 && !self.constrained[i - 1] {
-                let prev_u = self.u_diag[i - 1].abs().max(1.0e-12);
-                let l = self.lower[i - 1] / prev_u;
-                value -= l * y[i - 1];
-            }
-            y[i] = value;
-        }
-
-        let mut z = vec![0.0; n];
-        for i in (0..n).rev() {
-            if self.constrained[i] {
-                z[i] = y[i];
-                continue;
-            }
-            let mut value = y[i];
-            if i + 1 < n && !self.constrained[i + 1] {
-                value -= self.upper[i] * z[i + 1];
-            }
-            z[i] = value / self.u_diag[i].abs().max(1.0e-12);
-        }
-
-        z
+        Ok(Self { inverse_diagonal })
     }
 }
 
@@ -147,67 +68,175 @@ impl SpdPreconditioner for JacobiPreconditioner {
     fn kind(&self) -> SpdPreconditionerKind {
         SpdPreconditionerKind::Jacobi
     }
-
     fn apply(&self, residual: &[f64]) -> Vec<f64> {
         residual
             .iter()
-            .enumerate()
-            .map(|(i, &ri)| {
-                if self.constrained[i] {
-                    ri
-                } else {
-                    ri * self.inv_diag[i]
-                }
-            })
+            .zip(&self.inverse_diagonal)
+            .map(|(value, inverse)| value * inverse)
             .collect()
     }
 }
 
-pub fn build_spd_preconditioner(
-    operator: &OperatorSystem,
-    kind: SpdPreconditionerKind,
-) -> Box<dyn SpdPreconditioner> {
-    match kind {
-        SpdPreconditionerKind::Jacobi => Box::new(JacobiPreconditioner::from_operator(operator)),
-        SpdPreconditionerKind::Ilu0 => {
-            Box::new(Ilu0TridiagonalPreconditioner::from_operator(operator))
+struct Ilu0Preconditioner {
+    row_offsets: Vec<usize>,
+    column_indices: Vec<usize>,
+    factors: Vec<f64>,
+    diagonal_entries: Vec<usize>,
+}
+
+impl Ilu0Preconditioner {
+    fn factor(system: &PreparedRealLinearSystem) -> Result<Self, PreconditionerError> {
+        let matrix = system.matrix();
+        let n = matrix.rows();
+        let row_offsets = matrix
+            .pattern()
+            .row_offsets()
+            .iter()
+            .map(|value| *value as usize)
+            .collect::<Vec<_>>();
+        let column_indices = matrix
+            .pattern()
+            .column_indices()
+            .iter()
+            .map(|value| *value as usize)
+            .collect::<Vec<_>>();
+        let mut factors = matrix.values().to_vec();
+        let positions = (0..n)
+            .map(|row| {
+                matrix
+                    .pattern()
+                    .row_range(row)
+                    .map(|entry| (matrix.pattern().column(entry), entry))
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .collect::<Vec<_>>();
+        let diagonal_entries = positions
+            .iter()
+            .enumerate()
+            .map(|(row, entries)| {
+                entries
+                    .get(&row)
+                    .copied()
+                    .ok_or(PreconditionerError::MissingDiagonal { row })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for row in 0..n {
+            let lower_entries = matrix
+                .pattern()
+                .row_range(row)
+                .take_while(|entry| matrix.pattern().column(*entry) < row)
+                .collect::<Vec<_>>();
+            for lower_entry in lower_entries {
+                let pivot_row = column_indices[lower_entry];
+                let pivot = factors[diagonal_entries[pivot_row]];
+                if !pivot.is_finite() || pivot.abs() <= 1.0e-14 {
+                    return Err(PreconditionerError::InvalidPivot { row: pivot_row });
+                }
+                let multiplier = factors[lower_entry] / pivot;
+                factors[lower_entry] = multiplier;
+                for upper_entry in matrix.pattern().row_range(pivot_row) {
+                    let column = column_indices[upper_entry];
+                    if column <= pivot_row {
+                        continue;
+                    }
+                    if let Some(&target) = positions[row].get(&column) {
+                        factors[target] -= multiplier * factors[upper_entry];
+                    }
+                }
+            }
+            let pivot = factors[diagonal_entries[row]];
+            if !pivot.is_finite() || pivot.abs() <= 1.0e-14 {
+                return Err(PreconditionerError::InvalidPivot { row });
+            }
         }
+        Ok(Self {
+            row_offsets,
+            column_indices,
+            factors,
+            diagonal_entries,
+        })
+    }
+}
+
+impl SpdPreconditioner for Ilu0Preconditioner {
+    fn kind(&self) -> SpdPreconditionerKind {
+        SpdPreconditionerKind::Ilu0
+    }
+    fn apply(&self, residual: &[f64]) -> Vec<f64> {
+        let n = self.diagonal_entries.len();
+        let mut y = vec![0.0; n];
+        for row in 0..n {
+            let correction = (self.row_offsets[row]..self.diagonal_entries[row])
+                .map(|entry| self.factors[entry] * y[self.column_indices[entry]])
+                .sum::<f64>();
+            y[row] = residual[row] - correction;
+        }
+        let mut result = vec![0.0; n];
+        for row in (0..n).rev() {
+            let correction = (self.diagonal_entries[row] + 1..self.row_offsets[row + 1])
+                .map(|entry| self.factors[entry] * result[self.column_indices[entry]])
+                .sum::<f64>();
+            result[row] = (y[row] - correction) / self.factors[self.diagonal_entries[row]];
+        }
+        result
+    }
+}
+
+pub fn build_spd_preconditioner(
+    system: &PreparedRealLinearSystem,
+    kind: SpdPreconditionerKind,
+) -> Result<Box<dyn SpdPreconditioner>, PreconditionerError> {
+    match kind {
+        SpdPreconditionerKind::Jacobi => Ok(Box::new(JacobiPreconditioner::try_new(system)?)),
+        SpdPreconditionerKind::Ilu0 => Ok(Box::new(Ilu0Preconditioner::factor(system)?)),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::assembly::{assemble_structural_system, StructuralFormulationRequirement};
-    use crate::excitation::{realize_step_excitations, ExcitationSamplePoint};
-    use crate::fixtures::{fixture_model, FixtureId};
-
     use super::*;
+    use crate::algebra::{
+        MatrixProperties, OperatorRole, PreparedRealLinearSystem, RealSparseAssembler,
+        RealSparseMatrix,
+    };
 
-    fn model() -> runmat_analysis_core::AnalysisModel {
-        fixture_model(FixtureId::CantileverLinearStatic)
+    #[test]
+    fn ilu0_uses_canonical_sparse_pattern_and_is_finite() {
+        let mut assembler = RealSparseAssembler::square(
+            3,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        for row in 0..3 {
+            assembler.add(row, row, 4.0);
+            if row + 1 < 3 {
+                assembler.add(row, row + 1, -1.0);
+                assembler.add(row + 1, row, -1.0);
+            }
+        }
+        let matrix = assembler.finish().unwrap();
+        let system =
+            PreparedRealLinearSystem::try_new(matrix, vec![1.0; 3], vec![false; 3]).unwrap();
+        let applied = build_spd_preconditioner(&system, SpdPreconditionerKind::Ilu0)
+            .unwrap()
+            .apply(system.rhs());
+        assert!(applied.iter().all(|value| value.is_finite()));
     }
 
     #[test]
-    fn ilu0_preconditioner_is_buildable_and_finite() {
-        let model = model();
-        let excitations = realize_step_excitations(
-            &model,
-            &model.sequence.steps[0],
-            ExcitationSamplePoint::Static,
+    fn missing_pivot_is_attributable() {
+        let matrix = RealSparseMatrix::diagonal(
+            vec![1.0, 0.0],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
         )
-        .expect("preconditioner fixture excitations should realize");
-        let summary = assemble_structural_system(
-            &model,
-            &excitations,
-            None,
-            None,
-            None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-        )
-        .expect("test system should assemble");
-        let pc = build_spd_preconditioner(&summary.operator, SpdPreconditionerKind::Ilu0);
-        let z = pc.apply(&summary.operator.rhs);
-        assert_eq!(z.len(), summary.dof_count);
-        assert!(z.iter().all(|v| v.is_finite()));
+        .unwrap();
+        let system =
+            PreparedRealLinearSystem::try_new(matrix, vec![1.0; 2], vec![false; 2]).unwrap();
+        assert!(matches!(
+            build_spd_preconditioner(&system, SpdPreconditionerKind::Ilu0),
+            Err(PreconditionerError::InvalidPivot { row: 1 })
+        ));
     }
 }

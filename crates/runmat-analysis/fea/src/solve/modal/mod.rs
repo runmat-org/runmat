@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 use crate::{
+    algebra::{apply_k, apply_m},
     assembly::AssemblySummary,
     contracts::SolverMethod,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, apply_m},
     solve::{
         backend::kind::LinearAlgebraBackendKind,
         runtime_tensor_solver::prepare_runtime_tensor_linear_system,
@@ -62,19 +62,59 @@ pub fn solve_modal_system(
         };
     }
 
+    let prepared_modal = match summary.operator.prepare_modal() {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return ModalSolveResult {
+                converged: false,
+                frequencies_hz: Vec::new(),
+                mode_shapes: Vec::new(),
+                residual_norms: Vec::new(),
+                diagnostics: vec![FeaDiagnostic {
+                    code: "FEA_MODAL_PREPARATION_FAILED".to_string(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: format!("modal free-DOF reduction failed: {error:?}"),
+                }],
+                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_backend: LinearAlgebraBackendKind::CpuReference,
+                solver_host_sync_count: 0,
+                device_apply_k_count: 0,
+                device_apply_k_attempt_count: 0,
+            };
+        }
+    };
+    let reduced_operator = match prepared_modal.as_assembled() {
+        Ok(operator) => operator,
+        Err(error) => {
+            return ModalSolveResult {
+                converged: false,
+                frequencies_hz: Vec::new(),
+                mode_shapes: Vec::new(),
+                residual_norms: Vec::new(),
+                diagnostics: vec![FeaDiagnostic {
+                    code: "FEA_MODAL_PREPARATION_FAILED".to_string(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: format!("modal reduced system validation failed: {error:?}"),
+                }],
+                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_backend: LinearAlgebraBackendKind::CpuReference,
+                solver_host_sync_count: 0,
+                device_apply_k_count: 0,
+                device_apply_k_attempt_count: 0,
+            };
+        }
+    };
+    let mut solve_summary = summary.clone();
+    solve_summary.dof_count = reduced_operator.dof_count();
+    solve_summary.constrained_dof_count = 0;
+    solve_summary.operator = reduced_operator;
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
     let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
 
-    let unconstrained: Vec<usize> = summary
-        .operator
-        .constrained
-        .iter()
-        .enumerate()
-        .filter_map(|(i, is_constrained)| if *is_constrained { None } else { Some(i) })
-        .collect();
+    let unconstrained: Vec<usize> = (0..solve_summary.operator.dof_count()).collect();
     let target_mode_count = mode_count.min(unconstrained.len());
 
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
@@ -83,7 +123,7 @@ pub fn solve_modal_system(
     let mut prepared_build_ms = 0.0_f64;
     let prepared_runtime_system = if has_accel_provider {
         let prepared_start = Instant::now();
-        let prepared = prepare_runtime_tensor_linear_system(summary);
+        let prepared = prepare_runtime_tensor_linear_system(&solve_summary);
         prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
         prepared
     } else {
@@ -101,9 +141,9 @@ pub fn solve_modal_system(
         if crate::is_fea_cancelled() {
             break;
         }
-        let mut q = vec![0.0; summary.operator.dof_count];
+        let mut q = vec![0.0; solve_summary.operator.dof_count()];
         q[unconstrained[mode_idx]] = 1.0;
-        normalize_mass(&summary.operator, &mut q);
+        normalize_mass(&solve_summary.operator, &mut q);
         let mut linear_guess: Option<Vec<f64>> = None;
 
         for iter in 0..max_inverse_iters {
@@ -111,11 +151,11 @@ pub fn solve_modal_system(
                 break 'modes;
             }
             let q_prev = q.clone();
-            let mq = apply_m(&summary.operator, &q);
+            let mq = apply_m(&solve_summary.operator, &q);
             let solve_start = Instant::now();
             let z = solve_k_system_cg(
-                summary,
-                &summary.operator,
+                &solve_summary,
+                &solve_summary.operator,
                 &mq,
                 CgSolveOptions {
                     max_iters: 64,
@@ -145,8 +185,8 @@ pub fn solve_modal_system(
             }
             let mut z_vec = z.vector;
             linear_guess = Some(z_vec.clone());
-            orthonormalize_mass(&summary.operator, &mut z_vec, &basis);
-            normalize_mass(&summary.operator, &mut z_vec);
+            orthonormalize_mass(&solve_summary.operator, &mut z_vec, &basis);
+            normalize_mass(&solve_summary.operator, &mut z_vec);
             q = z_vec;
 
             if iter + 1 >= min_inverse_iters {
@@ -157,8 +197,8 @@ pub fn solve_modal_system(
             }
         }
 
-        let kq = apply_k(&summary.operator, &q);
-        let mq = apply_m(&summary.operator, &q);
+        let kq = apply_k(&solve_summary.operator, &q);
+        let mq = apply_m(&solve_summary.operator, &q);
         let lambda = (dot(&q, &kq) / dot(&q, &mq).abs().max(1.0e-12)).max(0.0);
         let freq_hz = lambda.sqrt() / (2.0 * std::f64::consts::PI);
 
@@ -179,7 +219,11 @@ pub fn solve_modal_system(
             .max(1.0e-12);
 
         basis.push(q.clone());
-        modes.push((freq_hz, q, residual / kq_norm));
+        let expanded = match prepared_modal.expand(&q) {
+            Ok(shape) => shape,
+            Err(_) => break,
+        };
+        modes.push((freq_hz, expanded, residual / kq_norm));
     }
 
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));

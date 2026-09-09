@@ -6,12 +6,16 @@ use runmat_analysis_core::{
 use thiserror::Error;
 
 use crate::{
+    algebra::{
+        spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
+        ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
+        RealSparseMatrix,
+    },
     excitation::{
         sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
         RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
         ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
     },
-    operator::{CsrAssembler, CsrMatrix, OperatorSystem},
     topology::{AnalysisProjection, ProjectedElement},
 };
 
@@ -24,8 +28,8 @@ pub(crate) use recovery::ThermalEnergyBalance;
 #[derive(Debug, Clone)]
 pub(crate) struct ThermalOperatorAssembly {
     pub projection: AnalysisProjection,
-    pub conductivity: CsrMatrix,
-    pub capacity: CsrMatrix,
+    pub conductivity: RealSparseMatrix,
+    pub capacity: RealSparseMatrix,
     pub source: Vec<f64>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub prescribed_temperature_k: Vec<Option<f64>>,
@@ -34,39 +38,44 @@ pub(crate) struct ThermalOperatorAssembly {
 }
 
 impl ThermalOperatorAssembly {
-    pub(crate) fn steady_operator(&self) -> OperatorSystem {
-        let stiffness_csr = self.conductivity.clone();
+    pub(crate) fn steady_operator(&self) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+        let stiffness = self.conductivity.clone();
         let mut rhs = self.source.clone();
-        apply_prescribed_temperatures(&stiffness_csr, &self.prescribed_temperature_k, &mut rhs);
-        let stiffness_diag = diagonal(&stiffness_csr, self.projection.nodes.len());
-        OperatorSystem {
-            dof_count: self.projection.nodes.len(),
-            constrained: self
-                .prescribed_temperature_k
-                .iter()
-                .map(Option::is_some)
-                .collect(),
-            stiffness_dense: None,
-            stiffness_csr: Some(stiffness_csr),
-            stiffness_diag,
-            stiffness_upper: vec![0.0; self.projection.nodes.len().saturating_sub(1)],
-            mass_csr: None,
-            mass_diag: diagonal(&self.capacity, self.projection.nodes.len()),
-            damping_diag: vec![0.0; self.projection.nodes.len()],
-            rhs,
-        }
+        apply_prescribed_values(&self.prescribed_temperature_k, &mut rhs);
+        let constrained = self
+            .prescribed_temperature_k
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        let mass = self.capacity.clone();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; self.projection.nodes.len()],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
+        let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
+        AssembledRealSystem::try_new(operators, constrained, rhs)
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
     }
 
     pub(crate) fn transient_operator(
         &self,
         time_step_s: f64,
         previous_temperature_k: &[f64],
-    ) -> OperatorSystem {
+    ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
         let inverse_time_step = time_step_s.recip();
-        let mut matrix = CsrAssembler::new(self.projection.nodes.len());
+        let mut matrix = RealSparseAssembler::square(
+            self.projection.nodes.len(),
+            OperatorRole::EffectiveTangent,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
         add_scaled_matrix(&mut matrix, &self.conductivity, 1.0);
         add_scaled_matrix(&mut matrix, &self.capacity, inverse_time_step);
-        let stiffness_csr = matrix.finish();
+        let stiffness = matrix
+            .finish()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
         let capacity_temperature = apply_matrix(&self.capacity, previous_temperature_k);
         let mut rhs = self
             .source
@@ -74,29 +83,30 @@ impl ThermalOperatorAssembly {
             .zip(capacity_temperature)
             .map(|(source, stored_energy)| source + inverse_time_step * stored_energy)
             .collect::<Vec<_>>();
-        apply_prescribed_temperatures(&stiffness_csr, &self.prescribed_temperature_k, &mut rhs);
-        let stiffness_diag = diagonal(&stiffness_csr, self.projection.nodes.len());
-        OperatorSystem {
-            dof_count: self.projection.nodes.len(),
-            constrained: self
-                .prescribed_temperature_k
-                .iter()
-                .map(Option::is_some)
-                .collect(),
-            stiffness_dense: None,
-            stiffness_csr: Some(stiffness_csr),
-            stiffness_diag,
-            stiffness_upper: vec![0.0; self.projection.nodes.len().saturating_sub(1)],
-            mass_csr: None,
-            mass_diag: diagonal(&self.capacity, self.projection.nodes.len()),
-            damping_diag: vec![0.0; self.projection.nodes.len()],
-            rhs,
-        }
+        apply_prescribed_values(&self.prescribed_temperature_k, &mut rhs);
+        let constrained = self
+            .prescribed_temperature_k
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        let mass = self.capacity.clone();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; self.projection.nodes.len()],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
+        let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
+        AssembledRealSystem::try_new(operators, constrained, rhs)
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
     }
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub(crate) enum ThermalAssemblyError {
+    #[error("thermal sparse operator construction failed: {0}")]
+    SparseOperator(String),
     #[error("thermal analysis projection is invalid: {0}")]
     InvalidProjection(String),
     #[error("volume region {region_id} has no thermal material assignment")]
@@ -139,8 +149,24 @@ pub(crate) fn assemble(
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
     let materials = thermal_materials(model);
     let default_material = (model.materials.len() == 1).then(|| &model.materials[0]);
-    let mut conductivity = CsrAssembler::new(projection.nodes.len());
-    let mut capacity = CsrAssembler::new(projection.nodes.len());
+    let mut conductivity = RealSparseAssembler::square(
+        projection.nodes.len(),
+        OperatorRole::Conductivity,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    let mut capacity = RealSparseAssembler::square(
+        projection.nodes.len(),
+        OperatorRole::Capacity,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    );
+    conductivity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
+    });
+    capacity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("consistent_heat_capacity".to_string()),
+    });
     let mut element_conductivity_w_per_mk = Vec::with_capacity(projection.elements.len());
     let mut element_volumetric_capacity_j_per_m3k = Vec::with_capacity(projection.elements.len());
 
@@ -408,8 +434,12 @@ pub(crate) fn assemble(
 
     Ok(ThermalOperatorAssembly {
         projection,
-        conductivity: conductivity.finish(),
-        capacity: capacity.finish(),
+        conductivity: conductivity
+            .finish()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?,
+        capacity: capacity
+            .finish()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?,
         source,
         source_evidence,
         prescribed_temperature_k,
@@ -465,50 +495,26 @@ fn volume_matches(element: &ProjectedElement, target: &RealizedExcitationTarget)
     }
 }
 
-fn add_scaled_matrix(assembler: &mut CsrAssembler, matrix: &CsrMatrix, scale: f64) {
-    for row in 0..matrix.row_offsets.len().saturating_sub(1) {
-        for entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1] {
+fn add_scaled_matrix(assembler: &mut RealSparseAssembler, matrix: &RealSparseMatrix, scale: f64) {
+    for row in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(row) {
             assembler.add(
                 row,
-                matrix.column_indices[entry],
-                scale * matrix.values[entry],
+                matrix.pattern().column(entry),
+                scale * matrix.values()[entry],
             );
         }
     }
 }
 
-pub(super) fn apply_matrix(matrix: &CsrMatrix, vector: &[f64]) -> Vec<f64> {
-    (0..matrix.row_offsets.len().saturating_sub(1))
-        .map(|row| {
-            (matrix.row_offsets[row]..matrix.row_offsets[row + 1])
-                .map(|entry| matrix.values[entry] * vector[matrix.column_indices[entry]])
-                .sum()
-        })
-        .collect()
+pub(super) fn apply_matrix(matrix: &RealSparseMatrix, vector: &[f64]) -> Vec<f64> {
+    spmv(matrix, vector).expect("validated thermal operator dimensions")
 }
 
-fn diagonal(matrix: &CsrMatrix, size: usize) -> Vec<f64> {
-    (0..size)
-        .map(|row| {
-            (matrix.row_offsets[row]..matrix.row_offsets[row + 1])
-                .find_map(|entry| {
-                    (matrix.column_indices[entry] == row).then_some(matrix.values[entry])
-                })
-                .unwrap_or(0.0)
-        })
-        .collect()
-}
-
-fn apply_prescribed_temperatures(matrix: &CsrMatrix, prescribed: &[Option<f64>], rhs: &mut [f64]) {
-    for row in 0..rhs.len() {
-        if let Some(value) = prescribed[row] {
-            rhs[row] = value;
-            continue;
-        }
-        for entry in matrix.row_offsets[row]..matrix.row_offsets[row + 1] {
-            if let Some(value) = prescribed[matrix.column_indices[entry]] {
-                rhs[row] -= matrix.values[entry] * value;
-            }
+fn apply_prescribed_values(prescribed: &[Option<f64>], rhs: &mut [f64]) {
+    for (right_hand_side, value) in rhs.iter_mut().zip(prescribed) {
+        if let Some(value) = value {
+            *right_hand_side = *value;
         }
     }
 }
@@ -784,10 +790,10 @@ mod tests {
             ExcitationSamplePoint::Static,
         )
         .unwrap();
-        let conductivity_sum = assembly.conductivity.values.iter().sum::<f64>();
+        let conductivity_sum = assembly.conductivity.values().iter().sum::<f64>();
         let conductivity_scale = assembly
             .conductivity
-            .values
+            .values()
             .iter()
             .map(|value| value.abs())
             .sum::<f64>();
@@ -797,7 +803,7 @@ mod tests {
         let expected_capacity = material.mechanical.density_kg_per_m3
             * material.thermal.specific_heat_j_per_kgk
             * assembly.projection.elements[0].signed_volume_m3;
-        let integrated_capacity = assembly.capacity.values.iter().sum::<f64>();
+        let integrated_capacity = assembly.capacity.values().iter().sum::<f64>();
         assert!((integrated_capacity - expected_capacity).abs() <= expected_capacity * 1.0e-12);
 
         let linear_temperature = assembly
@@ -842,7 +848,7 @@ mod tests {
         assert_eq!(assembly.source_evidence.len(), 1);
         assert!(assembly.source_evidence[0].accepted);
         let heated_initial = vec![300.0; assembly.projection.nodes.len()];
-        let heated_operator = assembly.transient_operator(0.1, &heated_initial);
+        let heated_operator = assembly.transient_operator(0.1, &heated_initial).unwrap();
         let heated = solve_operator_system(
             &heated_operator,
             SpdPreconditionerKind::Jacobi,
@@ -866,7 +872,7 @@ mod tests {
         )
         .unwrap();
         let initial = vec![315.0; no_source.projection.nodes.len()];
-        let operator = no_source.transient_operator(0.25, &initial);
+        let operator = no_source.transient_operator(0.25, &initial).unwrap();
         let solved = solve_operator_system(
             &operator,
             SpdPreconditionerKind::Jacobi,
@@ -923,7 +929,7 @@ mod tests {
         )
         .unwrap();
         let initial = vec![305.0; convection.projection.nodes.len()];
-        let operator = convection.transient_operator(0.25, &initial);
+        let operator = convection.transient_operator(0.25, &initial).unwrap();
         let solved = solve_operator_system(
             &operator,
             SpdPreconditionerKind::Jacobi,
@@ -969,7 +975,7 @@ mod tests {
         )
         .unwrap();
         let initial = vec![315.0; assembly.projection.nodes.len()];
-        let operator = assembly.transient_operator(0.25, &initial);
+        let operator = assembly.transient_operator(0.25, &initial).unwrap();
         let solved = solve_operator_system(
             &operator,
             SpdPreconditionerKind::Jacobi,
@@ -1009,7 +1015,9 @@ mod tests {
             let mut temperature = vec![300.0; assembly.projection.nodes.len()];
             temperature[free_node] = 400.0;
             for _ in 0..step_count {
-                let operator = assembly.transient_operator(time_step_s, &temperature);
+                let operator = assembly
+                    .transient_operator(time_step_s, &temperature)
+                    .unwrap();
                 let solve = solve_operator_system(
                     &operator,
                     SpdPreconditionerKind::Jacobi,
@@ -1095,7 +1103,7 @@ mod tests {
             + convection_diagonal * (2.0 * ambient_temperature_k - 350.0))
             / (conductivity_term + convection_diagonal);
         let solve = solve_operator_system(
-            &assembly.steady_operator(),
+            &assembly.steady_operator().unwrap(),
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,

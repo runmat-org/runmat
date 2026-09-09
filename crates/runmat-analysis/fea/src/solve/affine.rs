@@ -1,9 +1,9 @@
 use crate::{
+    algebra::apply_k,
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::apply_k_unconstrained,
     solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
 };
 
@@ -139,10 +139,10 @@ fn reduced_right_hand_side(
     summary: &AssemblySummary,
     reduction: &AffineConstraintReduction,
 ) -> Vec<f64> {
-    let internal_offset = apply_k_unconstrained(&summary.operator, &reduction.offset);
+    let internal_offset = apply_k(&summary.operator, &reduction.offset);
     let shifted = summary
         .operator
-        .rhs
+        .load()
         .iter()
         .zip(internal_offset)
         .map(|(applied, internal)| applied - internal)
@@ -156,7 +156,7 @@ fn apply_reduced_operator(
     reduced: &[f64],
 ) -> Vec<f64> {
     let full = expand_linear(reduction, reduced);
-    transpose_apply(reduction, &apply_k_unconstrained(&summary.operator, &full))
+    transpose_apply(reduction, &apply_k(&summary.operator, &full))
 }
 
 fn expand(reduction: &AffineConstraintReduction, reduced: &[f64]) -> Vec<f64> {

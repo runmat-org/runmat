@@ -1,6 +1,7 @@
 use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
 
 use crate::{
+    algebra::{apply_k, apply_m},
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_modal_mode_shape_field_id, ComputeBackend, FeaModalRunResult, FeaRunError,
@@ -12,7 +13,6 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    operator::{apply_k, apply_m},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
 };

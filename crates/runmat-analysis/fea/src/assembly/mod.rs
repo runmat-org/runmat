@@ -46,13 +46,16 @@ use self::{
 use moment_projection::project_moment;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
+use crate::algebra::{
+    AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
+    ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler, RealSparseMatrix,
+};
 use crate::constraints::{
     AffineConstraintReduction, CanonicalStructuralConstraintPlan, CanonicalStructuralDof,
     CanonicalStructuralDofOwner, ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery,
     ResolvedConstraintMatrix,
 };
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
-use crate::operator::{CsrMatrix, OperatorSystem};
 use crate::{FeaElectroThermalContext, FeaThermoMechanicalContext};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,11 +112,12 @@ pub struct AssemblySummary {
     pub structural_material: StructuralMaterialSummary,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
-    pub operator: OperatorSystem,
+    pub operator: AssembledRealSystem,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinearAssemblyError {
+    SparseOperator(String),
     ConstraintPlan(ConstraintPlanError),
     ConstraintAlgebra(ConstraintAlgebraError),
     Structural(StructuralAssemblyError),
@@ -124,6 +128,9 @@ pub enum LinearAssemblyError {
 impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            LinearAssemblyError::SparseOperator(message) => {
+                write!(f, "sparse operator construction failed: {message}")
+            }
             LinearAssemblyError::ConstraintPlan(err) => {
                 write!(f, "constraint planning failed: {err}")
             }
@@ -206,6 +213,7 @@ impl fmt::Display for StructuralLoadKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuralAssemblyError {
+    SparseOperator(String),
     MissingDiscretization,
     MixedSolidAndExplicit {
         explicit_element_count: usize,
@@ -271,6 +279,9 @@ pub enum StructuralAssemblyError {
 impl fmt::Display for StructuralAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SparseOperator(message) => {
+                write!(f, "structural sparse operator construction failed: {message}")
+            }
             Self::MissingDiscretization => write!(
                 f,
                 "structural analysis requires a canonical solid mesh or explicit beam/shell connectivity"
@@ -1034,29 +1045,23 @@ fn assemble_linear_system_impl(
         }
         None => None,
     };
-    if let Some(csr) = stiffness_csr.as_mut() {
-        let terminal_offset = csr.row_offsets.last().copied().unwrap_or(0);
-        csr.row_offsets.resize(dof_count + 1, terminal_offset);
-    }
-    if let Some(csr) = mass_csr.as_mut() {
-        let terminal_offset = csr.row_offsets.last().copied().unwrap_or(0);
-        csr.row_offsets.resize(dof_count + 1, terminal_offset);
-    }
+    stiffness_csr = stiffness_csr.map(|matrix| {
+        matrix
+            .expanded_square(dof_count)
+            .expect("structural DOF expansion is valid")
+    });
+    mass_csr = mass_csr.map(|matrix| {
+        matrix
+            .expanded_square(dof_count)
+            .expect("structural DOF expansion is valid")
+    });
     if let Some(csr) = stiffness_csr.as_ref() {
-        apply_csr_constraints(csr, &constrained, &mut rhs, dof_count);
         for (i, diagonal) in stiffness_diag.iter_mut().enumerate().take(dof_count) {
             if i >= mesh_dof_count {
                 *diagonal = 0.0;
                 continue;
             }
-            let start = csr.row_offsets[i];
-            let end = csr.row_offsets[i + 1];
-            *diagonal = csr.column_indices[start..end]
-                .iter()
-                .zip(csr.values[start..end].iter())
-                .find_map(|(&column, &value)| (column == i).then_some(value.abs()))
-                .unwrap_or(1.0e-12)
-                .max(1.0e-12);
+            *diagonal = csr.get(i, i).abs().max(1.0e-12);
         }
         stiffness_upper.fill(0.0);
     }
@@ -1153,17 +1158,55 @@ fn assemble_linear_system_impl(
         structural_material,
         thermo_mechanical,
         electro_thermal,
-        operator: OperatorSystem {
-            dof_count,
-            constrained,
-            stiffness_dense: None,
-            stiffness_csr,
-            stiffness_diag,
-            stiffness_upper,
-            mass_csr,
-            mass_diag,
-            damping_diag,
-            rhs,
+        operator: {
+            let raw_stiffness = match stiffness_csr {
+                Some(matrix) => matrix,
+                None => {
+                    let mut assembler = RealSparseAssembler::square(
+                        stiffness_diag.len(),
+                        OperatorRole::Stiffness,
+                        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                    );
+                    for (row, value) in stiffness_diag.iter().copied().enumerate() {
+                        assembler.add(row, row, value);
+                        if let Some(coupling) = stiffness_upper.get(row).copied() {
+                            assembler.add(row, row + 1, -coupling);
+                            assembler.add(row + 1, row, -coupling);
+                        }
+                    }
+                    assembler.finish().map_err(|error| {
+                        LinearAssemblyError::SparseOperator(format!("{error:?}"))
+                    })?
+                }
+            };
+            let raw_mass = match mass_csr {
+                Some(matrix) => matrix,
+                None => RealSparseMatrix::diagonal(
+                    mass_diag,
+                    OperatorRole::Mass,
+                    MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                )
+                .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?
+                .with_contribution(ContributionProvenance {
+                    domain: ContributionDomain::Structural,
+                    contribution_id: ContributionId("lumped_structural_mass".to_string()),
+                }),
+            };
+            let mass = raw_mass;
+            let damping = RealSparseMatrix::diagonal(
+                damping_diag,
+                OperatorRole::Damping,
+                MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+            )
+            .map_err(|error| LinearAssemblyError::SparseOperator(format!("{error:?}")))?
+            .with_contribution(ContributionProvenance {
+                domain: ContributionDomain::Structural,
+                contribution_id: ContributionId("structural_damping".to_string()),
+            });
+            let operators = CanonicalRealOperators::try_new(raw_stiffness, mass, damping)
+                .expect("assembled structural operator roles and dimensions are valid");
+            AssembledRealSystem::try_new(operators, constrained, rhs)
+                .expect("assembled structural system is finite and dimensionally consistent")
         },
     })
 }
@@ -1289,7 +1332,15 @@ fn assemble_explicit_structural_system(
         node_count
     ]);
     let dof_count = structural_dof_layout.total_dof_count();
-    let mut dense = vec![0.0_f64; dof_count * dof_count];
+    let mut stiffness_assembler = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    );
+    stiffness_assembler.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Structural,
+        contribution_id: ContributionId("explicit_beam_shell_stiffness".to_string()),
+    });
     let mut rhs = vec![0.0_f64; dof_count];
     let mut mass_diag = vec![0.0_f64; dof_count];
     let mut damping_diag = vec![0.0_f64; dof_count];
@@ -1345,7 +1396,7 @@ fn assemble_explicit_structural_system(
                 .expect("six-degree-of-freedom structural layout must address every beam node");
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
             for (local_col, &global_col) in element_dofs.iter().enumerate() {
-                dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
+                stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
             }
         }
         structural_beam_recovery.push(BeamRecoveryElementSummary {
@@ -1415,7 +1466,7 @@ fn assemble_explicit_structural_system(
             .expect("six-degree-of-freedom structural layout must address every shell node");
         for (local_row, &global_row) in element_dofs.iter().enumerate() {
             for (local_col, &global_col) in element_dofs.iter().enumerate() {
-                dense[global_row * dof_count + global_col] += stiffness[local_row][local_col];
+                stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
             }
         }
         add_lumped_shell_mass_and_damping(
@@ -1629,18 +1680,7 @@ fn assemble_explicit_structural_system(
             }
         }
     }
-    apply_dense_constraints(&dense, &constrained, &mut rhs, dof_count);
 
-    let stiffness_diag = (0..dof_count)
-        .map(|idx| {
-            if constrained[idx] {
-                1.0
-            } else {
-                dense[idx * dof_count + idx].abs().max(1.0e-12)
-            }
-        })
-        .collect::<Vec<_>>();
-    let stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
     let constrained_dof_count = constrained.iter().filter(|value| **value).count();
     let rotational_constraint_count = constrained
         .iter()
@@ -1704,17 +1744,34 @@ fn assemble_explicit_structural_system(
         structural_material,
         thermo_mechanical: None,
         electro_thermal: None,
-        operator: OperatorSystem {
-            dof_count,
-            constrained,
-            stiffness_dense: Some(dense),
-            stiffness_csr: None,
-            stiffness_diag,
-            stiffness_upper,
-            mass_csr: None,
-            mass_diag,
-            damping_diag,
-            rhs,
+        operator: {
+            let stiffness = stiffness_assembler
+                .finish()
+                .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+            let mass = RealSparseMatrix::diagonal(
+                mass_diag,
+                OperatorRole::Mass,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+            .with_contribution(ContributionProvenance {
+                domain: ContributionDomain::Structural,
+                contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
+            });
+            let damping = RealSparseMatrix::diagonal(
+                damping_diag,
+                OperatorRole::Damping,
+                MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+            )
+            .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+            .with_contribution(ContributionProvenance {
+                domain: ContributionDomain::Structural,
+                contribution_id: ContributionId("explicit_beam_shell_damping".to_string()),
+            });
+            let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+                .expect("assembled explicit operator roles and dimensions are valid");
+            AssembledRealSystem::try_new(operators, constrained, rhs)
+                .expect("assembled explicit structural system is consistent")
         },
     })
 }
@@ -2142,35 +2199,6 @@ fn resolve_solid_constraint_matrix(
     })
 }
 
-fn apply_dense_constraints(dense: &[f64], constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
-    for dof in 0..dof_count {
-        if !constrained[dof] {
-            continue;
-        }
-        for row in 0..dof_count {
-            if !constrained[row] {
-                rhs[row] -= dense[row * dof_count + dof] * rhs[dof];
-            }
-        }
-    }
-}
-
-fn apply_csr_constraints(csr: &CsrMatrix, constrained: &[bool], rhs: &mut [f64], dof_count: usize) {
-    for row in 0..dof_count {
-        if constrained[row] {
-            continue;
-        }
-        let start = csr.row_offsets[row];
-        let end = csr.row_offsets[row + 1];
-        for entry in start..end {
-            let column = csr.column_indices[entry];
-            if constrained[column] {
-                rhs[row] -= csr.values[entry] * rhs[column];
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct ThermoMechanicalFingerprintInputs {
     dof_count: usize,
@@ -2466,41 +2494,45 @@ mod tests {
                 [0.0, 0.0, 1.0],
             ]
         );
-        assert!(summary.operator.stiffness_dense.is_none());
         let expected_mass_kg = model.materials[0].mechanical.density_kg_per_m3 / 6.0;
         assert!(
             (summary.structural_solid_total_mass_kg - expected_mass_kg).abs()
                 <= expected_mass_kg * 1.0e-12
         );
-        assert!(summary.operator.mass_csr.is_some());
-        assert!(summary.operator.mass_diag.iter().all(|mass| *mass > 0.0));
         assert!(summary
             .operator
-            .damping_diag
+            .operators()
+            .mass()
+            .diagonal_values()
+            .iter()
+            .all(|mass| *mass > 0.0));
+        assert!(summary
+            .operator
+            .operators()
+            .damping()
+            .values()
             .iter()
             .all(|damping| *damping == 0.0));
-        let csr = summary
-            .operator
-            .stiffness_csr
-            .as_ref()
-            .expect("solver mesh should assemble a sparse solid stiffness matrix");
-        assert_eq!(csr.row_offsets.len(), summary.dof_count + 1);
-        assert_eq!(csr.row_offsets.last().copied(), Some(csr.values.len()));
-        assert_eq!(csr.column_indices.len(), csr.values.len());
+        let csr = summary.operator.operators().stiffness();
+        assert_eq!(csr.pattern().row_offsets().len(), summary.dof_count + 1);
+        assert_eq!(
+            csr.pattern().row_offsets().last().copied(),
+            Some(csr.values().len() as u64)
+        );
+        assert_eq!(csr.pattern().column_indices().len(), csr.values().len());
         assert!(summary
             .operator
-            .stiffness_diag
+            .operators()
+            .stiffness()
+            .diagonal_values()
             .iter()
             .all(|value| *value > 0.0));
         for row in 0..summary.dof_count {
-            let start = csr.row_offsets[row];
-            let end = csr.row_offsets[row + 1];
-            let diagonal = csr.column_indices[start..end]
-                .iter()
-                .zip(csr.values[start..end].iter())
-                .find_map(|(&column, &value)| (column == row).then_some(value.abs()))
-                .expect("csr row should include diagonal");
-            assert!((summary.operator.stiffness_diag[row] - diagonal) <= 1.0e-8);
+            let diagonal = csr.get(row, row).abs();
+            assert!(
+                (summary.operator.operators().stiffness().diagonal_values()[row] - diagonal)
+                    <= 1.0e-8
+            );
         }
     }
 
@@ -2672,10 +2704,10 @@ mod tests {
             .expect("valid boundary regions should assemble");
 
         assert_eq!(summary.constrained_dof_count, 9);
-        assert!(summary.operator.constrained[0]);
-        assert!(summary.operator.constrained[1]);
-        assert!(summary.operator.constrained[2]);
-        assert_eq!(summary.operator.rhs[10], -4.0);
+        assert!(summary.operator.constrained_dofs()[0]);
+        assert!(summary.operator.constrained_dofs()[1]);
+        assert!(summary.operator.constrained_dofs()[2]);
+        assert_eq!(summary.operator.load()[10], -4.0);
     }
 
     #[test]
@@ -2802,9 +2834,9 @@ mod tests {
         )
         .expect("valid pressure boundary should assemble");
 
-        assert_close(summary.operator.rhs[1], -2.0);
-        assert_close(summary.operator.rhs[4], -2.0);
-        assert_close(summary.operator.rhs[10], -2.0);
+        assert_close(summary.operator.load()[1], -2.0);
+        assert_close(summary.operator.load()[4], -2.0);
+        assert_close(summary.operator.load()[10], -2.0);
         assert_eq!(
             summary.structural_sources,
             vec![SourceImplementation::CanonicalBoundaryPressureIntegration]
@@ -2840,15 +2872,15 @@ mod tests {
         let mut moment = [0.0; 3];
         for &node_index in &face.node_indices {
             let nodal = [
-                summary.operator.rhs[summary
+                summary.operator.load()[summary
                     .structural_dof_layout
                     .index(node_index, StructuralDofKind::Ux)
                     .unwrap()],
-                summary.operator.rhs[summary
+                summary.operator.load()[summary
                     .structural_dof_layout
                     .index(node_index, StructuralDofKind::Uy)
                     .unwrap()],
-                summary.operator.rhs[summary
+                summary.operator.load()[summary
                     .structural_dof_layout
                     .index(node_index, StructuralDofKind::Uz)
                     .unwrap()],
@@ -2874,7 +2906,7 @@ mod tests {
             assert_close(moment[axis], 0.0);
         }
         assert!(face.node_indices[3..].iter().any(|node_index| {
-            summary.operator.rhs[summary
+            summary.operator.load()[summary
                 .structural_dof_layout
                 .index(*node_index, StructuralDofKind::Uy)
                 .unwrap()]
@@ -2979,7 +3011,7 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                force[axis] += summary.operator.rhs[summary
+                force[axis] += summary.operator.load()[summary
                     .structural_dof_layout
                     .index(node_index, kind)
                     .unwrap()];
@@ -3053,7 +3085,7 @@ mod tests {
             .structural_dof_layout
             .reference_point_index(0, StructuralDofKind::Ry)
             .unwrap();
-        assert_close(summary.operator.rhs[reference_ry], 6.0);
+        assert_close(summary.operator.load()[reference_ry], 6.0);
         assert_eq!(
             summary.structural_sources,
             vec![SourceImplementation::ReferencePointGeneralizedLoad]
@@ -3373,10 +3405,14 @@ mod tests {
         let second = assemble_linear_system(&model, &second_sample, None, None, None)
             .expect("second sampled load should assemble");
 
-        assert_eq!(first.operator.stiffness_csr, second.operator.stiffness_csr);
-        assert_eq!(first.operator.rhs.len(), second.operator.rhs.len());
-        assert!(first.operator.rhs.iter().any(|value| value.abs() > 0.0));
-        for (first_value, second_value) in first.operator.rhs.iter().zip(&second.operator.rhs) {
+        assert_eq!(
+            first.operator.operators().stiffness(),
+            second.operator.operators().stiffness()
+        );
+        assert_eq!(first.operator.load().len(), second.operator.load().len());
+        assert!(first.operator.load().iter().any(|value| value.abs() > 0.0));
+        for (first_value, second_value) in first.operator.load().iter().zip(second.operator.load())
+        {
             assert!((second_value - 2.0 * first_value).abs() <= 1.0e-12);
         }
     }
@@ -3394,7 +3430,11 @@ mod tests {
         assert_eq!(summary.load_count, 1);
         assert_eq!(summary.structural_beam_element_count, 0);
         assert!(summary.structural_formulation.is_none());
-        assert!(summary.operator.rhs.iter().any(|value| value.abs() > 0.0));
+        assert!(summary
+            .operator
+            .load()
+            .iter()
+            .any(|value| value.abs() > 0.0));
 
         let mesh_summary =
             assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()), None, None)
@@ -3410,7 +3450,7 @@ mod tests {
         );
         assert!(mesh_summary
             .operator
-            .rhs
+            .load()
             .iter()
             .any(|value| value.abs() > 0.0));
     }
@@ -3677,15 +3717,6 @@ mod tests {
     }
 
     fn first_csr_diagonal(summary: &AssemblySummary) -> f64 {
-        let csr = summary
-            .operator
-            .stiffness_csr
-            .as_ref()
-            .expect("solver mesh should assemble CSR stiffness");
-        csr.column_indices[csr.row_offsets[0]..csr.row_offsets[1]]
-            .iter()
-            .zip(csr.values[csr.row_offsets[0]..csr.row_offsets[1]].iter())
-            .find_map(|(&column, &value)| (column == 0).then_some(value.abs()))
-            .expect("first row should contain diagonal")
+        summary.operator.operators().stiffness().get(0, 0).abs()
     }
 }

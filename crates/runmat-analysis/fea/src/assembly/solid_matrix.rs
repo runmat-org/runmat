@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::operator::{CsrAssembler, CsrMatrix};
+use crate::algebra::{
+    ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
+    RealSparseAssembler, RealSparseMatrix, RealSparseMatrixError,
+};
 
 pub(super) fn empty_rows(dof_count: usize) -> Vec<BTreeMap<usize, f64>> {
     (0..dof_count).map(|_| BTreeMap::new()).collect()
@@ -27,8 +30,26 @@ pub(super) fn scatter_csr<const N: usize>(
     }
 }
 
-pub(super) fn rows_to_csr(rows: Vec<BTreeMap<usize, f64>>) -> CsrMatrix {
-    let mut assembler = CsrAssembler::new(rows.len());
+pub(super) fn rows_to_sparse(
+    rows: Vec<BTreeMap<usize, f64>>,
+    role: OperatorRole,
+) -> Result<RealSparseMatrix, RealSparseMatrixError> {
+    let mut assembler = RealSparseAssembler::square(
+        rows.len(),
+        role,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    assembler.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Structural,
+        contribution_id: ContributionId(
+            match role {
+                OperatorRole::Stiffness => "solid_element_stiffness",
+                OperatorRole::Mass => "solid_element_consistent_mass",
+                _ => "solid_element_operator",
+            }
+            .to_string(),
+        ),
+    });
     for (row_index, row) in rows.into_iter().enumerate() {
         for (column, value) in row {
             assembler.add(row_index, column, value);

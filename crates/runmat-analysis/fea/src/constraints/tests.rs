@@ -927,10 +927,10 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
             .sum::<f64>();
         assert!((value - matrix.right_hand_side[row]).abs() <= 1.0e-9);
     }
-    let internal = crate::operator::apply_k_unconstrained(&summary.operator, &solve.solution);
+    let internal = crate::algebra::apply_k(&summary.operator, &solve.solution);
     let reaction = internal
         .iter()
-        .zip(&summary.operator.rhs)
+        .zip(summary.operator.load())
         .map(|(internal, applied)| internal - applied)
         .collect::<Vec<_>>();
     let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();

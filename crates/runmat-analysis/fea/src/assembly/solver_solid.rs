@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
-use crate::operator::CsrMatrix;
+use crate::algebra::{OperatorRole, RealSparseMatrix};
 
 use super::{
     elements::solid::{
         global_stiffness_matrix as tetrahedron4_stiffness, tetrahedron10_global_stiffness_matrix,
         SolidMaterial, Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
     },
-    solid_matrix::{empty_rows, rows_to_csr, scatter_csr},
+    solid_matrix::{empty_rows, rows_to_sparse, scatter_csr},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +45,7 @@ pub enum SolverSolidAssemblyError {
         message: String,
     },
     InvalidMassOperator,
+    SparseOperator(String),
 }
 
 pub fn solver_solid_topology(
@@ -72,7 +73,7 @@ pub fn assemble_solver_solid_stiffness_csr(
     default_material: Option<SolidMaterial>,
     materials_by_region: &BTreeMap<String, SolidMaterial>,
     base_dof_count: usize,
-) -> Result<CsrMatrix, SolverSolidAssemblyError> {
+) -> Result<RealSparseMatrix, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact, base_dof_count)?;
     let nodes = artifact
         .topology
@@ -118,7 +119,8 @@ pub fn assemble_solver_solid_stiffness_csr(
             }
         }
     }
-    Ok(rows_to_csr(rows))
+    rows_to_sparse(rows, OperatorRole::Stiffness)
+        .map_err(|error| SolverSolidAssemblyError::SparseOperator(format!("{error:?}")))
 }
 
 pub(super) type NodeIndex = BTreeMap<u64, ([f64; 3], usize)>;

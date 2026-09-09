@@ -1,11 +1,11 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{provider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{provider, HostTensorView};
 
 use crate::{
+    algebra::{AssembledRealSystem, RealSparseMatrix},
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{csr_stiffness, dense_stiffness, CsrMatrix, OperatorSystem},
     solve::{
         backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult,
         preconditioner::SpdPreconditionerKind,
@@ -15,57 +15,22 @@ use crate::{
 mod operator_impl;
 mod preconditioner_impl;
 
-use operator_impl::{
-    apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
-    normalize_csr_constraints, CsrDeviceOperatorContext, DeviceOperatorContext,
-};
-use preconditioner_impl::{
-    apply_preconditioner_device, build_ilu0_factors, PreconditionerDeviceContext,
-};
+use operator_impl::{apply_k_device, dot_handle, CsrDeviceOperatorContext, DeviceOperatorContext};
+use preconditioner_impl::{apply_preconditioner_device, PreconditionerDeviceContext};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeTensorPreparedLinearSystem {
     pub(crate) dof_count: usize,
     pub(crate) shape: Vec<usize>,
-    pub(crate) diag: Vec<f64>,
-    pub(crate) upper_left: Vec<f64>,
-    pub(crate) upper_right: Vec<f64>,
-    pub(crate) stiffness_csr: Option<CsrMatrix>,
+    pub(crate) matrix: RealSparseMatrix,
     pub(crate) inv_diag: Vec<f64>,
-    pub(crate) ilu_l_subdiag: Vec<f64>,
-    pub(crate) ilu_upper_superdiag: Vec<f64>,
-    pub(crate) ilu_inv_u_diag: Vec<f64>,
-    pub(crate) constrained_mask: Vec<f64>,
-    pub(crate) unconstrained_mask: Vec<f64>,
-    pub(crate) prev_indices: Vec<u32>,
-    pub(crate) next_indices: Vec<u32>,
 }
 
-pub(crate) struct RuntimeTensorWorkspace {
-    pub(crate) full_indices: Vec<u32>,
-    pub(crate) precond_y: Option<GpuTensorHandle>,
-    pub(crate) precond_z: Option<GpuTensorHandle>,
-}
+pub(crate) struct RuntimeTensorWorkspace;
 
 impl RuntimeTensorWorkspace {
-    fn new(n: usize) -> Option<Self> {
-        if n > u32::MAX as usize {
-            return None;
-        }
-        Some(Self {
-            full_indices: (0..n as u32).collect(),
-            precond_y: None,
-            precond_z: None,
-        })
-    }
-
-    fn release(&mut self, provider: &dyn runmat_accelerate_api::AccelProvider) {
-        if let Some(handle) = self.precond_y.take() {
-            let _ = provider.free(&handle);
-        }
-        if let Some(handle) = self.precond_z.take() {
-            let _ = provider.free(&handle);
-        }
+    fn new() -> Self {
+        Self
     }
 }
 
@@ -89,14 +54,17 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
 }
 
 pub fn solve_operator_system_runtime_tensor_with_initial_guess(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
+    if preconditioner_kind != SpdPreconditionerKind::Jacobi {
+        return None;
+    }
     solve_runtime_tensor_linear_system_internal(
         operator,
         None,
-        &operator.rhs,
+        operator.load(),
         preconditioner_kind,
         initial_guess,
     )
@@ -109,64 +77,28 @@ pub fn prepare_runtime_tensor_linear_system(
 }
 
 pub fn prepare_runtime_tensor_operator_system(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
 ) -> Option<RuntimeTensorPreparedLinearSystem> {
-    let n = operator.dof_count;
-    if n == 0 || dense_stiffness(operator).is_some() {
+    let prepared_system = operator.prepare_linear().ok()?;
+    let n = prepared_system.dof_count();
+    if n == 0 {
         return None;
     }
 
     let inv_diag: Vec<f64> = (0..n)
         .map(|i| {
-            if operator.constrained[i] {
+            if prepared_system.constrained_dofs()[i] {
                 1.0
             } else {
-                1.0 / operator.stiffness_diag[i].abs().max(1.0e-12)
+                1.0 / prepared_system.matrix().get(i, i).abs().max(1.0e-12)
             }
         })
         .collect();
-    let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = build_ilu0_factors(operator);
-    let diag = operator.stiffness_diag.clone();
-    let mut upper_left = vec![0.0; n];
-    let mut upper_right = vec![0.0; n];
-    for i in 0..n {
-        if i > 0 && !operator.constrained[i - 1] && !operator.constrained[i] {
-            upper_left[i] = operator.stiffness_upper[i - 1];
-        }
-        if i + 1 < n && !operator.constrained[i + 1] && !operator.constrained[i] {
-            upper_right[i] = operator.stiffness_upper[i];
-        }
-    }
-    let constrained_mask: Vec<f64> = operator
-        .constrained
-        .iter()
-        .map(|&value| if value { 1.0 } else { 0.0 })
-        .collect();
-    let unconstrained_mask: Vec<f64> = operator
-        .constrained
-        .iter()
-        .map(|&value| if value { 0.0 } else { 1.0 })
-        .collect();
-    let prev_indices = linear_shift_indices(n, -1)?;
-    let next_indices = linear_shift_indices(n, 1)?;
-
     Some(RuntimeTensorPreparedLinearSystem {
         dof_count: n,
         shape: vec![n],
-        diag,
-        upper_left,
-        upper_right,
-        stiffness_csr: csr_stiffness(operator)
-            .cloned()
-            .and_then(|csr| normalize_csr_constraints(csr, &operator.constrained)),
+        matrix: prepared_system.matrix().clone(),
         inv_diag,
-        ilu_l_subdiag,
-        ilu_upper_superdiag,
-        ilu_inv_u_diag,
-        constrained_mask,
-        unconstrained_mask,
-        prev_indices,
-        next_indices,
     })
 }
 
@@ -187,7 +119,7 @@ pub fn solve_prepared_linear_system_runtime_tensor(
 }
 
 fn solve_runtime_tensor_linear_system_internal(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     prepared: Option<&RuntimeTensorPreparedLinearSystem>,
     rhs: &[f64],
     preconditioner_kind: SpdPreconditionerKind,
@@ -196,10 +128,11 @@ fn solve_runtime_tensor_linear_system_internal(
     let provider = provider()?;
     let dof_count = prepared
         .map(|value| value.dof_count)
-        .unwrap_or(operator.dof_count);
+        .unwrap_or(operator.dof_count());
     if dof_count == 0 || rhs.len() != dof_count {
         return None;
     }
+    let fallback_system = operator.prepare_linear().ok()?;
 
     let shape_storage = prepared
         .map(|value| value.shape.clone())
@@ -211,79 +144,18 @@ fn solve_runtime_tensor_linear_system_internal(
         .unwrap_or_else(|| {
             (0..dof_count)
                 .map(|i| {
-                    if operator.constrained[i] {
+                    if fallback_system.constrained_dofs()[i] {
                         1.0
                     } else {
-                        1.0 / operator.stiffness_diag[i].abs().max(1.0e-12)
+                        1.0 / fallback_system.matrix().get(i, i).abs().max(1.0e-12)
                     }
                 })
                 .collect()
         });
-    let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = prepared
-        .map(|value| {
-            (
-                value.ilu_l_subdiag.clone(),
-                value.ilu_upper_superdiag.clone(),
-                value.ilu_inv_u_diag.clone(),
-            )
-        })
-        .unwrap_or_else(|| build_ilu0_factors(operator));
-    let (diag, upper_left, upper_right) = prepared
-        .map(|value| {
-            (
-                value.diag.clone(),
-                value.upper_left.clone(),
-                value.upper_right.clone(),
-            )
-        })
-        .unwrap_or_else(|| {
-            let diag = operator.stiffness_diag.clone();
-            let mut upper_left = vec![0.0; dof_count];
-            let mut upper_right = vec![0.0; dof_count];
-            for i in 0..dof_count {
-                if i > 0 && !operator.constrained[i - 1] && !operator.constrained[i] {
-                    upper_left[i] = operator.stiffness_upper[i - 1];
-                }
-                if i + 1 < dof_count && !operator.constrained[i + 1] && !operator.constrained[i] {
-                    upper_right[i] = operator.stiffness_upper[i];
-                }
-            }
-            (diag, upper_left, upper_right)
-        });
-    let stiffness_csr = prepared
-        .and_then(|value| value.stiffness_csr.clone())
-        .or_else(|| {
-            csr_stiffness(operator)
-                .cloned()
-                .and_then(|csr| normalize_csr_constraints(csr, &operator.constrained))
-        });
-    let (constrained_mask, unconstrained_mask) = prepared
-        .map(|value| {
-            (
-                value.constrained_mask.clone(),
-                value.unconstrained_mask.clone(),
-            )
-        })
-        .unwrap_or_else(|| {
-            let constrained_mask: Vec<f64> = operator
-                .constrained
-                .iter()
-                .map(|&value| if value { 1.0 } else { 0.0 })
-                .collect();
-            let unconstrained_mask: Vec<f64> = operator
-                .constrained
-                .iter()
-                .map(|&value| if value { 0.0 } else { 1.0 })
-                .collect();
-            (constrained_mask, unconstrained_mask)
-        });
-    let prev_indices = prepared
-        .map(|value| value.prev_indices.clone())
-        .unwrap_or(linear_shift_indices(dof_count, -1)?);
-    let next_indices = prepared
-        .map(|value| value.next_indices.clone())
-        .unwrap_or(linear_shift_indices(dof_count, 1)?);
-    let mut workspace = RuntimeTensorWorkspace::new(dof_count)?;
+    let matrix = prepared
+        .map(|value| value.matrix.clone())
+        .unwrap_or_else(|| fallback_system.matrix().clone());
+    let mut workspace = RuntimeTensorWorkspace::new();
 
     let initial_x = match initial_guess {
         Some(values) if values.len() == dof_count => values.to_vec(),
@@ -308,75 +180,18 @@ fn solve_runtime_tensor_linear_system_internal(
             shape,
         })
         .ok()?;
-    let ilu_l_subdiag_h = provider
+    let matrix_values_h = provider
         .upload(&HostTensorView {
-            data: &ilu_l_subdiag,
-            shape,
+            data: matrix.values(),
+            shape: &[matrix.values().len()],
         })
         .ok()?;
-    let ilu_upper_superdiag_h = provider
-        .upload(&HostTensorView {
-            data: &ilu_upper_superdiag,
-            shape,
-        })
-        .ok()?;
-    let ilu_inv_u_diag_h = provider
-        .upload(&HostTensorView {
-            data: &ilu_inv_u_diag,
-            shape,
-        })
-        .ok()?;
-    let diag_h = provider
-        .upload(&HostTensorView { data: &diag, shape })
-        .ok()?;
-    let upper_left_h = provider
-        .upload(&HostTensorView {
-            data: &upper_left,
-            shape,
-        })
-        .ok()?;
-    let upper_right_h = provider
-        .upload(&HostTensorView {
-            data: &upper_right,
-            shape,
-        })
-        .ok()?;
-    let constrained_mask_h = provider
-        .upload(&HostTensorView {
-            data: &constrained_mask,
-            shape,
-        })
-        .ok()?;
-    let unconstrained_mask_h = provider
-        .upload(&HostTensorView {
-            data: &unconstrained_mask,
-            shape,
-        })
-        .ok()?;
-    let stiffness_csr_values_h = stiffness_csr.as_ref().map(|csr| {
-        provider.upload(&HostTensorView {
-            data: &csr.values,
-            shape: &[csr.values.len()],
-        })
-    });
-    let stiffness_csr_values_h = match stiffness_csr_values_h {
-        Some(result) => Some(result.ok()?),
-        None => None,
-    };
     let device_operator = DeviceOperatorContext {
         provider,
-        diag: &diag_h,
-        upper_left: &upper_left_h,
-        upper_right: &upper_right_h,
-        constrained_mask: &constrained_mask_h,
-        unconstrained_mask: &unconstrained_mask_h,
-        prev_indices: &prev_indices,
-        next_indices: &next_indices,
-        shape,
-        csr: stiffness_csr
-            .as_ref()
-            .zip(stiffness_csr_values_h.as_ref())
-            .map(|(matrix, values)| CsrDeviceOperatorContext { matrix, values }),
+        csr: CsrDeviceOperatorContext {
+            matrix: &matrix,
+            values: &matrix_values_h,
+        },
     };
 
     let mut r = if initial_guess.is_some() {
@@ -390,16 +205,7 @@ fn solve_runtime_tensor_linear_system_internal(
 
     let preconditioner_ctx = PreconditionerDeviceContext {
         provider,
-        inv_diag: &inv,
-        ilu_l_subdiag: &ilu_l_subdiag_h,
-        ilu_upper_superdiag: &ilu_upper_superdiag_h,
-        ilu_inv_u_diag: &ilu_inv_u_diag_h,
-        constrained_mask: &constrained_mask_h,
-        unconstrained_mask: &unconstrained_mask_h,
-        prev_indices: &prev_indices,
-        next_indices: &next_indices,
-        shape,
-        zero_like: &zero_h,
+        inverse_diagonal: &inv,
     };
 
     let mut z =
@@ -422,31 +228,8 @@ fn solve_runtime_tensor_linear_system_internal(
             break;
         }
         device_apply_k_attempt_count = device_apply_k_attempt_count.saturating_add(1);
-        let ap = match apply_k_device(&device_operator, &p) {
-            Some(value) => {
-                device_apply_k_count = device_apply_k_count.saturating_add(1);
-                value
-            }
-            None => {
-                host_sync_count = host_sync_count.saturating_add(1);
-                let p_host = block_on(provider.download(&p)).ok()?;
-                let ap_host = apply_k_host_from_prepared(
-                    &diag,
-                    &upper_left,
-                    &upper_right,
-                    stiffness_csr.as_ref(),
-                    &constrained_mask,
-                    &unconstrained_mask,
-                    &p_host.data,
-                );
-                provider
-                    .upload(&HostTensorView {
-                        data: &ap_host,
-                        shape,
-                    })
-                    .ok()?
-            }
-        };
+        let ap = apply_k_device(&device_operator, &p)?;
+        device_apply_k_count = device_apply_k_count.saturating_add(1);
 
         let denom = dot_handle(provider, &p, &ap, &mut host_sync_count)?;
         if denom.abs() <= 1.0e-18 {
@@ -532,19 +315,8 @@ fn solve_runtime_tensor_linear_system_internal(
     let _ = provider.free(&x);
     let _ = provider.free(&zero_h);
     let _ = provider.free(&inv);
-    let _ = provider.free(&ilu_l_subdiag_h);
-    let _ = provider.free(&ilu_upper_superdiag_h);
-    let _ = provider.free(&ilu_inv_u_diag_h);
-    let _ = provider.free(&diag_h);
-    let _ = provider.free(&upper_left_h);
-    let _ = provider.free(&upper_right_h);
-    let _ = provider.free(&constrained_mask_h);
-    let _ = provider.free(&unconstrained_mask_h);
-    if let Some(handle) = stiffness_csr_values_h.as_ref() {
-        let _ = provider.free(handle);
-    }
+    let _ = provider.free(&matrix_values_h);
     let _ = provider.free(&rhs_h);
-    workspace.release(provider);
 
     Some(LinearSolveResult {
         iterations,

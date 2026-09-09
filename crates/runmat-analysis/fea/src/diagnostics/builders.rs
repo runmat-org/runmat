@@ -81,19 +81,17 @@ pub(crate) fn structural_rotational_dof_diagnostic(
 }
 
 fn beam_operator_symmetry_residual(summary: &assembly::AssemblySummary) -> f64 {
-    let Some(stiffness) = summary.operator.stiffness_dense.as_ref() else {
-        return 0.0;
-    };
-    let n = summary.operator.dof_count;
-    if n == 0 || stiffness.len() != n * n {
+    let stiffness = summary.operator.operators().stiffness();
+    let n = summary.operator.dof_count();
+    if n == 0 {
         return 1.0;
     }
     let mut max_residual = 0.0_f64;
     let mut max_entry = 0.0_f64;
     for row in 0..n {
         for col in 0..n {
-            let a = stiffness[row * n + col];
-            let b = stiffness[col * n + row];
+            let a = stiffness.get(row, col);
+            let b = stiffness.get(col, row);
             max_residual = max_residual.max((a - b).abs());
             max_entry = max_entry.max(a.abs()).max(b.abs());
         }

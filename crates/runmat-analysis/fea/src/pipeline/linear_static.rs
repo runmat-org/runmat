@@ -4,6 +4,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
+    algebra::apply_k,
     assembly::{
         assemble_structural_system, assemble_structural_system_with_constraint_plan,
         AssemblySummary, StructuralFormulationRequirement,
@@ -26,10 +27,7 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
-    post::fields::{
-        recover_result_fields, recover_structural_stress_from_displacement,
-        structural_field_recovery_metrics,
-    },
+    post::fields::{recover_result_fields, structural_field_recovery_metrics},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{backend::build_backend, linear::solve_linear_system},
 };
@@ -308,7 +306,7 @@ fn run_linear_static_with_constraint_plan(
         });
         diagnostics.push(structural_linear_known_answer_diagnostic(
             total_strain_energy,
-            &summary.operator.rhs,
+            summary.operator.load(),
             &solve_result.solution,
         ));
         if let Some(reference_diagnostic) = structural_reference_kinematics_diagnostic(
@@ -403,36 +401,19 @@ fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
 }
 
 fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
-    if summary.structural_solid_element_count == 0
-        && summary.operator.stiffness_dense.is_none()
-        && summary.operator.stiffness_csr.is_none()
-    {
+    if summary.structural_solid_element_count == 0 {
         return None;
     }
 
-    let stiffness_nnz = summary
-        .operator
-        .stiffness_csr
-        .as_ref()
-        .map(|csr| csr.values.iter().filter(|value| value.abs() > 0.0).count())
-        .or_else(|| {
-            summary
-                .operator
-                .stiffness_dense
-                .as_ref()
-                .map(|dense| dense.iter().filter(|value| value.abs() > 0.0).count())
-        })
-        .unwrap_or(0);
+    let stiffness_nnz = summary.operator.operators().stiffness().values().len();
     let rhs_nonzero_count = summary
         .operator
-        .rhs
+        .load()
         .iter()
         .filter(|value| value.abs() > 0.0)
         .count();
-    let has_solid_stiffness = (summary.operator.stiffness_csr.is_some()
-        || summary.operator.stiffness_dense.is_some())
-        && summary.structural_solid_element_count > 0;
-    let has_solid_mass = summary.operator.mass_csr.is_some()
+    let has_solid_stiffness = stiffness_nnz > 0 && summary.structural_solid_element_count > 0;
+    let has_solid_mass = !summary.operator.operators().mass().values().is_empty()
         && summary.structural_solid_total_mass_kg.is_finite()
         && summary.structural_solid_total_mass_kg > 0.0;
     let basis = match summary.structural_formulation.map(|value| value.operator) {
@@ -440,13 +421,7 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
         Some(StructuralOperatorImplementation::Tet10LinearElasticity) => "tet10_linear_elasticity",
         _ => "non_solid",
     };
-    let storage = if summary.operator.stiffness_csr.is_some() {
-        "sparse_csr"
-    } else if summary.operator.stiffness_dense.is_some() {
-        "dense"
-    } else {
-        "none"
-    };
+    let storage = "sparse_csr";
 
     Some(FeaDiagnostic {
         code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
@@ -459,7 +434,7 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
             "basis={} stiffness_storage={} mass_storage={} solid_node_count={} solid_element_count={} solid_total_mass_kg={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={} mass_present={}",
             basis,
             storage,
-            if summary.operator.mass_csr.is_some() { "sparse_csr" } else { "none" },
+            "sparse_csr",
             summary.structural_node_count,
             summary.structural_solid_element_count,
             summary.structural_solid_total_mass_kg,
@@ -550,19 +525,24 @@ fn structural_reference_kinematics_diagnostic(
         .map(|value| value.abs())
         .fold(0.0_f64, f64::max);
     let primary_stress_component_ratio = primary_stress / max_stress.max(1.0e-18);
-    let direct_reference = solve_tridiagonal_reference(summary)?;
-    let displacement_error_ratio = vector_relative_error(solution, &direct_reference);
-    let expected_stress = recover_structural_stress_from_displacement(summary, &direct_reference);
-    let stress_error_ratio = vector_relative_error(stress, &expected_stress);
-    let closed_form_reference_coverage_ratio = if displacement_error_ratio.is_finite()
-        && stress_error_ratio.is_finite()
-        && !direct_reference.is_empty()
-        && !expected_stress.is_empty()
-    {
-        1.0
-    } else {
-        0.0
-    };
+    let applied = apply_k(&summary.operator, solution);
+    let free_residual_norm = applied
+        .iter()
+        .zip(summary.operator.load())
+        .zip(summary.operator.constrained_dofs())
+        .filter(|(_, constrained)| !**constrained)
+        .map(|((lhs, rhs), _)| (lhs - rhs) * (lhs - rhs))
+        .sum::<f64>()
+        .sqrt();
+    let load_norm = summary
+        .operator
+        .load()
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt()
+        .max(1.0);
+    let normalized_free_residual = free_residual_norm / load_norm;
     let directional_reference_coverage_ratio = if primary_displacement.is_finite()
         && primary_displacement > 0.0
         && transverse_displacement_leakage_ratio.is_finite()
@@ -574,11 +554,9 @@ fn structural_reference_kinematics_diagnostic(
         0.0
     };
     let severity = if directional_reference_coverage_ratio >= 1.0
-        && closed_form_reference_coverage_ratio >= 1.0
         && transverse_displacement_leakage_ratio <= 0.1
         && primary_stress_component_ratio >= 0.5
-        && displacement_error_ratio <= 1.0e-7
-        && stress_error_ratio <= 1.0e-7
+        && normalized_free_residual <= 1.0e-7
     {
         FeaDiagnosticSeverity::Info
     } else {
@@ -589,16 +567,14 @@ fn structural_reference_kinematics_diagnostic(
         code: "FEA_STRUCTURAL_REFERENCE_KINEMATICS".to_string(),
         severity,
         message: format!(
-            "case={} primary_component={} primary_displacement_m={} transverse_displacement_leakage_ratio={} primary_stress_component_ratio={} directional_reference_coverage_ratio={} closed_form_displacement_error_ratio={} closed_form_stress_error_ratio={} closed_form_reference_coverage_ratio={}",
+            "case={} primary_component={} primary_displacement_m={} transverse_displacement_leakage_ratio={} primary_stress_component_ratio={} directional_reference_coverage_ratio={} normalized_free_equilibrium_residual={}",
             case,
             primary_label,
             primary_displacement,
             transverse_displacement_leakage_ratio,
             primary_stress_component_ratio,
             directional_reference_coverage_ratio,
-            displacement_error_ratio,
-            stress_error_ratio,
-            closed_form_reference_coverage_ratio
+            normalized_free_residual
         ),
     })
 }
@@ -840,44 +816,6 @@ fn vector3_norm(values: [f64; 3]) -> f64 {
 
 fn distance3(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
-}
-
-fn solve_tridiagonal_reference(summary: &crate::assembly::AssemblySummary) -> Option<Vec<f64>> {
-    let n = summary.operator.dof_count;
-    if n == 0
-        || summary.operator.stiffness_diag.len() != n
-        || summary.operator.rhs.len() != n
-        || summary.operator.stiffness_upper.len() != n.saturating_sub(1)
-    {
-        return None;
-    }
-    let mut upper = vec![0.0_f64; n.saturating_sub(1)];
-    let mut rhs = vec![0.0_f64; n];
-    let first_pivot = *summary.operator.stiffness_diag.first()?;
-    if !first_pivot.is_finite() || first_pivot.abs() <= 1.0e-24 {
-        return None;
-    }
-    if n > 1 {
-        upper[0] = -summary.operator.stiffness_upper[0] / first_pivot;
-    }
-    rhs[0] = summary.operator.rhs[0] / first_pivot;
-    for row in 1..n {
-        let lower = -summary.operator.stiffness_upper[row - 1];
-        let pivot = summary.operator.stiffness_diag[row] - lower * upper[row - 1];
-        if !pivot.is_finite() || pivot.abs() <= 1.0e-24 {
-            return None;
-        }
-        if row < n - 1 {
-            upper[row] = -summary.operator.stiffness_upper[row] / pivot;
-        }
-        rhs[row] = (summary.operator.rhs[row] - lower * rhs[row - 1]) / pivot;
-    }
-    let mut solution = vec![0.0_f64; n];
-    solution[n - 1] = rhs[n - 1];
-    for row in (0..n - 1).rev() {
-        solution[row] = rhs[row] - upper[row] * solution[row + 1];
-    }
-    Some(solution)
 }
 
 fn vector_relative_error(observed: &[f64], expected: &[f64]) -> f64 {

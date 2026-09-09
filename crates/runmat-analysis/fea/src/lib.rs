@@ -2,6 +2,7 @@
 
 pub mod adaptation;
 pub mod admission;
+pub mod algebra;
 pub mod assembly;
 pub mod constraints;
 pub mod contracts;
@@ -9,7 +10,6 @@ pub mod diagnostics;
 pub mod excitation;
 pub mod execution;
 pub mod fixtures;
-pub mod operator;
 pub mod parity;
 pub mod physics;
 pub mod pipeline;

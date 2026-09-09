@@ -2,9 +2,12 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use crate::{
+    algebra::{
+        apply_k, apply_m, apply_prepared, AssembledRealSystem, CanonicalRealOperators,
+        MatrixProperties, OperatorRole, RealSparseMatrix,
+    },
     assembly::AssemblySummary,
     contracts::SolverPreconditioner,
-    operator::apply_k,
     solve::{
         backend::kind::LinearAlgebraBackendKind,
         preconditioner::SpdPreconditionerKind,
@@ -37,9 +40,9 @@ pub(super) struct RuntimeTensorStepCache<'a> {
 }
 
 pub(super) fn build_step_rhs(summary: &AssemblySummary, x_prev: &[f64], dt: f64) -> Vec<f64> {
-    let mut rhs = vec![0.0; summary.dof_count];
-    for i in 0..summary.dof_count {
-        rhs[i] = summary.operator.mass_diag[i] * x_prev[i] + dt * summary.operator.rhs[i];
+    let mut rhs = apply_m(&summary.operator, x_prev);
+    for (value, load) in rhs.iter_mut().zip(summary.operator.load()) {
+        *value += dt * load;
     }
     rhs
 }
@@ -53,7 +56,7 @@ pub(super) fn solve_implicit_step_system(
     runtime_cache: RuntimeTensorStepCache<'_>,
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
-    let tuned_preconditioner_kind = graph_tuned_preconditioner_kind(summary);
+    let preconditioner_kind = SpdPreconditionerKind::Jacobi;
     if use_runtime_tensor {
         let dt_key = dt_cache_key(
             dt,
@@ -89,7 +92,7 @@ pub(super) fn solve_implicit_step_system(
                 summary,
                 prepared,
                 rhs,
-                tuned_preconditioner_kind,
+                preconditioner_kind,
                 None,
             ) {
                 let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
@@ -104,7 +107,7 @@ pub(super) fn solve_implicit_step_system(
                         host_sync_count: result.host_sync_count,
                         device_apply_k_count: result.device_apply_k_count,
                         device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                        preconditioner: SolverPreconditioner::from_spd(tuned_preconditioner_kind),
+                        preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
                     }),
                 );
             }
@@ -113,7 +116,7 @@ pub(super) fn solve_implicit_step_system(
         let implicit_summary = build_implicit_summary(summary, rhs, dt);
         if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
             &implicit_summary,
-            tuned_preconditioner_kind,
+            preconditioner_kind,
             None,
         ) {
             let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
@@ -128,7 +131,7 @@ pub(super) fn solve_implicit_step_system(
                     host_sync_count: result.host_sync_count,
                     device_apply_k_count: result.device_apply_k_count,
                     device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                    preconditioner: SolverPreconditioner::from_spd(tuned_preconditioner_kind),
+                    preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
                 }),
             );
         }
@@ -168,11 +171,6 @@ pub(super) fn solve_implicit_step_system(
     (x, rr_old.sqrt() / rhs_norm, converged, None)
 }
 
-fn graph_tuned_preconditioner_kind(summary: &AssemblySummary) -> SpdPreconditionerKind {
-    let _ = summary;
-    SpdPreconditionerKind::Jacobi
-}
-
 fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {
     if rel_tol <= 0.0 {
         return dt.to_bits();
@@ -186,88 +184,37 @@ fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {
 
 fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> AssemblySummary {
     let mut implicit = summary.clone();
-    implicit.operator.rhs = rhs.to_vec();
-    if let Some(dense) = implicit.operator.stiffness_dense.as_mut() {
-        let n = implicit.operator.dof_count;
-        for row in 0..n {
-            for col in 0..n {
-                let index = row * n + col;
-                dense[index] = if implicit.operator.constrained[row] {
-                    if row == col {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                } else {
-                    dt * summary.operator.stiffness_dense.as_ref().unwrap()[index]
-                        + if row == col {
-                            summary.operator.mass_diag[row]
-                        } else {
-                            0.0
-                        }
-                };
-            }
-        }
-        for i in 0..implicit.operator.dof_count {
-            implicit.operator.stiffness_diag[i] = dense[i * n + i];
-        }
-        implicit.operator.stiffness_upper.fill(0.0);
-        return implicit;
-    }
-    if let Some(csr) = implicit.operator.stiffness_csr.as_mut() {
-        for row in 0..implicit.operator.dof_count {
-            let constrained = implicit.operator.constrained[row];
-            let start = csr.row_offsets[row];
-            let end = csr.row_offsets[row + 1];
-            for entry in start..end {
-                let column = csr.column_indices[entry];
-                csr.values[entry] = if constrained {
-                    if column == row {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                } else {
-                    dt * csr.values[entry]
-                        + if column == row {
-                            summary.operator.mass_diag[row]
-                        } else {
-                            0.0
-                        }
-                };
-            }
-        }
-    }
-    for i in 0..implicit.operator.dof_count {
-        if implicit.operator.constrained[i] {
-            implicit.operator.stiffness_diag[i] = 1.0;
-            continue;
-        }
-        implicit.operator.stiffness_diag[i] =
-            summary.operator.mass_diag[i] + dt * summary.operator.stiffness_diag[i];
-    }
-    for i in 0..implicit.operator.stiffness_upper.len() {
-        if summary.operator.constrained[i] || summary.operator.constrained[i + 1] {
-            implicit.operator.stiffness_upper[i] = 0.0;
-        } else {
-            implicit.operator.stiffness_upper[i] = dt * summary.operator.stiffness_upper[i];
-        }
-    }
+    let effective = RealSparseMatrix::scaled_sum(
+        &[
+            (1.0, summary.operator.operators().mass()),
+            (dt, summary.operator.operators().stiffness()),
+        ],
+        OperatorRole::EffectiveTangent,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .expect("transient mass and stiffness shapes agree");
+    let operators = CanonicalRealOperators::try_new(
+        effective,
+        summary.operator.operators().mass().clone(),
+        summary.operator.operators().damping().clone(),
+    )
+    .expect("transient effective operator roles agree");
+    implicit.operator = AssembledRealSystem::try_new(
+        operators,
+        summary.operator.constrained_dofs().to_vec(),
+        rhs.to_vec(),
+    )
+    .expect("transient effective system dimensions agree");
     implicit
 }
 
 fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec<f64> {
-    let stiffness = apply_k(&summary.operator, x);
-    let mut y = vec![0.0; x.len()];
-    for i in 0..x.len() {
-        if summary.operator.constrained[i] {
-            y[i] = x[i];
-            continue;
-        }
-
-        y[i] = summary.operator.mass_diag[i] * x[i] + dt * stiffness[i];
-    }
-    y
+    let implicit = build_implicit_summary(summary, &vec![0.0; x.len()], dt);
+    let prepared = implicit
+        .operator
+        .prepare_linear()
+        .expect("transient system prepares");
+    apply_prepared(&prepared, x)
 }
 
 pub(super) fn dot(a: &[f64], b: &[f64]) -> f64 {

@@ -6,6 +6,11 @@ use runmat_analysis_core::{
 };
 
 use crate::{
+    algebra::{
+        apply_k, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
+        ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
+        RealSparseMatrix,
+    },
     assembly::assemble_linear_system,
     contracts::{
         ComputeBackend, ElectromagneticSolveOptions, FeaElectromagneticRunResult, FeaRunError,
@@ -23,7 +28,6 @@ use crate::{
     excitation::{
         realize_step_excitations, ComplexVector3, ExcitationSamplePoint, RealizedExcitationKind,
     },
-    operator::{apply_k, OperatorSystem},
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::backend::kind::LinearAlgebraBackendKind,
 };
@@ -604,30 +608,27 @@ pub fn run_electromagnetic_with_options(
 
     summary.dof_count = node_count;
     summary.constrained_dof_count = constrained.iter().filter(|v| **v).count();
-    summary.operator = OperatorSystem {
-        dof_count: node_count,
-        constrained: constrained.clone(),
-        stiffness_dense: None,
-        stiffness_csr: None,
-        stiffness_diag,
-        stiffness_upper,
-        mass_csr: None,
-        mass_diag: vec![1.0; node_count],
-        damping_diag: vec![0.0; node_count],
-        rhs: rhs_real.clone(),
-    };
+    summary.operator = assemble_nodal_operator(
+        &stiffness_diag,
+        &stiffness_upper,
+        constrained.clone(),
+        rhs_real.clone(),
+    )
+    .map_err(FeaRunError::Assembly)?;
 
     let maxwell_topology =
         MaxwellEdgeTopology::from_solver_mesh_or_line(solver_mesh, node_count, h, &constrained);
-    let edge_operator = maxwell_topology.assemble_curl_curl_operator(CurlCurlAssemblyInputs {
-        nodal_operator: &summary.operator,
-        node_mu_r: &node_mu_r,
-        node_eps_r: &node_eps_r,
-        boundary_penalty_diag: &boundary_penalty_diag,
-        mu0,
-        epsilon0,
-        omega,
-    });
+    let edge_operator = maxwell_topology
+        .assemble_curl_curl_operator(CurlCurlAssemblyInputs {
+            nodal_operator: &summary.operator,
+            node_mu_r: &node_mu_r,
+            node_eps_r: &node_eps_r,
+            boundary_penalty_diag: &boundary_penalty_diag,
+            mu0,
+            epsilon0,
+            omega,
+        })
+        .map_err(FeaRunError::Assembly)?;
     let edge_coupling_terms =
         maxwell_topology.edge_average_terms(&conductivity_coupling_terms, 1.0e-9);
     let edge_rhs_real = maxwell_topology.edge_source_terms(&edge_nodal_rhs_real);
@@ -696,7 +697,9 @@ pub fn run_electromagnetic_with_options(
     let gauge_penalty_ratio = boundary_penalty_diag.iter().sum::<f64>()
         / summary
             .operator
-            .stiffness_diag
+            .operators()
+            .stiffness()
+            .diagonal_values()
             .iter()
             .sum::<f64>()
             .max(1.0e-9);
@@ -713,7 +716,7 @@ pub fn run_electromagnetic_with_options(
             harmonic_solve.residual_norm,
             harmonic_tol,
             backend_kind.as_str(),
-            edge_operator.dof_count,
+            edge_operator.dof_count(),
         ),
     }];
     diagnostics.push(electromagnetic_formulation_diagnostic(
@@ -807,7 +810,7 @@ pub fn run_electromagnetic_with_options(
     let mut imag_equation_scale_sq_sum = 0.0_f64;
     let mut rhs_sq_sum = 0.0_f64;
     for i in 0..element_count {
-        if edge_operator.constrained[i] {
+        if edge_operator.constrained_dofs()[i] {
             continue;
         }
         let conductivity_imag = edge_coupling_terms[i] * edge_vector_potential_imag[i];
@@ -906,12 +909,21 @@ pub fn run_electromagnetic_with_options(
     let solve_quality =
         (0.10 * residual_solve_quality + 0.90 * (1.0 - energy_imbalance_ratio)).clamp(0.65, 1.0);
     let boundary_band = (node_count / 4).max(1);
+    let stiffness = summary.operator.operators().stiffness();
+    let couplings = (0..stiffness.rows())
+        .flat_map(|row| {
+            stiffness.pattern().row_range(row).filter_map(move |entry| {
+                let column = stiffness.pattern().column(entry);
+                (column > row).then_some((row, column, stiffness.values()[entry].abs()))
+            })
+        })
+        .collect::<Vec<_>>();
     let mut boundary_coupling_energy = 0.0_f64;
     let mut total_coupling_energy = 0.0_f64;
-    for (i, value) in summary.operator.stiffness_upper.iter().enumerate() {
+    for (left, right, value) in &couplings {
         let edge_energy = value * value;
         total_coupling_energy += edge_energy;
-        if i < boundary_band || i + boundary_band >= summary.operator.stiffness_upper.len() {
+        if *left < boundary_band || *right + boundary_band >= node_count {
             boundary_coupling_energy += edge_energy;
         }
     }
@@ -922,13 +934,11 @@ pub fn run_electromagnetic_with_options(
             let (start, end) = region_span_for_index(*region_index, region_count, node_count);
             start..end.saturating_sub(1)
         })
-        .filter(|edge_index| *edge_index < summary.operator.stiffness_upper.len())
         .collect::<std::collections::BTreeSet<_>>();
-    let mean_all_coupling = if summary.operator.stiffness_upper.is_empty() {
+    let mean_all_coupling = if couplings.is_empty() {
         1.0
     } else {
-        summary.operator.stiffness_upper.iter().sum::<f64>()
-            / summary.operator.stiffness_upper.len() as f64
+        couplings.iter().map(|(_, _, value)| value).sum::<f64>() / couplings.len() as f64
     }
     .max(1.0e-9);
     let mean_insulated_coupling = if insulated_edge_indices.is_empty() {
@@ -936,20 +946,21 @@ pub fn run_electromagnetic_with_options(
     } else {
         insulated_edge_indices
             .iter()
-            .map(|edge_index| summary.operator.stiffness_upper[*edge_index])
+            .map(|edge_index| stiffness.get(*edge_index, edge_index + 1).abs())
             .sum::<f64>()
             / insulated_edge_indices.len() as f64
     };
-    let insulation_leakage_ratio = if !summary.operator.stiffness_upper.is_empty()
-        && insulated_edge_indices.len() == summary.operator.stiffness_upper.len()
-    {
-        0.0
-    } else {
-        (mean_insulated_coupling / mean_all_coupling).clamp(0.0, 5.0)
-    };
+    let insulation_leakage_ratio =
+        if !couplings.is_empty() && insulated_edge_indices.len() == couplings.len() {
+            0.0
+        } else {
+            (mean_insulated_coupling / mean_all_coupling).clamp(0.0, 5.0)
+        };
     let unconstrained_diagonals = summary
         .operator
-        .stiffness_diag
+        .operators()
+        .stiffness()
+        .diagonal_values()
         .iter()
         .enumerate()
         .filter_map(|(i, value)| (!constrained[i]).then_some(*value))
@@ -2001,6 +2012,61 @@ fn harmonic_mean(a: f64, b: f64) -> f64 {
     }
 }
 
+fn assemble_nodal_operator(
+    stiffness_diagonal: &[f64],
+    stiffness_couplings: &[f64],
+    constrained: Vec<bool>,
+    load: Vec<f64>,
+) -> Result<AssembledRealSystem, String> {
+    if stiffness_couplings.len() != stiffness_diagonal.len().saturating_sub(1) {
+        return Err("electromagnetic nodal coupling count does not match its DOFs".to_string());
+    }
+    let dof_count = stiffness_diagonal.len();
+    let mut stiffness = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    );
+    stiffness.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Electromagnetic,
+        contribution_id: ContributionId("nodal_electromagnetic_operator".to_string()),
+    });
+    for (row, diagonal) in stiffness_diagonal.iter().copied().enumerate() {
+        stiffness.add(row, row, diagonal);
+        if let Some(coupling) = stiffness_couplings.get(row).copied() {
+            stiffness.add(row, row + 1, -coupling);
+            stiffness.add(row + 1, row, -coupling);
+        }
+    }
+    let stiffness = stiffness.finish().map_err(|error| {
+        format!("electromagnetic nodal stiffness construction failed: {error:?}")
+    })?;
+    let mass = RealSparseMatrix::diagonal(
+        vec![1.0; dof_count],
+        OperatorRole::Mass,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .map_err(|error| format!("electromagnetic nodal mass construction failed: {error:?}"))?
+    .with_contribution(ContributionProvenance {
+        domain: ContributionDomain::Electromagnetic,
+        contribution_id: ContributionId("nodal_electromagnetic_mass".to_string()),
+    });
+    let damping = RealSparseMatrix::diagonal(
+        vec![0.0; dof_count],
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| format!("electromagnetic nodal damping construction failed: {error:?}"))?
+    .with_contribution(ContributionProvenance {
+        domain: ContributionDomain::Electromagnetic,
+        contribution_id: ContributionId("nodal_electromagnetic_damping".to_string()),
+    });
+    let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+        .map_err(|error| format!("electromagnetic nodal operator validation failed: {error:?}"))?;
+    AssembledRealSystem::try_new(operators, constrained, load)
+        .map_err(|error| format!("electromagnetic nodal system validation failed: {error:?}"))
+}
+
 fn region_span_for_index(
     region_index: usize,
     region_count: usize,
@@ -2138,18 +2204,18 @@ struct HarmonicBlockSolveResult {
 }
 
 fn solve_harmonic_block_system(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     coupling_terms: &[f64],
     rhs_real: &[f64],
     rhs_imag: &[f64],
     max_iters: usize,
     tol: f64,
 ) -> HarmonicBlockSolveResult {
-    let n = operator.dof_count;
+    let n = operator.dof_count();
     let size = n * 2;
     let mut b = vec![0.0_f64; size];
     for i in 0..n {
-        if operator.constrained[i] {
+        if operator.constrained_dofs()[i] {
             b[i] = 0.0;
             b[n + i] = 0.0;
         } else {
@@ -2246,18 +2312,18 @@ fn solve_harmonic_block_system(
 }
 
 fn apply_harmonic_block_operator(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     coupling_terms: &[f64],
     vector: &[f64],
 ) -> Vec<f64> {
-    let n = operator.dof_count;
+    let n = operator.dof_count();
     let real = &vector[..n];
     let imag = &vector[n..];
     let k_real = apply_k(operator, real);
     let k_imag = apply_k(operator, imag);
     let mut out = vec![0.0_f64; n * 2];
     for i in 0..n {
-        if operator.constrained[i] {
+        if operator.constrained_dofs()[i] {
             out[i] = real[i];
             out[n + i] = imag[i];
         } else {
@@ -2270,21 +2336,21 @@ fn apply_harmonic_block_operator(
 }
 
 fn apply_block_jacobi_preconditioner(
-    operator: &OperatorSystem,
+    operator: &AssembledRealSystem,
     coupling_terms: &[f64],
     vector: &[f64],
 ) -> Vec<f64> {
-    let n = operator.dof_count;
+    let n = operator.dof_count();
     let real = &vector[..n];
     let imag = &vector[n..];
     let mut out = vec![0.0_f64; n * 2];
     for i in 0..n {
-        if operator.constrained[i] {
+        if operator.constrained_dofs()[i] {
             out[i] = real[i];
             out[n + i] = imag[i];
             continue;
         }
-        let k = operator.stiffness_diag[i].max(1.0e-12);
+        let k = operator.operators().stiffness().diagonal_values()[i].max(1.0e-12);
         let c = coupling_terms[i];
         let denom = (k * k + c * c).max(1.0e-18);
         out[i] = (k * real[i] + c * imag[i]) / denom;
@@ -2310,7 +2376,7 @@ struct MaxwellEdgeTopology {
 }
 
 struct CurlCurlAssemblyInputs<'a> {
-    nodal_operator: &'a OperatorSystem,
+    nodal_operator: &'a AssembledRealSystem,
     node_mu_r: &'a [f64],
     node_eps_r: &'a [f64],
     boundary_penalty_diag: &'a [f64],
@@ -2476,12 +2542,13 @@ impl MaxwellEdgeTopology {
             .collect()
     }
 
-    fn assemble_curl_curl_operator(&self, inputs: CurlCurlAssemblyInputs<'_>) -> OperatorSystem {
+    fn assemble_curl_curl_operator(
+        &self,
+        inputs: CurlCurlAssemblyInputs<'_>,
+    ) -> Result<AssembledRealSystem, String> {
         let edge_count = self.edge_count();
         let mut stiffness_diag = vec![0.0_f64; edge_count];
-        let mut stiffness_upper = vec![0.0_f64; edge_count.saturating_sub(1)];
-        let mut stiffness_dense =
-            (!self.elements.is_empty()).then(|| vec![0.0_f64; edge_count * edge_count]);
+        let mut off_diagonal = Vec::new();
         let mut mass_diag = vec![1.0_f64; edge_count];
         let mut damping_diag = vec![0.0_f64; edge_count];
         let constrained = self
@@ -2496,7 +2563,15 @@ impl MaxwellEdgeTopology {
             let reluctivity = 1.0 / mu;
             let curl_curl = reluctivity / edge.length.max(1.0e-12);
             let displacement = inputs.omega * inputs.omega * epsilon * edge.length.max(1.0e-12);
-            let nodal_stiffness = edge.average(&inputs.nodal_operator.stiffness_diag).abs();
+            let nodal_stiffness = edge
+                .average(
+                    &inputs
+                        .nodal_operator
+                        .operators()
+                        .stiffness()
+                        .diagonal_values(),
+                )
+                .abs();
             let boundary_penalty = edge.average(inputs.boundary_penalty_diag).abs();
             stiffness_diag[index] =
                 curl_curl + displacement + boundary_penalty + 0.01 * nodal_stiffness.max(1.0e-9);
@@ -2505,7 +2580,7 @@ impl MaxwellEdgeTopology {
         }
 
         if self.elements.is_empty() {
-            for index in 0..stiffness_upper.len() {
+            for index in 0..edge_count.saturating_sub(1) {
                 let left = &self.edges[index];
                 let right = &self.edges[index + 1];
                 let shared_node = left.from_node == right.from_node
@@ -2513,8 +2588,11 @@ impl MaxwellEdgeTopology {
                     || left.to_node == right.from_node
                     || left.to_node == right.to_node;
                 let coupling_scale = if shared_node { 0.20 } else { 0.05 };
-                stiffness_upper[index] = coupling_scale
+                let coupling = coupling_scale
                     * harmonic_mean(stiffness_diag[index], stiffness_diag[index + 1]).max(1.0e-12);
+                stiffness_diag[index] += coupling.abs();
+                stiffness_diag[index + 1] += coupling.abs();
+                off_diagonal.push((index, index + 1, -coupling));
             }
         } else {
             for element in &self.elements {
@@ -2525,37 +2603,53 @@ impl MaxwellEdgeTopology {
                             .max(1.0e-12);
                     stiffness_diag[left_index] += coupling.abs();
                     stiffness_diag[right_index] += coupling.abs();
-                    let dense = stiffness_dense
-                        .as_mut()
-                        .expect("mesh incidence allocates a dense edge operator");
-                    dense[left_index * edge_count + right_index] -= coupling;
-                    dense[right_index * edge_count + left_index] -= coupling;
+                    off_diagonal.push((left_index, right_index, -coupling));
                 }
             }
         }
-        if let Some(dense) = stiffness_dense.as_mut() {
-            for (index, diagonal) in stiffness_diag.iter().copied().enumerate() {
-                dense[index * edge_count + index] = diagonal;
-            }
-        } else {
-            for (index, coupling) in stiffness_upper.iter().copied().enumerate() {
-                stiffness_diag[index] += coupling.abs();
-                stiffness_diag[index + 1] += coupling.abs();
-            }
+        let mut assembler = RealSparseAssembler::square(
+            edge_count,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        assembler.add_contribution(ContributionProvenance {
+            domain: ContributionDomain::Electromagnetic,
+            contribution_id: ContributionId("edge_curl_curl_operator".to_string()),
+        });
+        for (index, diagonal) in stiffness_diag.into_iter().enumerate() {
+            assembler.add(index, index, diagonal);
         }
-
-        OperatorSystem {
-            dof_count: edge_count,
-            constrained,
-            stiffness_dense,
-            stiffness_csr: None,
-            stiffness_diag,
-            stiffness_upper,
-            mass_csr: None,
+        for (left, right, value) in off_diagonal {
+            assembler.add(left, right, value);
+            assembler.add(right, left, value);
+        }
+        let stiffness = assembler
+            .finish()
+            .map_err(|error| format!("edge stiffness construction failed: {error:?}"))?;
+        let mass = RealSparseMatrix::diagonal(
             mass_diag,
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .map_err(|error| format!("edge mass construction failed: {error:?}"))?
+        .with_contribution(ContributionProvenance {
+            domain: ContributionDomain::Electromagnetic,
+            contribution_id: ContributionId("edge_metric_mass".to_string()),
+        });
+        let damping = RealSparseMatrix::diagonal(
             damping_diag,
-            rhs: vec![0.0; edge_count],
-        }
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| format!("edge damping construction failed: {error:?}"))?
+        .with_contribution(ContributionProvenance {
+            domain: ContributionDomain::Electromagnetic,
+            contribution_id: ContributionId("edge_boundary_damping".to_string()),
+        });
+        let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
+            .map_err(|error| format!("edge operator validation failed: {error:?}"))?;
+        AssembledRealSystem::try_new(operators, constrained, vec![0.0; edge_count])
+            .map_err(|error| format!("edge system validation failed: {error:?}"))
     }
 
     fn edge_average_terms(&self, nodal_terms: &[f64], floor: f64) -> Vec<f64> {
@@ -2834,7 +2928,7 @@ struct MaxwellEdgeResidualMetrics {
 
 impl MaxwellEdgeResidualMetrics {
     fn from_edge_operator(
-        operator: &OperatorSystem,
+        operator: &AssembledRealSystem,
         real: &[f64],
         imag: &[f64],
         rhs_real: &[f64],
@@ -2850,8 +2944,13 @@ impl MaxwellEdgeResidualMetrics {
         let mut real_equation_scale_sq_sum = 0.0_f64;
         let mut imag_equation_scale_sq_sum = 0.0_f64;
 
-        for index in 0..operator.dof_count {
-            if operator.constrained.get(index).copied().unwrap_or(false) {
+        for index in 0..operator.dof_count() {
+            if operator
+                .constrained_dofs()
+                .get(index)
+                .copied()
+                .unwrap_or(false)
+            {
                 continue;
             }
             active_edge_count = active_edge_count.saturating_add(1);
@@ -3167,12 +3266,10 @@ fn em_homogeneous_known_answer_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use crate::operator::OperatorSystem;
-
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
 
     use super::{
-        conductivity_frequency_sample, conductivity_scale_at_frequency,
+        assemble_nodal_operator, conductivity_frequency_sample, conductivity_scale_at_frequency,
         dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
         flux_density_from_complex_vector_potential, flux_density_from_magnitude_vector_potential,
         flux_phasor_coherence_ratio, relative_permeability_scale_at_frequency,
@@ -3376,34 +3473,43 @@ mod tests {
     #[test]
     fn maxwell_edge_topology_assembles_edge_curl_curl_operator() {
         let topology = MaxwellEdgeTopology::line_graph(5, 0.25, &[true, false, false, false, true]);
-        let nodal_operator = OperatorSystem {
-            dof_count: 5,
-            constrained: vec![true, false, false, false, true],
-            stiffness_dense: None,
-            stiffness_csr: None,
-            stiffness_diag: vec![10.0, 20.0, 30.0, 20.0, 10.0],
-            stiffness_upper: vec![1.0, 1.0, 1.0, 1.0],
-            mass_csr: None,
-            mass_diag: vec![1.0; 5],
-            damping_diag: vec![0.0; 5],
-            rhs: vec![0.0; 5],
-        };
-        let operator = topology.assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
-            nodal_operator: &nodal_operator,
-            node_mu_r: &[1.0; 5],
-            node_eps_r: &[2.0; 5],
-            boundary_penalty_diag: &[0.0, 3.0, 0.0, 3.0, 0.0],
-            mu0: 4.0e-7 * std::f64::consts::PI,
-            epsilon0: 8.854_187_812_8e-12,
-            omega: 2.0 * std::f64::consts::PI * 60.0,
-        });
+        let nodal_operator = assemble_nodal_operator(
+            &[10.0, 20.0, 30.0, 20.0, 10.0],
+            &[1.0, 1.0, 1.0, 1.0],
+            vec![true, false, false, false, true],
+            vec![0.0; 5],
+        )
+        .unwrap();
+        let operator = topology
+            .assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
+                nodal_operator: &nodal_operator,
+                node_mu_r: &[1.0; 5],
+                node_eps_r: &[2.0; 5],
+                boundary_penalty_diag: &[0.0, 3.0, 0.0, 3.0, 0.0],
+                mu0: 4.0e-7 * std::f64::consts::PI,
+                epsilon0: 8.854_187_812_8e-12,
+                omega: 2.0 * std::f64::consts::PI * 60.0,
+            })
+            .unwrap();
 
-        assert_eq!(operator.dof_count, topology.edge_count());
-        assert_eq!(operator.constrained, vec![true, false, false, true]);
-        assert_eq!(operator.stiffness_upper.len(), topology.edge_count() - 1);
-        assert!(operator.stiffness_diag.iter().all(|value| *value > 0.0));
-        assert!(operator.stiffness_upper.iter().all(|value| *value > 0.0));
-        assert_eq!(operator.mass_diag.len(), topology.edge_count());
+        assert_eq!(operator.dof_count(), topology.edge_count());
+        assert_eq!(operator.constrained_dofs(), vec![true, false, false, true]);
+        assert!(operator
+            .operators()
+            .stiffness()
+            .diagonal_values()
+            .iter()
+            .all(|value| *value > 0.0));
+        assert!(operator
+            .operators()
+            .stiffness()
+            .values()
+            .iter()
+            .any(|value| *value < 0.0));
+        assert_eq!(
+            operator.operators().mass().diagonal_values().len(),
+            topology.edge_count()
+        );
     }
 
     #[test]
@@ -3413,34 +3519,29 @@ mod tests {
         );
         let topology =
             MaxwellEdgeTopology::from_solver_mesh_or_line(Some(&mesh), 4, 0.25, &[false; 4]);
-        let nodal_operator = OperatorSystem {
-            dof_count: 4,
-            constrained: vec![false; 4],
-            stiffness_dense: None,
-            stiffness_csr: None,
-            stiffness_diag: vec![10.0; 4],
-            stiffness_upper: vec![1.0; 3],
-            mass_csr: None,
-            mass_diag: vec![1.0; 4],
-            damping_diag: vec![0.0; 4],
-            rhs: vec![0.0; 4],
-        };
+        let nodal_operator =
+            assemble_nodal_operator(&[10.0; 4], &[1.0; 3], vec![false; 4], vec![0.0; 4]).unwrap();
 
-        let operator = topology.assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
-            nodal_operator: &nodal_operator,
-            node_mu_r: &[1.0; 4],
-            node_eps_r: &[2.0; 4],
-            boundary_penalty_diag: &[0.0; 4],
-            mu0: 4.0e-7 * std::f64::consts::PI,
-            epsilon0: 8.854_187_812_8e-12,
-            omega: 2.0 * std::f64::consts::PI * 60.0,
-        });
+        let operator = topology
+            .assemble_curl_curl_operator(super::CurlCurlAssemblyInputs {
+                nodal_operator: &nodal_operator,
+                node_mu_r: &[1.0; 4],
+                node_eps_r: &[2.0; 4],
+                boundary_penalty_diag: &[0.0; 4],
+                mu0: 4.0e-7 * std::f64::consts::PI,
+                epsilon0: 8.854_187_812_8e-12,
+                omega: 2.0 * std::f64::consts::PI * 60.0,
+            })
+            .unwrap();
 
         assert_eq!(topology.incidence_operator_pair_coverage_ratio(), 1.0);
-        assert_eq!(
-            operator.stiffness_dense.as_ref().map(Vec::len),
-            Some(topology.edge_count() * topology.edge_count())
-        );
+        assert!(operator.operators().stiffness().values().len() >= topology.edge_count());
+        assert!(operator
+            .operators()
+            .stiffness()
+            .values()
+            .iter()
+            .all(|value| *value != 0.0));
     }
 
     #[test]

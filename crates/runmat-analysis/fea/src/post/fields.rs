@@ -14,6 +14,7 @@ use crate::contracts::{
     FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use crate::{
+    algebra::apply_k,
     assembly::{
         dofs::StructuralDofKind,
         elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
@@ -21,7 +22,6 @@ use crate::{
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
         SolidRecoveryElementSummary, StructuralMaterialSummary,
     },
-    operator::{apply_k, apply_k_unconstrained},
     solve::linear::LinearSolveResult,
 };
 
@@ -59,7 +59,7 @@ pub fn recover_result_fields(
         recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
     let strain_energy_density_values =
         recover_strain_energy_density(&strain_values, &stress_values);
-    let internal_force = apply_k_unconstrained(&summary.operator, &solve_result.solution);
+    let internal_force = apply_k(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
     let rotation_values = recover_rotation(summary, &solve_result.solution);
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
@@ -303,80 +303,61 @@ impl StructuralRecoveryBasis {
 }
 
 fn structural_recovery_edges(summary: &AssemblySummary) -> Vec<StructuralRecoveryEdge> {
-    summary
-        .operator
-        .stiffness_upper
-        .iter()
-        .enumerate()
-        .filter_map(|(from_dof, stiffness)| {
-            let to_dof = from_dof + 1;
-            if to_dof >= summary.dof_count
-                || *stiffness <= 0.0
-                || summary
-                    .operator
-                    .constrained
-                    .get(from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                || summary
-                    .operator
-                    .constrained
-                    .get(to_dof)
-                    .copied()
-                    .unwrap_or(false)
+    let matrix = summary.operator.operators().stiffness();
+    let constrained = summary.operator.constrained_dofs();
+    let mut edges = Vec::new();
+    for from_dof in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(from_dof) {
+            let to_dof = matrix.pattern().column(entry);
+            let stiffness = matrix.values()[entry].abs();
+            if to_dof <= from_dof
+                || stiffness == 0.0
+                || constrained[from_dof]
+                || constrained[to_dof]
             {
-                return None;
+                continue;
             }
-            let left_diag = summary
-                .operator
-                .stiffness_diag
-                .get(from_dof)
-                .copied()
-                .unwrap_or(0.0);
-            let right_diag = summary
-                .operator
-                .stiffness_diag
-                .get(to_dof)
-                .copied()
-                .unwrap_or(0.0);
+            let left_diag = matrix.get(from_dof, from_dof);
+            let right_diag = matrix.get(to_dof, to_dof);
             let diag_scale = (0.5 * (left_diag + right_diag)).abs().max(1.0);
-            Some(StructuralRecoveryEdge {
+            edges.push(StructuralRecoveryEdge {
                 from_dof,
                 to_dof,
                 component: from_dof % VECTOR_COMPONENT_COUNT,
-                hop: 1,
+                hop: to_dof - from_dof,
                 edge_length_m: 1.0,
-                stiffness_ratio: (*stiffness / diag_scale).abs(),
+                stiffness_ratio: stiffness / diag_scale,
                 basis: StructuralRecoveryBasis::OperatorConnectivity,
-            })
-        })
-        .collect()
+            });
+        }
+    }
+    edges
 }
 
 fn constrained_recovery_edge_count(summary: &AssemblySummary) -> usize {
-    summary
-        .operator
-        .stiffness_upper
-        .iter()
-        .enumerate()
-        .filter(|(from_dof, stiffness)| {
-            let to_dof = from_dof + 1;
-            **stiffness > 0.0
-                && to_dof < summary.dof_count
-                && (summary
-                    .operator
-                    .constrained
-                    .get(*from_dof)
-                    .copied()
-                    .unwrap_or(false)
-                    || summary
-                        .operator
-                        .constrained
-                        .get(to_dof)
-                        .copied()
-                        .unwrap_or(false))
+    structural_recovery_edges_including_constraints(summary)
+        .into_iter()
+        .filter(|(left, right)| {
+            summary.operator.constrained_dofs()[*left]
+                || summary.operator.constrained_dofs()[*right]
         })
         .count()
+}
+
+fn structural_recovery_edges_including_constraints(
+    summary: &AssemblySummary,
+) -> Vec<(usize, usize)> {
+    let matrix = summary.operator.operators().stiffness();
+    let mut edges = Vec::new();
+    for row in 0..matrix.rows() {
+        for entry in matrix.pattern().row_range(row) {
+            let column = matrix.pattern().column(entry);
+            if column > row && matrix.values()[entry] != 0.0 {
+                edges.push((row, column));
+            }
+        }
+    }
+    edges
 }
 
 fn recover_structural_strain(
@@ -884,7 +865,7 @@ fn recover_reaction_force(
     node_count: usize,
 ) -> Vec<f64> {
     let mut reactions = vec![0.0; node_count * VECTOR_COMPONENT_COUNT];
-    for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
+    for (dof, is_constrained) in summary.operator.constrained_dofs().iter().enumerate() {
         if !*is_constrained && !is_affine_constraint_dof(summary, dof) {
             continue;
         }
@@ -898,7 +879,7 @@ fn recover_reaction_force(
         if target >= reactions.len() {
             continue;
         }
-        let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
+        let rhs = summary.operator.load().get(dof).copied().unwrap_or(0.0);
         let internal = internal_force.get(dof).copied().unwrap_or(0.0);
         reactions[target] = internal - rhs;
     }
@@ -966,7 +947,7 @@ fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) ->
     if reactions.is_empty() {
         return reactions;
     }
-    for (dof, is_constrained) in summary.operator.constrained.iter().enumerate() {
+    for (dof, is_constrained) in summary.operator.constrained_dofs().iter().enumerate() {
         if !*is_constrained && !is_affine_constraint_dof(summary, dof) {
             continue;
         }
@@ -978,7 +959,7 @@ fn recover_reaction_moment(summary: &AssemblySummary, internal_force: &[f64]) ->
         };
         let target = address.node_index * VECTOR_COMPONENT_COUNT + component;
         if target < reactions.len() {
-            let rhs = summary.operator.rhs.get(dof).copied().unwrap_or(0.0);
+            let rhs = summary.operator.load().get(dof).copied().unwrap_or(0.0);
             let internal = internal_force.get(dof).copied().unwrap_or(0.0);
             reactions[target] = internal - rhs;
         }
@@ -1032,16 +1013,22 @@ fn recover_residual_metrics(
 ) -> StructuralResidualMetrics {
     let mut solution = displacement.to_vec();
     solution.resize(summary.dof_count, 0.0);
-    let applied = if summary.constraint_matrix.is_some() {
-        apply_k_unconstrained(&summary.operator, &solution)
-    } else {
-        apply_k(&summary.operator, &solution)
-    };
-    let full_residual = applied
+    let applied = apply_k(&summary.operator, &solution);
+    let mut full_residual = applied
         .iter()
-        .zip(summary.operator.rhs.iter())
+        .zip(summary.operator.load().iter())
         .map(|(lhs, rhs)| lhs - rhs)
         .collect::<Vec<_>>();
+    if summary.constraint_matrix.is_none() && summary.affine_constraint_reduction.is_none() {
+        for (value, constrained) in full_residual
+            .iter_mut()
+            .zip(summary.operator.constrained_dofs())
+        {
+            if *constrained {
+                *value = 0.0;
+            }
+        }
+    }
     let residual = summary
         .affine_constraint_reduction
         .as_ref()
@@ -1050,8 +1037,8 @@ fn recover_residual_metrics(
     let scaled_rhs = summary
         .affine_constraint_reduction
         .as_ref()
-        .and_then(|reduction| reduction.transpose_apply(&summary.operator.rhs).ok())
-        .unwrap_or_else(|| summary.operator.rhs.clone());
+        .and_then(|reduction| reduction.transpose_apply(summary.operator.load()).ok())
+        .unwrap_or_else(|| summary.operator.load().to_vec());
     let residual_norm = residual
         .iter()
         .map(|value| value * value)

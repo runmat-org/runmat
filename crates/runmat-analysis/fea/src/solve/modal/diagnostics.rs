@@ -1,13 +1,13 @@
 use crate::{
+    algebra::{apply_m, AssembledRealSystem},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_m, OperatorSystem},
 };
 
 use super::math::dot;
 
 pub(super) fn push_modal_quality_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
-    system: &OperatorSystem,
+    system: &AssembledRealSystem,
     frequencies_hz: &[f64],
     mode_shapes: &[Vec<f64>],
     residual_norms: &[f64],
@@ -51,7 +51,7 @@ pub(super) fn push_modal_quality_diagnostics(
     }
 }
 
-fn modal_max_m_orthogonality_offdiag(system: &OperatorSystem, modes: &[Vec<f64>]) -> f64 {
+fn modal_max_m_orthogonality_offdiag(system: &AssembledRealSystem, modes: &[Vec<f64>]) -> f64 {
     let mut max_offdiag = 0.0_f64;
     for i in 0..modes.len() {
         for j in 0..modes.len() {

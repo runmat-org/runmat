@@ -218,8 +218,10 @@ fn solve_steady(
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
 ) -> Result<ProcedureOutcome, FeaRunError> {
-    let operator = assembly.steady_operator();
-    let rhs_norm = rhs_norm(&operator.rhs);
+    let operator = assembly
+        .steady_operator()
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let rhs_norm = rhs_norm(operator.load());
     let solve = solve_checked(
         &operator,
         requested_solver_backend,
@@ -290,8 +292,10 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         let assembly = assemble_thermal_operator(input.model, input.mesh, &excitations, sample)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         source_evidence.extend(assembly.source_evidence.clone());
-        let operator = assembly.transient_operator(input.time_step_s, &previous);
-        let rhs_norm = rhs_norm(&operator.rhs);
+        let operator = assembly
+            .transient_operator(input.time_step_s, &previous)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let rhs_norm = rhs_norm(operator.load());
         let solve = solve_checked(
             &operator,
             input.requested_solver_backend,
@@ -333,7 +337,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
 }
 
 fn solve_checked(
-    operator: &crate::operator::OperatorSystem,
+    operator: &crate::algebra::AssembledRealSystem,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,

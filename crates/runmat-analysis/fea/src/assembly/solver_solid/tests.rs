@@ -17,9 +17,9 @@ fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
             3,
         )
         .unwrap();
-        assert_eq!(csr.row_offsets.len(), topology.dof_count + 1);
-        assert_eq!(csr.column_indices.len(), csr.values.len());
-        assert!(csr.values.iter().all(|value| value.is_finite()));
+        assert_eq!(csr.pattern().row_offsets().len(), topology.dof_count + 1);
+        assert_eq!(csr.pattern().column_indices().len(), csr.values().len());
+        assert!(csr.values().iter().all(|value| value.is_finite()));
     }
 }
 
@@ -42,8 +42,8 @@ fn canonical_solver_assembly_revalidates_digest_and_uses_region_assignment() {
         3,
     )
     .unwrap();
-    assert_eq!(default.column_indices, selected.column_indices);
-    for (default, selected) in default.values.iter().zip(&selected.values) {
+    assert_eq!(default.pattern(), selected.pattern());
+    for (default, selected) in default.values().iter().zip(selected.values()) {
         assert!((*selected - 2.0 * default).abs() <= default.abs().max(1.0) * 1.0e-12);
     }
 
