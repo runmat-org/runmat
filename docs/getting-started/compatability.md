@@ -96,7 +96,7 @@ runmat run analysis.m
 runmat test
 ```
 
-`runmat check` uses the parser, static analysis, source lookup, and compile validation used by RunMat's editor tooling. It does not execute the program. A clean result means that no static blocker was found.
+`runmat check` uses the parser, static analysis, source lookup, and compile validation used by RunMat's editor tooling. It does not execute the program. A clean result means that no static blocker was found. See the [runmat check reference](/docs/runtime/getting-started/check) for source-root setup, diagnostic examples, and automation.
 
 `runmat run` exercises runtime behavior, external data, files, and integrations reached by the selected entrypoint. Use representative inputs when numerical results or code paths depend on input data.
 
