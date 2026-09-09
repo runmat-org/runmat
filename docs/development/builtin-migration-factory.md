@@ -21,7 +21,12 @@ node scripts/development/builtin-migration-factory.mjs prepare accumarray \
   --workspace /tmp/runmat-builtin-review
 node scripts/development/builtin-migration-factory.mjs audit \
   --batch /tmp/array-batch.json \
-  --dispositions /tmp/reviewed-dispositions.json
+  --dispositions /tmp/reviewed-dispositions.json \
+  --source git:0123456789abcdef \
+  --artifact array-batch-audit
+node scripts/development/builtin-migration-factory.mjs verify \
+  --manifest /tmp/array-batch-verification.json \
+  --output /tmp/array-batch-verification-result.json
 node --test scripts/development/builtin-migration/tests/*.test.mjs
 ```
 
@@ -76,3 +81,44 @@ The scanner intentionally uses bounded lexical recognition instead of compiling 
 ```
 
 The audit is intentionally strict. Canonical identities require one catalog authority, runtime binding evidence, catalog documentation and typed examples, test evidence, native-link inputs, no old sidecar or runtime shadow, and no legacy resolver. Aliases must resolve to a canonical identity without copied documentation. Internal bindings must have runtime evidence and no public catalog/documentation surface. Missing, duplicated, contradictory, ambiguous, cyclic, or unresolved evidence fails the machine-readable report and exits nonzero.
+
+## Batch verification and reconciliation
+
+`verify` joins an audit to example-verifier evidence only through identifiers explicitly pinned by a versioned manifest. It does not run builds, shell commands, examples, or migrations. Relative evidence paths resolve from the manifest directory. A verification result is deterministic development evidence and must not be checked in or consumed as production authority.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "runmat-builtin-migration-verification-manifest",
+  "batch": {
+    "artifact": "array-batch-c03",
+    "source": "git:0123456789abcdef",
+    "identities": ["accumarray"],
+    "factory_inventory_digest": "sha256:<64 lowercase hex characters>",
+    "example_inventory_digest": "sha256:<64 lowercase hex characters>",
+    "combined_example_artifact": "array-examples-combined"
+  },
+  "factory_audit": {
+    "path": "array-batch-audit.json",
+    "artifact": "array-batch-audit"
+  },
+  "example_reports": [
+    { "path": "example-output-report.json", "artifact": "array-examples" }
+  ],
+  "expectations": [
+    {
+      "identity": "accumarray",
+      "example_keys": ["accumarray#basic"],
+      "required_lanes": ["browser", "native"]
+    }
+  ]
+}
+```
+
+The manifest must contain exactly one expectation per batch identity. `example_keys` and `required_lanes` are review inputs, including explicit empty arrays for aliases or internal bindings without public examples. The verifier never guesses them from source names or descriptions.
+
+Example inputs may be one combined report or one complete shard set. A supplied combined report must carry the exact `combined_example_artifact`; a shard set is deterministically combined under that identity while retaining its ordered constituent artifacts. Mixed forms, multiple combined reports, shard gaps, duplicate artifacts/results, failed examples, per-identity example-set mismatches, stale source IDs, and mismatched inventory digests fail reconciliation. Harness declarations provide typed lane coverage: `Portable` proves browser and native execution because the standalone verifier requires both; browser-only and native-only harnesses prove only their own lane. Unsupported harnesses prove neither.
+
+Schemas are closed: missing, misspelled, or additional fields fail validation. The verification manifest and result remain version 1, the migration audit is version 2, the referenced migration inventory remains version 1, and example reports use `runmat.builtin-example-report.v2`. Audit v1 and example-report v1 retain their sealed meanings and are explicitly rejected by this reconciliation layer. Future producers must increment their own schema version and update the consumer instead of relying on ignored fields.
+
+The result uses schema version 1 and kind `runmat-builtin-migration-verification-result`. It repeats the pinned batch, source, artifact, and inventory identities; records exact evidence artifacts; and emits global plus per-identity failures. Passing verification never changes catalog or runtime authority and never marks a C00-C07 migration complete by itself.

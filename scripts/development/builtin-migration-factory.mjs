@@ -7,6 +7,8 @@ import { auditInventory, parseBatch } from "./builtin-migration/audit.mjs";
 import { buildDispositionSeed, buildInventory, emptyDispositionInput } from "./builtin-migration/inventory.mjs";
 import { prepareIdentity } from "./builtin-migration/prepare.mjs";
 import { buildQueue } from "./builtin-migration/queue.mjs";
+import { parseVerificationManifest } from "./builtin-migration/verify-schema.mjs";
+import { verifyBatch } from "./builtin-migration/verify.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -16,6 +18,16 @@ try {
     process.stdout.write(help());
     process.exit(0);
   }
+  if (options.command === "verify") {
+    const manifestPath = path.resolve(options.manifest);
+    const manifest = parseVerificationManifest(readJson(manifestPath));
+    const base = path.dirname(manifestPath);
+    const load = (reference) => ({ reference, value: readJson(path.resolve(base, reference.path)) });
+    const output = verifyBatch(manifest, load(manifest.factory_audit), manifest.example_reports.map(load));
+    emit(output, options.output);
+    if (output.result !== "pass") process.exitCode = 1;
+    process.exit(process.exitCode ?? 0);
+  }
   const dispositions = options.dispositions ? readJson(options.dispositions) : emptyDispositionInput();
   const inventory = buildInventory(repository, dispositions);
   let output;
@@ -24,7 +36,7 @@ try {
   else if (options.command === "seed-dispositions") output = buildDispositionSeed(inventory);
   else if (options.command === "audit") {
     const identities = options.batch ? parseBatch(readJson(options.batch)) : options.identities;
-    output = auditInventory(inventory, identities);
+    output = auditInventory(inventory, identities, { source: options.source, artifact: options.artifact });
     if (output.result !== "pass") process.exitCode = 1;
   } else output = prepareIdentity(repository, inventory, options.identity, options.workspace);
   emit(output, options.output);
@@ -37,8 +49,8 @@ try {
 function parse(arguments_) {
   if (arguments_.includes("--help") || arguments_.includes("-h")) return { help: true };
   const command = arguments_.shift();
-  if (!["inventory", "queue", "seed-dispositions", "audit", "prepare"].includes(command)) throw new Error("expected inventory, queue, seed-dispositions, audit, or prepare; use --help");
-  const options = { command, dispositions: null, output: null, batch: null, identities: [], identity: null, workspace: null, help: false };
+  if (!["inventory", "queue", "seed-dispositions", "audit", "prepare", "verify"].includes(command)) throw new Error("expected inventory, queue, seed-dispositions, audit, prepare, or verify; use --help");
+  const options = { command, dispositions: null, output: null, batch: null, identities: [], identity: null, workspace: null, manifest: null, source: null, artifact: null, help: false };
   if (command === "prepare") options.identity = requireValue(arguments_, "prepare identity");
   while (arguments_.length) {
     const option = arguments_.shift();
@@ -47,12 +59,19 @@ function parse(arguments_) {
     else if (option === "--batch") options.batch = requireValue(arguments_, option);
     else if (option === "--identity") options.identities.push(requireValue(arguments_, option));
     else if (option === "--workspace") options.workspace = requireValue(arguments_, option);
+    else if (option === "--manifest") options.manifest = requireValue(arguments_, option);
+    else if (option === "--source") options.source = requireValue(arguments_, option);
+    else if (option === "--artifact") options.artifact = requireValue(arguments_, option);
     else throw new Error(`unknown option ${option}`);
   }
   if (command === "audit" && Boolean(options.batch) === Boolean(options.identities.length)) throw new Error("audit requires either one --batch or one or more --identity options");
   if (command === "prepare" && !options.workspace) throw new Error("prepare requires --workspace outside the repository");
   if (command !== "audit" && (options.batch || options.identities.length)) throw new Error(`${command} does not accept audit selection options`);
   if (command !== "prepare" && options.workspace) throw new Error(`${command} does not accept --workspace`);
+  if (command === "verify" && !options.manifest) throw new Error("verify requires --manifest");
+  if (command !== "verify" && options.manifest) throw new Error(`${command} does not accept --manifest`);
+  if (command !== "audit" && (options.source || options.artifact)) throw new Error(`${command} does not accept --source or --artifact`);
+  if (command === "verify" && (options.dispositions || options.batch || options.identities.length || options.workspace)) throw new Error("verify accepts only --manifest and --output");
   return options;
 }
 
@@ -74,7 +93,8 @@ function help() {
     `  node scripts/development/builtin-migration-factory.mjs inventory|queue [--dispositions PATH] [--output PATH]\n` +
     `  node scripts/development/builtin-migration-factory.mjs seed-dispositions [--output PATH]\n` +
     `  node scripts/development/builtin-migration-factory.mjs prepare NAME --workspace PATH [--dispositions PATH] [--output PATH]\n` +
-    `  node scripts/development/builtin-migration-factory.mjs audit (--identity NAME...|--batch PATH) [--dispositions PATH] [--output PATH]\n\n` +
+    `  node scripts/development/builtin-migration-factory.mjs audit (--identity NAME...|--batch PATH) [--source ID --artifact ID] [--dispositions PATH] [--output PATH]\n` +
+    `  node scripts/development/builtin-migration-factory.mjs verify --manifest PATH [--output PATH]\n\n` +
     `Generated JSON and prepare workspaces are development evidence, never production authority.\n` +
     `prepare requires a workspace outside the repository and never edits RunMat source.\n` +
     `seed-dispositions emits explicit unreviewed rows. A reviewed row must set review.status\n` +

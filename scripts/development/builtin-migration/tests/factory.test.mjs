@@ -130,7 +130,10 @@ test("seed format is explicit and accepts only unreviewed empty rows", () => {
 
 test("strict audit reports legacy debt and passes a reviewed internal identity", () => {
   const inventory = buildInventory(fixture(), disposition({ hidden: reviewed({ disposition: "internal", reason: "reviewed helper" }) }));
-  const report = auditInventory(inventory, ["foo", "hidden"]);
+  const report = auditInventory(inventory, ["foo", "hidden"], { source: "git:test", artifact: "fixture-audit" });
+  assert.equal(report.schema_version, 2);
+  assert.equal(report.metadata.source, "git:test");
+  assert.match(report.metadata.inventory.digest, /^sha256:[a-f0-9]{64}$/);
   assert.equal(report.result, "fail");
   assert.equal(report.identities.find((entry) => entry.identity === "hidden").result, "pass");
   const fooCodes = report.identities.find((entry) => entry.identity === "foo").failures.map((entry) => entry.code);

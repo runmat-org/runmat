@@ -23,3 +23,4 @@ Stable entrypoints:
 - `scripts/development/check-architecture-boundaries.sh`: validates durable dependency-direction and ownership boundaries between the value, type, builtin catalog, frontend, and runtime crates.
 - `scripts/runtime/verify-builtin-examples.mjs`: verifies catalog and legacy builtin examples, with deterministic multi-worker sharding and mergeable reports documented in `docs/development/builtin-example-sharding.md`.
 - `scripts/development/builtin-migration-factory.mjs`: emits the development-only C00-C07 identity inventory and complexity-weighted work queue. See `docs/development/builtin-migration-factory.md`; generated output is evidence, never an editable production authority.
+- Its `verify` command reconciles an exact migration audit with pinned combined/sharded example reports; verification output remains development evidence only.
