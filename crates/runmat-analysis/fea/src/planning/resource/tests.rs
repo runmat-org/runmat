@@ -1,9 +1,19 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::AccuracyResourceCeiling;
+use runmat_analysis_core::{AccuracyResourceCeiling, AnalysisModel};
 use runmat_execution::{
     resource::{AcceleratorRequest, Capability, ResourceInventory, ResourceUsage},
     Digest,
+};
+use runmat_meshing_core::{
+    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId, StableDigest,
+};
+
+use crate::{
+    constraints::CanonicalStructuralConstraintPlan,
+    fixtures::{fixture_model, FixtureId},
+    results::observation::{resolve_observation_plan, ObservationLimits},
+    topology::AnalysisProjection,
 };
 
 use super::*;
@@ -20,19 +30,18 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             element_node_references: Count(4),
             boundary_node_references: Count(12),
             node_neighbor_references: Count(12),
-            resident_bytes_upper_bound: ByteCount(1_088),
+            estimated_resident_bytes: ByteCount(1_088),
         },
         sparse: SparseResourceFacts {
             rows: Count(4),
             columns: Count(4),
-            nonzeros: Count(10),
-            value_array_count: Count(3),
+            operator_nonzeros: vec![Count(10), Count(4), Count(4)],
         },
         constraints: ConstraintResourceFacts {
             rows: Count(1),
             coefficients: Count(1),
             reference_points: Count(0),
-            resident_bytes_upper_bound: ByteCount(120),
+            estimated_resident_bytes: ByteCount(120),
         },
         assembly: AssemblyResourcePolicy {
             contribution_nonzero_upper_bound: Count(10),
@@ -52,7 +61,9 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
             retained_bytes: ByteCount(32),
         },
         observations: ObservationResourceFacts {
-            sample_count: Count(1),
+            maximum_samples_per_observation: Count(1),
+            produced_sample_count: Count(1),
+            retained_sample_count: Count(1),
             operation_count: Count(100),
             peak_resident_bytes: ByteCount(64),
             stored_bytes: ByteCount(200),
@@ -100,20 +111,115 @@ fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
     }
 }
 
+fn structural_fixture() -> (
+    AnalysisModel,
+    AnalysisProjection,
+    CanonicalStructuralConstraintPlan,
+) {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance.push(PersistentEntityId {
+            kind: runmat_meshing_core::PersistentEntityKind::Face,
+            source_topology_id: "root".into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    model.geometry_revision = mesh.geometry.geometry_revision as u32;
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let constraints = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    (model, projection, constraints)
+}
+
+#[test]
+fn structural_symbolic_plan_is_preassembly_and_material_independent() {
+    let (_, projection, constraints) = structural_fixture();
+    let operators = StructuralSymbolicOperators::derive(&projection, &constraints).unwrap();
+    let patterns = operators.patterns();
+    let facts = SparseResourceFacts::from_patterns(patterns).unwrap();
+
+    assert_eq!(facts.rows, Count(12));
+    assert_eq!(facts.columns, Count(12));
+    assert_eq!(
+        facts.operator_nonzeros,
+        vec![Count(144), Count(12), Count(12)]
+    );
+    assert_eq!(operators.stiffness_upper_bound().rows(), 12);
+    assert_eq!(
+        operators.identity(),
+        StructuralSymbolicOperators::derive(&projection, &constraints)
+            .unwrap()
+            .identity()
+    );
+}
+
+#[test]
+fn structural_preflight_derives_numerical_facts_before_assembly() {
+    let (model, projection, constraints) = structural_fixture();
+    let observations = resolve_observation_plan(
+        &model.sequence.steps[0],
+        &projection,
+        &[],
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let workload = crate::execution::StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: crate::contracts::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        thermo_mechanical_context: None,
+        electro_thermal_context: None,
+        initial_guess_transition: None,
+    };
+
+    let plan = build_structural_resource_plan(&projection, &constraints, &observations, &workload)
+        .unwrap();
+
+    assert_eq!(plan.input.topology_digest, projection.projection_digest);
+    assert_eq!(plan.input.sparse.rows, Count(12));
+    assert_eq!(
+        plan.input.sparse.operator_nonzeros,
+        vec![Count(144), Count(12), Count(12)]
+    );
+    assert_eq!(
+        plan.input.topology,
+        TopologyResourceFacts::from_projection(&projection).unwrap()
+    );
+    assert_eq!(
+        plan.input.constraints,
+        ConstraintResourceFacts::from_plan(&constraints).unwrap()
+    );
+    plan.validate_identity().unwrap();
+}
+
 #[test]
 fn exact_small_estimate_separates_all_resource_classes() {
     let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
 
     assert_eq!(plan.breakdown.topology_bytes, ByteCount(1_088));
-    assert_eq!(plan.breakdown.csr_row_offset_bytes, ByteCount(40));
-    assert_eq!(plan.breakdown.csr_column_index_bytes, ByteCount(80));
-    assert_eq!(plan.breakdown.csr_value_bytes, ByteCount(240));
+    assert_eq!(plan.breakdown.csr_row_offset_bytes, ByteCount(120));
+    assert_eq!(plan.breakdown.csr_column_index_bytes, ByteCount(144));
+    assert_eq!(plan.breakdown.csr_value_bytes, ByteCount(144));
     assert_eq!(plan.breakdown.assembly_contribution_bytes, ByteCount(240));
     assert_eq!(plan.breakdown.solve_vector_bytes, ByteCount(160));
     assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(32));
     assert_eq!(plan.breakdown.constraint_bytes, ByteCount(120));
     assert_eq!(plan.breakdown.observation_operation_count, Count(100));
-    assert_eq!(plan.request.memory_bytes, 1_908);
+    assert_eq!(
+        plan.breakdown.observation_maximum_samples_per_observation,
+        Count(1)
+    );
+    assert_eq!(plan.breakdown.observation_produced_sample_count, Count(1));
+    assert_eq!(plan.breakdown.observation_retained_sample_count, Count(1));
+    assert_eq!(plan.request.memory_bytes, 1_956);
     assert_eq!(plan.request.scratch_bytes, 45);
     assert_eq!(plan.request.max_artifact_bytes, 302);
     assert_eq!(plan.request.max_egress_bytes, 220);
@@ -132,7 +238,7 @@ fn overflow_and_impossible_sparse_facts_are_rejected() {
     ));
 
     let mut impossible = input(PartitioningPolicy::Monolithic);
-    impossible.sparse.nonzeros = Count(17);
+    impossible.sparse.operator_nonzeros[0] = Count(17);
     assert!(matches!(
         build_resource_plan(impossible),
         Err(ResourcePlanningError::Invalid(_))
@@ -142,14 +248,14 @@ fn overflow_and_impossible_sparse_facts_are_rejected() {
 #[test]
 fn understated_resident_bounds_are_rejected() {
     let mut topology = input(PartitioningPolicy::Monolithic);
-    topology.topology.resident_bytes_upper_bound = ByteCount(1);
+    topology.topology.estimated_resident_bytes = ByteCount(1);
     assert!(matches!(
         build_resource_plan(topology),
         Err(ResourcePlanningError::Invalid(_))
     ));
 
     let mut constraints = input(PartitioningPolicy::Monolithic);
-    constraints.constraints.resident_bytes_upper_bound = ByteCount(1);
+    constraints.constraints.estimated_resident_bytes = ByteCount(1);
     assert!(matches!(
         build_resource_plan(constraints),
         Err(ResourcePlanningError::Invalid(_))
@@ -271,9 +377,9 @@ fn operator_domain_work_gets_a_conservative_partition_recommendation() {
     else {
         panic!("operator/domain work should receive a partition recommendation");
     };
-    assert_eq!(minimum_partition_count, 2);
-    assert_eq!(per_partition_request.memory_bytes, 1_034);
-    assert_eq!(per_partition_request.scratch_bytes, 30);
+    assert_eq!(minimum_partition_count, 3);
+    assert_eq!(per_partition_request.memory_bytes, 749);
+    assert_eq!(per_partition_request.scratch_bytes, 24);
 }
 
 #[test]
@@ -339,7 +445,7 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
     let actual = AnalysisResourceUsage {
         scheduler: ResourceUsage {
             cpu_core_millis: 1_001,
-            memory_byte_millis: 1_908_001,
+            memory_byte_millis: 1_956_001,
             wall_millis: 1_001,
             egress_bytes: 221,
             relay_bytes: 13,

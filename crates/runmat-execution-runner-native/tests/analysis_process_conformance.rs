@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
-    build_analysis_task_submission, import_analysis_objects, import_analysis_output_set,
-    prepare_structural_linear_program, AnalysisExecutionContext, AnalysisHostWorkload,
-    PreparedAnalysisProgram, PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
-    StructuralSequencePreparation,
+    build_analysis_task_submission, build_structural_task_submission, import_analysis_objects,
+    import_analysis_output_set, prepare_structural_linear_program, AnalysisExecutionContext,
+    AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
+    StructuralLinearProgramPreparation, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -82,9 +82,10 @@ fn main() {
 
 async fn parent() {
     let directory = tempfile::tempdir().unwrap();
-    let (host, program, input_objects) = fixture(revision(), "analysis-process-conformance");
+    let (host, program, input_objects, resource_plan) =
+        fixture(revision(), "analysis-process-conformance");
     let request = program.request.clone();
-    let (second_host, second_program, _second_inputs) = fixture_for_study(
+    let (second_host, second_program, _second_inputs, second_resource_plan) = fixture_for_study(
         revision(),
         "analysis-process-conformance",
         digest("authored-study-second"),
@@ -103,7 +104,14 @@ async fn parent() {
     let submissions = vec![
         (
             request.clone(),
-            analysis_submission(session.scope_id(), session.pool_id(), &host, &request),
+            analysis_submission(
+                session.scope_id(),
+                session.pool_id(),
+                &host,
+                &request,
+                Some(&resource_plan),
+                resource_plan.request.clone(),
+            ),
         ),
         (
             second_request.clone(),
@@ -112,6 +120,8 @@ async fn parent() {
                 session.pool_id(),
                 &second_host,
                 &second_request,
+                Some(&second_resource_plan),
+                second_resource_plan.request.clone(),
             ),
         ),
     ];
@@ -151,6 +161,7 @@ async fn parent() {
         host: host.clone(),
         program: program.clone(),
         inputs: input_objects,
+        resource_plan,
     };
     let mut publication_driver = publication_chain::ProcessDriver {
         session: &session,
@@ -295,11 +306,12 @@ async fn durable_conformance(
             max_object_bytes: 64 * 1024 * 1024,
         },
     );
-    let (host, program, input_objects) = fixture(revision(), "durable-analysis");
+    let (host, program, input_objects, resource_plan) = fixture(revision(), "durable-analysis");
     let solve = PreparedStructuralLinearProgram {
         host,
         program,
         inputs: input_objects,
+        resource_plan,
     };
     let solve_host = solve.host.clone();
     let solve_program = solve.program.clone();
@@ -345,9 +357,10 @@ async fn remote_conformance(
         runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap();
-    let (host, program, input_objects) = fixture(revision.clone(), "remote-analysis");
+    let (host, program, input_objects, resource_plan) =
+        fixture(revision.clone(), "remote-analysis");
     let request = program.request.clone();
-    let (second_host, second_program, _second_inputs) = fixture_for_study(
+    let (second_host, second_program, _second_inputs, second_resource_plan) = fixture_for_study(
         revision.clone(),
         "remote-analysis",
         digest("remote-authored-study-second"),
@@ -483,11 +496,25 @@ async fn remote_conformance(
             .submit_graph(vec![
                 (
                     request.clone(),
-                    analysis_submission(scope_id, pool_id, &host, &request),
+                    analysis_submission(
+                        scope_id,
+                        pool_id,
+                        &host,
+                        &request,
+                        Some(&resource_plan),
+                        resource_plan.request.clone(),
+                    ),
                 ),
                 (
                     second_request.clone(),
-                    analysis_submission(scope_id, pool_id, &second_host, &second_request),
+                    analysis_submission(
+                        scope_id,
+                        pool_id,
+                        &second_host,
+                        &second_request,
+                        Some(&second_resource_plan),
+                        second_resource_plan.request.clone(),
+                    ),
                 ),
             ])
             .unwrap();
@@ -530,6 +557,7 @@ async fn remote_conformance(
             host: host.clone(),
             program: program.clone(),
             inputs: input_objects,
+            resource_plan,
         };
         let mut publication_driver = publication_chain::RemoteDriver {
             pool: Arc::clone(&pool),
@@ -595,6 +623,7 @@ fn fixture(
     AnalysisHostWorkload,
     PreparedAnalysisProgram,
     Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
+    runmat_analysis_fea::planning::resource::FeaResourcePlan,
 ) {
     fixture_for_study(revision, authorization_scope, digest("authored-study"))
 }
@@ -607,6 +636,7 @@ fn fixture_for_study(
     AnalysisHostWorkload,
     PreparedAnalysisProgram,
     Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
+    runmat_analysis_fea::planning::resource::FeaResourcePlan,
 ) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.sequence.steps[0].observations = vec![structural_displacement_observation()];
@@ -642,7 +672,12 @@ fn fixture_for_study(
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    (prepared.host, prepared.program, prepared.inputs)
+    (
+        prepared.host,
+        prepared.program,
+        prepared.inputs,
+        prepared.resource_plan,
+    )
 }
 
 fn structural_displacement_observation() -> runmat_analysis_core::ObservationRequest {
@@ -886,7 +921,11 @@ fn analysis_submission(
     pool_id: runmat_execution::PoolId,
     host: &AnalysisHostWorkload,
     request: &runmat_execution_artifact::ProgramExecutionRequest,
+    resource_plan: Option<&runmat_analysis_fea::planning::resource::FeaResourcePlan>,
+    resources: ResourceRequest,
 ) -> runmat_execution_runner::TaskSubmission {
+    let mut resources = resources;
+    resources.required_capabilities.extend(capabilities());
     let roots = request
         .arguments
         .iter()
@@ -895,32 +934,41 @@ fn analysis_submission(
             ValuePayload::Inline(_) => panic!("analysis inputs must remain externalized"),
         })
         .collect();
-    build_analysis_task_submission(
-        host,
-        roots,
-        Vec::new(),
-        BTreeSet::new(),
-        AnalysisExecutionContext {
-            scope_id,
-            pool_id,
-            program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
-            resources: ResourceRequest {
-                cpu_millicores: 1_000,
-                memory_bytes: 256 * 1024 * 1024,
-                scratch_bytes: 256 * 1024 * 1024,
-                max_wall_millis: 60_000,
-                max_artifact_bytes: 64 * 1024 * 1024,
-                max_egress_bytes: 64 * 1024 * 1024,
-                max_relay_bytes: 64 * 1024 * 1024,
-                accelerators: Vec::new(),
-                required_capabilities: capabilities(),
-            },
-            retry: RetryPolicy::IdempotentInfrastructure,
-            deadline_unix_millis: None,
-            priority: 0,
-        },
-    )
+    let context = AnalysisExecutionContext {
+        scope_id,
+        pool_id,
+        program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
+        resources,
+        retry: RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    };
+    match resource_plan {
+        Some(resource_plan) => build_structural_task_submission(
+            host,
+            resource_plan,
+            roots,
+            Vec::new(),
+            BTreeSet::new(),
+            context,
+        ),
+        None => build_analysis_task_submission(host, roots, Vec::new(), BTreeSet::new(), context),
+    }
     .unwrap()
+}
+
+fn analysis_resources() -> ResourceRequest {
+    ResourceRequest {
+        cpu_millicores: 1_000,
+        memory_bytes: 256 * 1024 * 1024,
+        scratch_bytes: 256 * 1024 * 1024,
+        max_wall_millis: 60_000,
+        max_artifact_bytes: 64 * 1024 * 1024,
+        max_egress_bytes: 64 * 1024 * 1024,
+        max_relay_bytes: 64 * 1024 * 1024,
+        accelerators: Vec::new(),
+        required_capabilities: capabilities(),
+    }
 }
 
 fn revision() -> ProgramRevision {

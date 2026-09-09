@@ -10,6 +10,10 @@ use runmat_analysis_fea::execution::{
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StudyIdentity,
 };
+use runmat_analysis_fea::planning::resource::{build_structural_resource_plan, FeaResourcePlan};
+use runmat_analysis_fea::post::fields::structural_observable_field_definitions;
+use runmat_analysis_fea::results::observation::{resolve_observation_plan, ObservationLimits};
+use runmat_analysis_fea::topology::AnalysisProjection;
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
@@ -46,6 +50,7 @@ pub struct PreparedStructuralLinearProgram {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+    pub resource_plan: FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -192,6 +197,27 @@ pub fn prepare_structural_linear_program(
     let constraint_plan_digest = constraint_plan
         .content_digest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let projection = AnalysisProjection::derive(&preparation.mesh)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let field_definitions = structural_observable_field_definitions()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let observation_plan = resolve_observation_plan(
+        preparation.workload.procedure_step()?,
+        &projection,
+        &field_definitions,
+        ObservationLimits::default(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = build_structural_resource_plan(
+        &projection,
+        &constraint_plan,
+        &observation_plan,
+        &preparation.workload,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan_bytes = resource_plan
+        .canonical_bytes()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let solve_bytes = preparation.workload.canonical_bytes()?;
     let mesh_bytes = preparation
         .mesh
@@ -232,6 +258,7 @@ pub fn prepare_structural_linear_program(
         preparation.frozen_project_digest,
         mesh_digest,
         constraint_plan_digest,
+        resource_plan.identity.digest(),
     )?;
     if let Some(transition) = preparation.workload.initial_guess_transition.as_ref() {
         let producer = preparation
@@ -280,10 +307,19 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan_bytes,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
     let mut inputs = vec![
         (invocation, ValueRefKind::DriverObject),
         (mesh, ValueRefKind::DriverObject),
         (constraint_plan, ValueRefKind::DriverObject),
+        (resource_plan_objects, ValueRefKind::DriverObject),
     ];
     if let Some(initial_guess) = preparation.initial_guess {
         inputs.push((initial_guess, ValueRefKind::ResultObject));
@@ -325,6 +361,7 @@ pub fn prepare_structural_linear_program(
         host,
         program,
         inputs,
+        resource_plan,
     })
 }
 
@@ -426,6 +463,7 @@ fn derive_identities(
     frozen_project_digest: Option<Digest>,
     mesh_digest: Digest,
     constraint_plan_digest: Digest,
+    resource_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
     let step_contract = workload.procedure_step()?;
     let study = StudyIdentity::from_authored_digest(authored_study_digest, frozen_project_digest)?;
@@ -501,6 +539,7 @@ fn derive_identities(
                 ANALYSIS_HOST_ABI,
                 workload.require_solver_mesh_for_solid,
                 AnalysisNumericalObjectKind::SolverResult,
+                resource_plan_digest,
             ),
         )?,
     )?;

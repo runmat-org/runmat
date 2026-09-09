@@ -13,7 +13,10 @@ use runmat_analysis_fea::execution::{
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult,
 };
-use runmat_analysis_fea::post::fields::take_structural_observable_fields;
+use runmat_analysis_fea::planning::resource::{build_structural_resource_plan, FeaResourcePlan};
+use runmat_analysis_fea::post::fields::{
+    structural_observable_field_definitions, take_structural_observable_fields,
+};
 use runmat_analysis_fea::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyArtifact, AccuracyArtifactInput, AccuracyEvidence,
     AccuracyEvidenceScope, AccuracyMeasure,
@@ -22,10 +25,11 @@ use runmat_analysis_fea::results::field::{
     RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldSelection,
 };
 use runmat_analysis_fea::results::observation::{
-    evaluate_observations, ObservationArtifact, ObservationArtifactInput,
-    ObservationArtifactManifest,
+    evaluate_observations, resolve_observation_plan, ObservationArtifact, ObservationArtifactInput,
+    ObservationArtifactManifest, ObservationLimits,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
+use runmat_analysis_fea::topology::AnalysisProjection;
 use runmat_analysis_fea::{
     run_linear_static_with_prepared_constraint_plan, LinearStaticSolveOptions,
 };
@@ -398,11 +402,12 @@ fn execute_structural_linear(
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let mesh = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let constraint_plan = unique_input(&invocation, AnalysisNumericalObjectKind::ConstraintPlan)?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let solve = StructuralLinearWorkload::from_canonical_bytes(&solve_invocation.payload())?;
     let expected_inputs = if solve.initial_guess_transition.is_some() {
-        4
+        5
     } else {
-        3
+        4
     };
     if invocation.inputs.len() != expected_inputs
         || invocation.host.workload.outputs
@@ -469,6 +474,32 @@ fn execute_structural_linear(
     constraint_plan
         .validate_against(&solver_model, &mesh)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if resource_plan_input.manifest.logical_identity != resource_plan.identity.digest() {
+        return Err(AnalysisBridgeError::Identity(
+            "resource-plan manifest differs from its canonical identity",
+        ));
+    }
+    let projection = AnalysisProjection::derive(&mesh)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let field_definitions = structural_observable_field_definitions()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let observations = resolve_observation_plan(
+        solve.procedure_step()?,
+        &projection,
+        &field_definitions,
+        ObservationLimits::default(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_resource_plan =
+        build_structural_resource_plan(&projection, &constraint_plan, &observations, &solve)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if expected_resource_plan != resource_plan {
+        return Err(AnalysisBridgeError::Identity(
+            "resource plan does not converge from authoritative structural inputs",
+        ));
+    }
     let expected_constraint_identity = ConstraintPlanIdentity::new(
         invocation.host.workload.step,
         runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
@@ -607,21 +638,18 @@ mod tests {
     use std::collections::BTreeSet;
 
     use runmat_analysis_execution::{
-        decode_recovered_field_artifact, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-        AnalysisWorkloadInput, AnalysisWorkloadRequest,
+        decode_recovered_field_artifact, prepare_structural_linear_program,
+        prepare_structural_sequence_step, AnalysisCapabilityRequirement, AnalysisHostWorkload,
+        AnalysisWorkloadInput, AnalysisWorkloadRequest, StructuralLinearProgramPreparation,
     };
-    use runmat_analysis_fea::execution::{
-        ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-        NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity,
-        SolverResultIdentity, StepIdentity, StudyIdentity,
-    };
+    use runmat_analysis_fea::execution::SolverResultIdentity;
     use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
     use runmat_analysis_fea::results::accuracy::{AccuracyStatus, PublicationDecision};
     use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
     use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
     use runmat_analysis_fea::ComputeBackend;
     use runmat_execution::value::ValueRefKind;
-    use runmat_execution::Digest;
+    use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::object::ObjectInventoryLimits;
     use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
     use runmat_meshing_core::{
@@ -634,16 +662,13 @@ mod tests {
         Digest::sha256(label)
     }
 
-    fn execution_plan(step: StepIdentity) -> ExecutionPlanIdentity {
-        let constraints =
-            ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
-        let problem =
-            ProblemIdentity::new(step, digest("model"), None, constraints, Vec::new()).unwrap();
-        let discretization =
-            DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
-        let operator = OperatorIdentity::new(discretization, digest("operator")).unwrap();
-        let numerical = NumericalPlanIdentity::new(operator, digest("solver")).unwrap();
-        ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap()
+    fn revision() -> ProgramRevision {
+        ProgramRevision::new(
+            digest("graph"),
+            digest("source"),
+            ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
+        )
+        .unwrap()
     }
 
     fn prepare_kernel_output(
@@ -734,15 +759,6 @@ mod tests {
             electro_thermal_context: None,
             initial_guess_transition: None,
         };
-        let state = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::SolverInvocation,
-            digest("state"),
-            &solve.canonical_bytes().unwrap(),
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap();
         let mut mesh =
             runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         for (face_index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
@@ -764,74 +780,27 @@ mod tests {
         }
         mesh.canonical_digest = StableDigest::ZERO;
         mesh.seal_canonical_digest().unwrap();
-        let constraint_plan =
-            CanonicalStructuralConstraintPlan::compile(&solve.model, &mesh).unwrap();
-        let constraint_plan_bytes = constraint_plan.canonical_bytes().unwrap();
-        let constraint_plan_digest = constraint_plan.content_digest().unwrap();
-        let mesh = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::Mesh,
-            Digest::from_bytes(*mesh.canonical_digest.bytes()),
-            &mesh.canonical_encode().unwrap(),
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap();
-        let study = StudyIdentity::from_authored_digest(digest("study"), None).unwrap();
-        let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
-        let step =
-            StepIdentity::from_solver_contract(sequence, solve.procedure_step().unwrap()).unwrap();
-        let constraint_plan = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::ConstraintPlan,
-            ConstraintPlanIdentity::new(
-                step,
-                mesh.manifest.logical_identity,
-                constraint_plan_digest,
-            )
-            .unwrap()
-            .digest(),
-            &constraint_plan_bytes,
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap();
-        let inputs = vec![state, mesh, constraint_plan];
-        let workload_inputs = inputs
-            .iter()
-            .map(|input| AnalysisWorkloadInput {
-                kind: input.manifest.kind,
-                logical_identity: input.manifest.logical_identity,
-                payload_digest: input.manifest.payload_digest,
-                manifest_digest: input.root.digest,
-                manifest_encoded_length: input.root.encoded_length,
-                reference_kind: ValueRefKind::DriverObject,
-            })
-            .collect();
-        let execution_plan = execution_plan(step);
-        let workload = AnalysisWorkloadRequest::new(
-            study,
-            step,
-            execution_plan,
-            AnalysisWorkKind::Solve,
-            workload_inputs,
-            vec![
-                AnalysisNumericalObjectKind::SolverResult,
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ],
-            BTreeSet::from([AnalysisCapabilityRequirement::Host {
-                abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
-            }]),
-        )
-        .unwrap();
-        let host = AnalysisHostWorkload::new(
-            workload,
-            ArtifactAccess {
+        let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+            authored_study_digest: digest("study"),
+            frozen_project_digest: None,
+            program_revision: revision(),
+            artifact_access: ArtifactAccess {
                 authorization_scope: "study:test".into(),
                 encryption_context: digest("encryption"),
             },
-        )
+            workload: solve.clone(),
+            mesh,
+            initial_guess: None,
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
         .unwrap();
+        let host = prepared.host;
+        let inputs = prepared.inputs;
+        let study = host.workload.study;
+        let step = host.workload.step;
+        let execution_plan = host.workload.execution_plan;
         let outputs = NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
                 kind: AnalysisWorkKind::Solve,
@@ -1330,30 +1299,8 @@ mod tests {
             .iter()
             .find(|candidate| candidate.step_id.as_str() == "branch")
             .unwrap();
-        let consumer = StepIdentity::from_solver_contract(sequence, consumer_step).unwrap();
-        let transition = runmat_analysis_fea::execution::CanonicalStateTransition::new(
-            runmat_analysis_fea::execution::CanonicalStateTransitionInput {
-                sequence,
-                producer: step,
-                consumer,
-                authored: &authored_transition,
-                source: &state,
-                target_topology_digest: inputs[1].manifest.logical_identity,
-            },
-        )
-        .unwrap();
         let mut warm_solve = solve.clone();
         warm_solve.step_id = consumer_step.step_id.clone();
-        warm_solve.initial_guess_transition = Some(transition);
-        let warm_invocation = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::SolverInvocation,
-            digest("warm-invocation"),
-            &warm_solve.canonical_bytes().unwrap(),
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap();
         let warm_state = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::SemanticState,
             state.identity.digest(),
@@ -1363,57 +1310,21 @@ mod tests {
             ObjectInventoryLimits::default(),
         )
         .unwrap();
-        let warm_constraint_plan = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::ConstraintPlan,
-            ConstraintPlanIdentity::new(
-                consumer,
-                inputs[1].manifest.logical_identity,
-                constraint_plan_digest,
-            )
-            .unwrap()
-            .digest(),
-            &constraint_plan_bytes,
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
+        let warm_prepared = prepare_structural_sequence_step(StructuralLinearProgramPreparation {
+            authored_study_digest: digest("study"),
+            frozen_project_digest: None,
+            program_revision: revision(),
+            artifact_access: host.artifact_access.clone(),
+            workload: warm_solve,
+            mesh: SolverMeshArtifact::canonical_decode(&inputs[1].payload()).unwrap(),
+            initial_guess: Some(warm_state),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
         .unwrap();
-        let warm_inputs = vec![
-            warm_invocation,
-            inputs[1].clone(),
-            warm_constraint_plan,
-            warm_state,
-        ];
-        let warm_workload_inputs = warm_inputs
-            .iter()
-            .map(|input| AnalysisWorkloadInput {
-                kind: input.manifest.kind,
-                logical_identity: input.manifest.logical_identity,
-                payload_digest: input.manifest.payload_digest,
-                manifest_digest: input.root.digest,
-                manifest_encoded_length: input.root.encoded_length,
-                reference_kind: ValueRefKind::DriverObject,
-            })
-            .collect();
-        let warm_host = AnalysisHostWorkload::new(
-            AnalysisWorkloadRequest::new(
-                study,
-                consumer,
-                execution_plan,
-                AnalysisWorkKind::Solve,
-                warm_workload_inputs,
-                vec![
-                    AnalysisNumericalObjectKind::SolverResult,
-                    AnalysisNumericalObjectKind::NumericalReceipt,
-                ],
-                BTreeSet::from([AnalysisCapabilityRequirement::Host {
-                    abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
-                }]),
-            )
-            .unwrap(),
-            host.artifact_access.clone(),
-        )
-        .unwrap();
+        let warm_host = warm_prepared.host;
+        let warm_inputs = warm_prepared.inputs;
         let warm_outputs = NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
                 kind: AnalysisWorkKind::Solve,
@@ -1436,7 +1347,7 @@ mod tests {
         }));
 
         let mut substituted = warm_inputs.clone();
-        substituted[2].manifest.logical_identity = digest("substituted-state");
+        substituted[4].manifest.logical_identity = digest("substituted-state");
         assert!(NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
                 kind: AnalysisWorkKind::Solve,

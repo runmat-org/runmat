@@ -18,6 +18,7 @@ use crate::{
         StudyIdentity,
     },
     fixtures::{fixture_model, FixtureId},
+    planning::resource::{Count, ObservationResourceFacts},
     results::field::{
         RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
@@ -275,6 +276,10 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
         ObservationLimits::default(),
     )
     .unwrap();
+    let resource_facts = ObservationResourceFacts::from_plan(&plan).unwrap();
+    assert_eq!(resource_facts.maximum_samples_per_observation, Count(3));
+    assert_eq!(resource_facts.produced_sample_count, Count(3));
+    assert_eq!(resource_facts.retained_sample_count, Count(2));
     let observation_id = ObservationId("temperature_history".into());
     let mut builder = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
     let mut result_identities = Vec::new();

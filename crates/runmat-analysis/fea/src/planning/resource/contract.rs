@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::AccuracyResourceCeiling;
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::{
     resource::{AcceleratorRequest, Capability, ResourceRequest, ResourceUsage},
     Digest,
@@ -30,9 +30,9 @@ pub struct TopologyResourceFacts {
     pub element_node_references: Count,
     pub boundary_node_references: Count,
     pub node_neighbor_references: Count,
-    /// Caller-attested upper bound for the complete resident projection, including
-    /// heap allocations, maps, provenance, and allocator overhead.
-    pub resident_bytes_upper_bound: ByteCount,
+    /// Deterministic estimate produced from the complete authoritative projection by the
+    /// resource-estimation model named by `estimation_model_revision`.
+    pub estimated_resident_bytes: ByteCount,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -40,8 +40,19 @@ pub struct TopologyResourceFacts {
 pub struct SparseResourceFacts {
     pub rows: Count,
     pub columns: Count,
-    pub nonzeros: Count,
-    pub value_array_count: Count,
+    /// Nonzero upper bound for each independently stored canonical operator pattern.
+    /// K, M, and C do not implicitly share row-offset or column-index storage.
+    pub operator_nonzeros: Vec<Count>,
+}
+
+impl SparseResourceFacts {
+    pub(crate) fn maximum_nonzeros(&self) -> u64 {
+        self.operator_nonzeros
+            .iter()
+            .map(|count| count.0)
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -50,14 +61,20 @@ pub struct ConstraintResourceFacts {
     pub rows: Count,
     pub coefficients: Count,
     pub reference_points: Count,
-    /// Caller-attested upper bound for the complete immutable constraint plan.
-    pub resident_bytes_upper_bound: ByteCount,
+    /// Deterministic estimate produced from the canonical constraint plan.
+    pub estimated_resident_bytes: ByteCount,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationResourceFacts {
-    pub sample_count: Count,
+    /// Largest produced sample count for any one observation. Accuracy ceilings apply per
+    /// observation rather than to the number of independently requested outputs.
+    pub maximum_samples_per_observation: Count,
+    /// Sum of samples that observation evaluators may produce across the resolved plan.
+    pub produced_sample_count: Count,
+    /// Sum of samples retained after applying each observation's storage policy.
+    pub retained_sample_count: Count,
     pub operation_count: Count,
     pub peak_resident_bytes: ByteCount,
     pub stored_bytes: ByteCount,
@@ -202,7 +219,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaResourcePlanningInput {
-    /// Version of the evidence model used for caller-attested resident bounds.
+    /// Version of the deterministic projection and numerical accounting model.
     pub estimation_model_revision: u16,
     pub topology_digest: Digest,
     pub operator_pattern_digest: Digest,
@@ -236,7 +253,9 @@ pub struct ResourceBreakdown {
     pub recovery_resident_bytes: ByteCount,
     pub recovery_scratch_bytes: ByteCount,
     pub recovery_retained_bytes: ByteCount,
-    pub observation_sample_count: Count,
+    pub observation_maximum_samples_per_observation: Count,
+    pub observation_produced_sample_count: Count,
+    pub observation_retained_sample_count: Count,
     pub observation_operation_count: Count,
     pub observation_peak_bytes: ByteCount,
     pub observation_stored_bytes: ByteCount,
@@ -340,6 +359,27 @@ impl FeaResourcePlan {
         self.request
             .validate()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ResourcePlanningError> {
+        self.validate_identity()?;
+        Ok(encode_contract(
+            RESOURCE_PREFIX,
+            "resource-plan-artifact",
+            self,
+            RESOURCE_LIMITS,
+        )?)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ResourcePlanningError> {
+        let plan: Self = decode_contract(
+            RESOURCE_PREFIX,
+            "resource-plan-artifact",
+            bytes,
+            RESOURCE_LIMITS,
+        )?;
+        plan.validate_identity()?;
+        Ok(plan)
     }
 }
 

@@ -150,6 +150,31 @@ pub fn recover_result_fields(
 pub fn take_structural_observable_fields(
     fields: &mut Vec<AnalysisField>,
 ) -> Result<Vec<RecoveredField>, RecoveredFieldError> {
+    let declarations = structural_observable_field_definitions()?;
+    let mut recovered = Vec::with_capacity(declarations.len());
+    for definition in declarations {
+        let Some(index) = fields
+            .iter()
+            .position(|field| field.field_id == definition.field_id())
+        else {
+            continue;
+        };
+        let storage = fields.remove(index);
+        recovered.push(RecoveredField::new(
+            definition,
+            RecoveredFieldSample::Final,
+            storage,
+        )?);
+    }
+    Ok(recovered)
+}
+
+/// Semantic field inventory produced by the structural solid recovery path.
+///
+/// Resource and observation planning use the same declarations as postprocessing so output
+/// selection cannot drift from the fields that are actually recoverable.
+pub fn structural_observable_field_definitions(
+) -> Result<Vec<RecoveredFieldDefinition>, RecoveredFieldError> {
     let declarations = [
         (
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
@@ -182,26 +207,18 @@ pub fn take_structural_observable_fields(
             ObservationValueShape::Vector3,
         ),
     ];
-    let mut recovered = Vec::with_capacity(declarations.len());
-    for (field_id, quantity, location, value_shape) in declarations {
-        let Some(index) = fields.iter().position(|field| field.field_id == field_id) else {
-            continue;
-        };
-        let storage = fields.remove(index);
-        let definition = RecoveredFieldDefinition::new(
-            field_id,
-            quantity,
-            location,
-            value_shape,
-            RecoveredFieldNumericRepresentation::Real,
-        )?;
-        recovered.push(RecoveredField::new(
-            definition,
-            RecoveredFieldSample::Final,
-            storage,
-        )?);
-    }
-    Ok(recovered)
+    declarations
+        .into_iter()
+        .map(|(field_id, quantity, location, value_shape)| {
+            RecoveredFieldDefinition::new(
+                field_id,
+                quantity,
+                location,
+                value_shape,
+                RecoveredFieldNumericRepresentation::Real,
+            )
+        })
+        .collect()
 }
 
 pub fn recover_structural_stress_from_displacement(

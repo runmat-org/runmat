@@ -107,7 +107,8 @@ pub use structural_sequence::{
     StructuralSequencePreparation, StructuralSequenceResultClosure,
 };
 pub use task::{
-    build_analysis_task_submission, AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+    build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
+    DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

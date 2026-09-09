@@ -25,7 +25,7 @@ use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeProgramSession, RemotePoolDriver,
 };
 
-use super::{analysis_submission, wait_for_native_task};
+use super::{analysis_resources, analysis_submission, wait_for_native_task};
 
 pub(super) trait PublicationChainDriver {
     type Store: CacheImport;
@@ -196,6 +196,8 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                         self.session.pool_id(),
                         host,
                         &program.request,
+                        None,
+                        analysis_resources(),
                     ),
                 )])
                 .unwrap()
@@ -331,7 +333,14 @@ impl PublicationChainDriver for RemoteDriver {
                 .pool
                 .submit_graph(vec![(
                     program.request.clone(),
-                    analysis_submission(self.scope_id, self.pool_id, host, &program.request),
+                    analysis_submission(
+                        self.scope_id,
+                        self.pool_id,
+                        host,
+                        &program.request,
+                        None,
+                        analysis_resources(),
+                    ),
                 )])
                 .unwrap()
                 .pop()

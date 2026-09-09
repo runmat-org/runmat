@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_fea::execution::AnalysisTaskIdentity;
+use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, AnalysisTaskIdentity};
+use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::ResourceRequest;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
@@ -25,6 +26,55 @@ pub struct AnalysisExecutionContext {
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
     pub priority: i16,
+}
+
+pub fn build_structural_task_submission(
+    host: &AnalysisHostWorkload,
+    resource_plan: &FeaResourcePlan,
+    program_roots: Vec<ValueRef>,
+    dependency_identities: Vec<AnalysisTaskIdentity>,
+    dependency_tasks: BTreeSet<TaskId>,
+    context: AnalysisExecutionContext,
+) -> AnalysisBridgeResult<TaskSubmission> {
+    resource_plan.validate_identity().map_err(|error| {
+        crate::AnalysisBridgeError::Invalid(format!("invalid structural resource plan: {error}"))
+    })?;
+    let matching_plan_inputs = host
+        .workload
+        .inputs
+        .iter()
+        .filter(|input| input.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .collect::<Vec<_>>();
+    if !matches!(matching_plan_inputs.as_slice(), [input] if input.logical_identity == resource_plan.identity.digest())
+    {
+        return Err(crate::AnalysisBridgeError::Identity(
+            "structural workload does not bind the canonical resource plan",
+        ));
+    }
+    let planned = &resource_plan.request;
+    if context.resources.cpu_millicores != planned.cpu_millicores
+        || context.resources.memory_bytes != planned.memory_bytes
+        || context.resources.scratch_bytes != planned.scratch_bytes
+        || context.resources.max_wall_millis != planned.max_wall_millis
+        || context.resources.max_artifact_bytes != planned.max_artifact_bytes
+        || context.resources.max_egress_bytes != planned.max_egress_bytes
+        || context.resources.max_relay_bytes != planned.max_relay_bytes
+        || context.resources.accelerators != planned.accelerators
+        || !planned
+            .required_capabilities
+            .is_subset(&context.resources.required_capabilities)
+    {
+        return Err(crate::AnalysisBridgeError::Identity(
+            "structural task resources differ from the canonical post-projection plan",
+        ));
+    }
+    build_analysis_task_submission(
+        host,
+        program_roots,
+        dependency_identities,
+        dependency_tasks,
+        context,
+    )
 }
 
 pub fn build_analysis_task_submission(

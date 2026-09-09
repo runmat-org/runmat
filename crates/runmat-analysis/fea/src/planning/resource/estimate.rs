@@ -10,23 +10,26 @@ pub fn build_resource_plan(
     input: FeaResourcePlanningInput,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_input(&input)?;
-    let topology_bytes = input.topology.resident_bytes_upper_bound;
+    let topology_bytes = input.topology.estimated_resident_bytes;
+    let operator_count = u64::try_from(input.sparse.operator_nonzeros.len())
+        .map_err(|_| ResourcePlanningError::Overflow("sparse operator count"))?;
+    let total_operator_nonzeros = input
+        .sparse
+        .operator_nonzeros
+        .iter()
+        .try_fold(0_u64, |total, count| add(total, count.0, "sparse nonzeros"))?;
     let csr_row_offset_bytes = ByteCount(bytes(
-        add(input.sparse.rows.0, 1, "CSR row offsets")?,
+        mul(
+            add(input.sparse.rows.0, 1, "CSR row offsets")?,
+            operator_count,
+            "CSR row offsets",
+        )?,
         8,
         "CSR row offsets",
     )?);
     let csr_column_index_bytes =
-        ByteCount(bytes(input.sparse.nonzeros.0, 8, "CSR column indices")?);
-    let csr_value_bytes = ByteCount(bytes(
-        mul(
-            input.sparse.nonzeros.0,
-            input.sparse.value_array_count.0,
-            "CSR values",
-        )?,
-        8,
-        "CSR values",
-    )?);
+        ByteCount(bytes(total_operator_nonzeros, 8, "CSR column indices")?);
+    let csr_value_bytes = ByteCount(bytes(total_operator_nonzeros, 8, "CSR values")?);
     let assembly_contribution_bytes = input.assembly.contribution_bytes_upper_bound;
     let assembly_scratch_bytes = ByteCount(add(
         input.assembly.fixed_scratch_bytes_per_worker.0,
@@ -47,7 +50,7 @@ pub fn build_resource_plan(
         "solve vectors",
     )?);
     let (preconditioner_bytes, factorization_bytes) = solve_storage(&input)?;
-    let constraint_bytes = input.constraints.resident_bytes_upper_bound;
+    let constraint_bytes = input.constraints.estimated_resident_bytes;
     let recovery_resident_bytes = input.recovery.resident_bytes_upper_bound;
     let persistent = sum(
         &[
@@ -152,7 +155,11 @@ pub fn build_resource_plan(
         recovery_resident_bytes,
         recovery_scratch_bytes: input.recovery.scratch_bytes,
         recovery_retained_bytes: input.recovery.retained_bytes,
-        observation_sample_count: input.observations.sample_count,
+        observation_maximum_samples_per_observation: input
+            .observations
+            .maximum_samples_per_observation,
+        observation_produced_sample_count: input.observations.produced_sample_count,
+        observation_retained_sample_count: input.observations.retained_sample_count,
         observation_operation_count: input.observations.operation_count,
         observation_peak_bytes: input.observations.peak_resident_bytes,
         observation_stored_bytes: input.observations.stored_bytes,
@@ -262,8 +269,8 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
         || input.operator_pattern_digest == Digest::sha256([])
         || input.topology.nodes.0 == 0
         || input.topology.elements.0 == 0
-        || input.topology.resident_bytes_upper_bound.0 == 0
-        || input.constraints.resident_bytes_upper_bound.0 == 0
+        || input.topology.estimated_resident_bytes.0 == 0
+        || input.constraints.estimated_resident_bytes.0 == 0
         || input.sparse.rows.0 == 0
         || input.sparse.columns.0 == 0
         || input.sparse.rows != input.sparse.columns
@@ -294,7 +301,7 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
         ],
         "topology structural lower bound",
     )?;
-    if input.topology.resident_bytes_upper_bound.0 < topology_payload_lower_bound {
+    if input.topology.estimated_resident_bytes.0 < topology_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
             "topology resident bound is below its coordinate/index payload".into(),
         ));
@@ -319,7 +326,7 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
         ],
         "constraint structural lower bound",
     )?;
-    if input.constraints.resident_bytes_upper_bound.0 < constraint_payload_lower_bound {
+    if input.constraints.estimated_resident_bytes.0 < constraint_payload_lower_bound {
         return Err(ResourcePlanningError::Invalid(
             "constraint resident bound is below its numerical payload".into(),
         ));
@@ -339,7 +346,7 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
             "recovery resident bound is below its scalar payload".into(),
         ));
     }
-    if input.assembly.contribution_nonzero_upper_bound.0 < input.sparse.nonzeros.0
+    if input.assembly.contribution_nonzero_upper_bound.0 < input.sparse.maximum_nonzeros()
         || input.assembly.contribution_bytes_upper_bound.0 == 0
         || input.assembly.contribution_bytes_upper_bound.0 < contribution_payload_lower_bound
     {
@@ -389,14 +396,15 @@ fn validate_input(input: &FeaResourcePlanningInput) -> Result<(), ResourcePlanni
 fn validate_sparse(facts: &SparseResourceFacts) -> Result<(), ResourcePlanningError> {
     if facts.rows.0 == 0
         || facts.columns.0 == 0
-        || facts.nonzeros.0 == 0
-        || facts.value_array_count.0 == 0
+        || facts.operator_nonzeros.is_empty()
+        || facts.operator_nonzeros.iter().any(|count| count.0 == 0)
     {
         return Err(ResourcePlanningError::Invalid(
-            "sparse dimensions, nonzeros, and value arrays must be nonzero".into(),
+            "sparse dimensions and every operator nonzero count must be nonzero".into(),
         ));
     }
-    if facts.nonzeros.0 > mul(facts.rows.0, facts.columns.0, "sparse dense bound")? {
+    let dense = mul(facts.rows.0, facts.columns.0, "sparse dense bound")?;
+    if facts.operator_nonzeros.iter().any(|count| count.0 > dense) {
         return Err(ResourcePlanningError::Invalid(
             "sparse nonzeros exceed matrix dimensions".into(),
         ));
@@ -417,7 +425,9 @@ fn validate_accuracy_demand(input: &FeaResourcePlanningInput) -> Result<(), Reso
     if input.accuracy_demand.solver_tightenings.0 > tightenings {
         return Err(ResourcePlanningError::AccuracyCeiling("solver tightenings"));
     }
-    if input.accuracy_demand.samples.0 > samples || input.observations.sample_count.0 > samples {
+    if input.accuracy_demand.samples.0 > samples
+        || input.observations.maximum_samples_per_observation.0 > samples
+    {
         return Err(ResourcePlanningError::AccuracyCeiling("samples"));
     }
     Ok(())

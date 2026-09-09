@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use runmat_analysis_execution::{
-    build_analysis_task_submission, AnalysisExecutionContext, AnalysisHostWorkload,
-    CompletedStructuralSequence, PreparedAnalysisProgram, PreparedStructuralSolveWave,
-    PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
-    StructuralSequencePreparation,
+    build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
+    AnalysisHostWorkload, CompletedStructuralSequence, PreparedAnalysisProgram,
+    PreparedStructuralLinearProgram, PreparedStructuralSolveWave, PreparedStructuralStateWave,
+    StructuralSequenceCoordinator, StructuralSequenceNode, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_execution::identity::ArtifactId;
@@ -115,6 +115,7 @@ async fn execute_solve_wave(
         dependencies: &task.dependencies,
         host: &task.prepared.host,
         program: &task.prepared.program,
+        structural: Some(&task.prepared),
     });
     execute_wave(pool, tasks, policy, completed_nodes).await
 }
@@ -130,6 +131,7 @@ async fn execute_state_wave(
         dependencies: &task.dependencies,
         host: &task.prepared.host,
         program: &task.prepared.program,
+        structural: None,
     });
     execute_wave(pool, tasks, policy, completed_nodes).await
 }
@@ -175,7 +177,10 @@ async fn execute_wave<'a>(
                 )),
             })
             .collect::<NativeExecutionResult<Vec<_>>>()?;
-        let mut resources = policy.resources.clone();
+        let mut resources = task.structural.map_or_else(
+            || policy.resources.clone(),
+            |prepared| prepared.resource_plan.request.clone(),
+        );
         resources.required_capabilities.extend(
             task.host
                 .workload
@@ -185,27 +190,32 @@ async fn execute_wave<'a>(
         resources
             .required_capabilities
             .insert(Capability::ProcessIsolation);
-        let submission = build_analysis_task_submission(
-            task.host,
-            roots,
-            dependency_identities.clone(),
-            dependency_tasks,
-            AnalysisExecutionContext {
-                scope_id: pool.scope_id(),
-                pool_id: pool.pool_id(),
-                program_artifact_id: ArtifactId::derive(&[task
-                    .program
-                    .request
-                    .artifact
-                    .id
-                    .0
-                    .bytes()]),
-                resources,
-                retry: policy.retry,
-                deadline_unix_millis: policy.deadline_unix_millis,
-                priority: policy.priority,
-            },
-        )
+        let context = AnalysisExecutionContext {
+            scope_id: pool.scope_id(),
+            pool_id: pool.pool_id(),
+            program_artifact_id: ArtifactId::derive(&[task.program.request.artifact.id.0.bytes()]),
+            resources,
+            retry: policy.retry,
+            deadline_unix_millis: policy.deadline_unix_millis,
+            priority: policy.priority,
+        };
+        let submission = match task.structural {
+            Some(prepared) => build_structural_task_submission(
+                &prepared.host,
+                &prepared.resource_plan,
+                roots,
+                dependency_identities.clone(),
+                dependency_tasks,
+                context,
+            ),
+            None => build_analysis_task_submission(
+                task.host,
+                roots,
+                dependency_identities.clone(),
+                dependency_tasks,
+                context,
+            ),
+        }
         .map_err(protocol)?;
         let identity =
             AnalysisTaskIdentity::new(task.host.workload.identity, dependency_identities)
@@ -227,9 +237,12 @@ async fn execute_wave<'a>(
         admitted.push((task.node.clone(), identity, submission.request.id));
         submissions.push((task.program.request.clone(), submission));
     }
-    let responses = pool
-        .execute_batch(submissions, policy.resources.max_wall_millis)
-        .await?;
+    let maximum_wall_millis = submissions
+        .iter()
+        .map(|(_, submission)| submission.request.resources.max_wall_millis)
+        .max()
+        .unwrap_or(policy.resources.max_wall_millis);
+    let responses = pool.execute_batch(submissions, maximum_wall_millis).await?;
     if responses.len() != admitted.len() {
         return Err(NativeExecutionError::Protocol(
             "sequence task responses differ from the submitted wave".into(),
@@ -252,6 +265,7 @@ struct TaskView<'a> {
     dependencies: &'a [StructuralSequenceNode],
     host: &'a AnalysisHostWorkload,
     program: &'a PreparedAnalysisProgram,
+    structural: Option<&'a PreparedStructuralLinearProgram>,
 }
 
 #[async_trait]

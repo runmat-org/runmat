@@ -1132,8 +1132,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    assert_eq!(prepared.inputs.len(), 3);
-    assert_eq!(prepared.program.request.arguments.len(), 4);
+    assert_eq!(prepared.inputs.len(), 4);
+    assert_eq!(prepared.program.request.arguments.len(), 5);
     assert_eq!(
         prepared
             .inputs
@@ -1144,6 +1144,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             AnalysisNumericalObjectKind::SolverInvocation,
             AnalysisNumericalObjectKind::Mesh,
             AnalysisNumericalObjectKind::ConstraintPlan,
+            AnalysisNumericalObjectKind::ResourcePlan,
         ]
     );
     let constraint_plan =
@@ -1164,12 +1165,75 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .unwrap()
         .digest()
     );
+    let resource_plan =
+        runmat_analysis_fea::planning::resource::FeaResourcePlan::from_canonical_bytes(
+            &prepared.inputs[3].payload(),
+        )
+        .unwrap();
+    assert_eq!(resource_plan, prepared.resource_plan);
+    assert_eq!(
+        prepared.inputs[3].manifest.logical_identity,
+        prepared.resource_plan.identity.digest()
+    );
     assert!(prepared
         .program
         .request
         .arguments
         .iter()
         .all(|input| matches!(input, ValuePayload::Object(_))));
+    let roots = prepared
+        .program
+        .request
+        .arguments
+        .iter()
+        .map(|input| match input {
+            ValuePayload::Object(root) => (**root).clone(),
+            ValuePayload::Inline(_) => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    let mut scheduled_resources = prepared.resource_plan.request.clone();
+    scheduled_resources
+        .required_capabilities
+        .extend(prepared.host.workload.generic_capabilities().unwrap());
+    let execution_context = |resources| AnalysisExecutionContext {
+        scope_id: ExecutionScopeId::derive(&[b"structural-study"]),
+        pool_id: PoolId::derive(&[b"structural-pool"]),
+        program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
+            b"structural-program",
+        ]),
+        resources,
+        retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
+        deadline_unix_millis: None,
+        priority: 0,
+    };
+    let submission = build_structural_task_submission(
+        &prepared.host,
+        &prepared.resource_plan,
+        roots.clone(),
+        Vec::new(),
+        BTreeSet::new(),
+        execution_context(scheduled_resources.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        submission.request.resources.memory_bytes,
+        prepared.resource_plan.request.memory_bytes
+    );
+    assert_eq!(
+        submission.request.resources.scratch_bytes,
+        prepared.resource_plan.request.scratch_bytes
+    );
+    let mut understated = scheduled_resources;
+    understated.memory_bytes -= 1;
+    assert!(build_structural_task_submission(
+        &prepared.host,
+        &prepared.resource_plan,
+        roots,
+        Vec::new(),
+        BTreeSet::new(),
+        execution_context(understated),
+    )
+    .is_err());
 
     let raw = run_linear_static_with_options(
         &solve.solver_model().unwrap(),
@@ -1669,7 +1733,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
-    assert_eq!(branch.inputs.len(), 4);
+    assert_eq!(branch.inputs.len(), 5);
     assert_eq!(
         branch
             .inputs
@@ -1680,6 +1744,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             AnalysisNumericalObjectKind::SolverInvocation,
             AnalysisNumericalObjectKind::Mesh,
             AnalysisNumericalObjectKind::ConstraintPlan,
+            AnalysisNumericalObjectKind::ResourcePlan,
             AnalysisNumericalObjectKind::SemanticState,
         ]
     );
@@ -2141,6 +2206,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             .map(|input| input.reference_kind)
             .collect::<Vec<_>>()
             == vec![
+                ValueRefKind::DriverObject,
                 ValueRefKind::DriverObject,
                 ValueRefKind::DriverObject,
                 ValueRefKind::DriverObject,

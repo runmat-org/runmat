@@ -4,6 +4,8 @@ mod admission;
 mod contract;
 mod estimate;
 mod facts;
+mod preflight;
+mod symbolic;
 
 pub use admission::{admit_resource_plan, reconcile_resource_usage};
 pub use contract::{
@@ -16,6 +18,8 @@ pub use contract::{
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 pub use estimate::build_resource_plan;
+pub use preflight::build_structural_resource_plan;
+pub use symbolic::StructuralSymbolicOperators;
 
 #[cfg(test)]
 mod tests;
