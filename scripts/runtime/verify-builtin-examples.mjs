@@ -11,7 +11,7 @@ import {
     unlinkSync,
     writeFileSync
 } from "fs";
-import { dirname, extname, join, resolve } from "path";
+import { basename, dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
     mergeLaneResults,
@@ -19,6 +19,14 @@ import {
     usesNativeLane
 } from "./builtin-example-verifier/lanes.mjs";
 import { runNativeCases } from "./builtin-example-verifier/native.mjs";
+import {
+    createInventory,
+    exampleKey,
+    resolveShardConfig,
+    shardFileSuffix,
+    shardInventory
+} from "./builtin-example-verifier/sharding.mjs";
+import { buildMachineReport } from "./builtin-example-verifier/reporting.mjs";
 
 /**
  * @typedef {import("../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
@@ -28,6 +36,7 @@ import { runNativeCases } from "./builtin-example-verifier/native.mjs";
 /**
  * @typedef {object} ExampleCase
  * @property {number} id
+ * @property {string} exampleKey
  * @property {string} builtin
  * @property {string} file
  * @property {string} description
@@ -58,8 +67,6 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = findRepoRoot(scriptDir);
 const outputDir = join(repoRoot, "scripts", "example-output-reports");
 const imageOutputDir = join(outputDir, "plot-example-images");
-const reportPath = join(outputDir, "example-output-report.html");
-const markdownReportPath = join(outputDir, "example-output-report.md");
 const chromeWrapper = join(repoRoot, "scripts", "runtime", "chrome-headless.sh");
 const wasmModule = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web.js");
 const wasmBinary = join(repoRoot, "bindings", "ts", "dist", "pkg-web", "runmat_wasm_web_bg.wasm");
@@ -70,8 +77,8 @@ if (process.argv.includes("--check-inventory")) {
     process.exit(process.exitCode ?? 0);
 }
 
-const cases = collectCases(documents);
-if (cases.length === 0) {
+const inventory = createInventory(collectCases(documents));
+if (inventory.cases.length === 0) {
     if (process.env.RUNMAT_EXAMPLE_BUILTIN || process.env.RUNMAT_EXAMPLE_FILTER) {
         console.error("No examples matched the requested builtin or text filter.");
         process.exit(1);
@@ -79,6 +86,15 @@ if (cases.length === 0) {
     console.log("No examples found to run.");
     process.exit(0);
 }
+const shard = resolveShardConfig();
+const selected = shardInventory(inventory, shard);
+const cases = selected.cases;
+const reportSuffix = shardFileSuffix(shard);
+const reportPath = join(outputDir, `example-output-report${reportSuffix}.html`);
+const markdownReportPath = join(outputDir, `example-output-report${reportSuffix}.md`);
+const machineReportPath = process.env.RUNMAT_EXAMPLE_REPORT_JSON
+    ? resolve(repoRoot, process.env.RUNMAT_EXAMPLE_REPORT_JSON)
+    : join(outputDir, `example-output-report${reportSuffix}.json`);
 
 const timeoutMs = resolveTimeoutMs();
 const nativeTimeoutMs = resolveNativeTimeoutMs(timeoutMs);
@@ -136,9 +152,9 @@ const plotImageErrors = rows
         return `#${row.testCase.id} ${row.testCase.file} example ${row.testCase.exampleIndex + 1}\n${why}`;
     });
 if (plotImageErrors.length > 0) {
-    writeFileSync(join(outputDir, "plot-image-capture-errors.txt"), `${plotImageErrors.join("\n\n")}\n`, "utf8");
+    writeFileSync(join(outputDir, `plot-image-capture-errors${reportSuffix}.txt`), `${plotImageErrors.join("\n\n")}\n`, "utf8");
 } else {
-    const captureErrorsPath = join(outputDir, "plot-image-capture-errors.txt");
+    const captureErrorsPath = join(outputDir, `plot-image-capture-errors${reportSuffix}.txt`);
     if (existsSync(captureErrorsPath)) {
         unlinkSync(captureErrorsPath);
     }
@@ -151,9 +167,21 @@ writeFileSync(reportPath, reportHtml, "utf8");
 const reportMarkdown = buildReportMarkdown(rows, reportRows, reportMode);
 writeFileSync(markdownReportPath, reportMarkdown, "utf8");
 
-console.log(`Wrote consolidated reports to:
+const machineReport = buildMachineReport({
+    rows,
+    inventory,
+    shard,
+    range: selected.range,
+    source: resolveReportSource(),
+    artifact: process.env.RUNMAT_EXAMPLE_ARTIFACT ?? basename(machineReportPath)
+});
+mkdirSync(dirname(machineReportPath), { recursive: true });
+writeFileSync(machineReportPath, `${JSON.stringify(machineReport, null, 2)}\n`, "utf8");
+
+console.log(`Wrote ${shard.count === 1 ? "consolidated" : `shard ${shard.index}/${shard.count}`} reports to:
   HTML: ${reportPath}
-  Markdown: ${markdownReportPath}`);
+  Markdown: ${markdownReportPath}
+  JSON: ${machineReportPath}`);
 if (rows.some((row) => !row.matches)) {
     process.exitCode = 1;
 }
@@ -266,6 +294,7 @@ function collectCases(documents) {
             const input = appendVerificationSource(example.input, verification);
             cases.push({
                 id: id++,
+                exampleKey: exampleKey(builtinKey, example, i),
                 builtin: parsed.title ?? builtinKey,
                 file,
                 description,
@@ -285,6 +314,16 @@ function collectCases(documents) {
 
     const filtered = applyCaseFilter(cases);
     return applyCaseLimit(filtered);
+}
+
+function resolveReportSource() {
+    const override = process.env.RUNMAT_EXAMPLE_SOURCE;
+    if (override && override.trim()) return override.trim();
+    try {
+        return `git:${execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim()}`;
+    } catch (_error) {
+        return `inventory:${inventory.digest}`;
+    }
 }
 
 /**
