@@ -27,8 +27,6 @@ def report(
     thermo_constitutive_material_spread_ratio=None,
     thermo_assignment_heterogeneity_index=None,
     thermo_spatial_coverage_ratio=None,
-    thermo_field_extrapolation_ratio=None,
-    thermo_field_clamp_ratio=None,
     plastic_nonlinear_severity=None,
     plastic_load_realization_ratio=None,
     plastic_load_amplification_ratio=None,
@@ -82,12 +80,6 @@ def report(
     if thermo_spatial_coverage_ratio is not None:
         for rec in records:
             rec["thermo_spatial_coverage_ratio"] = thermo_spatial_coverage_ratio
-    if thermo_field_extrapolation_ratio is not None:
-        for rec in records:
-            rec["thermo_field_extrapolation_ratio"] = thermo_field_extrapolation_ratio
-    if thermo_field_clamp_ratio is not None:
-        for rec in records:
-            rec["thermo_field_clamp_ratio"] = thermo_field_clamp_ratio
     if plastic_nonlinear_severity is not None:
         for rec in records:
             rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
@@ -143,18 +135,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RELATIVE_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
@@ -4214,7 +4197,6 @@ class ReleaseReadinessTests(unittest.TestCase):
             gpu_ms=100.0,
             thermo_coupling_enabled=True,
             thermo_transient_severity=0.1,
-            thermo_field_clamp_ratio=0.01,
         )
         latest["records"].append(
             {
@@ -4856,31 +4838,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "threshold_assertions": [
                     {"name": "thermo_gradient_pathological_spread_ratio", "observed": 1.9},
-                    {
-                        "name": "thermo_gradient_pathological_temporal_variation",
-                        "observed": 0.9,
-                    },
-                ],
-            }
-        )
-        latest["records"].append(
-            {
-                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 100.0,
-                "threshold_assertions": [
-                    {
-                        "name": "thermo_shock_oscillatory_temporal_variation",
-                        "observed": 0.8,
-                    }
                 ],
             }
         )
         os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO"] = "1.5"
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION"] = (
-            "0.6"
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION"] = "0.5"
         result = evaluate_release_readiness(
             latest,
             [report(passed=True, publishable=True, gpu_ms=95.0)],
@@ -4888,8 +4849,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_PATHOLOGICAL_SPREAD_RATIO_HIGH", codes)
-        self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH", codes)
-        self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_HIGH", codes)
 
     def test_pathological_thermo_assertion_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -4900,23 +4859,6 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "threshold_assertions": [
                     {"name": "thermo_gradient_pathological_spread_ratio", "observed": 2.0},
-                    {
-                        "name": "thermo_gradient_pathological_temporal_variation",
-                        "observed": 0.6,
-                    },
-                ],
-            }
-        )
-        latest["records"].append(
-            {
-                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 100.0,
-                "threshold_assertions": [
-                    {
-                        "name": "thermo_shock_oscillatory_temporal_variation",
-                        "observed": 0.7,
-                    }
                 ],
             }
         )
@@ -4928,40 +4870,15 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 95.0,
                 "threshold_assertions": [
                     {"name": "thermo_gradient_pathological_spread_ratio", "observed": 1.0},
-                    {
-                        "name": "thermo_gradient_pathological_temporal_variation",
-                        "observed": 0.2,
-                    },
-                ],
-            }
-        )
-        rolling[0]["records"].append(
-            {
-                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-                "publishable": True,
-                "gpu_run_ms": 95.0,
-                "threshold_assertions": [
-                    {
-                        "name": "thermo_shock_oscillatory_temporal_variation",
-                        "observed": 0.2,
-                    }
                 ],
             }
         )
         os.environ[
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO"
         ] = "1.2"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO"
-        ] = "1.2"
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO"
-        ] = "1.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_PATHOLOGICAL_SPREAD_TREND_WORSENING", codes)
-        self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING", codes)
-        self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_TREND_WORSENING", codes)
 
     def test_acoustic_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -7051,23 +6968,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_COVERAGE_LOW", codes)
 
-    def test_thermo_field_extrapolation_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_extrapolation_ratio=0.3,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO"] = "0.1"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_EXTRAPOLATION_HIGH", codes)
-
     def test_thermo_field_coverage_trend_worsening_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -7092,47 +6992,6 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_COVERAGE_TREND_WORSENING", codes)
 
-    def test_thermo_field_extrapolation_trend_worsening_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_extrapolation_ratio=0.18,
-        )
-        rolling = [
-            report(
-                passed=True,
-                publishable=True,
-                gpu_ms=95.0,
-                thermo_coupling_enabled=True,
-                thermo_field_extrapolation_ratio=0.09,
-            )
-        ]
-        os.environ[
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO"
-        ] = "1.5"
-        result = evaluate_release_readiness(latest, rolling, protected=False)
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING", codes)
-
-    def test_thermo_field_clamp_ratio_high_reason_is_emitted(self):
-        latest = report(
-            passed=True,
-            publishable=True,
-            gpu_ms=100.0,
-            thermo_coupling_enabled=True,
-            thermo_field_clamp_ratio=0.18,
-        )
-        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO"] = "0.1"
-        result = evaluate_release_readiness(
-            latest,
-            [report(passed=True, publishable=True, gpu_ms=95.0)],
-            protected=False,
-        )
-        codes = {reason["code"] for reason in result["reasons"]}
-        self.assertIn("THERMO_FIELD_CLAMP_RATIO_HIGH", codes)
-
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -7144,7 +7003,6 @@ class ReleaseReadinessTests(unittest.TestCase):
             thermo_constitutive_material_spread_ratio=1.1,
             thermo_assignment_heterogeneity_index=0.08,
             thermo_spatial_coverage_ratio=0.7,
-            thermo_field_extrapolation_ratio=0.01,
             thermal_max_relative_residual_norm=1.0e-6,
             thermal_min_temperature_k=300.0,
             thermal_max_temperature_k=350.0,
@@ -7166,28 +7024,14 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermo assignment heterogeneity index", summary)
         self.assertIn("Min thermo field coverage ratio", summary)
         self.assertIn("Thermo field coverage threshold", summary)
-        self.assertIn("Max thermo field extrapolation ratio", summary)
-        self.assertIn("Thermo field extrapolation threshold", summary)
-        self.assertIn("Max thermo field clamp ratio", summary)
-        self.assertIn("Thermo field clamp threshold", summary)
         self.assertIn("Thermo field coverage drop trend ratio", summary)
         self.assertIn("Thermo field coverage drop trend threshold", summary)
-        self.assertIn("Thermo field extrapolation trend ratio", summary)
-        self.assertIn("Thermo field extrapolation trend threshold", summary)
-        self.assertIn("Thermo field clamp trend ratio", summary)
-        self.assertIn("Thermo field clamp trend threshold", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
-        self.assertIn("Thermo field clamp breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
         self.assertIn("Thermo heterogeneity trend ratio", summary)
         self.assertIn("Thermo pathological spread assertion/threshold", summary)
-        self.assertIn("Thermo pathological temporal variation assertion/threshold", summary)
-        self.assertIn("Thermo shock temporal variation assertion/threshold", summary)
-        self.assertIn(
-            "Thermo pathological trend ratios (spread, temporal variation, shock temporal variation)",
-            summary,
-        )
+        self.assertIn("Thermo pathological spread trend ratio", summary)
         self.assertIn("### Thermal Posture", summary)
         self.assertIn("Max thermal relative residual norm/threshold", summary)
         self.assertIn("Conductivity/heat-capacity spread ratios", summary)

@@ -135,15 +135,9 @@ pub fn solve_transient_system(
     let thermo_context = options.thermo_mechanical_context.as_ref();
     let electro_context = options.electro_thermal_context.as_ref();
     let thermo_severity_base = thermo_mechanical::severity(thermo_context);
-    let thermo_temporal_variation = thermo_mechanical::temporal_profile_variation(thermo_context);
     let electro_severity_base = electro_thermal::severity(electro_context);
-    let electro_temporal_variation = electro_thermal::temporal_profile_variation(electro_context);
     let mut thermo_severity_sum = 0.0_f64;
-    let mut thermo_time_scale_sum = 0.0_f64;
-    let mut thermo_time_extrapolated = 0usize;
-    let mut thermo_time_clamped = 0usize;
     let mut electro_severity_sum = 0.0_f64;
-    let mut electro_time_scale_sum = 0.0_f64;
     let mut electro_severity_peak = 0.0_f64;
     let mut thermo_severity_peak = 0.0_f64;
     let mut effective_residual_target_peak = options.residual_target;
@@ -203,28 +197,11 @@ pub fn solve_transient_system(
             Some(step_index as u64),
             Some(options.step_count as u64),
         );
-        let step_progress = if options.step_count <= 1 {
-            1.0
-        } else {
-            step_index as f64 / (options.step_count - 1) as f64
-        };
-        let thermo_time_sample =
-            thermo_mechanical::sample_time_profile(thermo_context, step_progress);
-        let thermo_time_scale = thermo_time_sample.scale;
-        if thermo_time_sample.extrapolated {
-            thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
-        }
-        if thermo_time_sample.clamped {
-            thermo_time_clamped = thermo_time_clamped.saturating_add(1);
-        }
-        let electro_time_scale = electro_thermal::time_scale(electro_context, step_progress);
-        let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
-        let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
+        let thermo_severity = thermo_severity_base;
+        let electro_severity = electro_severity_base;
         thermo_severity_sum += thermo_severity;
-        thermo_time_scale_sum += thermo_time_scale;
         thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
         electro_severity_sum += electro_severity;
-        electro_time_scale_sum += electro_time_scale;
         electro_severity_peak = electro_severity_peak.max(electro_severity);
         let thermo_policy =
             thermo_mechanical::transient_policy(options.residual_target, thermo_severity);
@@ -423,15 +400,7 @@ pub fn solve_transient_system(
             } else {
                 thermo_severity_sum / options.step_count as f64
             },
-            thermo_time_scale_mean: if options.step_count == 0 {
-                1.0
-            } else {
-                thermo_time_scale_sum / options.step_count as f64
-            },
             thermo_severity_peak,
-            thermo_temporal_variation,
-            thermo_time_extrapolated,
-            thermo_time_clamped,
             effective_residual_target_peak,
             thermo_growth_limit_min,
             thermo_nonconverged_shrink_min,
@@ -440,25 +409,19 @@ pub fn solve_transient_system(
     if electro_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_ET_TRANSIENT".to_string(),
-            severity: if electro_severity_peak <= 0.6 && electro_temporal_variation <= 0.5 {
+            severity: if electro_severity_peak <= 0.6 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={}",
+                "severity_mean={} severity_peak={}",
                 if options.step_count == 0 {
                     0.0
                 } else {
                     electro_severity_sum / options.step_count as f64
                 },
-                if options.step_count == 0 {
-                    1.0
-                } else {
-                    electro_time_scale_sum / options.step_count as f64
-                },
                 electro_severity_peak,
-                electro_temporal_variation,
             ),
         });
     }

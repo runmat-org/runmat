@@ -210,8 +210,6 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_material_spread_ratio",
         "nonlinear_path_mix_spike_count",
         "thermo_nonlinear_severity",
-        "thermo_nonlinear_field_clamp_ratio",
-        "thermo_nonlinear_time_scale_mean",
     },
     "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
@@ -287,7 +285,6 @@ REQUIRED_FIXTURES = {
         "thermo_mech_material_spread_ratio",
         "thermo_mech_assignment_heterogeneity_index",
         "thermo_mech_transient_severity",
-        "thermo_mech_transient_time_scale_mean",
         "thermo_mech_constitutive_residual_ratio",
         "thermo_mech_thermal_strain_energy_density_mean",
         "thermo_mech_consistency_coverage_ratio",
@@ -302,7 +299,6 @@ REQUIRED_FIXTURES = {
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",
         "thermo_gradient_benign_heterogeneity",
-        "thermo_gradient_benign_temporal_variation",
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
         "transient_prepared_cache_hit_ratio",
@@ -311,18 +307,14 @@ REQUIRED_FIXTURES = {
     "thermo_gradient_pathological_gpu_provider": {
         "thermo_gradient_pathological_spread_ratio",
         "thermo_gradient_pathological_heterogeneity",
-        "thermo_gradient_pathological_temporal_variation",
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
         "transient_prepared_cache_hit_ratio",
         "transient_prepared_cache_misses",
     },
     "thermo_ramp_smooth_gpu_provider": {
-        "thermo_ramp_smooth_temporal_variation",
         "thermo_ramp_smooth_spatial_gradient_index",
         "thermo_ramp_smooth_spatial_coverage_ratio",
-        "thermo_ramp_smooth_field_extrapolation_ratio",
-        "thermo_ramp_smooth_field_clamp_ratio",
         "thermo_ramp_smooth_constitutive_temperature_factor",
         "thermo_ramp_smooth_effective_modulus_scale",
         "transient_max_residual_norm",
@@ -331,11 +323,8 @@ REQUIRED_FIXTURES = {
         "transient_prepared_cache_misses",
     },
     "thermo_shock_oscillatory_gpu_provider": {
-        "thermo_shock_oscillatory_temporal_variation",
         "thermo_shock_oscillatory_spatial_gradient_index",
         "thermo_shock_oscillatory_spatial_coverage_ratio",
-        "thermo_shock_oscillatory_field_extrapolation_ratio",
-        "thermo_shock_oscillatory_field_clamp_ratio",
         "thermo_shock_constitutive_temperature_factor",
         "thermo_shock_effective_modulus_scale",
         "transient_max_residual_norm",
@@ -1319,7 +1308,6 @@ THERMO_REQUIRED_FIELDS = {
     "thermo_assignment_heterogeneity_index",
     "thermo_region_delta_count",
     "thermo_spatial_coverage_ratio",
-    "thermo_field_extrapolation_ratio",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
 }
@@ -2004,14 +1992,6 @@ def main() -> int:
                 errors.append(
                     "thermo_spatial_coverage_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
                 )
-            if not any(
-                isinstance(record.get("thermo_field_extrapolation_ratio"), (int, float))
-                for record in thermo_field_records
-            ):
-                errors.append(
-                    "thermo_field_extrapolation_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
-                )
-
     if require_plastic_summary:
         plastic_records = [
             record

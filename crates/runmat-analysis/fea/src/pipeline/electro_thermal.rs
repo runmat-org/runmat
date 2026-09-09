@@ -175,9 +175,7 @@ pub(crate) fn recover_electro_thermal_fields(
     let mut final_temperature = vec![summary.reference_temperature_k; node_count];
     for (index, progress_factor) in progress_factors.iter().copied().enumerate() {
         let current_factor = progress_factor.clamp(0.0, 1.0);
-        let mean_temperature_rise = summary.joule_heating_scale.max(0.0)
-            * current_factor
-            * (1.0 + summary.temporal_profile_variation);
+        let mean_temperature_rise = summary.joule_heating_scale.max(0.0) * current_factor;
         let temperature = nodal_joule_heat
             .iter()
             .map(|source| {
@@ -688,8 +686,7 @@ fn conductivity_profile(summary: &ElectroThermalAssemblySummary, segment_count: 
                 index as f64 / (segment_count - 1) as f64
             };
             let profile = 1.0 / centered_spread + (centered_spread - 1.0 / centered_spread) * xi;
-            let temporal_adjustment = 1.0 + summary.temporal_profile_variation * (0.5 - xi) * 0.1;
-            (base * profile * temporal_adjustment).max(MIN_CONDUCTIVITY)
+            (base * profile).max(MIN_CONDUCTIVITY)
         })
         .collect()
 }
@@ -973,7 +970,6 @@ mod tests {
             resistive_heating_coefficient: 3.5e-4,
             joule_heating_scale: 10.0,
             conductivity_spread_ratio: 1.08,
-            temporal_profile_variation: 0.15,
             region_scale_count: 2,
             coupling_fingerprint: 42,
         }

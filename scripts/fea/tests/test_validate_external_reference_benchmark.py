@@ -281,20 +281,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "thermo_nonlinear_field_clamp_ratio",
-            "fixture_id": "nonlinear_load_path_mix_gpu_provider",
-            "observed": 0.0,
-            "reference": 0.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_nonlinear_time_scale_mean",
-            "fixture_id": "nonlinear_load_path_mix_gpu_provider",
-            "observed": 1.0,
-            "reference": 1.0,
-            "pass": True,
-        },
-        {
             "name": "plasticity_nonlinear_severity_peak",
             "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
             "observed": 0.85,
@@ -598,13 +584,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "thermo_gradient_benign_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_gradient_benign_temporal_variation",
-            "fixture_id": "thermo_gradient_benign_gpu_provider",
-            "observed": 0.15,
-            "reference": 0.15,
             "pass": True,
         },
         {
@@ -4799,13 +4778,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "thermo_mech_transient_time_scale_mean",
-            "fixture_id": "thermo_mech_kickoff_gpu_provider",
-            "observed": 0.8,
-            "reference": 0.8,
-            "pass": True,
-        },
-        {
             "name": "thermo_mech_constitutive_residual_ratio",
             "fixture_id": "thermo_mech_kickoff_gpu_provider",
             "observed": 0.0,
@@ -4876,13 +4848,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "thermo_ramp_smooth_temporal_variation",
-            "fixture_id": "thermo_ramp_smooth_gpu_provider",
-            "observed": 0.35,
-            "reference": 0.35,
-            "pass": True,
-        },
-        {
             "name": "thermo_ramp_smooth_spatial_gradient_index",
             "fixture_id": "thermo_ramp_smooth_gpu_provider",
             "observed": 0.0167,
@@ -4894,20 +4859,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "thermo_ramp_smooth_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_ramp_smooth_field_extrapolation_ratio",
-            "fixture_id": "thermo_ramp_smooth_gpu_provider",
-            "observed": 0.0,
-            "reference": 0.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_ramp_smooth_field_clamp_ratio",
-            "fixture_id": "thermo_ramp_smooth_gpu_provider",
-            "observed": 0.0,
-            "reference": 0.0,
             "pass": True,
         },
         {
@@ -4960,13 +4911,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "thermo_gradient_pathological_temporal_variation",
-            "fixture_id": "thermo_gradient_pathological_gpu_provider",
-            "observed": 0.55,
-            "reference": 0.55,
-            "pass": True,
-        },
-        {
             "name": "thermo_gradient_pathological_heterogeneity",
             "fixture_id": "thermo_gradient_pathological_gpu_provider",
             "observed": 0.45,
@@ -5002,13 +4946,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
-            "name": "thermo_shock_oscillatory_temporal_variation",
-            "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-            "observed": 0.5,
-            "reference": 0.5,
-            "pass": True,
-        },
-        {
             "name": "thermo_shock_oscillatory_spatial_gradient_index",
             "fixture_id": "thermo_shock_oscillatory_gpu_provider",
             "observed": 0.5,
@@ -5020,20 +4957,6 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "thermo_shock_oscillatory_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_shock_oscillatory_field_extrapolation_ratio",
-            "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-            "observed": 0.0,
-            "reference": 0.0,
-            "pass": True,
-        },
-        {
-            "name": "thermo_shock_oscillatory_field_clamp_ratio",
-            "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-            "observed": 0.0,
-            "reference": 0.0,
             "pass": True,
         },
         {

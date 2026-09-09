@@ -171,9 +171,7 @@ pub fn solve_nonlinear_system(
     let plasticity_context = options.plasticity_context.as_ref();
     let contact_context = options.contact_context.as_ref();
     let thermo_severity_base = thermo_mechanical::severity(thermo_context);
-    let thermo_temporal_variation = thermo_mechanical::temporal_profile_variation(thermo_context);
     let electro_severity_base = electro_thermal::severity(electro_context);
-    let electro_temporal_variation = electro_thermal::temporal_profile_variation(electro_context);
     let plasticity_severity_base = coupling_nonlinear::plasticity_severity(plasticity_context);
     let contact_severity_base = coupling_nonlinear::contact_severity(contact_context);
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
@@ -202,12 +200,8 @@ pub fn solve_nonlinear_system(
         * ((summary.dof_count as f64 / 384.0).max(1.0));
     let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
     let mut thermo_severity_peak = 0.0_f64;
-    let mut thermo_time_scale_sum = 0.0_f64;
-    let mut thermo_time_extrapolated = 0usize;
-    let mut thermo_time_clamped = 0usize;
     let mut electro_severity_peak = 0.0_f64;
     let mut electro_severity_sum = 0.0_f64;
-    let mut electro_time_scale_sum = 0.0_f64;
     let mut thermo_residual_target_peak = options.tolerance;
     let mut thermo_increment_target_peak = options.increment_norm_tolerance;
     let mut plasticity_severity_peak = 0.0_f64;
@@ -232,18 +226,8 @@ pub fn solve_nonlinear_system(
             break;
         }
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
-        let thermo_time_sample =
-            thermo_mechanical::sample_time_profile(thermo_context, load_factor);
-        let thermo_time_scale = thermo_time_sample.scale;
-        if thermo_time_sample.extrapolated {
-            thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
-        }
-        if thermo_time_sample.clamped {
-            thermo_time_clamped = thermo_time_clamped.saturating_add(1);
-        }
-        let electro_time_scale = electro_thermal::time_scale(electro_context, load_factor);
-        let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
-        let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
+        let thermo_severity = thermo_severity_base;
+        let electro_severity = electro_severity_base;
         let plasticity_severity =
             (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
         let contact_severity = (contact_severity_base * (0.7 + 0.3 * load_factor)).clamp(0.0, 1.0);
@@ -262,13 +246,11 @@ pub fn solve_nonlinear_system(
         let convergence_residual_target = thermo_policy.convergence_residual_target;
         let convergence_increment_target = thermo_policy.convergence_increment_target;
         thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
-        thermo_time_scale_sum += thermo_time_scale;
         thermo_residual_target_peak = thermo_residual_target_peak.max(convergence_residual_target);
         thermo_increment_target_peak =
             thermo_increment_target_peak.max(convergence_increment_target);
         electro_severity_peak = electro_severity_peak.max(electro_severity);
         electro_severity_sum += electro_severity;
-        electro_time_scale_sum += electro_time_scale;
         plasticity_severity_peak = plasticity_severity_peak.max(plasticity_severity);
         plasticity_severity_sum += plasticity_severity;
         contact_severity_peak = contact_severity_peak.max(contact_severity);
@@ -520,30 +502,14 @@ pub fn solve_nonlinear_system(
     if thermo_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TM_NONLINEAR".to_string(),
-            severity: if thermo_severity_peak <= 0.6 && thermo_temporal_variation <= 0.5 {
+            severity: if thermo_severity_peak <= 0.6 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_peak={} time_scale_mean={} field_extrapolation_ratio={} field_clamp_ratio={} temporal_variation={} convergence_residual_target_peak={} convergence_increment_target_peak={}",
+                "severity_peak={} convergence_residual_target_peak={} convergence_increment_target_peak={}",
                 thermo_severity_peak,
-                if options.increment_count == 0 {
-                    1.0
-                } else {
-                    thermo_time_scale_sum / options.increment_count as f64
-                },
-                if options.increment_count == 0 {
-                    0.0
-                } else {
-                    thermo_time_extrapolated as f64 / options.increment_count as f64
-                },
-                if options.increment_count == 0 {
-                    0.0
-                } else {
-                    thermo_time_clamped as f64 / options.increment_count as f64
-                },
-                thermo_temporal_variation,
                 thermo_residual_target_peak,
                 thermo_increment_target_peak,
             ),
@@ -552,25 +518,19 @@ pub fn solve_nonlinear_system(
     if electro_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_ET_NONLINEAR".to_string(),
-            severity: if electro_severity_peak <= 0.6 && electro_temporal_variation <= 0.5 {
+            severity: if electro_severity_peak <= 0.6 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_peak={} severity_mean={} time_scale_mean={} temporal_variation={}",
+                "severity_peak={} severity_mean={}",
                 electro_severity_peak,
                 if options.increment_count == 0 {
                     0.0
                 } else {
                     electro_severity_sum / options.increment_count as f64
                 },
-                if options.increment_count == 0 {
-                    1.0
-                } else {
-                    electro_time_scale_sum / options.increment_count as f64
-                },
-                electro_temporal_variation,
             ),
         });
     }

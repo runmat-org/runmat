@@ -3157,16 +3157,6 @@
       "tolerance_rel": 0.25
     },
     {
-      "name": "thermo_gradient_pathological_temporal_variation",
-      "fixture_id": "thermo_gradient_pathological_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_gradient_pathological_temporal_variation",
-      "reference": 0.55,
-      "tolerance_abs": 0.15,
-      "tolerance_rel": 0.3
-    },
-    {
       "name": "transient_max_residual_norm",
       "fixture_id": "thermo_gradient_pathological_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -3205,16 +3195,6 @@
       "reference": 17,
       "tolerance_abs": 6,
       "tolerance_rel": 0.4
-    },
-    {
-      "name": "thermo_shock_oscillatory_temporal_variation",
-      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_shock_oscillatory_temporal_variation",
-      "reference": 0.49999999999999994,
-      "tolerance_abs": 0.15,
-      "tolerance_rel": 0.3
     },
     {
       "name": "plasticity_hardening_reference_complex_load_realization_ratio",
@@ -3977,26 +3957,6 @@
       "tolerance_rel": 0.4
     },
     {
-      "name": "thermo_mech_transient_time_scale_mean",
-      "fixture_id": "thermo_mech_kickoff_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_mech_transient_time_scale_mean",
-      "reference": 0.7999999999999998,
-      "tolerance_abs": 0.2,
-      "tolerance_rel": 0.25
-    },
-    {
-      "name": "thermo_ramp_smooth_temporal_variation",
-      "fixture_id": "thermo_ramp_smooth_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_ramp_smooth_temporal_variation",
-      "reference": 0.35,
-      "tolerance_abs": 0.12,
-      "tolerance_rel": 0.3
-    },
-    {
       "name": "thermo_ramp_smooth_spatial_gradient_index",
       "fixture_id": "thermo_ramp_smooth_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -4015,26 +3975,6 @@
       "reference": 1.0,
       "tolerance_abs": 0.08,
       "tolerance_rel": 0.2
-    },
-    {
-      "name": "thermo_ramp_smooth_field_extrapolation_ratio",
-      "fixture_id": "thermo_ramp_smooth_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_ramp_smooth_field_extrapolation_ratio",
-      "reference": 0,
-      "tolerance_abs": 0.08,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermo_ramp_smooth_field_clamp_ratio",
-      "fixture_id": "thermo_ramp_smooth_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_ramp_smooth_field_clamp_ratio",
-      "reference": 0,
-      "tolerance_abs": 0.08,
-      "tolerance_rel": null
     },
     {
       "name": "thermo_ramp_smooth_constitutive_temperature_factor",
@@ -4115,26 +4055,6 @@
       "reference": 1.0,
       "tolerance_abs": 0.08,
       "tolerance_rel": 0.2
-    },
-    {
-      "name": "thermo_shock_oscillatory_field_extrapolation_ratio",
-      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_shock_oscillatory_field_extrapolation_ratio",
-      "reference": 0,
-      "tolerance_abs": 0.08,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermo_shock_oscillatory_field_clamp_ratio",
-      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_shock_oscillatory_field_clamp_ratio",
-      "reference": 0,
-      "tolerance_abs": 0.08,
-      "tolerance_rel": null
     },
     {
       "name": "thermo_shock_constitutive_temperature_factor",
@@ -5257,26 +5177,6 @@
       "tolerance_rel": null
     },
     {
-      "name": "thermo_nonlinear_field_clamp_ratio",
-      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_nonlinear_field_clamp_ratio",
-      "reference": 0,
-      "tolerance_abs": 0.05,
-      "tolerance_rel": null
-    },
-    {
-      "name": "thermo_nonlinear_time_scale_mean",
-      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_nonlinear_time_scale_mean",
-      "reference": 1,
-      "tolerance_abs": 0.12,
-      "tolerance_rel": 0.12
-    },
-    {
       "name": "plasticity_nonlinear_severity_peak",
       "fixture_id": "nonlinear_plasticity_benchmark_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -5375,16 +5275,6 @@
       "reference": 0,
       "tolerance_abs": 0.05,
       "tolerance_rel": null
-    },
-    {
-      "name": "thermo_gradient_benign_temporal_variation",
-      "fixture_id": "thermo_gradient_benign_gpu_provider",
-      "field": "unused_for_threshold_source",
-      "source": "threshold_assertion",
-      "assertion_name": "thermo_gradient_benign_temporal_variation",
-      "reference": 0.15000000000000002,
-      "tolerance_abs": 0.08,
-      "tolerance_rel": 0.35
     },
     {
       "name": "transient_max_residual_norm",

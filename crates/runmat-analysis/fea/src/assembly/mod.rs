@@ -51,7 +51,6 @@ use crate::constraints::{
 };
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 use crate::operator::{CsrMatrix, OperatorSystem};
-use crate::physics::coupling::thermo_mechanical;
 use crate::{FeaElectroThermalContext, FeaThermoMechanicalContext};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -527,7 +526,6 @@ pub struct ThermoMechanicalAssemblySummary {
     pub assignment_heterogeneity_index: f64,
     pub spatial_gradient_index: f64,
     pub spatial_coverage_ratio: f64,
-    pub temporal_profile_variation: f64,
     pub region_delta_count: usize,
     pub coupling_fingerprint: u64,
     pub profile_sources: Vec<SourceImplementation>,
@@ -542,7 +540,6 @@ pub struct ElectroThermalAssemblySummary {
     pub resistive_heating_coefficient: f64,
     pub joule_heating_scale: f64,
     pub conductivity_spread_ratio: f64,
-    pub temporal_profile_variation: f64,
     pub region_scale_count: usize,
     pub coupling_fingerprint: u64,
 }
@@ -899,8 +896,6 @@ fn assemble_linear_system_impl(
             &mut dof_adjustments,
         );
         let spatial_field = apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
-        let temporal_profile_variation =
-            thermo_mechanical::temporal_profile_variation(Some(&context));
         let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
         for i in 0..mesh_dof_count {
             let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
@@ -941,7 +936,6 @@ fn assemble_linear_system_impl(
             assignment_heterogeneity_index,
             spatial_gradient_index: spatial_field.gradient_index,
             spatial_coverage_ratio: spatial_field.coverage_ratio,
-            temporal_profile_variation,
             region_delta_count: context.region_temperature_deltas.len(),
             coupling_fingerprint: thermo_mechanical_fingerprint(
                 &context,
@@ -953,7 +947,6 @@ fn assemble_linear_system_impl(
                     constitutive_material_spread_ratio,
                     assignment_heterogeneity_index,
                     spatial_gradient_index: spatial_field.gradient_index,
-                    temporal_profile_variation,
                 },
             ),
             profile_sources: thermomechanical_profile_sources(&context),
@@ -961,21 +954,6 @@ fn assemble_linear_system_impl(
     }
 
     if let Some(context) = electro_thermal_context {
-        let temporal_variation = if context.sampled_time_profile.len() < 2 {
-            0.0
-        } else {
-            let min_scale = context
-                .sampled_time_profile
-                .iter()
-                .map(|point| point.scale)
-                .fold(f64::INFINITY, f64::min);
-            let max_scale = context
-                .sampled_time_profile
-                .iter()
-                .map(|point| point.scale)
-                .fold(-f64::INFINITY, f64::max);
-            ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
-        };
         let conductivity_scales = vec![1.0_f64; dof_count];
         let min_scale = conductivity_scales
             .iter()
@@ -1006,14 +984,12 @@ fn assemble_linear_system_impl(
             resistive_heating_coefficient: context.resistive_heating_coefficient,
             joule_heating_scale,
             conductivity_spread_ratio,
-            temporal_profile_variation: temporal_variation,
             region_scale_count: 0,
             coupling_fingerprint: electro_thermal_fingerprint(
                 &context,
                 dof_count,
                 joule_heating_scale,
                 conductivity_spread_ratio,
-                temporal_variation,
             ),
         });
     }
@@ -1197,7 +1173,6 @@ fn electro_thermal_fingerprint(
     dof_count: usize,
     joule_heating_scale: f64,
     conductivity_spread_ratio: f64,
-    temporal_profile_variation: f64,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
@@ -1207,9 +1182,7 @@ fn electro_thermal_fingerprint(
         context.resistive_heating_coefficient.to_bits(),
         joule_heating_scale.to_bits(),
         conductivity_spread_ratio.to_bits(),
-        temporal_profile_variation.to_bits(),
         dof_count as u64,
-        context.sampled_time_profile.len() as u64,
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211);
@@ -2173,7 +2146,6 @@ struct ThermoMechanicalFingerprintInputs {
     constitutive_material_spread_ratio: f64,
     assignment_heterogeneity_index: f64,
     spatial_gradient_index: f64,
-    temporal_profile_variation: f64,
 }
 
 fn thermo_mechanical_fingerprint(
@@ -2192,7 +2164,6 @@ fn thermo_mechanical_fingerprint(
         inputs.constitutive_material_spread_ratio.to_bits(),
         inputs.assignment_heterogeneity_index.to_bits(),
         inputs.spatial_gradient_index.to_bits(),
-        inputs.temporal_profile_variation.to_bits(),
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
@@ -2263,9 +2234,6 @@ fn thermomechanical_profile_sources(
     let mut sources = vec![SourceImplementation::PrescribedTemperatureDeltaProfile];
     if !context.region_temperature_deltas.is_empty() {
         sources.push(SourceImplementation::OrdinalRegionTemperatureDistribution);
-    }
-    if !context.sampled_time_profile.is_empty() {
-        sources.push(SourceImplementation::SampledTemporalProfileInterpolation);
     }
     sources
 }

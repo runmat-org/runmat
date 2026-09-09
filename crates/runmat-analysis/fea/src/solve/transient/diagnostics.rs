@@ -27,11 +27,7 @@ pub(super) struct TransientQualityDiagnosticInputs<'a> {
     pub(super) max_step_l2_jump_ratio: f64,
     pub(super) nonfinite_displacement_count: usize,
     pub(super) thermo_severity_mean: f64,
-    pub(super) thermo_time_scale_mean: f64,
     pub(super) thermo_severity_peak: f64,
-    pub(super) thermo_temporal_variation: f64,
-    pub(super) thermo_time_extrapolated: usize,
-    pub(super) thermo_time_clamped: usize,
     pub(super) effective_residual_target_peak: f64,
     pub(super) thermo_growth_limit_min: f64,
     pub(super) thermo_nonconverged_shrink_min: f64,
@@ -153,29 +149,15 @@ pub(super) fn push_transient_quality_diagnostics(
     if inputs.thermo_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TM_TRANSIENT".to_string(),
-            severity: if inputs.thermo_severity_peak <= 0.6
-                && inputs.thermo_temporal_variation <= 0.5
-            {
+            severity: if inputs.thermo_severity_peak <= 0.6 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={} field_extrapolation_ratio={} field_clamp_ratio={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
+                "severity_mean={} severity_peak={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
                 inputs.thermo_severity_mean,
-                inputs.thermo_time_scale_mean,
                 inputs.thermo_severity_peak,
-                inputs.thermo_temporal_variation,
-                if options.step_count == 0 {
-                    0.0
-                } else {
-                    inputs.thermo_time_extrapolated as f64 / options.step_count as f64
-                },
-                if options.step_count == 0 {
-                    0.0
-                } else {
-                    inputs.thermo_time_clamped as f64 / options.step_count as f64
-                },
                 inputs.effective_residual_target_peak,
                 inputs.thermo_growth_limit_min,
                 inputs.thermo_nonconverged_shrink_min,

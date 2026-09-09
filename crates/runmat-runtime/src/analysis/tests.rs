@@ -553,16 +553,6 @@ fn sample_cht_model() -> AnalysisModel {
                 region_id: "beam_span".to_string(),
                 temperature_delta_k: 70.0,
             }],
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.5,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
         },
     );
     model
@@ -599,37 +589,13 @@ fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanic
         material.thermal.reference_temperature_k = coupling.reference_temperature_k;
         material.thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
     }
-    let (time_seconds, kelvin) = if coupling.sampled_time_profile.is_empty() {
-        (
-            vec![0.0],
-            vec![Temperature::new(
-                coupling.reference_temperature_k + coupling.applied_temperature_delta_k,
-            )],
-        )
-    } else {
-        (
-            coupling
-                .sampled_time_profile
-                .iter()
-                .map(|point| point.normalized_coordinate)
-                .collect(),
-            coupling
-                .sampled_time_profile
-                .iter()
-                .map(|point| {
-                    Temperature::new(
-                        coupling.reference_temperature_k
-                            + coupling.applied_temperature_delta_k * point.scale,
-                    )
-                })
-                .collect(),
-        )
-    };
     append_scalar_history_excitation(
         model,
         "thermo_temperature_history",
-        time_seconds,
-        kelvin,
+        vec![0.0],
+        vec![Temperature::new(
+            coupling.reference_temperature_k + coupling.applied_temperature_delta_k,
+        )],
         ExcitationTarget::WholeModel,
         None,
         PhysicalSignal::Temperature,
@@ -665,30 +631,11 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             conductivity_frequency_response: Vec::new(),
         });
     }
-    let (time_seconds, volts) = if coupling.sampled_time_profile.is_empty() {
-        (
-            vec![0.0],
-            vec![ElectricPotential::new(coupling.applied_voltage_v)],
-        )
-    } else {
-        (
-            coupling
-                .sampled_time_profile
-                .iter()
-                .map(|point| point.normalized_coordinate)
-                .collect(),
-            coupling
-                .sampled_time_profile
-                .iter()
-                .map(|point| ElectricPotential::new(coupling.applied_voltage_v * point.scale))
-                .collect(),
-        )
-    };
     append_scalar_history_excitation(
         model,
         "electro_thermal_potential_history",
-        time_seconds,
-        volts,
+        vec![0.0],
+        vec![ElectricPotential::new(coupling.applied_voltage_v)],
         ExcitationTarget::Region(RegionTarget::boundary("tip")),
         None,
         PhysicalSignal::ElectricPotential,
@@ -3410,7 +3357,6 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -3515,7 +3461,6 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4714,7 +4659,6 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
     let run = analysis_run_transient_with_options_op(
@@ -4845,7 +4789,6 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4876,7 +4819,6 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.5e7,
             resistive_heating_coefficient: 4.0e-4,
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -4918,7 +4860,6 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
     let run = analysis_run_nonlinear_with_options_op(
@@ -5024,7 +4965,6 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -5479,16 +5419,6 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
             applied_temperature_delta_k: 20.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.0,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
         },
     );
     let thermal = analysis_run_thermal_with_options_op(
@@ -6274,7 +6204,6 @@ fn analysis_run_cht_rejects_uncoupled_thermal_step() {
             applied_temperature_delta_k: 50.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
     let err = analysis_run_cht_with_options_op(
@@ -7586,7 +7515,6 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -7666,7 +7594,6 @@ fn nonlinear_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8712,49 +8639,6 @@ fn analysis_run_transient_with_options_controls_timeline() {
 }
 
 #[test]
-fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
-    )];
-    set_model_thermo_coupling(
-        &mut model,
-        ThermoMechanicalCouplingOptions {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "beam_span".to_string(),
-                temperature_delta_k: 70.0,
-            }],
-            sampled_time_profile: vec![
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.8,
-                    scale: 1.0,
-                },
-                runmat_analysis_fea::SolverSampledScalePoint {
-                    normalized_coordinate: 0.5,
-                    scale: 0.9,
-                },
-            ],
-        },
-    );
-
-    let err = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
-        AnalysisTransientRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("non-monotonic thermo time template should be rejected");
-
-    assert_eq!(err.error_code, "RM.FEA.RUN_TRANSIENT.SOLVER_MODEL_INVALID");
-    assert!(err.message.contains("signal"));
-}
-
-#[test]
 fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -8771,7 +8655,6 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
                 region_id: "missing_region".to_string(),
                 temperature_delta_k: 80.0,
             }],
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8845,7 +8728,6 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 
@@ -8927,7 +8809,6 @@ fn transient_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         },
     );
 

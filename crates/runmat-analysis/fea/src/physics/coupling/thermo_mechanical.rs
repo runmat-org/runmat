@@ -1,13 +1,6 @@
 use crate::FeaThermoMechanicalContext;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TimeProfileSample {
-    pub scale: f64,
-    pub extrapolated: bool,
-    pub clamped: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransientPolicy {
     pub effective_residual_target: f64,
     pub growth_limit: f64,
@@ -28,87 +21,6 @@ pub fn severity(context: Option<&FeaThermoMechanicalContext>) -> f64 {
         * context.applied_temperature_delta_k.abs())
     .clamp(0.0, 0.05);
     (thermal_strain / 0.05).clamp(0.0, 1.0)
-}
-
-pub fn sample_time_profile(
-    context: Option<&FeaThermoMechanicalContext>,
-    normalized_coordinate: f64,
-) -> TimeProfileSample {
-    let Some(context) = context else {
-        return TimeProfileSample {
-            scale: 1.0,
-            extrapolated: false,
-            clamped: false,
-        };
-    };
-    if context.sampled_time_profile.is_empty() {
-        return TimeProfileSample {
-            scale: 1.0,
-            extrapolated: false,
-            clamped: false,
-        };
-    }
-    let mut points = context.sampled_time_profile.clone();
-    points.sort_by(|a, b| a.normalized_coordinate.total_cmp(&b.normalized_coordinate));
-    let t = normalized_coordinate.clamp(0.0, 1.0);
-
-    if t <= points[0].normalized_coordinate {
-        let raw = points[0].scale;
-        let scale = raw.clamp(0.2, 2.0);
-        return TimeProfileSample {
-            scale,
-            extrapolated: t < points[0].normalized_coordinate,
-            clamped: (scale - raw).abs() > 0.0,
-        };
-    }
-
-    for pair in points.windows(2) {
-        let a = &pair[0];
-        let b = &pair[1];
-        if t >= a.normalized_coordinate && t <= b.normalized_coordinate {
-            let span = (b.normalized_coordinate - a.normalized_coordinate)
-                .abs()
-                .max(1.0e-9);
-            let alpha = (t - a.normalized_coordinate) / span;
-            let raw = a.scale + (b.scale - a.scale) * alpha;
-            let scale = raw.clamp(0.2, 2.0);
-            return TimeProfileSample {
-                scale,
-                extrapolated: false,
-                clamped: (scale - raw).abs() > 0.0,
-            };
-        }
-    }
-
-    let raw = points.last().map(|p| p.scale).unwrap_or(1.0);
-    let scale = raw.clamp(0.2, 2.0);
-    TimeProfileSample {
-        scale,
-        extrapolated: t > points
-            .last()
-            .map(|p| p.normalized_coordinate)
-            .unwrap_or(1.0),
-        clamped: (scale - raw).abs() > 0.0,
-    }
-}
-
-pub fn temporal_profile_variation(context: Option<&FeaThermoMechanicalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if context.sampled_time_profile.len() < 2 {
-        return 0.0;
-    }
-    let mut min_scale = f64::INFINITY;
-    let mut max_scale = -f64::INFINITY;
-    for point in &context.sampled_time_profile {
-        min_scale = min_scale.min(point.scale);
-        max_scale = max_scale.max(point.scale);
-    }
-    if !min_scale.is_finite() || !max_scale.is_finite() {
-        return 0.0;
-    }
-    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }
 
 pub fn transient_policy(base_residual_target: f64, severity: f64) -> TransientPolicy {
@@ -139,35 +51,6 @@ pub fn nonlinear_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn realized_solver_profile_interpolates_and_reports_extrapolation() {
-        let context = FeaThermoMechanicalContext {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 40.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-            sampled_time_profile: vec![
-                crate::SolverSampledScalePoint {
-                    normalized_coordinate: 0.25,
-                    scale: 0.5,
-                },
-                crate::SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.25,
-                },
-            ],
-        };
-
-        let midpoint = sample_time_profile(Some(&context), 0.5);
-        assert!((midpoint.scale - 0.75).abs() < 1.0e-12);
-        assert!(!midpoint.extrapolated);
-        assert!(!midpoint.clamped);
-
-        let before_profile = sample_time_profile(Some(&context), 0.0);
-        assert_eq!(before_profile.scale, 0.5);
-        assert!(before_profile.extrapolated);
-    }
 
     #[test]
     fn thermo_policies_remain_bounded() {

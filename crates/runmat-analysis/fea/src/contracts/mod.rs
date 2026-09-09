@@ -412,23 +412,12 @@ pub struct FeaThermoRegionTemperatureDelta {
     pub temperature_delta_k: f64,
 }
 
-/// A sampled, dimensionless scale realized by orchestration from an authored physical signal.
-///
-/// This is solver input, not an alternative authored signal representation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SolverSampledScalePoint {
-    pub normalized_coordinate: f64,
-    pub scale: f64,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
     pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
-    /// Solver-owned realization of the authored temperature signal on normalized step time.
-    pub sampled_time_profile: Vec<SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -437,8 +426,6 @@ pub struct FeaElectroThermalContext {
     pub applied_voltage_v: f64,
     pub base_electrical_conductivity_s_per_m: f64,
     pub resistive_heating_coefficient: f64,
-    /// Solver-owned realization of the authored electric-potential signal on normalized step time.
-    pub sampled_time_profile: Vec<SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

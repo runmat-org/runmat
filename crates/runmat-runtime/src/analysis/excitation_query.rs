@@ -1,7 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisModel, CfdDomain, ElectroThermalDomain, ExcitationAction, ExcitationTarget,
-    PhysicalSignal, SignalId, SignalOrdinate, SignalRepresentation, SignalValue,
-    ThermoMechanicalDomain,
+    AnalysisModel, CfdDomain, ExcitationAction, ExcitationTarget, PhysicalSignal, SignalId,
+    SignalOrdinate, SignalRepresentation, SignalValue, ThermoMechanicalDomain,
 };
 
 pub(crate) fn cfd_velocity_scales(model: &AnalysisModel, _domain: &CfdDomain) -> Vec<f64> {
@@ -28,18 +27,6 @@ pub(crate) fn nominal_inlet_velocity_m_per_s(model: &AnalysisModel) -> Option<f6
             _ => None,
         },
     ))
-}
-
-pub(crate) fn thermo_temperature_scales(
-    model: &AnalysisModel,
-    domain: &ThermoMechanicalDomain,
-) -> Vec<f64> {
-    let reference = domain.reference_temperature.kelvin;
-    let deltas = temperature_field_values(model)
-        .into_iter()
-        .map(|value| value - reference)
-        .collect();
-    normalized_scales(deltas)
 }
 
 pub(crate) fn applied_temperature_delta_k(
@@ -80,13 +67,6 @@ pub(crate) fn regional_temperature_deltas_k(
             .map(|delta| (target.region_id.clone(), delta))
         })
         .collect()
-}
-
-pub(crate) fn electric_potential_scales(
-    model: &AnalysisModel,
-    _domain: &ElectroThermalDomain,
-) -> Vec<f64> {
-    normalized_scales(terminal_voltage_values(model))
 }
 
 pub(crate) fn applied_voltage_v(model: &AnalysisModel) -> Option<f64> {

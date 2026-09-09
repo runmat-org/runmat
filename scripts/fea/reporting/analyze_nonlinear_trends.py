@@ -76,9 +76,6 @@ def collect_metrics(reports, window):
                     "thermo_spatial_coverage_ratio": record.get(
                         "thermo_spatial_coverage_ratio"
                     ),
-                    "thermo_field_extrapolation_ratio": record.get(
-                        "thermo_field_extrapolation_ratio"
-                    ),
                     "thermo_transient_severity": record.get("thermo_transient_severity"),
                     "thermo_nonlinear_severity": record.get("thermo_nonlinear_severity"),
                     "plastic_nonlinear_severity": record.get("plastic_nonlinear_severity"),
@@ -214,9 +211,6 @@ def main():
     thermo_coverage_drop_limit = float(
         os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_COVERAGE_DROP_RATIO", "1.25")
     )
-    thermo_extrapolation_trend_limit = float(
-        os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO", "1.25")
-    )
     protected_only = (
         os.getenv("RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED", "false").lower() == "true"
     )
@@ -298,23 +292,6 @@ def main():
                 if coverage_drop_ratio > thermo_coverage_drop_limit:
                     warnings.append(
                         f"THERMO_FIELD_COVERAGE_WORSENING:{fixture}: drop ratio {coverage_drop_ratio:.3f} exceeds {thermo_coverage_drop_limit:.3f}"
-                    )
-
-        extrapolation = [
-            v["thermo_field_extrapolation_ratio"]
-            for v in values
-            if isinstance(v.get("thermo_field_extrapolation_ratio"), (int, float))
-        ]
-        if len(extrapolation) >= 2:
-            baseline_extrapolation = (
-                statistics.median(extrapolation[:-1]) if len(extrapolation) > 1 else extrapolation[0]
-            )
-            latest_extrapolation = extrapolation[-1]
-            if baseline_extrapolation > 0:
-                extrapolation_ratio = latest_extrapolation / baseline_extrapolation
-                if extrapolation_ratio > thermo_extrapolation_trend_limit:
-                    warnings.append(
-                        f"THERMO_FIELD_EXTRAPOLATION_WORSENING:{fixture}: ratio {extrapolation_ratio:.3f} exceeds {thermo_extrapolation_trend_limit:.3f}"
                     )
 
     if warnings:

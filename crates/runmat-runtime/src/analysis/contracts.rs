@@ -374,8 +374,6 @@ pub struct ThermoMechanicalCouplingOptions {
     pub thermal_expansion_coefficient: f64,
     #[serde(default)]
     pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
-    #[serde(default)]
-    pub sampled_time_profile: Vec<runmat_analysis_fea::SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -384,8 +382,6 @@ pub struct ElectroThermalCouplingOptions {
     pub applied_voltage_v: f64,
     pub base_electrical_conductivity_s_per_m: f64,
     pub resistive_heating_coefficient: f64,
-    #[serde(default)]
-    pub sampled_time_profile: Vec<runmat_analysis_fea::SolverSampledScalePoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -433,7 +429,6 @@ pub enum QualityReasonCode {
     ThermoMechanicalAssignmentHeterogeneityHigh,
     ThermoMechanicalGradientInstability,
     ThermoMechanicalFieldCoverageLow,
-    ThermoMechanicalFieldExtrapolationHigh,
     ElectroThermalTransientStress,
     ElectroThermalNonlinearStress,
     ElectromagneticSolveQualityLow,
@@ -1971,8 +1966,6 @@ pub struct AnalysisResultsSummary {
     pub thermo_assignment_heterogeneity_index: Option<f64>,
     pub thermo_region_delta_count: Option<f64>,
     pub thermo_spatial_coverage_ratio: Option<f64>,
-    pub thermo_field_extrapolation_ratio: Option<f64>,
-    pub thermo_field_clamp_ratio: Option<f64>,
     pub thermo_transient_severity: Option<f64>,
     pub thermo_nonlinear_severity: Option<f64>,
     pub electro_thermal_coupling_enabled: Option<bool>,
@@ -1980,9 +1973,7 @@ pub struct AnalysisResultsSummary {
     pub electro_joule_heating_scale: Option<f64>,
     pub electro_conductivity_spread_ratio: Option<f64>,
     pub electro_transient_severity: Option<f64>,
-    pub electro_transient_time_scale_mean: Option<f64>,
     pub electro_nonlinear_severity: Option<f64>,
-    pub electro_nonlinear_time_scale_mean: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity_mean: Option<f64>,
     pub plastic_load_realization_ratio: Option<f64>,

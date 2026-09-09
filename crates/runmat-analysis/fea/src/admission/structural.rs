@@ -116,7 +116,6 @@ pub fn thermomechanical_exact_realization(
                 source,
                 SourceImplementation::PrescribedTemperatureDeltaProfile
                     | SourceImplementation::OrdinalRegionTemperatureDistribution
-                    | SourceImplementation::SampledTemporalProfileInterpolation
             )
         })
         || !input
@@ -171,7 +170,6 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::UniformNodeDistribution => 10,
         SourceImplementation::PrescribedTemperatureDeltaProfile => 11,
         SourceImplementation::OrdinalRegionTemperatureDistribution => 12,
-        SourceImplementation::SampledTemporalProfileInterpolation => 13,
         SourceImplementation::OrdinalDistribution => 14,
         SourceImplementation::SyntheticProfileFallback => 15,
         SourceImplementation::UnmappedFallback => 16,

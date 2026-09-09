@@ -249,8 +249,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "nonlinear_path_mix_material_spread_ratio",
                     "nonlinear_path_mix_spike_count",
                     "thermo_nonlinear_severity",
-                    "thermo_nonlinear_field_clamp_ratio",
-                    "thermo_nonlinear_time_scale_mean",
                 },
             )
             | {
@@ -262,7 +260,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -366,7 +363,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                     "thermo_mech_material_spread_ratio",
                     "thermo_mech_assignment_heterogeneity_index",
                     "thermo_mech_transient_severity",
-                    "thermo_mech_transient_time_scale_mean",
                     "thermo_mech_constitutive_residual_ratio",
                     "thermo_mech_thermal_strain_energy_density_mean",
                     "thermo_mech_consistency_coverage_ratio",
@@ -388,7 +384,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -397,7 +392,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 {
                     "thermo_gradient_benign_spread_ratio",
                     "thermo_gradient_benign_heterogeneity",
-                    "thermo_gradient_benign_temporal_variation",
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
                     "transient_prepared_cache_hit_ratio",
@@ -413,7 +407,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -422,7 +415,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 {
                     "thermo_gradient_pathological_spread_ratio",
                     "thermo_gradient_pathological_heterogeneity",
-                    "thermo_gradient_pathological_temporal_variation",
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
                     "transient_prepared_cache_hit_ratio",
@@ -438,18 +430,14 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
             _record(
                 "thermo_ramp_smooth_gpu_provider",
                 {
-                    "thermo_ramp_smooth_temporal_variation",
                     "thermo_ramp_smooth_spatial_gradient_index",
                     "thermo_ramp_smooth_spatial_coverage_ratio",
-                    "thermo_ramp_smooth_field_extrapolation_ratio",
-                    "thermo_ramp_smooth_field_clamp_ratio",
                     "thermo_ramp_smooth_constitutive_temperature_factor",
                     "thermo_ramp_smooth_effective_modulus_scale",
                     "transient_max_residual_norm",
@@ -467,18 +455,14 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
             _record(
                 "thermo_shock_oscillatory_gpu_provider",
                 {
-                    "thermo_shock_oscillatory_temporal_variation",
                     "thermo_shock_oscillatory_spatial_gradient_index",
                     "thermo_shock_oscillatory_spatial_coverage_ratio",
-                    "thermo_shock_oscillatory_field_extrapolation_ratio",
-                    "thermo_shock_oscillatory_field_clamp_ratio",
                     "thermo_shock_constitutive_temperature_factor",
                     "thermo_shock_effective_modulus_scale",
                     "transient_max_residual_norm",
@@ -496,7 +480,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                 "thermo_assignment_heterogeneity_index": 1.0,
                 "thermo_region_delta_count": 1.0,
                 "thermo_spatial_coverage_ratio": 1.0,
-                "thermo_field_extrapolation_ratio": 0.0,
                 "thermo_transient_severity": 0.1,
                 "thermo_nonlinear_severity": 0.1,
             },
@@ -1428,38 +1411,6 @@ class ValidateFeaConformanceReportTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "nonlinear_path_mix_spike_count"
-                    ]
-                    break
-            path = Path(tmp) / "analysis_benchmark_report.json"
-            path.write_text(json.dumps({"records": records}))
-            rc = self._run_main_with_report(path)
-            self.assertEqual(rc, 1)
-
-    def test_fails_when_thermo_gradient_benign_temporal_variation_assertion_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            records = self._base_records()
-            for record in records:
-                if record["fixture_id"] == "thermo_gradient_benign_gpu_provider":
-                    record["threshold_assertions"] = [
-                        item
-                        for item in record["threshold_assertions"]
-                        if item["name"] != "thermo_gradient_benign_temporal_variation"
-                    ]
-                    break
-            path = Path(tmp) / "analysis_benchmark_report.json"
-            path.write_text(json.dumps({"records": records}))
-            rc = self._run_main_with_report(path)
-            self.assertEqual(rc, 1)
-
-    def test_fails_when_thermo_ramp_field_clamp_assertion_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            records = self._base_records()
-            for record in records:
-                if record["fixture_id"] == "thermo_ramp_smooth_gpu_provider":
-                    record["threshold_assertions"] = [
-                        item
-                        for item in record["threshold_assertions"]
-                        if item["name"] != "thermo_ramp_smooth_field_clamp_ratio"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

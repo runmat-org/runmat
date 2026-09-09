@@ -146,7 +146,7 @@ pub(crate) fn thermo_mechanical_diagnostic(
         code: "FEA_TM_COUPLING".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} spatial_coverage_ratio={} temporal_profile_variation={} region_delta_count={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} spatial_coverage_ratio={} region_delta_count={} coupling_fingerprint={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_temperature_delta_k,
@@ -160,7 +160,6 @@ pub(crate) fn thermo_mechanical_diagnostic(
             summary.assignment_heterogeneity_index,
             summary.spatial_gradient_index,
             summary.spatial_coverage_ratio,
-            summary.temporal_profile_variation,
             summary.region_delta_count,
             summary.coupling_fingerprint,
         ),
@@ -189,7 +188,7 @@ pub(crate) fn electro_thermal_diagnostic(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} temporal_profile_variation={} region_scale_count={} coupling_fingerprint={} electrical_power_in_w={} integrated_joule_heat_w={} power_balance_ratio={} conservation_residual={}",
+            "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} region_scale_count={} coupling_fingerprint={} electrical_power_in_w={} integrated_joule_heat_w={} power_balance_ratio={} conservation_residual={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_voltage_v,
@@ -197,7 +196,6 @@ pub(crate) fn electro_thermal_diagnostic(
             summary.resistive_heating_coefficient,
             summary.joule_heating_scale,
             summary.conductivity_spread_ratio,
-            summary.temporal_profile_variation,
             summary.region_scale_count,
             summary.coupling_fingerprint,
             electrical_power_in_w,

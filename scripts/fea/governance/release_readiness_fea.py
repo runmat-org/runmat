@@ -140,11 +140,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.08",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "1.6",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.65",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.6",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.1",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM": "0.001",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ": "50.0",
@@ -447,11 +443,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "1.8",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.7",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.65",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.2",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM": "0.0015",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ": "50.0",
@@ -754,11 +746,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "2.0",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.8",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.75",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.35",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_NORMALIZED_RESIDUAL_NORM": "0.002",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_DRIVE_FREQUENCY_HZ": "50.0",
@@ -1625,51 +1613,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO", "0.45"),
         )
     )
-    thermo_max_field_extrapolation_ratio_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO", "0.08"
-            ),
-        )
-    )
-    thermo_max_field_clamp_ratio_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO",
-            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO", "0.08"),
-        )
-    )
     thermo_max_field_coverage_drop_trend_ratio = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
-            ),
-        )
-    )
-    thermo_max_field_extrapolation_trend_ratio = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
-                "1.2",
-            ),
-        )
-    )
-    thermo_max_field_clamp_trend_ratio = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO", "1.2"
-            ),
-        )
-    )
-    thermo_max_field_clamp_breach_rate_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE", "0.25"
             ),
         )
     )
@@ -1817,44 +1766,11 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO", "1.8"),
         )
     )
-    thermo_max_pathological_temporal_variation_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
-                "0.7",
-            ),
-        )
-    )
-    thermo_max_shock_temporal_variation_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION",
-            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION", "0.65"),
-        )
-    )
     thermo_max_pathological_spread_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
-                "1.2",
-            ),
-        )
-    )
-    thermo_max_pathological_temporal_variation_trend_ratio_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
-                "1.2",
-            ),
-        )
-    )
-    thermo_max_shock_temporal_variation_trend_ratio_threshold = float(
-        os.getenv(
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
-            profile_default(
-                "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4611,22 +4527,13 @@ def evaluate_release_readiness(
     thermo_max_spread_ratio = None
     thermo_max_heterogeneity_index = None
     thermo_min_field_coverage_ratio = None
-    thermo_max_field_extrapolation_ratio = None
-    thermo_max_field_clamp_ratio = None
     thermo_field_coverage_drop_trend_ratio = None
-    thermo_field_extrapolation_trend_ratio = None
-    thermo_field_clamp_trend_ratio = None
     thermo_spread_breach_rate = None
     thermo_heterogeneity_breach_rate = None
-    thermo_field_clamp_breach_rate = None
     thermo_spread_trend_ratio = None
     thermo_heterogeneity_trend_ratio = None
     thermo_max_pathological_spread_assertion = None
-    thermo_max_pathological_temporal_variation_assertion = None
-    thermo_max_shock_temporal_variation_assertion = None
     thermo_pathological_spread_trend_ratio = None
-    thermo_pathological_temporal_variation_trend_ratio = None
-    thermo_shock_temporal_variation_trend_ratio = None
     thermal_max_relative_residual_norm = None
     thermal_min_temperature_k = None
     thermal_max_temperature_k = None
@@ -5428,51 +5335,6 @@ def evaluate_release_readiness(
                     )
                 )
 
-        extrapolation_values = []
-        for rec in thermo_records:
-            raw_value = rec.get("thermo_field_extrapolation_ratio")
-            if isinstance(raw_value, (int, float)):
-                value = float(raw_value)
-                if math.isfinite(value):
-                    extrapolation_values.append(value)
-        if extrapolation_values:
-            thermo_max_field_extrapolation_ratio = max(extrapolation_values)
-            if (
-                thermo_max_field_extrapolation_ratio
-                > thermo_max_field_extrapolation_ratio_threshold
-            ):
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_EXTRAPOLATION_HIGH",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            f"max thermo field extrapolation ratio {thermo_max_field_extrapolation_ratio:.3f} exceeds "
-                            f"threshold {thermo_max_field_extrapolation_ratio_threshold:.3f}"
-                        ),
-                    )
-                )
-
-        clamp_values = []
-        for rec in thermo_records:
-            raw_value = rec.get("thermo_field_clamp_ratio")
-            if isinstance(raw_value, (int, float)):
-                value = float(raw_value)
-                if math.isfinite(value):
-                    clamp_values.append(value)
-        if clamp_values:
-            thermo_max_field_clamp_ratio = max(clamp_values)
-            if thermo_max_field_clamp_ratio > thermo_max_field_clamp_ratio_threshold:
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_CLAMP_RATIO_HIGH",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            f"max thermo field clamp ratio {thermo_max_field_clamp_ratio:.3f} exceeds "
-                            f"threshold {thermo_max_field_clamp_ratio_threshold:.3f}"
-                        ),
-                    )
-                )
-
     thermo_assertion_specs = [
         (
             "thermo_gradient_pathological_gpu_provider",
@@ -5480,20 +5342,6 @@ def evaluate_release_readiness(
             thermo_max_pathological_spread_ratio_threshold,
             "THERMO_PATHOLOGICAL_SPREAD_RATIO_HIGH",
             "thermo pathological spread ratio",
-        ),
-        (
-            "thermo_gradient_pathological_gpu_provider",
-            "thermo_gradient_pathological_temporal_variation",
-            thermo_max_pathological_temporal_variation_threshold,
-            "THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH",
-            "thermo pathological temporal variation",
-        ),
-        (
-            "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_oscillatory_temporal_variation",
-            thermo_max_shock_temporal_variation_threshold,
-            "THERMO_SHOCK_TEMPORAL_VARIATION_HIGH",
-            "thermo shock oscillatory temporal variation",
         ),
     ]
     thermo_required_assertion_specs = [
@@ -5519,33 +5367,13 @@ def evaluate_release_readiness(
         ),
         (
             "thermo_gradient_pathological_gpu_provider",
-            "thermo_gradient_pathological_temporal_variation",
-            None,
-        ),
-        (
-            "thermo_gradient_pathological_gpu_provider",
             "thermo_gradient_pathological_heterogeneity",
             None,
         ),
         (
             "thermo_ramp_smooth_gpu_provider",
-            "thermo_ramp_smooth_field_clamp_ratio",
-            "thermo_field_clamp_ratio",
-        ),
-        (
-            "thermo_ramp_smooth_gpu_provider",
             "thermo_ramp_smooth_constitutive_temperature_factor",
             None,
-        ),
-        (
-            "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_oscillatory_temporal_variation",
-            None,
-        ),
-        (
-            "thermo_shock_oscillatory_gpu_provider",
-            "thermo_shock_oscillatory_field_clamp_ratio",
-            "thermo_field_clamp_ratio",
         ),
         (
             "thermo_shock_oscillatory_gpu_provider",
@@ -5568,10 +5396,6 @@ def evaluate_release_readiness(
         observed = max(values)
         if assertion_name == "thermo_gradient_pathological_spread_ratio":
             thermo_max_pathological_spread_assertion = observed
-        elif assertion_name == "thermo_gradient_pathological_temporal_variation":
-            thermo_max_pathological_temporal_variation_assertion = observed
-        elif assertion_name == "thermo_shock_oscillatory_temporal_variation":
-            thermo_max_shock_temporal_variation_assertion = observed
         if observed > threshold:
             reasons.append(
                 Reason(
@@ -8880,7 +8704,6 @@ def evaluate_release_readiness(
 
     spread_breach_values = []
     heterogeneity_breach_values = []
-    clamp_breach_values = []
     for rec in trend_thermo_records:
         spread = rec.get("thermo_constitutive_material_spread_ratio")
         if isinstance(spread, (int, float)):
@@ -8894,11 +8717,6 @@ def evaluate_release_readiness(
                 heterogeneity_breach_values.append(
                     value > thermo_max_heterogeneity_index_threshold
                 )
-        clamp_ratio = rec.get("thermo_field_clamp_ratio")
-        if isinstance(clamp_ratio, (int, float)):
-            value = float(clamp_ratio)
-            if math.isfinite(value):
-                clamp_breach_values.append(value > thermo_max_field_clamp_ratio_threshold)
 
     if spread_breach_values:
         thermo_spread_breach_rate = (
@@ -8936,23 +8754,6 @@ def evaluate_release_readiness(
                     ),
                     )
                 )
-
-    if clamp_breach_values:
-        thermo_field_clamp_breach_rate = (
-            sum(1 for breached in clamp_breach_values if breached)
-            / len(clamp_breach_values)
-        )
-        if thermo_field_clamp_breach_rate > thermo_max_field_clamp_breach_rate_threshold:
-            reasons.append(
-                Reason(
-                    code="THERMO_FIELD_CLAMP_BREACH_RATE_HIGH",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        f"thermo field clamp breach rate {thermo_field_clamp_breach_rate:.3f} exceeds "
-                        f"threshold {thermo_max_field_clamp_breach_rate_threshold:.3f}"
-                    ),
-                )
-            )
 
     plastic_breach_values = []
     for report in trend_reports:
@@ -9497,7 +9298,6 @@ def evaluate_release_readiness(
             )
 
         coverage_drop_ratios = []
-        extrapolation_trend_ratios = []
         for fixture_id, latest_rec in latest_by_fixture.items():
             baseline_records = rolling_by_fixture.get(fixture_id, [])
             if not baseline_records:
@@ -9517,22 +9317,6 @@ def evaluate_release_readiness(
                     statistics.median(baseline_coverage_values) / float(latest_coverage)
                 )
 
-            latest_extrapolation = latest_rec.get("thermo_field_extrapolation_ratio")
-            baseline_extrapolation_values = [
-                float(rec.get("thermo_field_extrapolation_ratio"))
-                for rec in baseline_records
-                if isinstance(rec.get("thermo_field_extrapolation_ratio"), (int, float))
-            ]
-            if (
-                isinstance(latest_extrapolation, (int, float))
-                and baseline_extrapolation_values
-                and statistics.median(baseline_extrapolation_values) > 0
-            ):
-                extrapolation_trend_ratios.append(
-                    float(latest_extrapolation)
-                    / statistics.median(baseline_extrapolation_values)
-                )
-
         if coverage_drop_ratios:
             thermo_field_coverage_drop_trend_ratio = max(coverage_drop_ratios)
             if (
@@ -9549,39 +9333,6 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
-
-        if extrapolation_trend_ratios:
-            thermo_field_extrapolation_trend_ratio = max(extrapolation_trend_ratios)
-            if (
-                thermo_field_extrapolation_trend_ratio
-                > thermo_max_field_extrapolation_trend_ratio
-            ):
-                reasons.append(
-                    Reason(
-                        code="THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            f"thermo field extrapolation trend ratio {thermo_field_extrapolation_trend_ratio:.3f} exceeds "
-                            f"threshold {thermo_max_field_extrapolation_trend_ratio:.3f}"
-                        ),
-                    )
-                )
-
-        thermo_field_clamp_trend_ratio = fixture_trend_ratio("thermo_field_clamp_ratio")
-        if (
-            thermo_field_clamp_trend_ratio is not None
-            and thermo_field_clamp_trend_ratio > thermo_max_field_clamp_trend_ratio
-        ):
-            reasons.append(
-                Reason(
-                    code="THERMO_FIELD_CLAMP_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        f"thermo field clamp trend ratio {thermo_field_clamp_trend_ratio:.3f} exceeds "
-                        f"threshold {thermo_max_field_clamp_trend_ratio:.3f}"
-                    ),
-                )
-            )
 
         thermo_pathological_spread_trend_ratio = fixture_assertion_trend_ratio(
             "thermo_gradient_pathological_spread_ratio",
@@ -9600,48 +9351,6 @@ def evaluate_release_readiness(
                         "thermo pathological spread trend ratio "
                         f"{thermo_pathological_spread_trend_ratio:.3f} exceeds threshold "
                         f"{thermo_max_pathological_spread_trend_ratio_threshold:.3f}"
-                    ),
-                )
-            )
-
-        thermo_pathological_temporal_variation_trend_ratio = fixture_assertion_trend_ratio(
-            "thermo_gradient_pathological_temporal_variation",
-            ratio_mode="increase",
-        )
-        if (
-            thermo_pathological_temporal_variation_trend_ratio is not None
-            and thermo_pathological_temporal_variation_trend_ratio
-            > thermo_max_pathological_temporal_variation_trend_ratio_threshold
-        ):
-            reasons.append(
-                Reason(
-                    code="THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        "thermo pathological temporal-variation trend ratio "
-                        f"{thermo_pathological_temporal_variation_trend_ratio:.3f} exceeds threshold "
-                        f"{thermo_max_pathological_temporal_variation_trend_ratio_threshold:.3f}"
-                    ),
-                )
-            )
-
-        thermo_shock_temporal_variation_trend_ratio = fixture_assertion_trend_ratio(
-            "thermo_shock_oscillatory_temporal_variation",
-            ratio_mode="increase",
-        )
-        if (
-            thermo_shock_temporal_variation_trend_ratio is not None
-            and thermo_shock_temporal_variation_trend_ratio
-            > thermo_max_shock_temporal_variation_trend_ratio_threshold
-        ):
-            reasons.append(
-                Reason(
-                    code="THERMO_SHOCK_TEMPORAL_VARIATION_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        "thermo shock temporal-variation trend ratio "
-                        f"{thermo_shock_temporal_variation_trend_ratio:.3f} exceeds threshold "
-                        f"{thermo_max_shock_temporal_variation_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -13415,36 +13124,18 @@ def evaluate_release_readiness(
         "thermo_max_spread_ratio": thermo_max_spread_ratio,
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
         "thermo_min_field_coverage_ratio": thermo_min_field_coverage_ratio,
-        "thermo_max_field_extrapolation_ratio": thermo_max_field_extrapolation_ratio,
-        "thermo_max_field_clamp_ratio": thermo_max_field_clamp_ratio,
         "thermo_field_coverage_drop_trend_ratio": thermo_field_coverage_drop_trend_ratio,
-        "thermo_field_extrapolation_trend_ratio": thermo_field_extrapolation_trend_ratio,
-        "thermo_field_clamp_trend_ratio": thermo_field_clamp_trend_ratio,
         "thermo_max_spread_ratio_threshold": thermo_max_spread_ratio_threshold,
         "thermo_min_field_coverage_ratio_threshold": thermo_min_field_coverage_ratio_threshold,
-        "thermo_max_field_extrapolation_ratio_threshold": thermo_max_field_extrapolation_ratio_threshold,
-        "thermo_max_field_clamp_ratio_threshold": thermo_max_field_clamp_ratio_threshold,
         "thermo_max_field_coverage_drop_trend_ratio": thermo_max_field_coverage_drop_trend_ratio,
-        "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
-        "thermo_max_field_clamp_trend_ratio": thermo_max_field_clamp_trend_ratio,
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
-        "thermo_field_clamp_breach_rate": thermo_field_clamp_breach_rate,
-        "thermo_max_field_clamp_breach_rate_threshold": thermo_max_field_clamp_breach_rate_threshold,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
         "thermo_heterogeneity_trend_ratio": thermo_heterogeneity_trend_ratio,
         "thermo_max_pathological_spread_assertion": thermo_max_pathological_spread_assertion,
         "thermo_max_pathological_spread_ratio_threshold": thermo_max_pathological_spread_ratio_threshold,
-        "thermo_max_pathological_temporal_variation_assertion": thermo_max_pathological_temporal_variation_assertion,
-        "thermo_max_pathological_temporal_variation_threshold": thermo_max_pathological_temporal_variation_threshold,
-        "thermo_max_shock_temporal_variation_assertion": thermo_max_shock_temporal_variation_assertion,
-        "thermo_max_shock_temporal_variation_threshold": thermo_max_shock_temporal_variation_threshold,
         "thermo_pathological_spread_trend_ratio": thermo_pathological_spread_trend_ratio,
         "thermo_max_pathological_spread_trend_ratio_threshold": thermo_max_pathological_spread_trend_ratio_threshold,
-        "thermo_pathological_temporal_variation_trend_ratio": thermo_pathological_temporal_variation_trend_ratio,
-        "thermo_max_pathological_temporal_variation_trend_ratio_threshold": thermo_max_pathological_temporal_variation_trend_ratio_threshold,
-        "thermo_shock_temporal_variation_trend_ratio": thermo_shock_temporal_variation_trend_ratio,
-        "thermo_max_shock_temporal_variation_trend_ratio_threshold": thermo_max_shock_temporal_variation_trend_ratio_threshold,
         "thermal_max_relative_residual_norm": thermal_max_relative_residual_norm,
         "thermal_max_relative_residual_norm_threshold": thermal_max_relative_residual_norm_threshold,
         "thermal_min_temperature_k": thermal_min_temperature_k,
@@ -14220,22 +13911,6 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermo_min_field_coverage_ratio_threshold') if result.get('thermo_min_field_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- Max thermo field extrapolation ratio: "
-        f"`{result.get('thermo_max_field_extrapolation_ratio') if result.get('thermo_max_field_extrapolation_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field extrapolation threshold: "
-        f"`{result.get('thermo_max_field_extrapolation_ratio_threshold') if result.get('thermo_max_field_extrapolation_ratio_threshold') is not None else '-'}`"
-    )
-    lines.append(
-        "- Max thermo field clamp ratio: "
-        f"`{result.get('thermo_max_field_clamp_ratio') if result.get('thermo_max_field_clamp_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field clamp threshold: "
-        f"`{result.get('thermo_max_field_clamp_ratio_threshold') if result.get('thermo_max_field_clamp_ratio_threshold') is not None else '-'}`"
-    )
-    lines.append(
         "- Thermo field coverage drop trend ratio: "
         f"`{result.get('thermo_field_coverage_drop_trend_ratio') if result.get('thermo_field_coverage_drop_trend_ratio') is not None else '-'}`"
     )
@@ -14244,32 +13919,12 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermo_max_field_coverage_drop_trend_ratio') if result.get('thermo_max_field_coverage_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- Thermo field extrapolation trend ratio: "
-        f"`{result.get('thermo_field_extrapolation_trend_ratio') if result.get('thermo_field_extrapolation_trend_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field extrapolation trend threshold: "
-        f"`{result.get('thermo_max_field_extrapolation_trend_ratio') if result.get('thermo_max_field_extrapolation_trend_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field clamp trend ratio: "
-        f"`{result.get('thermo_field_clamp_trend_ratio') if result.get('thermo_field_clamp_trend_ratio') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field clamp trend threshold: "
-        f"`{result.get('thermo_max_field_clamp_trend_ratio') if result.get('thermo_max_field_clamp_trend_ratio') is not None else '-'}`"
-    )
-    lines.append(
         "- Thermo spread breach rate: "
         f"`{result.get('thermo_spread_breach_rate') if result.get('thermo_spread_breach_rate') is not None else '-'}`"
     )
     lines.append(
         "- Thermo heterogeneity breach rate: "
         f"`{result.get('thermo_heterogeneity_breach_rate') if result.get('thermo_heterogeneity_breach_rate') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo field clamp breach rate: "
-        f"`{result.get('thermo_field_clamp_breach_rate') if result.get('thermo_field_clamp_breach_rate') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread trend ratio: "
@@ -14284,16 +13939,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermo_max_pathological_spread_assertion') if result.get('thermo_max_pathological_spread_assertion') is not None else '-'}`/`{result.get('thermo_max_pathological_spread_ratio_threshold') if result.get('thermo_max_pathological_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- Thermo pathological temporal variation assertion/threshold: "
-        f"`{result.get('thermo_max_pathological_temporal_variation_assertion') if result.get('thermo_max_pathological_temporal_variation_assertion') is not None else '-'}`/`{result.get('thermo_max_pathological_temporal_variation_threshold') if result.get('thermo_max_pathological_temporal_variation_threshold') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo shock temporal variation assertion/threshold: "
-        f"`{result.get('thermo_max_shock_temporal_variation_assertion') if result.get('thermo_max_shock_temporal_variation_assertion') is not None else '-'}`/`{result.get('thermo_max_shock_temporal_variation_threshold') if result.get('thermo_max_shock_temporal_variation_threshold') is not None else '-'}`"
-    )
-    lines.append(
-        "- Thermo pathological trend ratios (spread, temporal variation, shock temporal variation): "
-        f"`{result.get('thermo_pathological_spread_trend_ratio') if result.get('thermo_pathological_spread_trend_ratio') is not None else '-'}`/`{result.get('thermo_pathological_temporal_variation_trend_ratio') if result.get('thermo_pathological_temporal_variation_trend_ratio') is not None else '-'}`/`{result.get('thermo_shock_temporal_variation_trend_ratio') if result.get('thermo_shock_temporal_variation_trend_ratio') is not None else '-'}`"
+        "- Thermo pathological spread trend ratio: "
+        f"`{result.get('thermo_pathological_spread_trend_ratio') if result.get('thermo_pathological_spread_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Thermal Posture")

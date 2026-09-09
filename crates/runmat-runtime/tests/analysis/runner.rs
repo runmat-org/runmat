@@ -143,7 +143,7 @@ fn fluid_constraint(
 }
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::{
-    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id, SolverSampledScalePoint,
+    fea_fsi_fluid_velocity_field_id, fea_thermal_temperature_field_id,
     FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CHT_FLUID_VELOCITY,
     FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
@@ -890,16 +890,6 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 55.0,
                 },
             ],
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.6,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
         }),
         "thermo_gradient_benign_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             reference_temperature_k: 293.15,
@@ -915,16 +905,6 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 50.0,
                 },
             ],
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.7,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
         }),
         "thermo_gradient_pathological_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             reference_temperature_k: 293.15,
@@ -938,20 +918,6 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 ThermoRegionTemperatureDelta {
                     region_id: "polymer_segment".to_string(),
                     temperature_delta_k: 120.0,
-                },
-            ],
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.2,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.4,
-                    scale: 1.3,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 0.9,
                 },
             ],
         }),
@@ -973,20 +939,6 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                         temperature_delta_k: 68.0,
                     },
                 ],
-                sampled_time_profile: vec![
-                    SolverSampledScalePoint {
-                        normalized_coordinate: 0.0,
-                        scale: 0.3,
-                    },
-                    SolverSampledScalePoint {
-                        normalized_coordinate: 0.5,
-                        scale: 0.7,
-                    },
-                    SolverSampledScalePoint {
-                        normalized_coordinate: 1.0,
-                        scale: 1.0,
-                    },
-                ],
             })
         }
         "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
@@ -1003,30 +955,26 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                     temperature_delta_k: 90.0,
                 },
             ],
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.4,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.25,
-                    scale: 1.4,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.5,
-                    scale: 0.5,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.75,
-                    scale: 1.3,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 0.6,
-                },
-            ],
         }),
         _ => None,
+    }
+}
+
+fn thermo_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
+    match spec_id {
+        "thermo_mech_kickoff_gpu_provider" => &[(0.0, 0.6), (1.0, 1.0)],
+        "thermo_gradient_benign_gpu_provider" => &[(0.0, 0.7), (1.0, 1.0)],
+        "thermo_gradient_pathological_gpu_provider" => &[(0.0, 0.2), (0.4, 1.3), (1.0, 0.9)],
+        value
+            if value == "thermo_ramp_smooth_gpu_provider"
+                || value.starts_with("thermal_standalone_ramp_") =>
+        {
+            &[(0.0, 0.3), (0.5, 0.7), (1.0, 1.0)]
+        }
+        "thermo_shock_oscillatory_gpu_provider" => {
+            &[(0.0, 0.4), (0.25, 1.4), (0.5, 0.5), (0.75, 1.3), (1.0, 0.6)]
+        }
+        _ => &[],
     }
 }
 
@@ -1037,56 +985,36 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.8e7,
             resistive_heating_coefficient: 3.5e-4,
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.7,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.0,
-                },
-            ],
         }),
         "electro_thermal_joule_pathological_rejected" => Some(ElectroThermalCouplingOptions {
             reference_temperature_k: 293.15,
             applied_voltage_v: 180.0,
             base_electrical_conductivity_s_per_m: 2.0e7,
             resistive_heating_coefficient: 9.5e-4,
-            sampled_time_profile: vec![
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.0,
-                    scale: 0.45,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.3,
-                    scale: 1.45,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 0.6,
-                    scale: 0.6,
-                },
-                SolverSampledScalePoint {
-                    normalized_coordinate: 1.0,
-                    scale: 1.25,
-                },
-            ],
         }),
         "electro_thermal_invalid_voltage" => Some(ElectroThermalCouplingOptions {
             reference_temperature_k: 293.15,
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.8e7,
             resistive_heating_coefficient: 3.5e-4,
-            sampled_time_profile: Vec::new(),
         }),
         "electro_thermal_invalid_conductivity" => Some(ElectroThermalCouplingOptions {
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 0.0,
             resistive_heating_coefficient: 3.5e-4,
-            sampled_time_profile: Vec::new(),
         }),
         _ => None,
+    }
+}
+
+fn electro_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
+    match spec_id {
+        "electro_thermal_joule_benign_rejected" => &[(0.0, 0.7), (1.0, 1.0)],
+        "electro_thermal_joule_pathological_rejected" => {
+            &[(0.0, 0.45), (0.3, 1.45), (0.6, 0.6), (1.0, 1.25)]
+        }
+        _ => &[],
     }
 }
 
@@ -2547,21 +2475,15 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             applied_temperature_delta_k: 75.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: Vec::new(),
-            sampled_time_profile: Vec::new(),
         });
     }
     if let Some(value) = thermo {
-        let temperature_points = value
-            .sampled_time_profile
-            .iter()
-            .map(|point| (point.normalized_coordinate, point.scale))
-            .collect::<Vec<_>>();
         set_temperature_history(
             model,
             &format!("thermo_temperature_{spec_id}"),
             value.reference_temperature_k,
             value.applied_temperature_delta_k,
-            &temperature_points,
+            thermo_history_for_fixture(spec_id),
         );
         for (index, delta) in value.region_temperature_deltas.iter().enumerate() {
             set_temperature_excitation(
@@ -2601,11 +2523,6 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     }
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
-        let potential_points = electro
-            .sampled_time_profile
-            .iter()
-            .map(|point| (point.normalized_coordinate, point.scale))
-            .collect::<Vec<_>>();
         for material in &mut model.materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
                 reference_temperature_k: electro.reference_temperature_k,
@@ -2620,7 +2537,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             model,
             &format!("electro_potential_{spec_id}"),
             electro.applied_voltage_v,
-            &potential_points,
+            electro_history_for_fixture(spec_id),
         );
         model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
             reference_temperature: runmat_analysis_core::Temperature::new(
@@ -4378,8 +4295,6 @@ pub(super) fn run_fixture(
     let mut thermo_assignment_heterogeneity_index = None;
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
-    let mut thermo_field_extrapolation_ratio = None;
-    let mut thermo_field_clamp_ratio = None;
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut electro_thermal_coupling_enabled = None;
@@ -4387,9 +4302,7 @@ pub(super) fn run_fixture(
     let mut electro_joule_heating_scale = None;
     let mut electro_conductivity_spread_ratio = None;
     let mut electro_transient_severity = None;
-    let mut electro_transient_time_scale_mean = None;
     let mut electro_nonlinear_severity = None;
-    let mut electro_nonlinear_time_scale_mean = None;
     let mut plastic_nonlinear_severity = None;
     let mut plastic_nonlinear_severity_mean = None;
     let mut plastic_load_realization_ratio = None;
@@ -4489,8 +4402,6 @@ pub(super) fn run_fixture(
                     thermo_assignment_heterogeneity_index,
                     thermo_region_delta_count,
                     thermo_spatial_coverage_ratio,
-                    thermo_field_extrapolation_ratio,
-                    thermo_field_clamp_ratio,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     electro_thermal_coupling_enabled,
@@ -4498,9 +4409,7 @@ pub(super) fn run_fixture(
                     electro_joule_heating_scale,
                     electro_conductivity_spread_ratio,
                     electro_transient_severity,
-                    electro_transient_time_scale_mean,
                     electro_nonlinear_severity,
-                    electro_nonlinear_time_scale_mean,
                     plastic_nonlinear_severity,
                     plastic_nonlinear_severity_mean,
                     plastic_load_realization_ratio,
@@ -7108,20 +7017,6 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "thermo_mech_transient_time_scale_mean",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "time_scale_mean",
-                            ),
-                            Some(0.6),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
                             "thermo_mech_constitutive_residual_ratio",
                             "FEA_TM_CONSISTENCY",
                             diagnostic_metric(
@@ -7231,25 +7126,11 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.22),
                         );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_benign_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.0),
-                            Some(0.35),
-                        );
                     } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
                         // The pathological case intentionally drives every assigned material to
                         // the constitutive lower clamp. A unit spread verifies that saturation is
                         // uniform; heterogeneity and temporal variation below verify that the
-                        // authored spatial and time signals were still realized.
+                        // authored spatial inputs were still realized.
                         push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
@@ -7274,20 +7155,6 @@ pub(super) fn run_fixture(
                                 &gpu_envelope.data,
                                 "FEA_TM_COUPLING",
                                 "assignment_heterogeneity_index",
-                            ),
-                            Some(0.2),
-                            Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_gradient_pathological_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
                             ),
                             Some(0.2),
                             Some(1.0),
@@ -7325,20 +7192,6 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "thermo_ramp_smooth_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.2),
-                            Some(0.4),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
                             "thermo_ramp_smooth_spatial_gradient_index",
                             "FEA_TM_COUPLING",
                             diagnostic_metric(
@@ -7362,34 +7215,6 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.0),
                             Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_field_extrapolation_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_extrapolation_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.02),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_ramp_smooth_field_clamp_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.02),
                         );
                     } else if spec.id == "thermo_shock_oscillatory_gpu_provider" {
                         push_threshold_assertion!(
@@ -7424,20 +7249,6 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "thermo_shock_oscillatory_temporal_variation",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "temporal_variation",
-                            ),
-                            Some(0.35),
-                            Some(0.7),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
                             "thermo_shock_oscillatory_spatial_gradient_index",
                             "FEA_TM_COUPLING",
                             diagnostic_metric(
@@ -7461,34 +7272,6 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.0),
                             Some(1.0),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_field_extrapolation_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_extrapolation_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.08),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_shock_oscillatory_field_clamp_ratio",
-                            "FEA_TM_TRANSIENT",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_TRANSIENT",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.08),
                         );
                     } else if spec.id.starts_with("thermal_standalone_ramp_") {
                         push_thermal_standalone_threshold_assertions(
@@ -7786,34 +7569,6 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.0),
                             Some(0.08),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_nonlinear_time_scale_mean",
-                            "FEA_TM_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_NONLINEAR",
-                                "time_scale_mean",
-                            ),
-                            Some(0.9),
-                            Some(1.1),
-                        );
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "thermo_nonlinear_field_clamp_ratio",
-                            "FEA_TM_NONLINEAR",
-                            diagnostic_metric(
-                                &gpu_envelope.data,
-                                "FEA_TM_NONLINEAR",
-                                "field_clamp_ratio",
-                            ),
-                            Some(0.0),
-                            Some(0.05),
                         );
                     }
                     if spec.id == "nonlinear_plasticity_benchmark_gpu_provider" {
@@ -9927,8 +9682,6 @@ pub(super) fn run_fixture(
                                 thermo_assignment_heterogeneity_index,
                                 thermo_region_delta_count,
                                 thermo_spatial_coverage_ratio,
-                                thermo_field_extrapolation_ratio,
-                                thermo_field_clamp_ratio,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 electro_thermal_coupling_enabled,
@@ -9936,9 +9689,7 @@ pub(super) fn run_fixture(
                                 electro_joule_heating_scale,
                                 electro_conductivity_spread_ratio,
                                 electro_transient_severity,
-                                electro_transient_time_scale_mean,
                                 electro_nonlinear_severity,
-                                electro_nonlinear_time_scale_mean,
                                 plastic_nonlinear_severity,
                                 plastic_nonlinear_severity_mean,
                                 plastic_load_realization_ratio,
@@ -10026,9 +9777,6 @@ pub(super) fn run_fixture(
                     thermo_region_delta_count = gpu_results.data.summary.thermo_region_delta_count;
                     thermo_spatial_coverage_ratio =
                         gpu_results.data.summary.thermo_spatial_coverage_ratio;
-                    thermo_field_extrapolation_ratio =
-                        gpu_results.data.summary.thermo_field_extrapolation_ratio;
-                    thermo_field_clamp_ratio = gpu_results.data.summary.thermo_field_clamp_ratio;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
                     electro_thermal_coupling_enabled =
@@ -10043,12 +9791,8 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_conductivity_spread_ratio;
                     electro_transient_severity =
                         gpu_results.data.summary.electro_transient_severity;
-                    electro_transient_time_scale_mean =
-                        gpu_results.data.summary.electro_transient_time_scale_mean;
                     electro_nonlinear_severity =
                         gpu_results.data.summary.electro_nonlinear_severity;
-                    electro_nonlinear_time_scale_mean =
-                        gpu_results.data.summary.electro_nonlinear_time_scale_mean;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
                     plastic_nonlinear_severity_mean =
@@ -10360,8 +10104,6 @@ pub(super) fn run_fixture(
                                     thermo_assignment_heterogeneity_index,
                                     thermo_region_delta_count,
                                     thermo_spatial_coverage_ratio,
-                                    thermo_field_extrapolation_ratio,
-                                    thermo_field_clamp_ratio,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     electro_thermal_coupling_enabled,
@@ -10369,9 +10111,7 @@ pub(super) fn run_fixture(
                                     electro_joule_heating_scale,
                                     electro_conductivity_spread_ratio,
                                     electro_transient_severity,
-                                    electro_transient_time_scale_mean,
                                     electro_nonlinear_severity,
-                                    electro_nonlinear_time_scale_mean,
                                     plastic_nonlinear_severity,
                                     plastic_nonlinear_severity_mean,
                                     plastic_load_realization_ratio,
@@ -10520,8 +10260,6 @@ pub(super) fn run_fixture(
         thermo_assignment_heterogeneity_index,
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
-        thermo_field_extrapolation_ratio,
-        thermo_field_clamp_ratio,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         electro_thermal_coupling_enabled,
@@ -10529,9 +10267,7 @@ pub(super) fn run_fixture(
         electro_joule_heating_scale,
         electro_conductivity_spread_ratio,
         electro_transient_severity,
-        electro_transient_time_scale_mean,
         electro_nonlinear_severity,
-        electro_nonlinear_time_scale_mean,
         plastic_nonlinear_severity,
         plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,

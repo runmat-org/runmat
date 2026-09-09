@@ -121,10 +121,7 @@ pub(crate) fn recover_thermo_mechanical_snapshots(
             .copied()
             .filter(|value| value.is_finite())
             .unwrap_or(0.0)
-            * (1.0
-                + summary.spatial_gradient_index
-                + summary.temporal_profile_variation
-                + summary.assignment_heterogeneity_index);
+            * (1.0 + summary.spatial_gradient_index + summary.assignment_heterogeneity_index);
         fields
             .coupling_residual_snapshots
             .push(AnalysisField::host_f64(

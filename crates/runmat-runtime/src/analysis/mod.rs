@@ -52,8 +52,8 @@ use crate::operations::{
 };
 use policy::{
     breach_rate_greater_than, breach_rate_less_than, electromagnetic_sweep_thresholds_for_policy,
-    electromagnetic_thresholds_for_policy, thermo_field_quality_thresholds_for_policy,
-    thermo_gradient_thresholds_for_policy, thermo_thresholds_for_policy,
+    electromagnetic_thresholds_for_policy, thermo_field_coverage_min_for_policy,
+    thermo_spatial_gradient_threshold_for_policy, thermo_thresholds_for_policy,
     ElectromagneticQualityThresholds, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
     EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
     EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
@@ -95,9 +95,9 @@ pub mod value_admission;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use excitation_query::{
-    applied_temperature_delta_k, applied_voltage_v, cfd_velocity_scales, electric_potential_scales,
+    applied_temperature_delta_k, applied_voltage_v, cfd_velocity_scales,
     has_nonzero_electromagnetic_source, nominal_inlet_velocity_m_per_s, pressure_sources,
-    regional_temperature_deltas_k, thermo_temperature_scales,
+    regional_temperature_deltas_k,
 };
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
@@ -8036,21 +8036,11 @@ pub fn analysis_run_transient_with_options_op(
         "FEA_TM_COUPLING",
         "spatial_coverage_ratio",
     );
-    let thermo_temporal_variation =
-        diagnostic_metric(&run.diagnostics, "FEA_TM_TRANSIENT", "temporal_variation");
-    let thermo_field_extrapolation_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_TRANSIENT",
-        "field_extrapolation_ratio",
-    );
-    let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
-        thermo_gradient_thresholds_for_policy(options.quality_policy);
+    let thermo_gradient_spatial_threshold =
+        thermo_spatial_gradient_threshold_for_policy(options.quality_policy);
     let thermo_gradient_instability = thermo_spatial_gradient_index
         .map(|value| value > thermo_gradient_spatial_threshold)
-        .unwrap_or(false)
-        || thermo_temporal_variation
-            .map(|value| value > thermo_gradient_temporal_threshold)
-            .unwrap_or(false);
+        .unwrap_or(false);
     let thermo_spread_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -8063,8 +8053,7 @@ pub fn analysis_run_transient_with_options_op(
     );
     let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
         thermo_thresholds_for_policy(options.quality_policy);
-    let (thermo_field_coverage_min, thermo_field_extrapolation_max) =
-        thermo_field_quality_thresholds_for_policy(options.quality_policy);
+    let thermo_field_coverage_min = thermo_field_coverage_min_for_policy(options.quality_policy);
     let thermo_spread_breach = thermo_spread_ratio
         .map(|value| value > thermo_spread_threshold)
         .unwrap_or(false);
@@ -8073,9 +8062,6 @@ pub fn analysis_run_transient_with_options_op(
         .unwrap_or(false);
     let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
         .map(|value| value < thermo_field_coverage_min)
-        .unwrap_or(false);
-    let thermo_field_extrapolation_breach = thermo_field_extrapolation_ratio
-        .map(|value| value > thermo_field_extrapolation_max)
         .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
@@ -8144,11 +8130,9 @@ pub fn analysis_run_transient_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalGradientInstability,
             detail: format!(
-                "thermo gradient instability spatial_gradient_index={} temporal_variation={} thresholds=({}, {})",
+                "thermo spatial gradient index {} exceeds threshold {}",
                 thermo_spatial_gradient_index.unwrap_or(0.0),
-                thermo_temporal_variation.unwrap_or(0.0),
                 thermo_gradient_spatial_threshold,
-                thermo_gradient_temporal_threshold,
             ),
         });
     }
@@ -8159,16 +8143,6 @@ pub fn analysis_run_transient_with_options_op(
                 "thermo field spatial coverage ratio {} is below minimum {}",
                 thermo_spatial_coverage_ratio.unwrap_or(0.0),
                 thermo_field_coverage_min
-            ),
-        });
-    }
-    if thermo_field_extrapolation_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalFieldExtrapolationHigh,
-            detail: format!(
-                "thermo field extrapolation ratio {} exceeds maximum {}",
-                thermo_field_extrapolation_ratio.unwrap_or(0.0),
-                thermo_field_extrapolation_max
             ),
         });
     }
@@ -8678,21 +8652,11 @@ pub fn analysis_run_nonlinear_with_options_op(
         "FEA_TM_COUPLING",
         "spatial_coverage_ratio",
     );
-    let thermo_temporal_variation =
-        diagnostic_metric(&run.diagnostics, "FEA_TM_NONLINEAR", "temporal_variation");
-    let thermo_field_extrapolation_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_NONLINEAR",
-        "field_extrapolation_ratio",
-    );
-    let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
-        thermo_gradient_thresholds_for_policy(options.quality_policy);
+    let thermo_gradient_spatial_threshold =
+        thermo_spatial_gradient_threshold_for_policy(options.quality_policy);
     let thermo_gradient_instability = thermo_spatial_gradient_index
         .map(|value| value > thermo_gradient_spatial_threshold)
-        .unwrap_or(false)
-        || thermo_temporal_variation
-            .map(|value| value > thermo_gradient_temporal_threshold)
-            .unwrap_or(false);
+        .unwrap_or(false);
     let thermo_spread_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -8705,8 +8669,7 @@ pub fn analysis_run_nonlinear_with_options_op(
     );
     let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
         thermo_thresholds_for_policy(options.quality_policy);
-    let (thermo_field_coverage_min, thermo_field_extrapolation_max) =
-        thermo_field_quality_thresholds_for_policy(options.quality_policy);
+    let thermo_field_coverage_min = thermo_field_coverage_min_for_policy(options.quality_policy);
     let thermo_spread_breach = thermo_spread_ratio
         .map(|value| value > thermo_spread_threshold)
         .unwrap_or(false);
@@ -8715,9 +8678,6 @@ pub fn analysis_run_nonlinear_with_options_op(
         .unwrap_or(false);
     let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
         .map(|value| value < thermo_field_coverage_min)
-        .unwrap_or(false);
-    let thermo_field_extrapolation_breach = thermo_field_extrapolation_ratio
-        .map(|value| value > thermo_field_extrapolation_max)
         .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
@@ -8798,11 +8758,9 @@ pub fn analysis_run_nonlinear_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalGradientInstability,
             detail: format!(
-                "thermo gradient instability spatial_gradient_index={} temporal_variation={} thresholds=({}, {})",
+                "thermo spatial gradient index {} exceeds threshold {}",
                 thermo_spatial_gradient_index.unwrap_or(0.0),
-                thermo_temporal_variation.unwrap_or(0.0),
                 thermo_gradient_spatial_threshold,
-                thermo_gradient_temporal_threshold,
             ),
         });
     }
@@ -8813,16 +8771,6 @@ pub fn analysis_run_nonlinear_with_options_op(
                 "thermo field spatial coverage ratio {} is below minimum {}",
                 thermo_spatial_coverage_ratio.unwrap_or(0.0),
                 thermo_field_coverage_min
-            ),
-        });
-    }
-    if thermo_field_extrapolation_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalFieldExtrapolationHigh,
-            detail: format!(
-                "thermo field extrapolation ratio {} exceeds maximum {}",
-                thermo_field_extrapolation_ratio.unwrap_or(0.0),
-                thermo_field_extrapolation_max
             ),
         });
     }
@@ -10709,7 +10657,6 @@ fn model_thermo_coupling_options(model: &AnalysisModel) -> Option<ThermoMechanic
                 },
             )
             .collect(),
-        sampled_time_profile: sampled_scale_points(thermo_temperature_scales(model, domain)),
     })
 }
 
@@ -10744,22 +10691,7 @@ fn model_electro_coupling_options(model: &AnalysisModel) -> Option<ElectroTherma
         applied_voltage_v: applied_voltage_v(model).unwrap_or(0.0),
         base_electrical_conductivity_s_per_m: base_conductivity,
         resistive_heating_coefficient: resistive_coeff,
-        sampled_time_profile: sampled_scale_points(electric_potential_scales(model, domain)),
     })
-}
-
-fn sampled_scale_points(scales: Vec<f64>) -> Vec<runmat_analysis_fea::SolverSampledScalePoint> {
-    let denominator = scales.len().saturating_sub(1).max(1) as f64;
-    scales
-        .into_iter()
-        .enumerate()
-        .map(
-            |(index, scale)| runmat_analysis_fea::SolverSampledScalePoint {
-                normalized_coordinate: index as f64 / denominator,
-                scale,
-            },
-        )
-        .collect()
 }
 
 fn model_plasticity_constitutive_options(
@@ -10832,7 +10764,6 @@ fn to_fea_thermo_mechanical_context(
                 },
             )
             .collect(),
-        sampled_time_profile: tm.sampled_time_profile,
     })
 }
 
@@ -10844,7 +10775,6 @@ fn to_fea_electro_thermal_context(
         applied_voltage_v: et.applied_voltage_v,
         base_electrical_conductivity_s_per_m: et.base_electrical_conductivity_s_per_m,
         resistive_heating_coefficient: et.resistive_heating_coefficient,
-        sampled_time_profile: et.sampled_time_profile,
     })
 }
 
@@ -10905,47 +10835,6 @@ fn validate_thermo_coupling_options(
                 options.thermal_expansion_coefficient.to_string(),
             )]),
         ));
-    }
-
-    let mut last_t = -1.0_f64;
-    for (idx, point) in options.sampled_time_profile.iter().enumerate() {
-        if !point.normalized_coordinate.is_finite()
-            || point.normalized_coordinate < 0.0
-            || point.normalized_coordinate > 1.0
-        {
-            return Err((
-                "thermo sampled_time_profile normalized_coordinate must be finite and within [0, 1]".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    (
-                        "normalized_coordinate".to_string(),
-                        point.normalized_coordinate.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        if !point.scale.is_finite() {
-            return Err((
-                "thermo sampled_time_profile scale must be finite".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    ("scale".to_string(), point.scale.to_string()),
-                ]),
-            ));
-        }
-        if point.normalized_coordinate + 1.0e-12 < last_t {
-            return Err((
-                "thermo sampled_time_profile normalized_coordinate must be monotonic non-decreasing".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    (
-                        "normalized_coordinate".to_string(),
-                        point.normalized_coordinate.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        last_t = point.normalized_coordinate;
     }
 
     let model_region_ids = model
@@ -11030,46 +10919,6 @@ fn validate_electro_coupling_options(
                 options.resistive_heating_coefficient.to_string(),
             )]),
         ));
-    }
-    let mut last_t = -1.0_f64;
-    for (idx, point) in options.sampled_time_profile.iter().enumerate() {
-        if !point.normalized_coordinate.is_finite()
-            || point.normalized_coordinate < 0.0
-            || point.normalized_coordinate > 1.0
-        {
-            return Err((
-                "electro sampled_time_profile normalized_coordinate must be finite and within [0, 1]".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    (
-                        "normalized_coordinate".to_string(),
-                        point.normalized_coordinate.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        if !point.scale.is_finite() {
-            return Err((
-                "electro sampled_time_profile scale must be finite".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    ("scale".to_string(), point.scale.to_string()),
-                ]),
-            ));
-        }
-        if point.normalized_coordinate + 1.0e-12 < last_t {
-            return Err((
-                "electro sampled_time_profile normalized_coordinate must be monotonic non-decreasing".to_string(),
-                BTreeMap::from([
-                    ("sampled_time_profile_index".to_string(), idx.to_string()),
-                    (
-                        "normalized_coordinate".to_string(),
-                        point.normalized_coordinate.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        last_t = point.normalized_coordinate;
     }
     Ok(())
 }

@@ -834,7 +834,6 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
                 region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_linear_static_options()
         },
@@ -932,7 +931,6 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
                 region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_linear_static_options()
         },
@@ -981,7 +979,6 @@ fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling(
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
                 region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_nonlinear_options()
         },
@@ -2246,7 +2243,6 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
                 region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_transient_options()
         },
@@ -2347,7 +2343,6 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
                 applied_voltage_v: 36.0,
                 base_electrical_conductivity_s_per_m: 3.5e7,
                 resistive_heating_coefficient: 4.0e-4,
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_transient_options()
         },
@@ -2596,7 +2591,6 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.4e-5,
                 region_temperature_deltas: Vec::new(),
-                sampled_time_profile: Vec::new(),
             }),
             ..experimental_nonlinear_options()
         },

@@ -37,19 +37,19 @@ pub(crate) fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) 
     }
 }
 
-pub(crate) fn thermo_gradient_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+pub(crate) fn thermo_spatial_gradient_threshold_for_policy(policy: QualityPolicy) -> f64 {
     match policy {
-        QualityPolicy::Strict => (0.22, 0.25),
-        QualityPolicy::Balanced => (0.30, 0.35),
-        QualityPolicy::Exploratory => (0.45, 0.55),
+        QualityPolicy::Strict => 0.22,
+        QualityPolicy::Balanced => 0.30,
+        QualityPolicy::Exploratory => 0.45,
     }
 }
 
-pub(crate) fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+pub(crate) fn thermo_field_coverage_min_for_policy(policy: QualityPolicy) -> f64 {
     match policy {
-        QualityPolicy::Strict => (0.55, 0.02),
-        QualityPolicy::Balanced => (0.45, 0.08),
-        QualityPolicy::Exploratory => (0.30, 0.18),
+        QualityPolicy::Strict => 0.55,
+        QualityPolicy::Balanced => 0.45,
+        QualityPolicy::Exploratory => 0.30,
     }
 }
 
