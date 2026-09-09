@@ -56,6 +56,8 @@ pub struct OperatorSystem {
     pub stiffness_csr: Option<CsrMatrix>,
     pub stiffness_diag: Vec<f64>,
     pub stiffness_upper: Vec<f64>,
+    #[serde(default)]
+    pub mass_csr: Option<CsrMatrix>,
     pub mass_diag: Vec<f64>,
     pub damping_diag: Vec<f64>,
     pub rhs: Vec<f64>,
@@ -153,7 +155,21 @@ pub fn csr_stiffness(system: &OperatorSystem) -> Option<&CsrMatrix> {
 }
 
 pub fn apply_m(system: &OperatorSystem, x: &[f64]) -> Vec<f64> {
+    if let Some(csr) = csr_mass(system) {
+        return apply_csr_with_constraints(csr, &system.constrained, x);
+    }
     apply_diag_with_constraints(&system.mass_diag, &system.constrained, x)
+}
+
+pub fn csr_mass(system: &OperatorSystem) -> Option<&CsrMatrix> {
+    let csr = system.mass_csr.as_ref()?;
+    if csr.row_offsets.len() != system.dof_count.saturating_add(1)
+        || csr.column_indices.len() != csr.values.len()
+        || csr.row_offsets.last().copied()? != csr.values.len()
+    {
+        return None;
+    }
+    Some(csr)
 }
 
 pub fn apply_c(system: &OperatorSystem, x: &[f64]) -> Vec<f64> {
@@ -220,6 +236,7 @@ mod tests {
             stiffness_csr: None,
             stiffness_diag: vec![100.0, 10.0, 5.0],
             stiffness_upper: vec![1.0, 0.5],
+            mass_csr: None,
             mass_diag: vec![1.0, 2.0, 3.0],
             damping_diag: vec![0.1, 0.2, 0.3],
             rhs: vec![0.0, -100.0, 0.0],
@@ -244,6 +261,7 @@ mod tests {
             stiffness_csr: None,
             stiffness_diag: vec![100.0, 10.0, 5.0],
             stiffness_upper: vec![1.0, 0.5],
+            mass_csr: None,
             mass_diag: vec![1.0, 2.0, 3.0],
             damping_diag: vec![0.1, 0.2, 0.3],
             rhs: vec![0.0, -100.0, 0.0],
@@ -267,6 +285,7 @@ mod tests {
             }),
             stiffness_diag: vec![4.0, 3.0, 5.0],
             stiffness_upper: vec![0.0, 0.0],
+            mass_csr: None,
             mass_diag: vec![1.0; 3],
             damping_diag: vec![0.0; 3],
             rhs: vec![0.0; 3],
@@ -275,5 +294,27 @@ mod tests {
 
         assert_eq!(apply_k(&system, &x), vec![10.0, -2.0, 16.0]);
         assert_eq!(apply_k_unconstrained(&system, &x), vec![38.0, -12.0, 16.0]);
+    }
+
+    #[test]
+    fn operator_apply_uses_csr_mass_when_present() {
+        let system = OperatorSystem {
+            dof_count: 3,
+            constrained: vec![true, false, false],
+            stiffness_dense: None,
+            stiffness_csr: None,
+            stiffness_diag: vec![1.0; 3],
+            stiffness_upper: vec![0.0; 2],
+            mass_csr: Some(CsrMatrix {
+                row_offsets: vec![0, 2, 5, 7],
+                column_indices: vec![0, 1, 0, 1, 2, 1, 2],
+                values: vec![2.0, 0.5, 0.5, 3.0, 0.25, 0.25, 4.0],
+            }),
+            mass_diag: vec![9.0; 3],
+            damping_diag: vec![0.0; 3],
+            rhs: vec![0.0; 3],
+        };
+
+        assert_eq!(apply_m(&system, &[10.0, 2.0, 4.0]), vec![10.0, 7.0, 16.5]);
     }
 }

@@ -5,6 +5,7 @@ use thiserror::Error;
 pub struct SolidMaterial {
     pub youngs_modulus_pa: f64,
     pub poisson_ratio: f64,
+    pub density_kg_per_m3: f64,
 }
 
 pub(super) type ElasticityMatrix = [[f64; 6]; 6];
@@ -15,6 +16,8 @@ pub enum SolidMaterialError {
     InvalidYoungsModulus,
     #[error("solid material Poisson ratio must be finite and in (-1, 0.5)")]
     InvalidPoissonRatio,
+    #[error("solid material density must be positive and finite")]
+    InvalidDensity,
 }
 
 impl SolidMaterial {
@@ -27,6 +30,9 @@ impl SolidMaterial {
             || self.poisson_ratio >= 0.5
         {
             return Err(SolidMaterialError::InvalidPoissonRatio);
+        }
+        if !self.density_kg_per_m3.is_finite() || self.density_kg_per_m3 <= 0.0 {
+            return Err(SolidMaterialError::InvalidDensity);
         }
         Ok(())
     }

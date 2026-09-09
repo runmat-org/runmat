@@ -60,7 +60,7 @@ pub(crate) fn structural_rotational_dof_diagnostic(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "structural_node_count={} structural_translational_dof_count={} structural_rotational_dof_count={} structural_rotation_node_count={} structural_moment_load_count={} structural_direct_rotational_moment_load_count={} structural_direct_rotational_moment_coverage_ratio={} structural_moment_requested_norm_n_m={} structural_rotational_constraint_count={} structural_beam_element_count={} structural_shell_element_count={} structural_solid_element_count={} structural_beam_local_frame_coverage_ratio={} structural_beam_stiffness_matrix_symmetry_residual={}",
+            "structural_node_count={} structural_translational_dof_count={} structural_rotational_dof_count={} structural_rotation_node_count={} structural_moment_load_count={} structural_direct_rotational_moment_load_count={} structural_direct_rotational_moment_coverage_ratio={} structural_moment_requested_norm_n_m={} structural_rotational_constraint_count={} structural_beam_element_count={} structural_shell_element_count={} structural_solid_element_count={} structural_solid_total_mass_kg={} structural_beam_local_frame_coverage_ratio={} structural_beam_stiffness_matrix_symmetry_residual={}",
             summary.structural_node_count,
             summary.structural_translational_dof_count,
             summary.structural_rotational_dof_count,
@@ -73,6 +73,7 @@ pub(crate) fn structural_rotational_dof_diagnostic(
             summary.structural_beam_element_count,
             summary.structural_shell_element_count,
             summary.structural_solid_element_count,
+            summary.structural_solid_total_mass_kg,
             beam_local_frame_coverage_ratio,
             beam_stiffness_matrix_symmetry_residual
         ),

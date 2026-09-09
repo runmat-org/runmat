@@ -75,5 +75,6 @@ fn material(youngs_modulus_pa: f64) -> SolidMaterial {
     SolidMaterial {
         youngs_modulus_pa,
         poisson_ratio: 0.25,
+        density_kg_per_m3: 1_000.0,
     }
 }

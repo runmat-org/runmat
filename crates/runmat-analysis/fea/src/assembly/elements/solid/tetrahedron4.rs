@@ -122,6 +122,25 @@ pub fn global_stiffness_matrix(
     Ok(k)
 }
 
+pub fn consistent_mass_matrix(
+    material: SolidMaterial,
+    geometry: Tetrahedron4ElementGeometry,
+) -> Result<Tetrahedron4Matrix12, Tetrahedron4ElementError> {
+    material.validate()?;
+    let scalar = material.density_kg_per_m3 * geometry.volume_m3()? / 20.0;
+    Ok(std::array::from_fn(|row| {
+        std::array::from_fn(|column| {
+            if row % TETRAHEDRON4_NODE_DOF_COUNT != column % TETRAHEDRON4_NODE_DOF_COUNT {
+                0.0
+            } else if row / TETRAHEDRON4_NODE_DOF_COUNT == column / TETRAHEDRON4_NODE_DOF_COUNT {
+                2.0 * scalar
+            } else {
+                scalar
+            }
+        })
+    }))
+}
+
 fn validate_nodes(nodes_m: [[f64; 3]; 4]) -> Result<(), Tetrahedron4ElementError> {
     if nodes_m.iter().flatten().all(|value| value.is_finite()) {
         Ok(())
@@ -202,6 +221,7 @@ mod tests {
         SolidMaterial {
             youngs_modulus_pa: 200.0e9,
             poisson_ratio: 0.3,
+            density_kg_per_m3: 7_850.0,
         }
     }
 

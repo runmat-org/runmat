@@ -30,6 +30,99 @@ const QUADRATURE: [[f64; 4]; 4] = [
     [QUADRATURE_B, QUADRATURE_B, QUADRATURE_A, QUADRATURE_B],
     [QUADRATURE_B, QUADRATURE_B, QUADRATURE_B, QUADRATURE_A],
 ];
+const MASS_QUADRATURE: [([f64; 4], f64); 11] = [
+    ([0.25, 0.25, 0.25, 0.25], -0.013_155_555_555_555_556),
+    (
+        [
+            0.785_714_285_714_285_7,
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+        ],
+        0.007_622_222_222_222_222,
+    ),
+    (
+        [
+            0.071_428_571_428_571_42,
+            0.785_714_285_714_285_7,
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+        ],
+        0.007_622_222_222_222_222,
+    ),
+    (
+        [
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+            0.785_714_285_714_285_7,
+            0.071_428_571_428_571_42,
+        ],
+        0.007_622_222_222_222_222,
+    ),
+    (
+        [
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+            0.071_428_571_428_571_42,
+            0.785_714_285_714_285_7,
+        ],
+        0.007_622_222_222_222_222,
+    ),
+    (
+        [
+            0.399_403_576_166_799_2,
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+            0.100_596_423_833_200_8,
+        ],
+        0.024_888_888_888_888_89,
+    ),
+    (
+        [
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+        ],
+        0.024_888_888_888_888_89,
+    ),
+    (
+        [
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+        ],
+        0.024_888_888_888_888_89,
+    ),
+    (
+        [
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+        ],
+        0.024_888_888_888_888_89,
+    ),
+    (
+        [
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+        ],
+        0.024_888_888_888_888_89,
+    ),
+    (
+        [
+            0.100_596_423_833_200_8,
+            0.100_596_423_833_200_8,
+            0.399_403_576_166_799_2,
+            0.399_403_576_166_799_2,
+        ],
+        0.024_888_888_888_89,
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tetrahedron10ElementGeometry {
@@ -85,6 +178,42 @@ pub fn global_stiffness_matrix(
     } else {
         Err(Tetrahedron10ElementError::DegenerateOrInverted)
     }
+}
+
+pub fn consistent_mass_matrix(
+    material: SolidMaterial,
+    geometry: Tetrahedron10ElementGeometry,
+) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
+    validate_nodes(geometry.nodes_m)?;
+    material.validate()?;
+    let mut mass = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
+    for (barycentric, weight) in MASS_QUADRATURE {
+        let shape = shape_values(barycentric);
+        let scale = material.density_kg_per_m3
+            * weight
+            * jacobian_determinant(geometry.nodes_m, barycentric)?;
+        for left_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
+            for right_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
+                let value = scale * shape[left_node] * shape[right_node];
+                for axis in 0..TETRAHEDRON10_NODE_DOF_COUNT {
+                    mass[left_node * TETRAHEDRON10_NODE_DOF_COUNT + axis]
+                        [right_node * TETRAHEDRON10_NODE_DOF_COUNT + axis] += value;
+                }
+            }
+        }
+    }
+    Ok(mass)
+}
+
+fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
+    let mut values = [0.0; TETRAHEDRON10_ELEMENT_NODE_COUNT];
+    for node in 0..4 {
+        values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
+    }
+    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
+        values[4 + local_edge] = 4.0 * barycentric[left] * barycentric[right];
+    }
+    values
 }
 
 fn physical_shape_gradients(
@@ -247,6 +376,7 @@ mod tests {
         SolidMaterial {
             youngs_modulus_pa: 200.0e9,
             poisson_ratio: 0.3,
+            density_kg_per_m3: 7_850.0,
         }
     }
 

@@ -5,6 +5,7 @@ mod reduced_rhs;
 mod solid_matrix;
 pub mod solver_solid;
 mod solver_solid_boundary;
+mod solver_solid_mass;
 mod structural_inputs;
 
 use std::{collections::BTreeMap, fmt};
@@ -35,6 +36,7 @@ use self::{
         assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
     },
     solver_solid_boundary::apply_solver_mesh_structural_loads,
+    solver_solid_mass::assemble_solver_solid_mass,
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_constraint_kind_name,
@@ -82,6 +84,8 @@ pub struct AssemblySummary {
     pub structural_shell_element_count: usize,
     #[serde(default)]
     pub structural_solid_element_count: usize,
+    #[serde(default)]
+    pub structural_solid_total_mass_kg: f64,
     #[serde(default)]
     pub structural_solid_recovery: Vec<SolidRecoveryElementSummary>,
     #[serde(default)]
@@ -747,11 +751,13 @@ fn assemble_linear_system_impl(
     let mut stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
     let mut mass_diag = vec![0.0; dof_count];
     let mut damping_diag = vec![0.0; dof_count];
-    for i in 0..mesh_dof_count {
-        let factor = 1.0 + (i as f64) * 0.05;
-        stiffness_diag[i] = stiffness_base * factor;
-        mass_diag[i] = 1.0 + (i as f64) * 0.01;
-        damping_diag[i] = 0.05 * factor;
+    if solid_topology.is_none() {
+        for i in 0..mesh_dof_count {
+            let factor = 1.0 + (i as f64) * 0.05;
+            stiffness_diag[i] = stiffness_base * factor;
+            mass_diag[i] = 1.0 + (i as f64) * 0.01;
+            damping_diag[i] = 0.05 * factor;
+        }
     }
 
     let mut rhs = vec![0.0; dof_count];
@@ -994,22 +1000,45 @@ fn assemble_linear_system_impl(
         });
     }
 
+    let default_solid_material = (model.materials.len() == 1).then_some(SolidMaterial {
+        youngs_modulus_pa: structural_material.youngs_modulus_pa,
+        poisson_ratio: structural_material.poisson_ratio,
+        density_kg_per_m3: structural_material.density_kg_per_m3,
+    });
+    let solid_materials_by_region = solid_materials_by_region(model);
     let mut stiffness_csr = match solver_mesh.as_ref() {
         Some(mesh) => Some(
             assemble_solver_solid_stiffness_csr(
                 mesh,
-                (model.materials.len() == 1).then_some(SolidMaterial {
-                    youngs_modulus_pa: structural_material.youngs_modulus_pa,
-                    poisson_ratio: structural_material.poisson_ratio,
-                }),
-                &solid_materials_by_region(model),
+                default_solid_material,
+                &solid_materials_by_region,
                 base_dof_count,
             )
             .map_err(LinearAssemblyError::SolidStiffness)?,
         ),
         None => None,
     };
+    let mut structural_solid_total_mass_kg = 0.0;
+    let mut mass_csr = match solver_mesh.as_ref() {
+        Some(mesh) => {
+            let assembled = assemble_solver_solid_mass(
+                mesh,
+                default_solid_material,
+                &solid_materials_by_region,
+                base_dof_count,
+            )
+            .map_err(LinearAssemblyError::SolidStiffness)?;
+            structural_solid_total_mass_kg = assembled.total_mass_kg;
+            mass_diag[..mesh_dof_count].copy_from_slice(&assembled.lumped_diag[..mesh_dof_count]);
+            Some(assembled.consistent)
+        }
+        None => None,
+    };
     if let Some(csr) = stiffness_csr.as_mut() {
+        let terminal_offset = csr.row_offsets.last().copied().unwrap_or(0);
+        csr.row_offsets.resize(dof_count + 1, terminal_offset);
+    }
+    if let Some(csr) = mass_csr.as_mut() {
         let terminal_offset = csr.row_offsets.last().copied().unwrap_or(0);
         csr.row_offsets.resize(dof_count + 1, terminal_offset);
     }
@@ -1060,6 +1089,7 @@ fn assemble_linear_system_impl(
             .as_ref()
             .map(|topology| topology.volume_element_count)
             .unwrap_or(0),
+        structural_solid_total_mass_kg,
         structural_solid_recovery,
         structural_dof_layout,
         structural_beam_recovery: Vec::new(),
@@ -1130,6 +1160,7 @@ fn assemble_linear_system_impl(
             stiffness_csr,
             stiffness_diag,
             stiffness_upper,
+            mass_csr,
             mass_diag,
             damping_diag,
             rhs,
@@ -1652,6 +1683,7 @@ fn assemble_explicit_structural_system(
         structural_beam_element_count: beam_elements.len(),
         structural_shell_element_count: shell_elements.len(),
         structural_solid_element_count: 0,
+        structural_solid_total_mass_kg: 0.0,
         structural_solid_recovery: Vec::new(),
         structural_dof_layout,
         structural_beam_recovery,
@@ -1679,6 +1711,7 @@ fn assemble_explicit_structural_system(
             stiffness_csr: None,
             stiffness_diag,
             stiffness_upper,
+            mass_csr: None,
             mass_diag,
             damping_diag,
             rhs,
@@ -1739,6 +1772,7 @@ fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMat
                 SolidMaterial {
                     youngs_modulus_pa: material.mechanical.youngs_modulus_pa.max(1.0),
                     poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
+                    density_kg_per_m3: material.mechanical.density_kg_per_m3.max(1.0e-12),
                 },
             )
         })
@@ -2433,6 +2467,18 @@ mod tests {
             ]
         );
         assert!(summary.operator.stiffness_dense.is_none());
+        let expected_mass_kg = model.materials[0].mechanical.density_kg_per_m3 / 6.0;
+        assert!(
+            (summary.structural_solid_total_mass_kg - expected_mass_kg).abs()
+                <= expected_mass_kg * 1.0e-12
+        );
+        assert!(summary.operator.mass_csr.is_some());
+        assert!(summary.operator.mass_diag.iter().all(|mass| *mass > 0.0));
+        assert!(summary
+            .operator
+            .damping_diag
+            .iter()
+            .all(|damping| *damping == 0.0));
         let csr = summary
             .operator
             .stiffness_csr

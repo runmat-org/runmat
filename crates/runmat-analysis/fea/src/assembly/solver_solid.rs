@@ -40,6 +40,11 @@ pub enum SolverSolidAssemblyError {
         element_id: u64,
         message: String,
     },
+    ElementMass {
+        element_id: u64,
+        message: String,
+    },
+    InvalidMassOperator,
 }
 
 pub fn solver_solid_topology(
@@ -116,9 +121,9 @@ pub fn assemble_solver_solid_stiffness_csr(
     Ok(rows_to_csr(rows))
 }
 
-type NodeIndex = BTreeMap<u64, ([f64; 3], usize)>;
+pub(super) type NodeIndex = BTreeMap<u64, ([f64; 3], usize)>;
 
-fn element_geometry<const N: usize>(
+pub(super) fn element_geometry<const N: usize>(
     element_id: u64,
     node_ids: &[u64],
     nodes: &NodeIndex,

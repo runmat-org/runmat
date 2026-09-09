@@ -1,5 +1,6 @@
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
+    StructuralOperatorImplementation,
 };
 
 use crate::{
@@ -431,6 +432,14 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
     let has_solid_stiffness = (summary.operator.stiffness_csr.is_some()
         || summary.operator.stiffness_dense.is_some())
         && summary.structural_solid_element_count > 0;
+    let has_solid_mass = summary.operator.mass_csr.is_some()
+        && summary.structural_solid_total_mass_kg.is_finite()
+        && summary.structural_solid_total_mass_kg > 0.0;
+    let basis = match summary.structural_formulation.map(|value| value.operator) {
+        Some(StructuralOperatorImplementation::Tet4LinearElasticity) => "tet4_linear_elasticity",
+        Some(StructuralOperatorImplementation::Tet10LinearElasticity) => "tet10_linear_elasticity",
+        _ => "non_solid",
+    };
     let storage = if summary.operator.stiffness_csr.is_some() {
         "sparse_csr"
     } else if summary.operator.stiffness_dense.is_some() {
@@ -441,21 +450,25 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
 
     Some(FeaDiagnostic {
         code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
-        severity: if has_solid_stiffness {
+        severity: if has_solid_stiffness && has_solid_mass {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "basis=solid_tetrahedron4_stiffness storage={} solid_node_count={} solid_element_count={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={}",
+            "basis={} stiffness_storage={} mass_storage={} solid_node_count={} solid_element_count={} solid_total_mass_kg={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={} mass_present={}",
+            basis,
             storage,
+            if summary.operator.mass_csr.is_some() { "sparse_csr" } else { "none" },
             summary.structural_node_count,
             summary.structural_solid_element_count,
+            summary.structural_solid_total_mass_kg,
             summary.dof_count,
             summary.constrained_dof_count,
             stiffness_nnz,
             rhs_nonzero_count,
-            has_solid_stiffness
+            has_solid_stiffness,
+            has_solid_mass,
         ),
     })
 }
