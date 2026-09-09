@@ -103,6 +103,27 @@ impl AccelProvider for WgpuProvider {
         sparse::execute_spmv(self, request)
     }
 
+    fn prepare_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparsePreconditionerHandle> {
+        sparse::prepare_preconditioner(self, request)
+    }
+
+    fn apply_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerApplyRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::apply_preconditioner(self, request)
+    }
+
+    fn free_sparse_preconditioner(
+        &self,
+        preconditioner: &runmat_accelerate_api::SparsePreconditionerHandle,
+    ) -> Result<()> {
+        self.sparse.free_preconditioner(self, preconditioner)
+    }
+
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
         // WebGPU exposes a maximum single-buffer size, not a trustworthy total
         // device-memory budget. Keep total capacity unknown rather than

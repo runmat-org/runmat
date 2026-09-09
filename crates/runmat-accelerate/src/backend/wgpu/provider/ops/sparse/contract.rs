@@ -25,7 +25,7 @@ pub(crate) fn capabilities(provider: &WgpuProvider) -> ProviderSparseCapabilitie
         }],
         storage: vec![GpuTensorStorage::Real],
         transpose_modes: vec![SparseTranspose::None],
-        preconditioners: Vec::new(),
+        preconditioners: vec![runmat_accelerate_api::SparsePreconditionerKind::Jacobi],
         krylov_methods: Vec::new(),
         resident_krylov: false,
         max_host_synchronizations_per_solve: None,
@@ -148,13 +148,33 @@ fn estimate(
         .nnz
         .checked_mul(element_bytes)?
         .max(element_bytes);
+    let preconditioner_bytes = match query.operation {
+        SparseOperation::PreparePreconditioner(_)
+        | SparseOperation::ApplyPreconditioner(_)
+        | SparseOperation::KrylovSolve {
+            preconditioner: Some(_),
+            ..
+        } => query
+            .pattern
+            .rows
+            .checked_mul(element_bytes)?
+            .max(element_bytes),
+        _ => 0,
+    };
     let output_bytes = match query.operation {
         SparseOperation::Spmv(_) => query
             .pattern
             .rows
             .checked_mul(element_bytes)?
             .max(element_bytes),
-        SparseOperation::UploadPattern | SparseOperation::BindValues => 0,
+        SparseOperation::ApplyPreconditioner(_) => query
+            .pattern
+            .rows
+            .checked_mul(element_bytes)?
+            .max(element_bytes),
+        SparseOperation::UploadPattern
+        | SparseOperation::BindValues
+        | SparseOperation::PreparePreconditioner(_) => 0,
         _ => return None,
     };
     let binding_limit = storage_binding_limit(provider);
@@ -172,10 +192,18 @@ fn estimate(
     Some(SparseResourceEstimate {
         persistent_pattern_bytes: pattern_bytes,
         persistent_matrix_bytes: value_bytes,
-        persistent_preconditioner_bytes: 0,
+        persistent_preconditioner_bytes: preconditioner_bytes,
         workspace_bytes: 0,
         output_bytes,
-        dispatch_upper_bound: u64::from(matches!(query.operation, SparseOperation::Spmv(_))),
-        host_synchronization_upper_bound: 0,
+        dispatch_upper_bound: u64::from(matches!(
+            query.operation,
+            SparseOperation::Spmv(_)
+                | SparseOperation::PreparePreconditioner(_)
+                | SparseOperation::ApplyPreconditioner(_)
+        )),
+        host_synchronization_upper_bound: u32::from(matches!(
+            query.operation,
+            SparseOperation::PreparePreconditioner(_)
+        )),
     })
 }

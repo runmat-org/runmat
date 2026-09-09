@@ -3,6 +3,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostCsrPatternView, HostNumericDataOwned,
     HostNumericDataView, HostNumericTensorView, NumericElementType, ProviderRejectionCode,
     SparseFeasibility, SparseFeasibilityQuery, SparseIndexWidth, SparseOperation,
+    SparsePreconditionerApplyRequest, SparsePreconditionerKind, SparsePreconditionerRequest,
     SparseSpmvRequest, SparseTranspose,
 };
 
@@ -151,7 +152,7 @@ fn sparse_admission_is_exact_and_side_effect_free() {
         }
     ));
     let snapshot = provider.capability_snapshot();
-    assert_eq!(snapshot.revision, 2);
+    assert_eq!(snapshot.revision, 3);
     snapshot
         .sparse
         .expect("WGPU sparse capability envelope")
@@ -379,4 +380,51 @@ fn empty_sparse_matrix_preserves_zero_shape_and_physical_accounting() {
     .expect("execute empty sparse SpMV");
     assert_eq!(output.shape, vec![0]);
     assert!(download_vector(provider, &output).is_empty());
+}
+
+#[test]
+fn sparse_jacobi_is_prepared_and_applied_on_device() {
+    let Some(session) = test_session() else {
+        return;
+    };
+    let provider = session.provider();
+    let pattern = upload_pattern(provider);
+    let matrix = bind_matrix(provider, &pattern);
+    let before_preconditioner = provider.sparse.resident_bytes();
+    let preconditioner = block_on(provider.prepare_sparse_preconditioner(
+        &SparsePreconditionerRequest {
+            matrix: &matrix,
+            kind: SparsePreconditionerKind::Jacobi,
+        },
+    ))
+    .expect("prepare a resident Jacobi preconditioner");
+    assert_eq!(
+        provider.sparse.resident_bytes(),
+        before_preconditioner + 2 * provider.element_size as u64
+    );
+
+    let input = upload_vector(provider, [8.0, 9.0]);
+    let output = block_on(provider.apply_sparse_preconditioner(
+        &SparsePreconditionerApplyRequest {
+            preconditioner: &preconditioner,
+            input: &input,
+        },
+    ))
+    .expect("apply resident Jacobi preconditioner");
+    let values = download_vector(provider, &output);
+    assert!((values[0] - 2.0).abs() < 1.0e-5);
+    assert!((values[1] - 3.0).abs() < 1.0e-5);
+
+    provider.free(&output).expect("release Jacobi output");
+    provider.free(&input).expect("release Jacobi input");
+    provider
+        .free_sparse_preconditioner(&preconditioner)
+        .expect("release Jacobi preconditioner");
+    provider
+        .free_sparse_matrix(&matrix)
+        .expect("release sparse matrix");
+    provider
+        .free_sparse_pattern(&pattern)
+        .expect("release sparse pattern");
+    assert_eq!(provider.sparse.resident_bytes(), 0);
 }
