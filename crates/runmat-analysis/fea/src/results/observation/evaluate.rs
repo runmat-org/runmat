@@ -1,4 +1,7 @@
-use runmat_analysis_core::{AnalysisField, FieldLocation, ObservationValueShape, SpatialReduction};
+use runmat_analysis_core::{
+    AnalysisField, FieldLocation, ObservationId, ObservationValueShape, SamplingPolicy,
+    SpatialReduction,
+};
 use runmat_execution::Digest;
 
 use crate::{
@@ -13,6 +16,7 @@ use super::contract::{
     ObservationResultIdentity, ResolvedComponentProjection, ResolvedObservation,
     ResolvedObservationPlan, ResolvedObservationTarget,
 };
+use super::history::{sample_matches_domain, sample_matches_policy};
 
 pub fn evaluate_observations(
     plan: &ResolvedObservationPlan,
@@ -31,38 +35,102 @@ pub fn evaluate_observations(
         ));
     }
     validate_plan_targets(plan, projection)?;
+    if plan
+        .observations
+        .iter()
+        .any(|observation| observation.spec.sampling != SamplingPolicy::Final)
+    {
+        return Err(ObservationError::Unsupported(
+            "sampled observations require bounded history evaluation",
+        ));
+    }
     plan.observations
         .iter()
         .map(|observation| {
-            let source = fields
-                .get(
-                    observation.source_field_definition_identity,
-                    RecoveredFieldSample::Final,
-                )
-                .ok_or_else(|| ObservationError::Field {
-                    observation_id: observation.spec.observation_id.0.clone(),
-                    reason: "resolved source field was not supplied".into(),
-                })?;
-            if source.definition().quantity() != observation.spec.quantity
-                || source.definition().location() != observation.spec.source_location
-                || source.definition().value_shape() != &observation.spec.value_shape
-            {
-                return Err(ObservationError::Field {
-                    observation_id: observation.spec.observation_id.0.clone(),
-                    reason: "supplied field declaration differs from the resolved plan".into(),
-                });
-            }
-            if source.sample() != RecoveredFieldSample::Final
-                || source.definition().numeric_representation()
-                    != RecoveredFieldNumericRepresentation::Real
-            {
-                return Err(ObservationError::Unsupported(
-                    "this serial evaluator requires one final real recovered field",
-                ));
-            }
-            evaluate_one(plan, observation, source.storage(), projection)
+            evaluate_sample(
+                plan,
+                observation,
+                projection,
+                fields,
+                RecoveredFieldSample::Final,
+            )
         })
         .collect()
+}
+
+pub fn evaluate_observation_sample(
+    plan: &ResolvedObservationPlan,
+    observation_id: &ObservationId,
+    projection: &AnalysisProjection,
+    fields: &RecoveredFieldCatalog,
+    sample: RecoveredFieldSample,
+) -> Result<ObservationResult, ObservationError> {
+    plan.validate_identity()?;
+    if plan.topology_digest != projection.projection_digest
+        || fields.topology_digest() != projection.projection_digest
+    {
+        return Err(ObservationError::Identity(
+            "sampled observation inputs name different topology projections",
+        ));
+    }
+    validate_plan_targets(plan, projection)?;
+    let observation = plan
+        .observations
+        .iter()
+        .find(|observation| &observation.spec.observation_id == observation_id)
+        .ok_or_else(|| {
+            ObservationError::Invalid(
+                "sampled observation identifier is absent from its resolved plan".into(),
+            )
+        })?;
+    if observation.spec.sampling == SamplingPolicy::Final {
+        return Err(ObservationError::Invalid(
+            "a final-only observation cannot be appended to a history".into(),
+        ));
+    }
+    if !sample_matches_policy(&observation.spec.sampling, sample)? {
+        return Err(ObservationError::Invalid(
+            "sample coordinate differs from the resolved observation schedule".into(),
+        ));
+    }
+    if !sample_matches_domain(&plan.independent_domain, sample) {
+        return Err(ObservationError::Invalid(
+            "sample coordinate differs from the resolved independent domain".into(),
+        ));
+    }
+    evaluate_sample(plan, observation, projection, fields, sample)
+}
+
+fn evaluate_sample(
+    plan: &ResolvedObservationPlan,
+    observation: &ResolvedObservation,
+    projection: &AnalysisProjection,
+    fields: &RecoveredFieldCatalog,
+    sample: RecoveredFieldSample,
+) -> Result<ObservationResult, ObservationError> {
+    let source = fields
+        .get(observation.source_field_definition_identity, sample)
+        .ok_or_else(|| ObservationError::Field {
+            observation_id: observation.spec.observation_id.0.clone(),
+            reason: "resolved source field sample was not supplied".into(),
+        })?;
+    if source.definition().quantity() != observation.spec.quantity
+        || source.definition().location() != observation.spec.source_location
+        || source.definition().value_shape() != &observation.spec.value_shape
+    {
+        return Err(ObservationError::Field {
+            observation_id: observation.spec.observation_id.0.clone(),
+            reason: "supplied field declaration differs from the resolved plan".into(),
+        });
+    }
+    if source.sample() != sample
+        || source.definition().numeric_representation() != RecoveredFieldNumericRepresentation::Real
+    {
+        return Err(ObservationError::Unsupported(
+            "this serial evaluator requires a matching real recovered-field sample",
+        ));
+    }
+    evaluate_one(plan, observation, source.storage(), projection)
 }
 
 fn validate_plan_targets(

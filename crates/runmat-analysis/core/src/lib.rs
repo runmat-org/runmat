@@ -35,6 +35,7 @@ mod validate_signals;
 
 pub use validate_authored::validate_coordinate_frame;
 pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::{observation_sampling_matches_domain, validate_observation_sampling};
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};

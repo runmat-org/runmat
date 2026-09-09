@@ -2,6 +2,8 @@ mod monitor;
 mod sampling;
 pub(crate) mod spec;
 
+pub use sampling::observation_sampling_matches_domain;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -38,6 +40,24 @@ pub(crate) fn validate_outputs(
         }
     }
     monitor::validate_monitors(step, &ordinary)
+}
+
+pub fn validate_observation_sampling(
+    step: &ProcedureStep,
+    request: &ObservationRequest,
+) -> Result<(), AnalysisValidationError> {
+    match request {
+        ObservationRequest::Field(spec)
+        | ObservationRequest::History(spec)
+        | ObservationRequest::Probe(spec)
+        | ObservationRequest::Reduction(spec) => {
+            sampling::validate_sampling(step, request, &spec.sampling)
+        }
+        ObservationRequest::Diagnostic(spec) => {
+            sampling::validate_sampling(step, request, &spec.sampling)
+        }
+        ObservationRequest::Monitor(_) => Ok(()),
+    }
 }
 
 pub(super) fn observation_error<T>(

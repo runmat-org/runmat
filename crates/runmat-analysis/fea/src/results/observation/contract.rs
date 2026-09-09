@@ -1,6 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisField, FieldLocation, ObservationCostEstimate, ObservationId, ObservationQuantity,
-    ObservationSpec, ObservationValueShape, PartialAccessPolicy, ProcedureStepId,
+    AnalysisField, FieldLocation, IndependentDomain, ObservationCostEstimate, ObservationId,
+    ObservationQuantity, ObservationSpec, ObservationValueShape, PartialAccessPolicy,
+    ProcedureStepId, SamplingPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -118,7 +119,15 @@ pub struct ResolvedObservation {
     pub target: ResolvedObservationTarget,
     pub component: ResolvedComponentProjection,
     pub result_component_count: usize,
+    pub sample_bounds: ObservationSampleBounds,
     pub resolved_cost: ObservationCostEstimate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservationSampleBounds {
+    pub maximum_produced_samples: usize,
+    pub maximum_retained_samples: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -136,6 +145,7 @@ pub struct ResolvedObservationPlan {
     pub identity: ResolvedObservationPlanIdentity,
     pub topology_digest: Digest,
     pub step_id: ProcedureStepId,
+    pub independent_domain: IndependentDomain,
     pub observations: Vec<ResolvedObservation>,
 }
 
@@ -150,6 +160,7 @@ impl ResolvedObservationPlan {
                 self.schema_version,
                 self.topology_digest,
                 &self.step_id,
+                &self.independent_domain,
                 &self.observations,
             ),
             OBSERVATION_LIMITS,
@@ -168,6 +179,14 @@ impl ResolvedObservationPlan {
             if !observation_ids.insert(observation.spec.observation_id.0.as_str()) {
                 return Err(ObservationError::Invalid(
                     "resolved observation identifiers must be unique".into(),
+                ));
+            }
+            if !runmat_analysis_core::observation_sampling_matches_domain(
+                &self.independent_domain,
+                &observation.spec.sampling,
+            ) {
+                return Err(ObservationError::Invalid(
+                    "resolved observation sampling differs from the step domain".into(),
                 ));
             }
             validate_resolved_observation(observation)?;
@@ -203,6 +222,7 @@ struct ResolvedObservationPlanWire {
     identity: ResolvedObservationPlanIdentity,
     topology_digest: Digest,
     step_id: ProcedureStepId,
+    independent_domain: IndependentDomain,
     observations: Vec<ResolvedObservation>,
 }
 
@@ -215,6 +235,7 @@ impl TryFrom<ResolvedObservationPlanWire> for ResolvedObservationPlan {
             identity: wire.identity,
             topology_digest: wire.topology_digest,
             step_id: wire.step_id,
+            independent_domain: wire.independent_domain,
             observations: wire.observations,
         };
         plan.validate_identity()?;
@@ -732,6 +753,32 @@ fn derive_artifact_identity(
 fn validate_resolved_observation(
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
+    if observation.sample_bounds.maximum_produced_samples == 0
+        || observation.sample_bounds.maximum_retained_samples == 0
+        || observation.sample_bounds.maximum_retained_samples
+            > observation.sample_bounds.maximum_produced_samples
+    {
+        return Err(ObservationError::Invalid(
+            "resolved observation sample bounds are invalid".into(),
+        ));
+    }
+    let expected_sample_bounds = if observation.spec.sampling == SamplingPolicy::Final {
+        ObservationSampleBounds {
+            maximum_produced_samples: 1,
+            maximum_retained_samples: 1,
+        }
+    } else {
+        super::history::resolve_history_sample_bounds(
+            &observation.spec.sampling,
+            &observation.spec.storage.retention,
+            observation.sample_bounds.maximum_produced_samples,
+        )?
+    };
+    if observation.sample_bounds != expected_sample_bounds {
+        return Err(ObservationError::Identity(
+            "resolved observation sample bounds do not converge",
+        ));
+    }
     if observation.result_component_count == 0 {
         return Err(ObservationError::Invalid(
             "resolved source field does not match its authored observation".into(),

@@ -6,17 +6,23 @@
 
 mod contract;
 mod evaluate;
+mod history;
 mod publish;
 mod resolve;
 
 pub use contract::{
     ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
-    ObservationLimits, ObservationResult, ObservationResultIdentity, ResolvedComponentProjection,
-    ResolvedObservation, ResolvedObservationPlan, ResolvedObservationPlanIdentity,
-    ResolvedObservationTarget,
+    ObservationLimits, ObservationResult, ObservationResultIdentity, ObservationSampleBounds,
+    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
+    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
 };
-pub use evaluate::evaluate_observations;
+pub use evaluate::{evaluate_observation_sample, evaluate_observations};
+pub use history::{
+    BoundedObservationHistory, ObservationHistory, ObservationHistoryEntry,
+    ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
+    ObservationHistorySampleIdentity,
+};
 pub use publish::publish_observation;
 pub use resolve::resolve_observation_plan;
 

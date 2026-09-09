@@ -12,9 +12,10 @@ use crate::{results::field::RecoveredFieldDefinition, topology::AnalysisProjecti
 
 use super::contract::{
     checked_bytes, shape_component_count, ObservationError, ObservationLimits,
-    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
+    ObservationSampleBounds, ResolvedComponentProjection, ResolvedObservation,
+    ResolvedObservationPlan, ResolvedObservationPlanIdentity, ResolvedObservationTarget,
 };
+use super::history::resolve_history_sample_bounds;
 
 pub fn resolve_observation_plan(
     step: &ProcedureStep,
@@ -36,6 +37,7 @@ pub fn resolve_observation_plan(
         identity: ResolvedObservationPlanIdentity(Digest::sha256([])),
         topology_digest: projection.projection_digest,
         step_id: step.step_id.clone(),
+        independent_domain: step.independent_domain.clone(),
         observations,
     };
     plan.identity = plan.derive_identity()?;
@@ -71,15 +73,13 @@ fn resolve_request(
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservation, ObservationError> {
+    runmat_analysis_core::validate_observation_sampling(step, request)
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
     let spec = match request {
         ObservationRequest::Field(spec)
+        | ObservationRequest::History(spec)
         | ObservationRequest::Probe(spec)
         | ObservationRequest::Reduction(spec) => spec,
-        ObservationRequest::History(_) => {
-            return Err(ObservationError::Unsupported(
-                "history evaluation requires a sampled state series",
-            ));
-        }
         ObservationRequest::Diagnostic(_) | ObservationRequest::Monitor(_) => {
             return Err(ObservationError::Unsupported(
                 "diagnostics and monitors are evaluated by their owning pipeline",
@@ -106,7 +106,10 @@ fn resolve_request(
         return Err(ObservationError::Limit("selected topology entities"));
     }
     let value_count = match request {
-        ObservationRequest::Reduction(_) => result_component_count,
+        ObservationRequest::Reduction(_)
+        | ObservationRequest::History(ObservationSpec {
+            reduction: Some(_), ..
+        }) => result_component_count,
         _ => selected
             .checked_mul(result_component_count)
             .ok_or(ObservationError::Limit("observation value count"))?,
@@ -114,25 +117,51 @@ fn resolve_request(
     if value_count > limits.maximum_values {
         return Err(ObservationError::Limit("observation value count"));
     }
+    let sample_bounds = match request {
+        ObservationRequest::History(_) => resolve_history_sample_bounds(
+            &spec.sampling,
+            &spec.storage.retention,
+            step.accuracy.resources.maximum_samples,
+        )?,
+        _ => ObservationSampleBounds {
+            maximum_produced_samples: 1,
+            maximum_retained_samples: 1,
+        },
+    };
+    let retained_sample_count = u64::try_from(sample_bounds.maximum_retained_samples)
+        .map_err(|_| ObservationError::Limit("observation retained sample count"))?;
+    let result_component_count_u64 = u64::try_from(result_component_count)
+        .map_err(|_| ObservationError::Limit("observation result component count"))?;
     let work_entities = integration_work(&target, projection)?;
     let operation_count = u64::try_from(work_entities)
         .ok()
-        .and_then(|value| value.checked_mul(result_component_count as u64))
+        .and_then(|value| value.checked_mul(result_component_count_u64))
         .and_then(|value| value.checked_mul(operation_multiplier(request, spec)))
+        .and_then(|value| {
+            value.checked_mul(u64::try_from(sample_bounds.maximum_produced_samples).ok()?)
+        })
         .ok_or(ObservationError::Limit("observation operation count"))?;
     let value_bytes = checked_bytes(value_count)?;
+    let retained_value_bytes = value_bytes
+        .checked_mul(retained_sample_count)
+        .ok_or(ObservationError::Limit("observation retained value bytes"))?;
     let source_work_bytes = checked_bytes(
         work_entities
             .checked_mul(shape_component_count(source_field.value_shape())?)
             .ok_or(ObservationError::Limit("observation working-set values"))?,
     )?;
-    let stored_bytes = value_bytes
-        .checked_add(16 * 1024)
+    let stored_bytes = retained_value_bytes
+        .checked_add(
+            16_u64
+                .checked_mul(1024)
+                .and_then(|overhead| overhead.checked_mul(retained_sample_count))
+                .ok_or(ObservationError::Limit("observation storage overhead"))?,
+        )
         .ok_or(ObservationError::Limit("observation storage overhead"))?;
     let resolved_cost = ObservationCostEstimate {
         operation_count,
         peak_resident_bytes: source_work_bytes
-            .checked_add(value_bytes)
+            .checked_add(retained_value_bytes)
             .ok_or(ObservationError::Limit("observation working set"))?,
         stored_bytes,
         transfer_bytes: stored_bytes,
@@ -145,6 +174,7 @@ fn resolve_request(
         target,
         component,
         result_component_count,
+        sample_bounds,
         resolved_cost,
     })
 }
@@ -173,10 +203,22 @@ fn validate_supported_spec(
             "this serial evaluator currently publishes real f64 observations",
         ));
     }
-    if spec.sampling != SamplingPolicy::Final {
-        return Err(ObservationError::Unsupported(
-            "this evaluator requires one final solver state",
-        ));
+    match request {
+        ObservationRequest::History(_) if spec.sampling == SamplingPolicy::Final => {
+            return Err(ObservationError::Invalid(
+                "history requests require a sampled series rather than one final state".into(),
+            ));
+        }
+        ObservationRequest::Field(_)
+        | ObservationRequest::Probe(_)
+        | ObservationRequest::Reduction(_)
+            if spec.sampling != SamplingPolicy::Final =>
+        {
+            return Err(ObservationError::Unsupported(
+                "sampled field, probe, and reduction series require a history request",
+            ));
+        }
+        _ => {}
     }
     if !matches!(
         spec.storage.compression,
@@ -225,10 +267,12 @@ fn validate_supported_spec(
             "probe requests cannot apply reductions".into(),
         )),
         ObservationRequest::Reduction(_)
-            if spec
-                .reduction
-                .as_ref()
-                .is_none_or(|reduction| reduction.spatial == SpatialReduction::None) =>
+        | ObservationRequest::History(ObservationSpec {
+            reduction: Some(_), ..
+        }) if spec
+            .reduction
+            .as_ref()
+            .is_none_or(|reduction| reduction.spatial == SpatialReduction::None) =>
         {
             Err(ObservationError::Invalid(
                 "reduction requests require a spatial reduction".into(),
@@ -274,6 +318,15 @@ fn resolve_target(
         ObservationRequest::Probe(_) => resolve_probe(spec, projection),
         ObservationRequest::Reduction(_) => resolve_reduction_target(spec, projection),
         ObservationRequest::Field(_) => resolve_field_target(spec, projection),
+        ObservationRequest::History(_) if spec.reduction.is_some() => {
+            resolve_reduction_target(spec, projection)
+        }
+        ObservationRequest::History(_)
+            if matches!(spec.target, ObservationTarget::Point { .. }) =>
+        {
+            resolve_probe(spec, projection)
+        }
+        ObservationRequest::History(_) => resolve_field_target(spec, projection),
         _ => Err(ObservationError::Unsupported(
             "unsupported observation request",
         )),
@@ -595,13 +648,14 @@ fn integration_work(
 
 fn operation_multiplier(request: &ObservationRequest, spec: &ObservationSpec) -> u64 {
     match request {
-        ObservationRequest::Reduction(_) => {
-            match spec.reduction.as_ref().map(|reduction| reduction.spatial) {
-                Some(SpatialReduction::RootMeanSquare) => 12,
-                Some(SpatialReduction::Integral | SpatialReduction::Average) => 8,
-                _ => 3,
-            }
-        }
+        ObservationRequest::Reduction(_)
+        | ObservationRequest::History(ObservationSpec {
+            reduction: Some(_), ..
+        }) => match spec.reduction.as_ref().map(|reduction| reduction.spatial) {
+            Some(SpatialReduction::RootMeanSquare) => 12,
+            Some(SpatialReduction::Integral | SpatialReduction::Average) => 8,
+            _ => 3,
+        },
         _ => 2,
     }
 }

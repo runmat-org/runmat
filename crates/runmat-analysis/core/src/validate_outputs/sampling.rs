@@ -13,76 +13,34 @@ pub(super) fn validate_sampling(
 ) -> Result<(), AnalysisValidationError> {
     let invalid = match sampling {
         SamplingPolicy::Final => false,
-        SamplingPolicy::EveryAcceptedIncrement => matches!(
-            step.procedure,
-            AnalysisProcedure::Static
-                | AnalysisProcedure::ModalExtraction
-                | AnalysisProcedure::PrestressedModalExtraction
-                | AnalysisProcedure::EigenvalueBuckling
-        ),
-        SamplingPolicy::TimeSeconds(values) => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::TimeSeconds { .. }
-            ) || !strictly_increasing_finite(values, true)
+        SamplingPolicy::EveryAcceptedIncrement => {
+            matches!(
+                step.procedure,
+                AnalysisProcedure::Static
+                    | AnalysisProcedure::ModalExtraction
+                    | AnalysisProcedure::PrestressedModalExtraction
+                    | AnalysisProcedure::EigenvalueBuckling
+            ) || !observation_sampling_matches_domain(&step.independent_domain, sampling)
         }
-        SamplingPolicy::TimeIntervalSeconds {
-            start,
-            end,
-            interval,
-        } => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::TimeSeconds { .. }
-            ) || !valid_interval(*start, *end, *interval, true)
+        SamplingPolicy::TimeSeconds(_)
+        | SamplingPolicy::TimeIntervalSeconds { .. }
+        | SamplingPolicy::FrequencyHertz(_)
+        | SamplingPolicy::FrequencyIntervalHertz { .. }
+        | SamplingPolicy::LoadFactors(_)
+        | SamplingPolicy::LoadFactorInterval { .. }
+        | SamplingPolicy::ModeIndices(_) => {
+            !observation_sampling_matches_domain(&step.independent_domain, sampling)
         }
-        SamplingPolicy::FrequencyHertz(values) => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::FrequencyHertz(_)
-            ) || !strictly_increasing_finite(values, true)
+        SamplingPolicy::Event(_) => {
+            !observation_sampling_matches_domain(&step.independent_domain, sampling)
         }
-        SamplingPolicy::FrequencyIntervalHertz {
-            start,
-            end,
-            interval,
-        } => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::FrequencyHertz(_)
-            ) || !valid_interval(*start, *end, *interval, true)
-        }
-        SamplingPolicy::LoadFactors(values) => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::LoadFactor { .. }
-            ) || !strictly_increasing_finite(values, false)
-        }
-        SamplingPolicy::LoadFactorInterval {
-            start,
-            end,
-            interval,
-        } => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::LoadFactor { .. }
-            ) || !valid_interval(*start, *end, *interval, false)
-        }
-        SamplingPolicy::ModeIndices(values) => {
-            !matches!(
-                &step.independent_domain,
-                IndependentDomain::Eigenvalue { .. }
-            ) || values.is_empty()
-                || values.contains(&0)
-                || values.windows(2).any(|pair| pair[0] >= pair[1])
-        }
-        SamplingPolicy::Event(_) => matches!(&step.independent_domain, IndependentDomain::Static),
         SamplingPolicy::Adaptive {
             minimum_interval,
             maximum_samples,
             relative_change,
         } => {
-            !minimum_interval.is_finite()
+            !observation_sampling_matches_domain(&step.independent_domain, sampling)
+                || !minimum_interval.is_finite()
                 || *minimum_interval <= 0.0
                 || *maximum_samples == 0
                 || !relative_change.is_finite()
@@ -96,6 +54,87 @@ pub(super) fn validate_sampling(
         )
     } else {
         Ok(())
+    }
+}
+
+pub fn observation_sampling_matches_domain(
+    domain: &IndependentDomain,
+    sampling: &SamplingPolicy,
+) -> bool {
+    match (domain, sampling) {
+        (_, SamplingPolicy::Final) => true,
+        (
+            IndependentDomain::TimeSeconds { .. }
+            | IndependentDomain::FrequencyHertz(_)
+            | IndependentDomain::LoadFactor { .. },
+            SamplingPolicy::EveryAcceptedIncrement | SamplingPolicy::Adaptive { .. },
+        ) => true,
+        (domain, SamplingPolicy::Event(_)) => !matches!(domain, IndependentDomain::Static),
+        (
+            IndependentDomain::TimeSeconds { start, end, .. },
+            SamplingPolicy::TimeSeconds(values),
+        ) => {
+            strictly_increasing_finite(values, true)
+                && values.first().is_some_and(|value| value >= start)
+                && values.last().is_some_and(|value| value <= end)
+        }
+        (
+            IndependentDomain::TimeSeconds { .. },
+            SamplingPolicy::TimeIntervalSeconds {
+                start,
+                end,
+                interval,
+            },
+        ) => {
+            valid_interval(*start, *end, *interval, true)
+                && interval_within_domain(domain, *start, *end)
+        }
+        (
+            IndependentDomain::FrequencyHertz(domain_values),
+            SamplingPolicy::FrequencyHertz(values),
+        ) => {
+            strictly_increasing_finite(values, true)
+                && values.iter().all(|value| domain_values.contains(value))
+        }
+        (
+            IndependentDomain::FrequencyHertz(_),
+            SamplingPolicy::FrequencyIntervalHertz {
+                start,
+                end,
+                interval,
+            },
+        ) => {
+            valid_interval(*start, *end, *interval, true)
+                && interval_within_domain(domain, *start, *end)
+        }
+        (IndependentDomain::LoadFactor { .. }, SamplingPolicy::LoadFactors(values)) => {
+            strictly_increasing_finite(values, false)
+                && values
+                    .first()
+                    .zip(values.last())
+                    .is_some_and(|(first, last)| interval_within_domain(domain, *first, *last))
+        }
+        (
+            IndependentDomain::LoadFactor { .. },
+            SamplingPolicy::LoadFactorInterval {
+                start,
+                end,
+                interval,
+            },
+        ) => {
+            valid_interval(*start, *end, *interval, false)
+                && interval_within_domain(domain, *start, *end)
+        }
+        (
+            IndependentDomain::Eigenvalue { requested_count },
+            SamplingPolicy::ModeIndices(values),
+        ) => {
+            !values.is_empty()
+                && !values.contains(&0)
+                && values.windows(2).all(|pair| pair[0] < pair[1])
+                && values.last().is_some_and(|value| value <= requested_count)
+        }
+        _ => false,
     }
 }
 
@@ -114,6 +153,25 @@ fn valid_interval(start: f64, end: f64, interval: f64, nonnegative: bool) -> boo
         && interval > 0.0
         && end >= start
         && (!nonnegative || start >= 0.0)
+}
+
+fn interval_within_domain(domain: &IndependentDomain, start: f64, end: f64) -> bool {
+    match domain {
+        IndependentDomain::TimeSeconds {
+            start: domain_start,
+            end: domain_end,
+            ..
+        }
+        | IndependentDomain::LoadFactor {
+            start: domain_start,
+            end: domain_end,
+        } => start >= *domain_start && end <= *domain_end,
+        IndependentDomain::FrequencyHertz(values) => values
+            .first()
+            .zip(values.last())
+            .is_some_and(|(domain_start, domain_end)| start >= *domain_start && end <= *domain_end),
+        _ => false,
+    }
 }
 
 pub(super) fn validate_reduction(
@@ -206,7 +264,9 @@ pub(super) fn validate_retention(
 
 #[cfg(test)]
 mod tests {
-    use super::valid_interval;
+    use crate::{IndependentDomain, SamplingPolicy};
+
+    use super::{observation_sampling_matches_domain, valid_interval};
 
     #[test]
     fn intervals_require_finite_ordered_positive_bounds() {
@@ -216,5 +276,27 @@ mod tests {
         assert!(!valid_interval(1.0, 0.0, 0.1, false));
         assert!(!valid_interval(0.0, 1.0, 0.0, true));
         assert!(!valid_interval(0.0, f64::INFINITY, 0.1, true));
+    }
+
+    #[test]
+    fn explicit_samples_must_remain_inside_the_independent_domain() {
+        let time = IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 1.0,
+        };
+        assert!(observation_sampling_matches_domain(
+            &time,
+            &SamplingPolicy::TimeSeconds(vec![0.0, 0.5, 1.0]),
+        ));
+        assert!(!observation_sampling_matches_domain(
+            &time,
+            &SamplingPolicy::TimeSeconds(vec![0.0, 1.5]),
+        ));
+        let modes = IndependentDomain::Eigenvalue { requested_count: 3 };
+        assert!(!observation_sampling_matches_domain(
+            &modes,
+            &SamplingPolicy::ModeIndices(vec![1, 4]),
+        ));
     }
 }

@@ -5,6 +5,7 @@ mod callable;
 mod error;
 mod field_recovery;
 mod graph;
+mod history_access;
 mod host;
 mod materialized_signal;
 mod object;
@@ -38,6 +39,11 @@ pub use field_recovery::{
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
     PreparedAnalysisStepTask,
+};
+pub use history_access::{
+    import_observation_history, import_observation_history_sample,
+    prepare_observation_history_objects, ImportedObservationHistory,
+    ImportedObservationHistoryStorage, ObservationHistoryImport,
 };
 pub use host::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, AnalysisHostWorkload,

@@ -44,13 +44,27 @@ fn catalog(
     shape: Vec<usize>,
     values: Vec<f64>,
 ) -> RecoveredFieldCatalog {
+    catalog_at_sample(
+        projection,
+        definition,
+        RecoveredFieldSample::Final,
+        shape,
+        values,
+    )
+}
+
+fn catalog_at_sample(
+    projection: &AnalysisProjection,
+    definition: &RecoveredFieldDefinition,
+    sample: RecoveredFieldSample,
+    shape: Vec<usize>,
+    values: Vec<f64>,
+) -> RecoveredFieldCatalog {
     let storage =
         runmat_analysis_core::AnalysisField::host_f64(definition.field_id(), shape, values);
     RecoveredFieldCatalog::new(
         projection,
-        vec![
-            RecoveredField::new(definition.clone(), RecoveredFieldSample::Final, storage).unwrap(),
-        ],
+        vec![RecoveredField::new(definition.clone(), sample, storage).unwrap()],
     )
     .unwrap()
 }
@@ -237,6 +251,134 @@ fn partial_access_policy_controls_chunk_shape_without_changing_result() {
 }
 
 #[test]
+fn bounded_history_retains_latest_samples_with_independent_identities() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut history = spec("temperature_history", ObservationTarget::WholeModel);
+    history.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0, 2.0]);
+    history.storage.retention = RetentionPolicy::LatestSamples { count: 2 };
+    history.cost.operation_count = 1_000_000;
+    history.cost.peak_resident_bytes = 10_000_000;
+    history.cost.stored_bytes = 10_000_000;
+    history.cost.transfer_bytes = 10_000_000;
+    let mut step = ProcedureStep::thermal_transient("thermal-history");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 2.0,
+    };
+    step.observations = vec![ObservationRequest::History(history)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("temperature_history".into());
+    let mut builder = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    let mut result_identities = Vec::new();
+    for time in [0.0, 1.0, 2.0] {
+        let sample = RecoveredFieldSample::TimeSeconds(time);
+        let fields = catalog_at_sample(&projection, &definition, sample, vec![4], vec![1.0; 4]);
+        let result =
+            evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample)
+                .unwrap();
+        result_identities.push(result.logical_identity);
+        builder.push(sample, result).unwrap();
+    }
+    let history = builder.finish().unwrap();
+    assert_eq!(history.manifest().observed_sample_count, 3);
+    assert_eq!(history.manifest().maximum_retained_samples, 2);
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        vec![
+            RecoveredFieldSample::TimeSeconds(1.0),
+            RecoveredFieldSample::TimeSeconds(2.0),
+        ]
+    );
+    assert_eq!(
+        history.samples()[0].result.logical_identity,
+        result_identities[1]
+    );
+    assert_eq!(result_identities[0], result_identities[1]);
+    assert_ne!(history.samples()[0].identity, history.samples()[1].identity);
+    let decoded_manifest = ObservationHistoryManifest::from_canonical_bytes(
+        &history.manifest().canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    let decoded_samples = history
+        .samples()
+        .iter()
+        .map(|sample| {
+            ObservationHistorySample::from_canonical_bytes(&sample.canonical_bytes().unwrap())
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        ObservationHistory::from_manifest_and_samples(decoded_manifest, decoded_samples).unwrap(),
+        history
+    );
+    let mut invalid_manifest = serde_json::to_value(history.manifest()).unwrap();
+    invalid_manifest["maximum_retained_samples"] = serde_json::json!(3);
+    assert!(serde_json::from_value::<ObservationHistoryManifest>(invalid_manifest).is_err());
+}
+
+#[test]
+fn history_bounds_and_coordinates_fail_closed_before_publication() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut unbounded = spec("unbounded", ObservationTarget::WholeModel);
+    unbounded.sampling = SamplingPolicy::EveryAcceptedIncrement;
+    unbounded.storage.retention = RetentionPolicy::Canonical;
+    let mut step = ProcedureStep::thermal_transient("unbounded-history");
+    step.observations = vec![ObservationRequest::History(unbounded)];
+    assert!(resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("cost estimate understates"));
+
+    let mut explicit = spec("explicit", ObservationTarget::WholeModel);
+    explicit.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
+    explicit.storage.retention = RetentionPolicy::ExplicitSamples { maximum_count: 1 };
+    step.observations = vec![ObservationRequest::History(explicit)];
+    assert!(resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .is_err());
+
+    let mut latest = spec("latest", ObservationTarget::WholeModel);
+    latest.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
+    latest.storage.retention = RetentionPolicy::LatestSamples { count: 1 };
+    step.observations = vec![ObservationRequest::History(latest)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("latest".into());
+    let sample = RecoveredFieldSample::TimeSeconds(0.5);
+    let fields = catalog_at_sample(&projection, &definition, sample, vec![4], vec![1.0; 4]);
+    assert!(
+        evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample).is_err()
+    );
+}
+
+#[test]
 fn invalid_and_unbounded_requests_fail_before_field_evaluation() {
     let projection = projection(ElementOrder::Tet4);
     let definition = scalar_definition();
@@ -251,7 +393,7 @@ fn invalid_and_unbounded_requests_fail_before_field_evaluation() {
     )
     .unwrap_err()
     .to_string()
-    .contains("sampled state series"));
+    .contains("sampling policy is invalid"));
 
     let step = thermal_step(vec![ObservationRequest::Field(spec(
         "too_large",

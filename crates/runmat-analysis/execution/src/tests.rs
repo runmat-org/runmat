@@ -600,6 +600,138 @@ fn semantic_partition_import_does_not_gather_unrelated_payloads() {
     .is_err());
 }
 
+#[test]
+fn observation_history_import_reads_only_the_requested_retained_sample() {
+    use runmat_analysis_fea::results::field::{
+        RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
+        RecoveredFieldNumericRepresentation, RecoveredFieldSample,
+    };
+    use runmat_analysis_fea::results::observation::{
+        evaluate_observation_sample, resolve_observation_plan, BoundedObservationHistory,
+        ObservationLimits,
+    };
+    use runmat_analysis_fea::topology::AnalysisProjection;
+    use runmat_meshing_core::ElementOrder;
+
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "displacement.history",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::FieldLocation::Node,
+        runmat_analysis_core::ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = structural_displacement_observation();
+    let spec = request.spec_mut().unwrap();
+    spec.observation_id = runmat_analysis_core::ObservationId("displacement_history".into());
+    spec.sampling = runmat_analysis_core::SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
+    spec.storage.retention = runmat_analysis_core::RetentionPolicy::Canonical;
+    let history_spec = request.spec().unwrap().clone();
+    let mut step = ProcedureStep::structural_transient("history");
+    step.observations = vec![runmat_analysis_core::ObservationRequest::History(
+        history_spec,
+    )];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = runmat_analysis_core::ObservationId("displacement_history".into());
+    let mut history = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    for time in [0.0, 1.0] {
+        let coordinate = RecoveredFieldSample::TimeSeconds(time);
+        let field = RecoveredField::new(
+            definition.clone(),
+            coordinate,
+            runmat_analysis_core::AnalysisField::host_f64(
+                definition.field_id(),
+                vec![projection.nodes.len(), 3],
+                vec![time + 1.0; projection.nodes.len() * 3],
+            ),
+        )
+        .unwrap();
+        let fields = RecoveredFieldCatalog::new(&projection, vec![field]).unwrap();
+        let result =
+            evaluate_observation_sample(&plan, &observation_id, &projection, &fields, coordinate)
+                .unwrap();
+        history.push(coordinate, result).unwrap();
+    }
+    let history = history.finish().unwrap();
+    let prepared = prepare_observation_history_objects(
+        &history,
+        32,
+        ObjectNamespace::ResultValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let root = prepared
+        .root_reference(&access(), ValueRefKind::ResultObject)
+        .unwrap();
+    let mut store = MemoryObjects::default();
+    for object in &prepared.objects {
+        store
+            .0
+            .insert(object.descriptor.digest, object.bytes.clone());
+    }
+    let imported = import_observation_history(
+        &store,
+        ObservationHistoryImport {
+            root: &root,
+            expected_identity: history.manifest().identity,
+            expected_payload_digest: prepared.manifest.payload_digest,
+            partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+            access: &access(),
+            limits: ObjectInventoryLimits::default(),
+        },
+    )
+    .unwrap();
+    let removed = history.samples()[0].identity;
+    let removed_partition = prepared
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == removed.digest())
+        .unwrap();
+    let start = removed_partition.first_chunk_ordinal as usize + 1;
+    let end = start + removed_partition.chunk_count as usize;
+    let retained_partition = prepared
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == history.samples()[1].identity.digest())
+        .unwrap();
+    let retained_start = retained_partition.first_chunk_ordinal as usize;
+    let retained_end = retained_start + retained_partition.chunk_count as usize;
+    let retained_chunks = prepared.manifest.chunks[retained_start..retained_end]
+        .iter()
+        .map(|chunk| chunk.digest)
+        .collect::<BTreeSet<_>>();
+    for object in &prepared.objects[start..end] {
+        if !retained_chunks.contains(&object.descriptor.digest) {
+            store.0.remove(&object.descriptor.digest);
+        }
+    }
+    let selected = import_observation_history_sample(
+        &store,
+        &imported,
+        RecoveredFieldSample::TimeSeconds(1.0),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(selected.coordinate, RecoveredFieldSample::TimeSeconds(1.0));
+    assert!(import_observation_history_sample(
+        &store,
+        &imported,
+        RecoveredFieldSample::TimeSeconds(0.0),
+        ObjectInventoryLimits::default(),
+    )
+    .is_err());
+}
+
 struct FieldKernel;
 
 impl AnalysisKernel for FieldKernel {
