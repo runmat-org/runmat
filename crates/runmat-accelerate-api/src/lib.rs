@@ -14,8 +14,10 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 mod placement;
+mod sparse;
 
 pub use placement::*;
+pub use sparse::*;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
@@ -1665,6 +1667,85 @@ pub trait AccelProvider: Send + Sync {
     /// without attempting allocation, compilation, transfer, or dispatch.
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         query.conservative_transfer_feasibility(self.precision())
+    }
+
+    /// Determines whether a native sparse operation can execute without allocation, transfer,
+    /// compilation, or dispatch. Providers must advertise the matching sparse capability before
+    /// returning support. The default rejects without attempting a dense or host fallback.
+    fn query_sparse_feasibility(&self, _query: &SparseFeasibilityQuery) -> SparseFeasibility {
+        SparseFeasibility::rejected(
+            ProviderRejectionCode::UnsupportedOperation,
+            "provider.sparse.unsupported",
+        )
+    }
+
+    /// Returns a side-effect-free sparse cost estimate after feasibility succeeds.
+    fn estimate_sparse_cost(&self, query: &SparseCostQuery) -> Option<ProviderCostEstimate> {
+        sparse::unsupported_sparse_cost(query)
+    }
+
+    /// Uploads one validated canonical CSR pattern into provider-owned preparation storage.
+    fn upload_sparse_pattern(
+        &self,
+        _pattern: HostCsrPatternView<'_>,
+    ) -> anyhow::Result<SparsePatternHandle> {
+        Err(anyhow!("sparse pattern upload not supported by provider"))
+    }
+
+    /// Binds a floating value revision to an already uploaded pattern.
+    fn bind_sparse_values(
+        &self,
+        _pattern: &SparsePatternHandle,
+        _values: &HostNumericTensorView<'_>,
+    ) -> anyhow::Result<SparseMatrixHandle> {
+        Err(anyhow!("sparse value binding not supported by provider"))
+    }
+
+    fn free_sparse_pattern(&self, _pattern: &SparsePatternHandle) -> anyhow::Result<()> {
+        Err(anyhow!("sparse pattern release not supported by provider"))
+    }
+
+    fn free_sparse_matrix(&self, _matrix: &SparseMatrixHandle) -> anyhow::Result<()> {
+        Err(anyhow!("sparse matrix release not supported by provider"))
+    }
+
+    fn sparse_spmv<'a>(
+        &'a self,
+        _request: &'a SparseSpmvRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::unsupported_sparse_future()
+    }
+
+    fn prepare_sparse_preconditioner<'a>(
+        &'a self,
+        _request: &'a SparsePreconditionerRequest<'a>,
+    ) -> AccelProviderFuture<'a, SparsePreconditionerHandle> {
+        sparse::unsupported_sparse_future()
+    }
+
+    fn free_sparse_preconditioner(
+        &self,
+        _preconditioner: &SparsePreconditionerHandle,
+    ) -> anyhow::Result<()> {
+        Err(anyhow!(
+            "sparse preconditioner release not supported by provider"
+        ))
+    }
+
+    fn apply_sparse_preconditioner<'a>(
+        &'a self,
+        _request: &'a SparsePreconditionerApplyRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::unsupported_sparse_future()
+    }
+
+    /// Executes the admitted Krylov method as one provider-owned resident operation. Implementors
+    /// return actual synchronization and dispatch evidence; callers must not reconstruct it.
+    fn sparse_krylov_solve<'a>(
+        &'a self,
+        _request: &'a SparseKrylovRequest<'a>,
+    ) -> AccelProviderFuture<'a, SparseKrylovResult> {
+        sparse::unsupported_sparse_future()
     }
 
     /// Returns a side-effect-free component cost estimate for an already

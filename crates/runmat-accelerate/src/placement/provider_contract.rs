@@ -198,6 +198,7 @@ pub(crate) fn dense_capability_snapshot(
         ],
         max_rank: None,
         max_allocation_bytes: device.memory_bytes,
+        sparse: None,
         concurrency: ProviderConcurrencyCapabilities {
             spawn_handles: provider.spawn_handle_concurrency(),
             concurrent_dispatch: true,
@@ -326,6 +327,7 @@ mod tests {
             element_types: vec![ProviderElementType::F64],
             max_rank: None,
             max_allocation_bytes: Some(1024),
+            sparse: None,
             concurrency: ProviderConcurrencyCapabilities {
                 spawn_handles: runmat_accelerate_api::SpawnHandleConcurrency::Reject,
                 concurrent_dispatch: false,
