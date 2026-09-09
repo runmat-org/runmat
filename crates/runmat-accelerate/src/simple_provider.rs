@@ -62,6 +62,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LockResult, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
+#[path = "simple_provider/sparse/mod.rs"]
+mod sparse;
+
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 const PROVIDER_ID_BLOCK_SIZE: u64 = 1_000_000_000;
 
@@ -1916,6 +1919,7 @@ pub struct InProcessProvider {
     next_id: AtomicU64,
     id_limit: u64,
     telemetry: AccelTelemetry,
+    sparse: sparse::SparseState,
 }
 
 impl InProcessProvider {
@@ -1933,7 +1937,20 @@ impl InProcessProvider {
                 .checked_add(PROVIDER_ID_BLOCK_SIZE)
                 .expect("in-process provider id range exhausted"),
             telemetry: AccelTelemetry::new(),
+            sparse: sparse::SparseState::default(),
         }
+    }
+
+    fn allocate_sparse_id(&self) -> Result<u64> {
+        self.next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                if current < self.id_limit {
+                    current.checked_add(1)
+                } else {
+                    None
+                }
+            })
+            .map_err(|_| anyhow!("in-process provider id range exhausted"))
     }
 
     fn allocate_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
@@ -4060,7 +4077,9 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        crate::placement::in_process_capability_snapshot(self)
+        let mut snapshot = crate::placement::in_process_capability_snapshot(self);
+        snapshot.sparse = Some(sparse::capabilities());
+        snapshot
     }
 
     fn query_feasibility(
@@ -4068,6 +4087,84 @@ impl AccelProvider for InProcessProvider {
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
         crate::placement::dense_feasibility(&self.capability_snapshot(), query)
+    }
+
+    fn query_sparse_feasibility(
+        &self,
+        query: &runmat_accelerate_api::SparseFeasibilityQuery,
+    ) -> runmat_accelerate_api::SparseFeasibility {
+        sparse::feasibility(query)
+    }
+
+    fn estimate_sparse_cost(
+        &self,
+        query: &runmat_accelerate_api::SparseCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        sparse::cost(query)
+    }
+
+    fn upload_sparse_pattern(
+        &self,
+        pattern: runmat_accelerate_api::HostCsrPatternView<'_>,
+    ) -> Result<runmat_accelerate_api::SparsePatternHandle> {
+        self.sparse
+            .upload_pattern(self.device_id, self.allocate_sparse_id()?, pattern)
+    }
+
+    fn bind_sparse_values(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+        values: &HostNumericTensorView<'_>,
+    ) -> Result<runmat_accelerate_api::SparseMatrixHandle> {
+        self.sparse
+            .bind_values(self.device_id, self.allocate_sparse_id()?, pattern, *values)
+    }
+
+    fn free_sparse_pattern(
+        &self,
+        pattern: &runmat_accelerate_api::SparsePatternHandle,
+    ) -> Result<()> {
+        self.sparse.free_pattern(self.device_id, pattern)
+    }
+
+    fn free_sparse_matrix(&self, matrix: &runmat_accelerate_api::SparseMatrixHandle) -> Result<()> {
+        self.sparse.free_matrix(self.device_id, matrix)
+    }
+
+    fn sparse_spmv<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseSpmvRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::spmv(self, request)
+    }
+
+    fn prepare_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparsePreconditionerHandle> {
+        sparse::prepare_preconditioner(self, request)
+    }
+
+    fn free_sparse_preconditioner(
+        &self,
+        preconditioner: &runmat_accelerate_api::SparsePreconditionerHandle,
+    ) -> Result<()> {
+        self.sparse
+            .free_preconditioner(self.device_id, preconditioner)
+    }
+
+    fn apply_sparse_preconditioner<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparsePreconditionerApplyRequest<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        sparse::apply_preconditioner(self, request)
+    }
+
+    fn sparse_krylov_solve<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseKrylovRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparseKrylovResult> {
+        sparse::krylov_solve(self, request)
     }
 
     fn gather_linear(

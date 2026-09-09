@@ -36,6 +36,17 @@ pub fn validate_sparse_values(
     values: HostNumericTensorView<'_>,
 ) -> anyhow::Result<SparseMatrixDescriptor> {
     values.validate()?;
+    match values.data {
+        crate::HostNumericDataView::F64(data) => ensure!(
+            data.iter().all(|value| value.is_finite()),
+            "sparse values must be finite"
+        ),
+        crate::HostNumericDataView::F32(data) => ensure!(
+            data.iter().all(|value| value.is_finite()),
+            "sparse values must be finite"
+        ),
+        _ => {}
+    }
     ensure!(
         values.shape
             == [usize::try_from(pattern.descriptor.nnz)
@@ -86,6 +97,7 @@ pub fn validate_matrix_owner(
         matrix.device_id == provider_device_id,
         "sparse matrix belongs to a different provider"
     );
+    matrix.pattern.validate()?;
     matrix.descriptor.validate()
 }
 

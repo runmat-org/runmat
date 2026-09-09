@@ -132,6 +132,35 @@ fn matrix_values_must_match_pattern_shape_and_float_storage() {
         },
     )
     .is_err());
+    assert!(validate_sparse_values(
+        &pattern,
+        HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0, f64::NAN]),
+            shape: &[2],
+            storage: GpuTensorStorage::Real,
+        },
+    )
+    .is_err());
+}
+
+#[test]
+fn feasibility_rejects_impossible_constructed_pattern_descriptors() {
+    let query = SparseFeasibilityQuery {
+        operation: SparseOperation::UploadPattern,
+        pattern: SparsePatternDescriptor {
+            format: SparseFormat::Csr,
+            index_width: SparseIndexWidth::U32,
+            rows: 2,
+            columns: 2,
+            nnz: 5,
+        },
+        element_type: NumericElementType::F64,
+        storage: GpuTensorStorage::Real,
+        vector_count: 0,
+        vector_length: 0,
+        max_iterations: None,
+    };
+    assert!(query.validate().is_err());
 }
 
 #[test]

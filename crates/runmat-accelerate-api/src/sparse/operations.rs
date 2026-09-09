@@ -114,6 +114,13 @@ impl SparseKrylovRequest<'_> {
                 preconditioner.descriptor.matrix_id == self.matrix.matrix_id,
                 "sparse preconditioner is bound to a different matrix"
             );
+            ensure!(
+                preconditioner.descriptor.dimension == self.matrix.pattern.rows
+                    && preconditioner.descriptor.element_type
+                        == self.matrix.descriptor.element_type
+                    && preconditioner.descriptor.storage == self.matrix.descriptor.storage,
+                "sparse preconditioner representation does not match its matrix"
+            );
         }
         ensure!(
             self.matrix.pattern.rows == self.matrix.pattern.columns,

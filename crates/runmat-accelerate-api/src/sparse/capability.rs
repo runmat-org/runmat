@@ -134,6 +134,7 @@ pub struct SparseFeasibilityQuery {
 
 impl SparseFeasibilityQuery {
     pub fn validate(self) -> anyhow::Result<()> {
+        self.pattern.validate()?;
         SparseMatrixDescriptor {
             pattern_id: 0,
             element_type: self.element_type,

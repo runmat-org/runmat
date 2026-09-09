@@ -82,6 +82,22 @@ pub struct SparsePatternDescriptor {
 }
 
 impl SparsePatternDescriptor {
+    pub fn validate(self) -> anyhow::Result<()> {
+        let entry_capacity = self
+            .rows
+            .checked_mul(self.columns)
+            .ok_or_else(|| anyhow!("sparse matrix dimensions exceed addressable entry count"))?;
+        ensure!(
+            self.nnz <= entry_capacity,
+            "sparse nonzero count exceeds matrix dimensions"
+        );
+        ensure!(
+            self.checked_storage_bytes().is_some(),
+            "sparse pattern storage size overflows"
+        );
+        Ok(())
+    }
+
     pub fn checked_storage_bytes(self) -> Option<u64> {
         self.rows
             .checked_add(1)?
