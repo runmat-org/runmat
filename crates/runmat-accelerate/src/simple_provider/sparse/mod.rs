@@ -10,6 +10,8 @@ use runmat_accelerate_api::{
     SparsePreconditionerHandle, SparsePreconditionerKind,
 };
 
+mod algebra;
+mod cancellation;
 mod cg;
 mod contract;
 mod provider;
@@ -17,7 +19,9 @@ mod provider;
 #[cfg(test)]
 mod tests;
 
-pub(in crate::simple_provider) use cg::solve_cg;
+use algebra::{apply_jacobi, multiply};
+use cancellation::{CancellationMonitor, Controlled};
+pub(in crate::simple_provider) use cg::{solve_cg, CgProblem};
 pub(super) use contract::{capabilities, cost, feasibility};
 pub(super) use provider::{apply_preconditioner, krylov_solve, prepare_preconditioner, spmv};
 
@@ -253,38 +257,6 @@ impl SparseState {
         );
         Ok(())
     }
-}
-
-pub(super) fn multiply(matrix: &SparseMatrix, input: &[f64]) -> anyhow::Result<Vec<f64>> {
-    ensure!(
-        input.len() == matrix.pattern.descriptor.columns as usize,
-        "sparse SpMV input length does not match matrix columns"
-    );
-    let mut output = vec![0.0; matrix.pattern.descriptor.rows as usize];
-    for (row, output_value) in output.iter_mut().enumerate() {
-        let start = matrix.pattern.row_offsets[row] as usize;
-        let end = matrix.pattern.row_offsets[row + 1] as usize;
-        for index in start..end {
-            *output_value +=
-                matrix.values[index] * input[matrix.pattern.column_indices[index] as usize];
-        }
-    }
-    Ok(output)
-}
-
-pub(super) fn apply_jacobi(
-    preconditioner: &SparsePreconditioner,
-    input: &[f64],
-) -> anyhow::Result<Vec<f64>> {
-    ensure!(
-        input.len() == preconditioner.inverse_diagonal.len(),
-        "Jacobi input length does not match its matrix"
-    );
-    Ok(input
-        .iter()
-        .zip(&preconditioner.inverse_diagonal)
-        .map(|(value, inverse)| value * inverse)
-        .collect())
 }
 
 pub(super) fn read_f64_vector(

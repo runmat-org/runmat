@@ -1,7 +1,8 @@
 use runmat_accelerate_api::{
     GpuTensorStorage, NumericElementType, ProviderCostEstimate, ProviderRejectionCode,
-    ProviderSparseCapabilities, SparseCostQuery, SparseFeasibility, SparseFeasibilityQuery,
-    SparseFormat, SparseIndexWidth, SparseOperation, SparseResourceEstimate, SparseTranspose,
+    ProviderSparseCapabilities, SparseCancellationCapability, SparseCostQuery, SparseFeasibility,
+    SparseFeasibilityQuery, SparseFormat, SparseIndexWidth, SparseOperation,
+    SparseResourceEstimate, SparseTranspose,
 };
 use runmat_execution::ExecutionCostComponents;
 
@@ -28,6 +29,8 @@ pub(crate) fn capabilities(provider: &WgpuProvider) -> ProviderSparseCapabilitie
         krylov_methods: Vec::new(),
         resident_krylov: false,
         max_host_synchronizations_per_solve: None,
+        cancellation: SparseCancellationCapability::BeforeDispatch,
+        transactional_results: true,
         max_rows: Some(
             index_limit
                 .saturating_sub(1)

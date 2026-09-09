@@ -5,8 +5,10 @@ use crate::GpuTensorHandle;
 
 use super::{
     ensure_vector_matches_matrix, validate_dense_owner, validate_matrix_owner,
-    validate_preconditioner_owner, SparseKrylovMethod, SparseKrylovTermination, SparseMatrixHandle,
-    SparsePreconditionerHandle, SparsePreconditionerKind, SparseTranspose,
+    validate_preconditioner_owner, SparseExecutionContext, SparseFeasibilityQuery,
+    SparseKrylovMethod, SparseKrylovTermination, SparseMatrixHandle, SparseOperation,
+    SparseOperationEvidence, SparsePreconditionerHandle, SparsePreconditionerKind, SparseTranspose,
+    SPARSE_EVIDENCE_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -87,10 +89,12 @@ pub struct SparseKrylovRequest<'a> {
     pub relative_tolerance: f64,
     pub absolute_tolerance: f64,
     pub max_iterations: u32,
+    pub execution: SparseExecutionContext<'a>,
 }
 
 impl SparseKrylovRequest<'_> {
     pub fn validate(self, provider_device_id: u32) -> anyhow::Result<()> {
+        self.execution.validate()?;
         validate_matrix_owner(self.matrix, provider_device_id)?;
         validate_dense_owner(self.rhs, provider_device_id)?;
         ensure_vector_matches_matrix(
@@ -146,30 +150,14 @@ impl SparseKrylovRequest<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SparseOperationEvidence {
-    pub pattern_upload_bytes: u64,
-    pub value_upload_bytes: u64,
-    pub setup_dispatches: u64,
-    pub spmv_dispatches: u64,
-    pub preconditioner_dispatches: u64,
-    pub vector_dispatches: u64,
-    pub host_synchronizations: u32,
-    pub device_readbacks: u32,
-    pub peak_resident_bytes: u64,
-    pub scratch_bytes: u64,
-    pub used_host_fallback: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SparseKrylovResult {
-    pub solution: GpuTensorHandle,
+    pub solution: Option<GpuTensorHandle>,
     pub termination: SparseKrylovTermination,
     pub iterations: u32,
-    pub initial_residual_norm: f64,
-    pub final_residual_norm: f64,
+    pub initial_residual_norm: Option<f64>,
+    pub final_residual_norm: Option<f64>,
     pub evidence: SparseOperationEvidence,
 }
 
@@ -177,30 +165,130 @@ impl SparseKrylovResult {
     pub fn validate(
         &self,
         request: SparseKrylovRequest<'_>,
-        provider_device_id: u32,
+        capability: &crate::ProviderCapabilitySnapshot,
     ) -> anyhow::Result<()> {
+        let provider_device_id = capability.device.device_id;
         request.validate(provider_device_id)?;
-        validate_dense_owner(&self.solution, provider_device_id)?;
-        ensure_vector_matches_matrix(
-            &self.solution,
-            request.matrix.pattern.columns,
-            request.matrix.descriptor,
-            "sparse Krylov solution",
-        )?;
+        anyhow::ensure!(
+            request.execution.provider_capability_schema_version == capability.schema_version,
+            "sparse Krylov request capability schema version is stale"
+        );
+        anyhow::ensure!(
+            request.execution.provider_capability_revision == capability.revision,
+            "sparse Krylov request capability revision is stale"
+        );
+        let sparse_capability = capability
+            .sparse
+            .as_ref()
+            .ok_or_else(|| anyhow!("provider does not advertise sparse execution"))?;
+        sparse_capability.validate()?;
+        anyhow::ensure!(
+            sparse_capability.supports(SparseFeasibilityQuery {
+                operation: SparseOperation::KrylovSolve {
+                    method: request.method,
+                    preconditioner: request
+                        .preconditioner
+                        .map(|preconditioner| preconditioner.descriptor.kind),
+                },
+                pattern: request.matrix.pattern,
+                element_type: request.matrix.descriptor.element_type,
+                storage: request.matrix.descriptor.storage,
+                vector_count: 1,
+                vector_length: request.matrix.pattern.rows,
+                max_iterations: Some(request.max_iterations),
+            }),
+            "provider capability does not admit the sparse Krylov result"
+        );
+        ensure!(
+            (self.termination == SparseKrylovTermination::Cancelled) == self.solution.is_none(),
+            "cancelled sparse Krylov execution must not publish a partial solution"
+        );
+        if let Some(solution) = &self.solution {
+            validate_dense_owner(solution, provider_device_id)?;
+            ensure_vector_matches_matrix(
+                solution,
+                request.matrix.pattern.columns,
+                request.matrix.descriptor,
+                "sparse Krylov solution",
+            )?;
+        }
         ensure!(
             self.iterations <= request.max_iterations,
             "sparse Krylov result exceeds its iteration bound"
         );
+        let valid_norm =
+            |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value >= 0.0);
         ensure!(
-            self.initial_residual_norm.is_finite()
-                && self.initial_residual_norm >= 0.0
-                && self.final_residual_norm.is_finite()
-                && self.final_residual_norm >= 0.0,
+            valid_norm(self.initial_residual_norm) && valid_norm(self.final_residual_norm),
             "sparse Krylov result contains an invalid residual norm"
+        );
+        ensure!(
+            self.termination == SparseKrylovTermination::Cancelled
+                || (self.initial_residual_norm.is_some() && self.final_residual_norm.is_some()),
+            "completed sparse Krylov result requires residual norms"
         );
         ensure!(
             !self.evidence.used_host_fallback,
             "native sparse Krylov evidence cannot report a host fallback"
+        );
+        ensure!(
+            self.evidence.schema_version == SPARSE_EVIDENCE_SCHEMA_VERSION,
+            "unsupported sparse operation evidence schema"
+        );
+        let expected_preconditioner = request
+            .preconditioner
+            .map(|preconditioner| preconditioner.preconditioner_id);
+        ensure!(
+            self.evidence.binding.attempt_id == request.execution.attempt_id
+                && self.evidence.binding.operator_identity == request.execution.operator_identity
+                && self.evidence.binding.provider_device_id == provider_device_id
+                && self.evidence.binding.provider_capability_schema_version
+                    == capability.schema_version
+                && self.evidence.binding.provider_capability_revision == capability.revision
+                && self.evidence.binding.pattern_id == request.matrix.descriptor.pattern_id
+                && self.evidence.binding.matrix_id == request.matrix.matrix_id
+                && self.evidence.binding.preconditioner_id == expected_preconditioner,
+            "sparse operation evidence is bound to a different execution"
+        );
+        ensure!(
+            self.evidence.peak_resident_bytes >= self.evidence.scratch_bytes,
+            "sparse operation evidence understates resident storage"
+        );
+        let required_resident_bytes = self
+            .evidence
+            .resident_pattern_bytes
+            .checked_add(self.evidence.resident_matrix_bytes)
+            .and_then(|bytes| bytes.checked_add(self.evidence.resident_preconditioner_bytes))
+            .and_then(|bytes| bytes.checked_add(self.evidence.resident_solution_bytes))
+            .and_then(|bytes| bytes.checked_add(self.evidence.scratch_bytes))
+            .ok_or_else(|| anyhow!("sparse operation evidence resident storage overflows"))?;
+        ensure!(
+            self.evidence.peak_resident_bytes >= required_resident_bytes,
+            "sparse operation evidence peak is below its itemized storage"
+        );
+        ensure!(
+            (self.termination == SparseKrylovTermination::Cancelled)
+                == self.evidence.cancellation_observed,
+            "sparse cancellation evidence does not match termination"
+        );
+        ensure!(
+            (self.solution.is_none()) == (self.evidence.resident_solution_bytes == 0),
+            "sparse operation evidence solution storage does not match publication"
+        );
+        if matches!(
+            sparse_capability.cancellation,
+            super::SparseCancellationCapability::Cooperative { .. }
+        ) {
+            ensure!(
+                self.evidence.cancellation_checks > 0,
+                "cooperative sparse execution must report cancellation checks"
+            );
+        }
+        ensure!(
+            sparse_capability
+                .max_host_synchronizations_per_solve
+                .is_some_and(|bound| self.evidence.host_synchronizations <= bound),
+            "sparse operation evidence exceeds the advertised synchronization bound"
         );
         Ok(())
     }

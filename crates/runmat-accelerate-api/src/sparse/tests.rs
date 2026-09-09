@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 
 use anyhow::anyhow;
 
@@ -17,6 +20,20 @@ fn numeric_handle(device_id: u32, buffer_id: u64, length: usize) -> GpuTensorHan
     }
 }
 
+#[test]
+fn sparse_cancellation_token_shares_one_atomic_state() {
+    let shared = Arc::new(AtomicBool::new(false));
+    let token = SparseCancellationToken::from_shared(Arc::clone(&shared));
+    assert!(!token.is_cancelled());
+    shared.store(true, Ordering::Release);
+    assert!(token.is_cancelled());
+
+    let shared = Arc::new(AtomicBool::new(false));
+    let token = SparseCancellationToken::from_shared(Arc::clone(&shared));
+    token.cancel();
+    assert!(shared.load(Ordering::Acquire));
+}
+
 fn matrix_handle(device_id: u32, matrix_id: u64) -> SparseMatrixHandle {
     SparseMatrixHandle {
         device_id,
@@ -33,6 +50,19 @@ fn matrix_handle(device_id: u32, matrix_id: u64) -> SparseMatrixHandle {
             element_type: NumericElementType::F64,
             storage: GpuTensorStorage::Real,
         },
+    }
+}
+
+fn execution_context(
+    cancellation: &SparseCancellationToken,
+    provider_capability_revision: u64,
+) -> SparseExecutionContext<'_> {
+    SparseExecutionContext {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"sparse-contract-test"]),
+        operator_identity: runmat_execution::Digest::sha256(b"sparse-operator-test"),
+        provider_capability_schema_version: crate::PROVIDER_CAPABILITY_SCHEMA_VERSION,
+        provider_capability_revision,
+        cancellation,
     }
 }
 
@@ -179,6 +209,7 @@ fn krylov_validation_rejects_cross_device_and_preconditioner_substitution() {
             storage: GpuTensorStorage::Real,
         },
     };
+    let cancellation = SparseCancellationToken::new();
     let base = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -188,6 +219,7 @@ fn krylov_validation_rejects_cross_device_and_preconditioner_substitution() {
         relative_tolerance: 1.0e-8,
         absolute_tolerance: 0.0,
         max_iterations: 20,
+        execution: execution_context(&cancellation, 1),
     };
     assert!(base.validate(7).is_err());
     assert!(SparseKrylovRequest {
@@ -232,6 +264,7 @@ fn default_sparse_contract_rejects_without_dense_transfer() {
 
     let matrix = matrix_handle(0, 13);
     let rhs = numeric_handle(0, 21, 2);
+    let cancellation = SparseCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
         rhs: &rhs,
@@ -241,6 +274,7 @@ fn default_sparse_contract_rejects_without_dense_transfer() {
         relative_tolerance: 1.0e-8,
         absolute_tolerance: 0.0,
         max_iterations: 20,
+        execution: execution_context(&cancellation, 1),
     };
     let _unsupported = provider.sparse_krylov_solve(&request);
     assert_eq!(provider.uploads.load(Ordering::Relaxed), 0);
@@ -259,6 +293,10 @@ fn sparse_capabilities_require_resident_krylov_and_exact_envelope_match() {
         krylov_methods: vec![SparseKrylovMethod::ConjugateGradient],
         resident_krylov: true,
         max_host_synchronizations_per_solve: Some(1),
+        cancellation: SparseCancellationCapability::Cooperative {
+            maximum_work_units_between_checks: 1_024,
+        },
+        transactional_results: true,
         max_rows: Some(100),
         max_columns: Some(100),
         max_nnz: Some(1_000),
@@ -287,6 +325,18 @@ fn sparse_capabilities_require_resident_krylov_and_exact_envelope_match() {
         element_type: NumericElementType::F32,
         ..query
     }));
+
+    let mut invalid = capabilities.clone();
+    invalid.cancellation = SparseCancellationCapability::BeforeDispatch;
+    assert!(invalid.validate().is_err());
+    invalid = capabilities.clone();
+    invalid.cancellation = SparseCancellationCapability::Cooperative {
+        maximum_work_units_between_checks: 0,
+    };
+    assert!(invalid.validate().is_err());
+    invalid = capabilities.clone();
+    invalid.transactional_results = false;
+    assert!(invalid.validate().is_err());
 
     let mut nonresident = capabilities;
     nonresident.resident_krylov = false;

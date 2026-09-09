@@ -1,7 +1,8 @@
 use runmat_accelerate_api::{
-    ProviderCostEstimate, ProviderRejectionCode, ProviderSparseCapabilities, SparseCostQuery,
-    SparseFeasibility, SparseFeasibilityQuery, SparseFormat, SparseIndexWidth, SparseKrylovMethod,
-    SparseOperation, SparsePreconditionerKind, SparseResourceEstimate, SparseTranspose,
+    ProviderCostEstimate, ProviderRejectionCode, ProviderSparseCapabilities,
+    SparseCancellationCapability, SparseCostQuery, SparseFeasibility, SparseFeasibilityQuery,
+    SparseFormat, SparseIndexWidth, SparseKrylovMethod, SparseOperation, SparsePreconditionerKind,
+    SparseResourceEstimate, SparseTranspose,
 };
 use runmat_execution::ExecutionCostComponents;
 
@@ -16,6 +17,11 @@ pub(in crate::simple_provider) fn capabilities() -> ProviderSparseCapabilities {
         krylov_methods: vec![SparseKrylovMethod::ConjugateGradient],
         resident_krylov: true,
         max_host_synchronizations_per_solve: Some(0),
+        cancellation: SparseCancellationCapability::Cooperative {
+            maximum_work_units_between_checks:
+                super::cancellation::MAXIMUM_WORK_UNITS_BETWEEN_CHECKS,
+        },
+        transactional_results: true,
         max_rows: None,
         max_columns: None,
         max_nnz: None,

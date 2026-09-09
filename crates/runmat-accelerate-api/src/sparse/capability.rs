@@ -12,6 +12,27 @@ use super::{
     SparsePatternDescriptor, SparsePreconditionerKind, SparseTranspose,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "mode")]
+pub enum SparseCancellationCapability {
+    Unsupported,
+    BeforeDispatch,
+    Cooperative {
+        maximum_work_units_between_checks: u64,
+    },
+}
+
+impl SparseCancellationCapability {
+    pub const fn supports_resident_solve(self) -> bool {
+        matches!(
+            self,
+            Self::Cooperative {
+                maximum_work_units_between_checks: 1..
+            }
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSparseCapabilities {
@@ -24,6 +45,8 @@ pub struct ProviderSparseCapabilities {
     pub krylov_methods: Vec<SparseKrylovMethod>,
     pub resident_krylov: bool,
     pub max_host_synchronizations_per_solve: Option<u32>,
+    pub cancellation: SparseCancellationCapability,
+    pub transactional_results: bool,
     pub max_rows: Option<u64>,
     pub max_columns: Option<u64>,
     pub max_nnz: Option<u64>,
@@ -51,6 +74,23 @@ impl ProviderSparseCapabilities {
         ensure!(
             !self.resident_krylov || self.max_host_synchronizations_per_solve.is_some(),
             "resident sparse Krylov capability requires a synchronization bound"
+        );
+        ensure!(
+            !self.resident_krylov || self.cancellation.supports_resident_solve(),
+            "resident sparse Krylov capability requires cooperative cancellation"
+        );
+        ensure!(
+            !self.resident_krylov || self.transactional_results,
+            "resident sparse Krylov capability requires transactional results"
+        );
+        ensure!(
+            !matches!(
+                self.cancellation,
+                SparseCancellationCapability::Cooperative {
+                    maximum_work_units_between_checks: 0
+                }
+            ),
+            "cooperative sparse cancellation requires a positive work bound"
         );
         ensure!(
             [self.max_rows, self.max_columns, self.max_nnz]

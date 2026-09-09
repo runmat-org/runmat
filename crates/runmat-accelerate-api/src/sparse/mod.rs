@@ -5,12 +5,14 @@
 //! matrix identities and cannot be transported as authored data.
 
 mod capability;
+mod execution;
 mod handles;
 mod operations;
 mod pattern;
 mod types;
 
 pub use capability::*;
+pub use execution::*;
 pub use handles::*;
 pub use operations::*;
 pub use pattern::*;
