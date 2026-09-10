@@ -318,11 +318,14 @@ pub(crate) fn assemble(
             _ => unreachable!(),
         }
         let evidence = evidence.finish();
+        evidence
+            .validate()
+            .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
         if !evidence.accepted {
             return Err(ThermalAssemblyError::ProjectionConservation {
                 excitation_id: evidence.excitation_id.clone(),
                 relative_error: evidence.resultant_relative_error(),
-                relative_tolerance: evidence.relative_tolerance,
+                relative_tolerance: evidence.requirements.relative_tolerance,
             });
         }
         source_evidence.push(evidence);
@@ -586,6 +589,7 @@ mod tests {
             case_id: ExcitationCaseId("uniform_heat_case".into()),
             signal_id: SignalId("uniform_heat_signal".into()),
             quantity: PhysicalQuantityKind::HeatGenerationDensity,
+            sample: crate::excitation::ProjectionSample::Static,
             target: RealizedExcitationTarget::WholeModel,
             kind: RealizedExcitationKind::HeatGeneration(ComplexScalar::real(value)),
             policy: RealizedExcitationPolicy {
@@ -1047,6 +1051,10 @@ mod tests {
         assert!((projected_source - expected_source).abs() <= expected_source * 1.0e-12);
         assert_eq!(assembly.source_evidence.len(), 1);
         assert!(assembly.source_evidence[0].accepted);
+        assert_eq!(
+            assembly.source_evidence[0].sample,
+            crate::excitation::ProjectionSample::Static
+        );
         let heated_initial = vec![300.0; assembly.projection.nodes.len()];
         let heated_operator = assembly.transient_operator(0.1, &heated_initial).unwrap();
         let heated = solve_operator_system(

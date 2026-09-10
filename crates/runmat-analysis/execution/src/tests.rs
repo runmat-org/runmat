@@ -1254,6 +1254,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             &raw.fields,
         )
         .unwrap();
+    let mut tampered_projection_evidence = raw.clone();
+    let evidence = tampered_projection_evidence
+        .spatial_projection_evidence
+        .first_mut()
+        .expect("structural fixture should publish projection evidence");
+    evidence.accepted = !evidence.accepted;
+    assert!(StructuralLinearWorkloadResult::new(
+        tampered_projection_evidence,
+        constraint_result.clone(),
+    )
+    .is_err());
     let encoded = StructuralLinearWorkloadResult::new(raw.clone(), constraint_result.clone())
         .unwrap()
         .canonical_bytes()

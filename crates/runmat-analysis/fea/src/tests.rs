@@ -369,6 +369,25 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
     )
     .expect("transient solve should consume the canonical mesh");
     assert_eq!(transient.displacement_snapshots[0].shape, vec![4, 3]);
+    assert_eq!(
+        transient.run.spatial_projection_evidence.len(),
+        transient.time_points_s.len()
+    );
+    for (evidence, time_s) in transient
+        .run
+        .spatial_projection_evidence
+        .iter()
+        .zip(&transient.time_points_s)
+    {
+        assert_eq!(
+            evidence.sample,
+            crate::excitation::ProjectionSample::TimeSeconds {
+                value: *time_s,
+                approach: runmat_analysis_core::SignalSampleApproach::At,
+            }
+        );
+        assert!(evidence.accepted);
+    }
 
     let mut nonlinear_model = model.clone();
     nonlinear_model.sequence.steps = vec![ProcedureStep::structural_nonlinear("nonlinear")];
@@ -1141,6 +1160,7 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
         runmat_analysis_core::PhysicalQuantityKind::Force
     );
     assert_eq!(evidence.signal_id, "tip_load.signal");
+    assert_eq!(evidence.sample, crate::excitation::ProjectionSample::Static);
     assert!(evidence.accepted);
 }
 

@@ -3,6 +3,8 @@ use runmat_analysis_core::{
     PhysicalQuantityKind, Position, ProjectionRequirement, SignalId,
 };
 
+use super::ProjectionSample;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ComplexScalar {
     pub real: f64,
@@ -89,6 +91,7 @@ pub(crate) struct RealizedExcitation {
     pub case_id: ExcitationCaseId,
     pub signal_id: SignalId,
     pub quantity: PhysicalQuantityKind,
+    pub sample: ProjectionSample,
     pub target: RealizedExcitationTarget,
     pub kind: RealizedExcitationKind,
     pub policy: RealizedExcitationPolicy,

@@ -311,6 +311,11 @@ impl StructuralLinearWorkloadResult {
                 "structural linear result schema or field set is invalid".into(),
             ));
         }
+        for evidence in &self.run.spatial_projection_evidence {
+            evidence
+                .validate()
+                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        }
         self.constraint_result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;

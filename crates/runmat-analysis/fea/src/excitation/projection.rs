@@ -88,6 +88,7 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             excitation_id: self.load.excitation_id.0.clone(),
             signal_id: self.load.signal_id.0.clone(),
             quantity: self.load.quantity,
+            sample: self.load.sample.clone(),
             analysis_projection_digest: self.projection.projection_digest,
             integration_rule: self.integration_rule,
             resolved_entity_count: self.resolved_entity_count,
@@ -99,7 +100,7 @@ impl<'a> ScalarProjectionAccumulator<'a> {
                 normalization_scale,
                 relative_error,
             },
-            relative_tolerance: requirements.relative_tolerance,
+            requirements,
             accepted: !requirements.preserve_resultant
                 || relative_error <= requirements.relative_tolerance,
         }
@@ -193,6 +194,7 @@ impl<'a> SpatialProjectionAccumulator<'a> {
             excitation_id: self.load.excitation_id.0.clone(),
             signal_id: self.load.signal_id.0.clone(),
             quantity: self.load.quantity,
+            sample: self.load.sample.clone(),
             analysis_projection_digest: self.projection.projection_digest,
             integration_rule: self.integration_rule,
             resolved_entity_count: self.resolved_entity_count,
@@ -220,7 +222,7 @@ impl<'a> SpatialProjectionAccumulator<'a> {
                 resultant_relative_error,
                 moment_relative_error,
             },
-            relative_tolerance: requirements.relative_tolerance,
+            requirements,
             accepted,
         }
     }

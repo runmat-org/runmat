@@ -2954,8 +2954,10 @@ mod tests {
         assert_eq!(evidence.resolved_entity_count, 1);
         assert_eq!(evidence.resolved_node_count, 6);
         assert!(evidence.accepted);
-        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
-        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+        assert!(evidence.resultant_relative_error() <= evidence.requirements.relative_tolerance);
+        assert!(
+            evidence.moment_relative_error().unwrap() <= evidence.requirements.relative_tolerance
+        );
     }
 
     #[test]
@@ -3005,8 +3007,10 @@ mod tests {
         }
         assert_eq!(evidence.resolved_node_count, 6);
         assert!(evidence.accepted);
-        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
-        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+        assert!(evidence.resultant_relative_error() <= evidence.requirements.relative_tolerance);
+        assert!(
+            evidence.moment_relative_error().unwrap() <= evidence.requirements.relative_tolerance
+        );
     }
 
     #[test]
@@ -3061,8 +3065,10 @@ mod tests {
         assert_eq!(evidence.resolved_entity_count, 1);
         assert_eq!(evidence.resolved_node_count, 10);
         assert!(evidence.accepted);
-        assert!(evidence.resultant_relative_error() <= evidence.relative_tolerance);
-        assert!(evidence.moment_relative_error().unwrap() <= evidence.relative_tolerance);
+        assert!(evidence.resultant_relative_error() <= evidence.requirements.relative_tolerance);
+        assert!(
+            evidence.moment_relative_error().unwrap() <= evidence.requirements.relative_tolerance
+        );
     }
 
     #[test]
@@ -3390,6 +3396,7 @@ mod tests {
                     case_id: runmat_analysis_core::ExcitationCaseId("case".to_string()),
                     signal_id: runmat_analysis_core::SignalId("signal".to_string()),
                     quantity,
+                    sample: crate::excitation::ProjectionSample::Static,
                     target: crate::excitation::RealizedExcitationTarget::WholeModel,
                     kind,
                     policy: crate::excitation::RealizedExcitationPolicy {

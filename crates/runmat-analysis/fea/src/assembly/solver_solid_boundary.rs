@@ -238,7 +238,7 @@ fn apply_reference_point_structural_loads(
                 );
                 projection_evidence.add_requested_force(position.meters, force.real);
                 projection_evidence.add_projected_generalized_force(force.real);
-                evidence.push(projection_evidence.finish());
+                record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             RealizedExcitationKind::Moment(moment) => {
                 add_reference_vector(layout, rhs, point_index, moment.real, true);
@@ -251,7 +251,7 @@ fn apply_reference_point_structural_loads(
                 );
                 projection_evidence.add_requested_moment(moment.real);
                 projection_evidence.add_projected_moment(moment.real);
-                evidence.push(projection_evidence.finish());
+                record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             _ => {
                 return Err(
@@ -464,6 +464,9 @@ fn record_spatial_evidence(
     evidence: &mut Vec<SpatialProjectionEvidence>,
     item: SpatialProjectionEvidence,
 ) -> Result<(), SolverMeshRegionMappingError> {
+    item.validate().map_err(|error| {
+        SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
+    })?;
     if !item.accepted {
         let resultant_relative_error = item.resultant_relative_error();
         let moment_relative_error = item.moment_relative_error().unwrap_or(0.0);
@@ -471,7 +474,7 @@ fn record_spatial_evidence(
             load_id: item.excitation_id,
             resultant_relative_error,
             moment_relative_error,
-            relative_tolerance: item.relative_tolerance,
+            relative_tolerance: item.requirements.relative_tolerance,
         });
     }
     evidence.push(item);

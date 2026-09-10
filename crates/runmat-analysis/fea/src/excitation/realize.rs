@@ -99,6 +99,7 @@ fn realize_excitations_for_step(
             case_id: excitation.case_id.clone(),
             signal_id: excitation.signal_id.clone(),
             quantity: action.expected_quantity(),
+            sample: sample.into(),
             target: realize_target(&excitation.target),
             kind: realize_kind(action, signal, sample)?,
             policy: RealizedExcitationPolicy {

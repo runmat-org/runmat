@@ -109,6 +109,7 @@ mod tests {
             case_id: ExcitationCaseId(format!("{id}.case")),
             signal_id: SignalId(format!("{id}.signal")),
             quantity: PhysicalQuantityKind::Temperature,
+            sample: crate::excitation::ProjectionSample::Static,
             target,
             kind: RealizedExcitationKind::TemperatureField(ComplexScalar::real(kelvin)),
             policy: RealizedExcitationPolicy {

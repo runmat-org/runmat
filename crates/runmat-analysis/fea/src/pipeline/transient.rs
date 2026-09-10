@@ -211,7 +211,11 @@ pub fn run_transient_with_options(
         solver_host_sync_count: transient.solver_host_sync_count,
         accelerator_evidence: transient.accelerator_evidence.clone(),
         diagnostics,
-        spatial_projection_evidence: reporting_summary.spatial_projection_evidence.clone(),
+        spatial_projection_evidence: transient
+            .assembly_snapshots
+            .iter()
+            .flat_map(|summary| summary.spatial_projection_evidence.iter().cloned())
+            .collect(),
         observations: Vec::new(),
         fields: vec![
             AnalysisField::host_f64(

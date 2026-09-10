@@ -13,8 +13,8 @@ mod time_grid;
 
 pub(crate) use coupling::realize_coupling_contexts;
 pub use evidence::{
-    ProjectionScalar, ProjectionVector3, SpatialIntegrationRule, SpatialProjectionBalance,
-    SpatialProjectionEvidence,
+    ProjectionSample, ProjectionScalar, ProjectionVector3, SpatialIntegrationRule,
+    SpatialProjectionBalance, SpatialProjectionEvidence, SpatialProjectionEvidenceError,
 };
 #[cfg(test)]
 pub(crate) use model::{ComplexScalar, RealizedExcitationPolicy};
