@@ -6,9 +6,27 @@ use super::{
 };
 use crate::topology::AnalysisProjection;
 
+enum ProjectionCoordinates<'a> {
+    Canonical(&'a AnalysisProjection),
+    Explicit(&'a [[f64; 3]]),
+}
+
+impl ProjectionCoordinates<'_> {
+    fn at(&self, node_index: usize) -> Option<[f64; 3]> {
+        match self {
+            Self::Canonical(projection) => projection
+                .nodes
+                .get(node_index)
+                .map(|node| node.coordinates_m),
+            Self::Explicit(coordinates) => coordinates.get(node_index).copied(),
+        }
+    }
+}
+
 pub(crate) struct SpatialProjectionAccumulator<'a> {
     load: &'a RealizedExcitation,
-    projection: &'a AnalysisProjection,
+    projection_digest: runmat_execution::Digest,
+    coordinates: ProjectionCoordinates<'a>,
     integration_rule: SpatialIntegrationRule,
     resolved_entity_count: usize,
     resolved_nodes: BTreeSet<usize>,
@@ -117,7 +135,35 @@ impl<'a> SpatialProjectionAccumulator<'a> {
     ) -> Self {
         Self {
             load,
-            projection,
+            projection_digest: projection.projection_digest,
+            coordinates: ProjectionCoordinates::Canonical(projection),
+            integration_rule,
+            resolved_entity_count,
+            resolved_nodes: BTreeSet::new(),
+            reference_point_m,
+            requested_resultant: [0.0; 3],
+            projected_resultant: [0.0; 3],
+            requested_moment: [0.0; 3],
+            projected_moment: [0.0; 3],
+            requested_resultant_scale: 0.0,
+            projected_resultant_scale: 0.0,
+            requested_moment_scale: 0.0,
+            projected_moment_scale: 0.0,
+        }
+    }
+
+    pub(crate) fn for_explicit_topology(
+        load: &'a RealizedExcitation,
+        projection_digest: runmat_execution::Digest,
+        node_coordinates_m: &'a [[f64; 3]],
+        integration_rule: SpatialIntegrationRule,
+        resolved_entity_count: usize,
+        reference_point_m: [f64; 3],
+    ) -> Self {
+        Self {
+            load,
+            projection_digest,
+            coordinates: ProjectionCoordinates::Explicit(node_coordinates_m),
             integration_rule,
             resolved_entity_count,
             resolved_nodes: BTreeSet::new(),
@@ -159,10 +205,11 @@ impl<'a> SpatialProjectionAccumulator<'a> {
     pub(crate) fn add_projected_force(&mut self, node_index: usize, force: [f64; 3]) {
         self.resolved_nodes.insert(node_index);
         self.add_projected_generalized_force(force);
-        let arm = subtract(
-            self.projection.nodes[node_index].coordinates_m,
-            self.reference_point_m,
-        );
+        let coordinate = self
+            .coordinates
+            .at(node_index)
+            .expect("projection accumulator nodes must belong to its topology");
+        let arm = subtract(coordinate, self.reference_point_m);
         let moment = cross(arm, force);
         add(&mut self.projected_moment, moment);
         self.projected_moment_scale += norm(moment);
@@ -195,7 +242,7 @@ impl<'a> SpatialProjectionAccumulator<'a> {
             signal_id: self.load.signal_id.0.clone(),
             quantity: self.load.quantity,
             sample: self.load.sample.clone(),
-            analysis_projection_digest: self.projection.projection_digest,
+            analysis_projection_digest: self.projection_digest,
             integration_rule: self.integration_rule,
             resolved_entity_count: self.resolved_entity_count,
             resolved_node_count: self.resolved_nodes.len(),

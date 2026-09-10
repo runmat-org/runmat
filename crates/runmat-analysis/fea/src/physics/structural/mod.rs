@@ -1,4 +1,5 @@
 pub mod material;
+pub(crate) mod topology;
 
 pub fn displacement_increment_norm(a: &[f64], b: &[f64]) -> f64 {
     let mut sum = 0.0_f64;

@@ -1,5 +1,6 @@
 pub mod dofs;
 pub mod elements;
+mod explicit_loads;
 mod moment_projection;
 mod reduced_rhs;
 mod solid_matrix;
@@ -31,6 +32,7 @@ use self::{
         ShellElementGeometry, ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT,
         SHELL_NODE_DOF_COUNT,
     },
+    explicit_loads::apply_explicit_structural_loads,
     solver_solid::{
         assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
         SolverSolidAssemblyError,
@@ -216,7 +218,7 @@ impl fmt::Display for StructuralLoadKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StructuralAssemblyError {
     SparseOperator(String),
     MissingDiscretization,
@@ -249,6 +251,17 @@ pub enum StructuralAssemblyError {
     UnassignedExplicitRegion {
         element_id: String,
         region_id: String,
+    },
+    ExplicitTopologyIdentity(String),
+    InvalidSpatialProjectionEvidence {
+        load_id: String,
+        reason: String,
+    },
+    ProjectionConservation {
+        load_id: String,
+        resultant_relative_error: f64,
+        moment_relative_error: f64,
+        relative_tolerance: f64,
     },
     BeamElement {
         element_id: String,
@@ -349,6 +362,23 @@ impl fmt::Display for StructuralAssemblyError {
             } => write!(
                 f,
                 "explicit structural element region has no material assignment: element_id={element_id} region_id={region_id}"
+            ),
+            Self::ExplicitTopologyIdentity(message) => write!(
+                f,
+                "explicit structural topology identity could not be derived: {message}"
+            ),
+            Self::InvalidSpatialProjectionEvidence { load_id, reason } => write!(
+                f,
+                "explicit structural load projection evidence is invalid: load_id={load_id} reason={reason}"
+            ),
+            Self::ProjectionConservation {
+                load_id,
+                resultant_relative_error,
+                moment_relative_error,
+                relative_tolerance,
+            } => write!(
+                f,
+                "explicit structural load projection violates its conservation requirement: load_id={load_id} resultant_relative_error={resultant_relative_error} moment_relative_error={moment_relative_error} relative_tolerance={relative_tolerance}"
             ),
             Self::BeamElement { element_id, error } => {
                 write!(f, "beam element assembly failed: element_id={element_id} error={error}")
@@ -1647,114 +1677,11 @@ fn assemble_explicit_structural_system(
         });
     }
 
-    let mut direct_rotational_moment_load_count = 0usize;
-    let mut structural_moment_projection = Vec::new();
-    let spatial_projection_evidence = Vec::new();
-    let structural_node_coordinates_m = structural
-        .nodes
-        .iter()
-        .map(|node| node.coordinates_m)
-        .collect::<Vec<_>>();
-    for load in excitations.iter() {
-        if matches!(
-            load.kind,
-            RealizedExcitationKind::TemperatureField(_)
-                | RealizedExcitationKind::TerminalVoltage(_)
-        ) {
-            continue;
-        }
-        let region_id = load.target.solver_region_id().ok_or_else(|| {
-            StructuralAssemblyError::UnmappedStructuralLoad {
-                load_id: load.excitation_id.0.clone(),
-                region_id: "<non-region target>".to_string(),
-                load_kind: explicit_load_kind(&load.kind),
-            }
-        })?;
-        let target_nodes = structural_target_nodes(structural, region_id);
-        if target_nodes.is_empty() {
-            return Err(StructuralAssemblyError::UnmappedStructuralLoad {
-                load_id: load.excitation_id.0.clone(),
-                region_id: region_id.to_string(),
-                load_kind: explicit_load_kind(&load.kind),
-            });
-        }
-        let scale = 1.0 / target_nodes.len() as f64;
-        match load.kind {
-            RealizedExcitationKind::Force(value) => {
-                let [fx, fy, fz] = value.real;
-                for node_index in target_nodes {
-                    add_rhs(
-                        &structural_dof_layout,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Ux,
-                        fx * scale,
-                    );
-                    add_rhs(
-                        &structural_dof_layout,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Uy,
-                        fy * scale,
-                    );
-                    add_rhs(
-                        &structural_dof_layout,
-                        &mut rhs,
-                        node_index,
-                        StructuralDofKind::Uz,
-                        fz * scale,
-                    );
-                }
-            }
-            RealizedExcitationKind::Moment(value) => {
-                if target_nodes.iter().all(|node_index| {
-                    structural_dof_layout
-                        .index(*node_index, StructuralDofKind::Rx)
-                        .is_some()
-                }) {
-                    let [mx, my, mz] = value.real;
-                    direct_rotational_moment_load_count += 1;
-                    for node_index in target_nodes {
-                        add_rhs(
-                            &structural_dof_layout,
-                            &mut rhs,
-                            node_index,
-                            StructuralDofKind::Rx,
-                            mx * scale,
-                        );
-                        add_rhs(
-                            &structural_dof_layout,
-                            &mut rhs,
-                            node_index,
-                            StructuralDofKind::Ry,
-                            my * scale,
-                        );
-                        add_rhs(
-                            &structural_dof_layout,
-                            &mut rhs,
-                            node_index,
-                            StructuralDofKind::Rz,
-                            mz * scale,
-                        );
-                    }
-                } else {
-                    let summary = add_moment_projection_rhs(
-                        &structural_node_coordinates_m,
-                        &structural_dof_layout,
-                        &mut rhs,
-                        &target_nodes,
-                        value.real,
-                    );
-                    structural_moment_projection.push(MomentProjectionSummary {
-                        load_id: load.excitation_id.0.clone(),
-                        region_id: region_id.to_string(),
-                        ..summary
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
+    let source_projection =
+        apply_explicit_structural_loads(structural, excitations, &structural_dof_layout, &mut rhs)?;
+    let direct_rotational_moment_load_count = source_projection.direct_rotational_moment_count;
+    let structural_moment_projection = source_projection.moment_projection;
+    let spatial_projection_evidence = source_projection.evidence;
 
     let mut constrained = vec![false; dof_count];
     for constraint in model
@@ -2886,6 +2813,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn explicit_force_and_moment_publish_topology_bound_conservation_evidence() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        replace_fixture_excitations(
+            &mut model,
+            vec![
+                FixtureExcitation {
+                    id: "tip_force".into(),
+                    region_id: "beam_span".into(),
+                    kind: FixtureExcitationKind::Force([3.0, -5.0, 7.0]),
+                },
+                FixtureExcitation {
+                    id: "tip_moment".into(),
+                    region_id: "beam_span".into(),
+                    kind: FixtureExcitationKind::Moment([2.0, 4.0, -6.0]),
+                },
+            ],
+        );
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("explicit load projection must conserve authored resultants");
+        let structural = model.structural.as_ref().expect("explicit topology");
+        let topology_digest =
+            crate::physics::structural::topology::explicit_topology_digest(structural)
+                .expect("topology identity");
+        assert_eq!(summary.spatial_projection_evidence.len(), 2);
+        assert!(summary.spatial_projection_evidence.iter().all(|evidence| {
+            evidence.analysis_projection_digest == topology_digest
+                && evidence.resolved_entity_count == 1
+                && evidence.resolved_node_count == 2
+                && evidence.accepted
+                && evidence.resultant_relative_error() == 0.0
+                && evidence.moment_relative_error() == Some(0.0)
+        }));
+        assert_eq!(summary.structural_direct_rotational_moment_load_count, 1);
+        assert_eq!(
+            summary.structural_sources,
+            vec![SourceImplementation::ExplicitRegionNodalDistribution]
+        );
     }
 
     #[test]
