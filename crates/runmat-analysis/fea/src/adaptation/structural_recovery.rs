@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
-use runmat_meshing_core::{FieldTopologyLocation, SolverMeshArtifact, StableDigest};
+use runmat_meshing_core::{ElementOrder, FieldTopologyLocation, SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 
+use crate::assembly::elements::solid::{Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry};
 use crate::contracts::FEA_FIELD_STRUCTURAL_STRESS;
 use crate::progress::is_cancelled;
 
@@ -185,7 +186,8 @@ pub fn estimate_structural_recovery_error(
         .iter()
         .map(|node| (node.node_id, node.coordinates_m))
         .collect::<BTreeMap<_, _>>();
-    let mut nodal_stress = BTreeMap::<u64, ([f64; STRESS_COMPONENT_COUNT], f64)>::new();
+    let mut region_side_nodal_stress =
+        BTreeMap::<(u64, String), ([f64; STRESS_COMPONENT_COUNT], f64)>::new();
     let mut element_volumes = BTreeMap::new();
     let mut work = 0_u64;
     for element in &artifact.topology.volume_elements {
@@ -194,8 +196,8 @@ pub fn estimate_structural_recovery_error(
         element_volumes.insert(element.element_id, volume);
         let element_stress = stress_by_element[&element.element_id];
         for node_id in &element.node_ids {
-            let (sum, weight) = nodal_stress
-                .entry(*node_id)
+            let (sum, weight) = region_side_nodal_stress
+                .entry((*node_id, element.region_id.source_topology_id.clone()))
                 .or_insert(([0.0; STRESS_COMPONENT_COUNT], 0.0));
             for (sum, value) in sum.iter_mut().zip(element_stress) {
                 *sum += volume * value;
@@ -209,7 +211,8 @@ pub fn estimate_structural_recovery_error(
         checkpoint(&mut work, options)?;
         let mut recovered = [0.0; STRESS_COMPONENT_COUNT];
         for node_id in &element.node_ids {
-            let (sum, weight) = &nodal_stress[node_id];
+            let (sum, weight) = &region_side_nodal_stress
+                [&(*node_id, element.region_id.source_topology_id.clone())];
             for (recovered, sum) in recovered.iter_mut().zip(sum) {
                 *recovered += sum / weight / element.node_ids.len() as f64;
             }
@@ -310,15 +313,34 @@ fn tetrahedron_volume(
     element: &runmat_meshing_core::SolverVolumeElement,
     coordinates: &BTreeMap<u64, [f64; 3]>,
 ) -> Result<f64, StructuralRecoveryEstimatorError> {
-    let [a, b, c, d] = std::array::from_fn(|index| coordinates[&element.node_ids[index]]);
-    let ab = subtract(b, a);
-    let ac = subtract(c, a);
-    let ad = subtract(d, a);
-    let determinant = dot(ab, cross(ac, ad));
-    if !determinant.is_finite() || determinant <= 0.0 {
+    match element.order {
+        ElementOrder::Tet4 => Tetrahedron4ElementGeometry {
+            nodes_m: element_coordinates::<4>(element, coordinates)?,
+        }
+        .volume_m3()
+        .map_err(|_| StructuralRecoveryEstimatorError::InvalidElementGeometry),
+        ElementOrder::Tet10 => Tetrahedron10ElementGeometry {
+            nodes_m: element_coordinates::<10>(element, coordinates)?,
+        }
+        .volume_m3()
+        .map_err(|_| StructuralRecoveryEstimatorError::InvalidElementGeometry),
+    }
+}
+
+fn element_coordinates<const N: usize>(
+    element: &runmat_meshing_core::SolverVolumeElement,
+    coordinates: &BTreeMap<u64, [f64; 3]>,
+) -> Result<[[f64; 3]; N], StructuralRecoveryEstimatorError> {
+    if element.node_ids.len() != N {
         return Err(StructuralRecoveryEstimatorError::InvalidElementGeometry);
     }
-    Ok(determinant / 6.0)
+    let mut nodes_m = [[0.0; 3]; N];
+    for (local, node_id) in element.node_ids.iter().enumerate() {
+        nodes_m[local] = *coordinates
+            .get(node_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+    }
+    Ok(nodes_m)
 }
 
 fn mark_elements(
@@ -362,22 +384,6 @@ fn checkpoint(
     }
     *work = work.saturating_add(1);
     Ok(())
-}
-
-fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    std::array::from_fn(|axis| left[axis] - right[axis])
-}
-
-fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
-}
-
-fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
-    left.into_iter().zip(right).map(|(a, b)| a * b).sum()
 }
 
 #[cfg(test)]

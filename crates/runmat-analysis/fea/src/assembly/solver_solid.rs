@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
+use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement};
 
 use crate::algebra::{OperatorRole, RealSparseMatrix};
 
@@ -77,14 +77,7 @@ pub fn assemble_solver_solid_stiffness_csr(
         .collect::<BTreeMap<_, _>>();
     let mut rows = empty_rows(topology.dof_count);
     for element in &artifact.topology.volume_elements {
-        let material = materials_by_region
-            .get(&element.region_id.source_topology_id)
-            .copied()
-            .or(default_material)
-            .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
-                element_id: element.element_id,
-                region_id: element.region_id.source_topology_id.clone(),
-            })?;
+        let material = resolve_element_material(element, default_material, materials_by_region)?;
         match element.order {
             ElementOrder::Tet4 => {
                 let (coordinates, offsets) =
@@ -114,6 +107,21 @@ pub fn assemble_solver_solid_stiffness_csr(
     }
     rows_to_sparse(rows, OperatorRole::Stiffness)
         .map_err(|error| SolverSolidAssemblyError::SparseOperator(format!("{error:?}")))
+}
+
+pub(super) fn resolve_element_material(
+    element: &SolverVolumeElement,
+    default_material: Option<SolidMaterial>,
+    materials_by_region: &BTreeMap<String, SolidMaterial>,
+) -> Result<SolidMaterial, SolverSolidAssemblyError> {
+    materials_by_region
+        .get(&element.region_id.source_topology_id)
+        .copied()
+        .or(default_material)
+        .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
+            element_id: element.element_id,
+            region_id: element.region_id.source_topology_id.clone(),
+        })
 }
 
 pub(super) type NodeIndex = BTreeMap<u64, ([f64; 3], usize)>;

@@ -777,7 +777,7 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     assert!(solve.converged, "{:?}", solve.diagnostics);
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-10);
 
-    let fields = recover_result_fields(&summary, &solve);
+    let fields = recover_result_fields(&summary, &solve).unwrap();
     let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
     let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
     let equation = result
@@ -887,7 +887,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
     );
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-9);
-    let fields = recover_result_fields(&summary, &solve);
+    let fields = recover_result_fields(&summary, &solve).unwrap();
     let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
     let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
     let equation = result

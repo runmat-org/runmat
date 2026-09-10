@@ -1,7 +1,7 @@
 use runmat_analysis_core::AnalysisField;
 use runmat_meshing_core::{
-    solver_volume_element_identity, FieldTopologyLocation, MeshNeighbor, SolverMeshNode,
-    SolverVolumeElement, StableDigest,
+    solver_volume_element_identity, FieldTopologyLocation, MeshNeighbor, MeshRegion,
+    PersistentEntityId, PersistentEntityKind, SolverMeshNode, SolverVolumeElement, StableDigest,
 };
 
 use super::*;
@@ -167,4 +167,57 @@ fn recovery_estimator_handles_uniform_stress_and_fails_closed() {
         ),
         Err(StructuralRecoveryEstimatorError::Cancelled)
     );
+}
+
+#[test]
+fn recovery_estimator_preserves_stress_jumps_across_region_sides() {
+    let mut artifact = two_tetrahedron_artifact();
+    let second_region = PersistentEntityId {
+        kind: PersistentEntityKind::Region,
+        source_topology_id: "region_b".to_owned(),
+        assembly_path: vec!["root".to_owned()],
+    };
+    artifact.topology.volume_elements[1].region_id = second_region.clone();
+    artifact.topology.regions[0].element_ids = vec![1];
+    artifact.topology.regions.push(MeshRegion {
+        region_id: second_region,
+        element_ids: vec![2],
+    });
+    artifact.seal_canonical_digest().unwrap();
+    let stress = AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_STRESS,
+        vec![2, 6],
+        vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    );
+
+    let estimate = estimate_structural_recovery_error(
+        &artifact,
+        "elements",
+        &stress,
+        StructuralRecoveryEstimatorOptions::default(),
+    )
+    .unwrap();
+
+    assert_eq!(estimate.total_error, 0.0);
+    assert!(estimate
+        .indicators
+        .iter()
+        .all(|indicator| indicator.error == 0.0));
+}
+
+#[test]
+fn tetrahedron10_volume_uses_curved_midside_geometry() {
+    let mut artifact = artifact(ElementOrder::Tet10);
+    artifact.topology.nodes[4].coordinates_m[1] = 0.1;
+    let coordinates = artifact
+        .topology
+        .nodes
+        .iter()
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<BTreeMap<_, _>>();
+
+    let volume = tetrahedron_volume(&artifact.topology.volume_elements[0], &coordinates).unwrap();
+
+    assert!((volume - 0.15).abs() < 1.0e-13);
+    assert!((volume - 1.0 / 6.0).abs() > 1.0e-3);
 }

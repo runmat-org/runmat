@@ -79,6 +79,7 @@ pub enum CouplingImplementation {
 #[serde(rename_all = "snake_case")]
 pub enum StructuralRecoveryImplementation {
     Tet4ConstantStrain,
+    Tet10VolumeAverageStrain,
     BeamSectionResultants,
     PairSpringShellDerivedResultants,
 }

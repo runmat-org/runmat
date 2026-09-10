@@ -33,7 +33,8 @@ use self::{
         SHELL_NODE_DOF_COUNT,
     },
     solver_solid::{
-        assemble_solver_solid_stiffness_csr, solver_solid_topology, SolverSolidAssemblyError,
+        assemble_solver_solid_stiffness_csr, resolve_element_material, solver_solid_topology,
+        SolverSolidAssemblyError,
     },
     solver_solid_boundary::apply_solver_mesh_structural_loads,
     solver_solid_mass::assemble_solver_solid_mass,
@@ -514,8 +515,30 @@ pub struct ShellRecoveryElementSummary {
 pub struct SolidRecoveryElementSummary {
     pub element_id: String,
     pub region_id: String,
-    pub node_indices: [usize; 4],
-    pub coordinates_m: [[f64; 3]; 4],
+    pub material: SolidMaterial,
+    pub geometry: SolidRecoveryGeometry,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "order", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SolidRecoveryGeometry {
+    Tetrahedron4 {
+        node_indices: [usize; 4],
+        coordinates_m: [[f64; 3]; 4],
+    },
+    Tetrahedron10 {
+        node_indices: [usize; 10],
+        coordinates_m: [[f64; 3]; 10],
+    },
+}
+
+impl SolidRecoveryGeometry {
+    pub fn node_indices(&self) -> &[usize] {
+        match self {
+            Self::Tetrahedron4 { node_indices, .. } => node_indices,
+            Self::Tetrahedron10 { node_indices, .. } => node_indices,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -709,18 +732,13 @@ fn assemble_linear_system_impl(
         .map(|plan| plan.reference_points.len())
         .unwrap_or(0);
     let dof_count = mesh_dof_count + reference_point_count * 6;
-    let structural_solid_recovery = solver_mesh
-        .as_ref()
-        .map(solid_recovery_from_solver_mesh)
-        .unwrap_or_default();
-
     let avg_youngs_modulus = if model.materials.is_empty() {
         1.0e9
     } else {
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.youngs_modulus_pa.max(1.0))
+            .map(|material| material.mechanical.youngs_modulus_pa)
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -730,7 +748,7 @@ fn assemble_linear_system_impl(
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.poisson_ratio.clamp(0.0, 0.49))
+            .map(|material| material.mechanical.poisson_ratio)
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -744,19 +762,19 @@ fn assemble_linear_system_impl(
             .sum::<f64>()
             / model.materials.len() as f64
     };
-    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
     let avg_density_kg_per_m3 = if model.materials.is_empty() {
         7850.0
     } else {
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.density_kg_per_m3.max(1.0))
+            .map(|material| material.mechanical.density_kg_per_m3)
             .sum::<f64>()
             / model.materials.len() as f64
     };
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
-        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
+        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
     let structural_material = StructuralMaterialSummary {
         youngs_modulus_pa: avg_youngs_modulus,
         poisson_ratio: avg_poisson_ratio,
@@ -1025,6 +1043,18 @@ fn assemble_linear_system_impl(
         density_kg_per_m3: structural_material.density_kg_per_m3,
     });
     let solid_materials_by_region = solid_materials_by_region(model);
+    let structural_solid_recovery = solver_mesh
+        .as_ref()
+        .map(|mesh| {
+            solid_recovery_from_solver_mesh(
+                mesh,
+                default_solid_material,
+                &solid_materials_by_region,
+            )
+        })
+        .transpose()
+        .map_err(LinearAssemblyError::SolidStiffness)?
+        .unwrap_or_default();
     let mut stiffness_csr = match solver_mesh.as_ref() {
         Some(mesh) => Some(
             assemble_solver_solid_stiffness_csr(
@@ -1116,7 +1146,7 @@ fn assemble_linear_system_impl(
                         ),
                         ElementOrder::Tet10 => (
                             StructuralOperatorImplementation::Tet10LinearElasticity,
-                            None,
+                            Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
                         ),
                     };
                     StructuralFormulationRealization::new(operator, recovery)
@@ -1253,7 +1283,11 @@ fn assemble_linear_system_impl(
     })
 }
 
-fn solid_recovery_from_solver_mesh(mesh: &SolverMeshArtifact) -> Vec<SolidRecoveryElementSummary> {
+fn solid_recovery_from_solver_mesh(
+    mesh: &SolverMeshArtifact,
+    default_material: Option<SolidMaterial>,
+    materials_by_region: &BTreeMap<String, SolidMaterial>,
+) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     let node_indices = mesh
         .topology
         .nodes
@@ -1265,23 +1299,72 @@ fn solid_recovery_from_solver_mesh(mesh: &SolverMeshArtifact) -> Vec<SolidRecove
     mesh.topology
         .volume_elements
         .iter()
-        .filter(|element| element.node_ids.len() == 4)
-        .filter_map(|element| {
-            let mut indices = [0_usize; 4];
-            let mut coordinates_m = [[0.0_f64; 3]; 4];
-            for (local, node_id) in element.node_ids.iter().copied().enumerate() {
-                let node_index = *node_indices.get(&node_id)?;
-                indices[local] = node_index;
-                coordinates_m[local] = mesh.topology.nodes.get(node_index)?.coordinates_m;
-            }
-            Some(SolidRecoveryElementSummary {
+        .map(|element| {
+            let material =
+                resolve_element_material(element, default_material, materials_by_region)?;
+            let geometry = match element.order {
+                ElementOrder::Tet4 => {
+                    let (node_indices, coordinates_m) = recovery_geometry::<4>(
+                        element.element_id,
+                        &element.node_ids,
+                        &node_indices,
+                        mesh,
+                    )?;
+                    SolidRecoveryGeometry::Tetrahedron4 {
+                        node_indices,
+                        coordinates_m,
+                    }
+                }
+                ElementOrder::Tet10 => {
+                    let (node_indices, coordinates_m) = recovery_geometry::<10>(
+                        element.element_id,
+                        &element.node_ids,
+                        &node_indices,
+                        mesh,
+                    )?;
+                    SolidRecoveryGeometry::Tetrahedron10 {
+                        node_indices,
+                        coordinates_m,
+                    }
+                }
+            };
+            Ok(SolidRecoveryElementSummary {
                 element_id: element.element_id.to_string(),
                 region_id: element.region_id.source_topology_id.clone(),
-                node_indices: indices,
-                coordinates_m,
+                material,
+                geometry,
             })
         })
         .collect()
+}
+
+fn recovery_geometry<const N: usize>(
+    element_id: u64,
+    node_ids: &[u64],
+    node_indices: &BTreeMap<u64, usize>,
+    mesh: &SolverMeshArtifact,
+) -> Result<([usize; N], [[f64; 3]; N]), SolverSolidAssemblyError> {
+    if node_ids.len() != N {
+        return Err(SolverSolidAssemblyError::InvalidElementNodeCount {
+            element_id,
+            expected: N,
+            actual: node_ids.len(),
+        });
+    }
+    let mut indices = [0; N];
+    let mut coordinates_m = [[0.0; 3]; N];
+    for (local, node_id) in node_ids.iter().copied().enumerate() {
+        let node_index =
+            *node_indices
+                .get(&node_id)
+                .ok_or(SolverSolidAssemblyError::UnknownElementNode {
+                    element_id,
+                    node_id,
+                })?;
+        indices[local] = node_index;
+        coordinates_m[local] = mesh.topology.nodes[node_index].coordinates_m;
+    }
+    Ok((indices, coordinates_m))
 }
 
 fn electro_thermal_fingerprint(
@@ -1843,7 +1926,7 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.youngs_modulus_pa.max(1.0))
+            .map(|material| material.mechanical.youngs_modulus_pa)
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -1853,23 +1936,23 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.poisson_ratio.clamp(0.0, 0.49))
+            .map(|material| material.mechanical.poisson_ratio)
             .sum::<f64>()
             / model.materials.len() as f64
     };
-    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio)).max(1.0e-9);
+    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
     let avg_density_kg_per_m3 = if model.materials.is_empty() {
         7850.0
     } else {
         model
             .materials
             .iter()
-            .map(|material| material.mechanical.density_kg_per_m3.max(1.0))
+            .map(|material| material.mechanical.density_kg_per_m3)
             .sum::<f64>()
             / model.materials.len() as f64
     };
     let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
-        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio)).max(1.0e-9);
+        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
     StructuralMaterialSummary {
         youngs_modulus_pa: avg_youngs_modulus,
         poisson_ratio: avg_poisson_ratio,
@@ -1887,9 +1970,9 @@ fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolidMat
             (
                 material.material_id.clone(),
                 SolidMaterial {
-                    youngs_modulus_pa: material.mechanical.youngs_modulus_pa.max(1.0),
-                    poisson_ratio: material.mechanical.poisson_ratio.clamp(0.0, 0.49),
-                    density_kg_per_m3: material.mechanical.density_kg_per_m3.max(1.0e-12),
+                    youngs_modulus_pa: material.mechanical.youngs_modulus_pa,
+                    poisson_ratio: material.mechanical.poisson_ratio,
+                    density_kg_per_m3: material.mechanical.density_kg_per_m3,
                 },
             )
         })
@@ -2516,12 +2599,16 @@ mod tests {
         assert_eq!(summary.structural_solid_element_count, 1);
         assert!(summary.operator.nullspace_evidence().is_none());
         assert_eq!(summary.structural_solid_recovery.len(), 1);
+        let SolidRecoveryGeometry::Tetrahedron4 {
+            node_indices,
+            coordinates_m,
+        } = &summary.structural_solid_recovery[0].geometry
+        else {
+            panic!("Tet4 assembly must retain Tet4 recovery geometry")
+        };
+        assert_eq!(*node_indices, [0, 1, 2, 3]);
         assert_eq!(
-            summary.structural_solid_recovery[0].node_indices,
-            [0, 1, 2, 3]
-        );
-        assert_eq!(
-            summary.structural_solid_recovery[0].coordinates_m,
+            *coordinates_m,
             [
                 [0.0, 0.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -2670,6 +2757,39 @@ mod tests {
             soft_summary.structural_solid_recovery[0].region_id,
             "soft_region"
         );
+        assert_eq!(
+            soft_summary.structural_solid_recovery[0]
+                .material
+                .youngs_modulus_pa,
+            soft.mechanical.youngs_modulus_pa
+        );
+        assert_eq!(
+            hard_summary.structural_solid_recovery[0]
+                .material
+                .youngs_modulus_pa,
+            hard.mechanical.youngs_modulus_pa
+        );
+    }
+
+    #[test]
+    fn solver_mesh_preserves_valid_single_material_properties_exactly() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
+        model.materials[0].mechanical.youngs_modulus_pa = 0.5;
+        model.materials[0].mechanical.poisson_ratio = -0.25;
+        model.materials[0].mechanical.density_kg_per_m3 = 0.125;
+
+        let summary = assemble_physical_structural_system(&model, Some(tetrahedron4_mesh()))
+            .expect("valid low-valued auxetic material should assemble without coercion");
+        let recovered_material = summary.structural_solid_recovery[0].material;
+
+        assert_eq!(recovered_material.youngs_modulus_pa, 0.5);
+        assert_eq!(recovered_material.poisson_ratio, -0.25);
+        assert_eq!(recovered_material.density_kg_per_m3, 0.125);
+        assert_eq!(summary.structural_material.youngs_modulus_pa, 0.5);
+        assert_eq!(summary.structural_material.poisson_ratio, -0.25);
+        assert_eq!(summary.structural_material.density_kg_per_m3, 0.125);
     }
 
     #[test]
@@ -3642,7 +3762,7 @@ mod tests {
             (
                 tet10,
                 StructuralOperatorImplementation::Tet10LinearElasticity,
-                None,
+                Some(StructuralRecoveryImplementation::Tet10VolumeAverageStrain),
                 SourceImplementation::NotApplicable,
                 BoundaryTransferImplementation::NotApplicable,
             ),

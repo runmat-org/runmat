@@ -130,10 +130,62 @@ pub struct Tetrahedron10ElementGeometry {
     pub nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 }
 
+impl Tetrahedron10ElementGeometry {
+    pub fn volume_m3(self) -> Result<f64, Tetrahedron10ElementError> {
+        validate_nodes(self.nodes_m)?;
+        let volume =
+            MASS_QUADRATURE
+                .into_iter()
+                .try_fold(0.0, |volume, (barycentric, weight)| {
+                    Ok::<_, Tetrahedron10ElementError>(
+                        volume + weight * jacobian_determinant(self.nodes_m, barycentric)?,
+                    )
+                })?;
+        if volume.is_finite() && volume > 0.0 {
+            Ok(volume)
+        } else {
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+        }
+    }
+
+    pub fn volume_average_strain(
+        self,
+        displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
+    ) -> Result<[f64; 6], Tetrahedron10ElementError> {
+        validate_nodes(self.nodes_m)?;
+        if displacement.iter().any(|value| !value.is_finite()) {
+            return Err(Tetrahedron10ElementError::NonFiniteDisplacement);
+        }
+        let mut integrated = [0.0; 6];
+        let mut volume = 0.0;
+        for (barycentric, weight) in MASS_QUADRATURE {
+            let gradients = physical_shape_gradients(self.nodes_m, barycentric)?;
+            let b = strain_displacement_matrix(gradients);
+            let weighted_volume = weight * jacobian_determinant(self.nodes_m, barycentric)?;
+            for component in 0..6 {
+                integrated[component] += weighted_volume
+                    * b[component]
+                        .iter()
+                        .zip(displacement)
+                        .map(|(shape, value)| shape * value)
+                        .sum::<f64>();
+            }
+            volume += weighted_volume;
+        }
+        if !volume.is_finite() || volume <= 0.0 || integrated.iter().any(|value| !value.is_finite())
+        {
+            return Err(Tetrahedron10ElementError::DegenerateOrInverted);
+        }
+        Ok(integrated.map(|value| value / volume))
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum Tetrahedron10ElementError {
     #[error("Tetrahedron10 node coordinates must be finite")]
     NonFiniteCoordinate,
+    #[error("Tetrahedron10 nodal displacement must be finite")]
+    NonFiniteDisplacement,
     #[error("Tetrahedron10 quadrature Jacobian must be positive and finite")]
     DegenerateOrInverted,
     #[error("Tetrahedron10 material is invalid: {0}")]
@@ -417,6 +469,24 @@ mod tests {
                 .sum::<f64>()
         });
         assert!(residual.iter().all(|value| value.abs() < 2.0e-3));
+    }
+
+    #[test]
+    fn volume_average_strain_recovers_a_quadratic_displacement_field() {
+        let geometry = straight_unit_tetrahedron();
+        let displacement = std::array::from_fn(|dof| {
+            let node = dof / TETRAHEDRON10_NODE_DOF_COUNT;
+            let axis = dof % TETRAHEDRON10_NODE_DOF_COUNT;
+            if axis == 0 {
+                geometry.nodes_m[node][0].powi(2)
+            } else {
+                0.0
+            }
+        });
+        let strain = geometry.volume_average_strain(displacement).unwrap();
+        assert!((geometry.volume_m3().unwrap() - 1.0 / 6.0).abs() < 1.0e-14);
+        assert!((strain[0] - 0.5).abs() < 1.0e-13);
+        assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));
     }
 
     #[test]

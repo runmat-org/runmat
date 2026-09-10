@@ -73,10 +73,13 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     let mechanical = &material.mechanical;
     require_positive(material, "Young's modulus", mechanical.youngs_modulus_pa)?;
     require_positive(material, "mechanical density", mechanical.density_kg_per_m3)?;
-    if !mechanical.poisson_ratio.is_finite() || !(-1.0..0.5).contains(&mechanical.poisson_ratio) {
+    if !mechanical.poisson_ratio.is_finite()
+        || mechanical.poisson_ratio <= -1.0
+        || mechanical.poisson_ratio >= 0.5
+    {
         return Err(invalid_material(
             material,
-            "Poisson ratio must be finite and in [-1, 0.5)",
+            "Poisson ratio must be finite and in (-1, 0.5)",
         ));
     }
 
@@ -295,6 +298,17 @@ mod tests {
             validate_materials(&[invalid], &[]),
             Err(AnalysisValidationError::InvalidMaterial { .. })
         ));
+
+        let mut invalid = material();
+        invalid.mechanical.poisson_ratio = -1.0;
+        assert!(matches!(
+            validate_materials(&[invalid], &[]),
+            Err(AnalysisValidationError::InvalidMaterial { .. })
+        ));
+
+        let mut auxetic = material();
+        auxetic.mechanical.poisson_ratio = -0.25;
+        validate_materials(&[auxetic], &[]).expect("finite auxetic material should be valid");
     }
 
     #[test]

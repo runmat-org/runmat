@@ -10,7 +10,9 @@ use super::{
         Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
     },
     solid_matrix::{empty_rows, rows_to_sparse, scatter_csr},
-    solver_solid::{element_geometry, solver_solid_topology, SolverSolidAssemblyError},
+    solver_solid::{
+        element_geometry, resolve_element_material, solver_solid_topology, SolverSolidAssemblyError,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,14 +40,7 @@ pub fn assemble_solver_solid_mass(
     let mut total_mass_kg = 0.0;
 
     for element in &artifact.topology.volume_elements {
-        let material = materials_by_region
-            .get(&element.region_id.source_topology_id)
-            .copied()
-            .or(default_material)
-            .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
-                element_id: element.element_id,
-                region_id: element.region_id.source_topology_id.clone(),
-            })?;
+        let material = resolve_element_material(element, default_material, materials_by_region)?;
         match element.order {
             ElementOrder::Tet4 => {
                 let (coordinates, offsets) =

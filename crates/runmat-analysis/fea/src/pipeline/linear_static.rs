@@ -198,7 +198,8 @@ fn run_linear_static_with_constraint_plan(
         Some(3),
         Some(5),
     );
-    let mut fields = recover_result_fields(&summary, &solve_result);
+    let mut fields = recover_result_fields(&summary, &solve_result)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
         summary.thermo_mechanical.as_ref(),
         &[1.0],
@@ -357,7 +358,8 @@ fn run_linear_static_with_constraint_plan(
             diagnostics.push(reference_diagnostic);
         }
     }
-    let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution);
+    let recovery_metrics = structural_field_recovery_metrics(&summary, &solve_result.solution)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     diagnostics.push(FeaDiagnostic {
         code: "FEA_STRUCTURAL_FIELD_RECOVERY".to_string(),
         severity: if recovery_metrics.recovery_element_count > 0
