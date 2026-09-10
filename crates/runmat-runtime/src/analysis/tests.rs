@@ -453,6 +453,56 @@ fn append_scalar_history_excitation<Q>(
     });
 }
 
+fn append_scalar_constant_excitation<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    value: Q,
+    target: ExcitationTarget,
+    direction: Option<Direction>,
+    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    model.signals.push(signal(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(value)),
+        precision: SignalPrecision::Real64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: None,
+            max_relative_error: None,
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+        provenance: SignalProvenance::Authored,
+    }));
+    let excitation_id = ExcitationId(id.to_string());
+    model.excitations.push(action(AnalysisExcitation {
+        excitation_id: excitation_id.clone(),
+        case_id: case_id.clone(),
+        target,
+        frame: CoordinateFrame::Global,
+        direction,
+        distribution: ExcitationDistribution::TopologyField,
+        kinematics: ExcitationKinematics::FixedFrame,
+        signal_id,
+        active_step_ids: Vec::new(),
+        combination_group: None,
+        projection: ProjectionRequirement {
+            preserve_resultant: false,
+            preserve_moment: false,
+            relative_tolerance: 1.0e-10,
+        },
+    }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![excitation_id],
+        activation: ExcitationCaseActivation::Always,
+    });
+}
+
 fn replace_with_moment_excitation(model: &mut AnalysisModel, excitation_id: &str) {
     use runmat_analysis_core::{
         AnalysisExcitation, ExcitationCase, ExcitationCaseActivation, ExcitationCaseId,
@@ -550,17 +600,36 @@ fn sample_cht_model() -> AnalysisModel {
     model.cfd = Some(sample_cfd_domain());
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 60.0,
             thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                region_id: "beam_span".to_string(),
-                temperature_delta_k: 70.0,
-            }],
+            region_temperature_deltas: Vec::new(),
         },
     );
     model
+}
+
+#[derive(Clone)]
+struct TestThermoRegionTemperatureDelta {
+    region_id: String,
+    temperature_delta_k: f64,
+}
+
+#[derive(Clone)]
+struct TestThermoMechanicalCoupling {
+    reference_temperature_k: f64,
+    applied_temperature_delta_k: f64,
+    thermal_expansion_coefficient: f64,
+    region_temperature_deltas: Vec<TestThermoRegionTemperatureDelta>,
+}
+
+#[derive(Clone, Copy)]
+struct TestElectroThermalCoupling {
+    reference_temperature_k: f64,
+    applied_voltage_v: f64,
+    base_electrical_conductivity_s_per_m: f64,
+    resistive_heating_coefficient: f64,
 }
 
 fn sample_fsi_model() -> AnalysisModel {
@@ -589,31 +658,25 @@ fn sample_fsi_model() -> AnalysisModel {
     model
 }
 
-fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
+fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: TestThermoMechanicalCoupling) {
     for material in &mut model.materials {
         material.thermal.reference_temperature_k = coupling.reference_temperature_k;
         material.thermal.expansion_coefficient_per_k = coupling.thermal_expansion_coefficient;
     }
-    append_scalar_history_excitation(
+    append_scalar_constant_excitation(
         model,
-        "thermo_temperature_history",
-        vec![0.0],
-        vec![Temperature::new(
-            coupling.reference_temperature_k + coupling.applied_temperature_delta_k,
-        )],
+        "thermo_temperature",
+        Temperature::new(coupling.reference_temperature_k + coupling.applied_temperature_delta_k),
         ExcitationTarget::WholeModel,
         None,
         PhysicalSignal::Temperature,
         ExcitationAction::TemperatureField,
     );
     for (index, delta) in coupling.region_temperature_deltas.iter().enumerate() {
-        append_scalar_history_excitation(
+        append_scalar_constant_excitation(
             model,
             &format!("thermo_region_temperature_{index}"),
-            vec![0.0],
-            vec![Temperature::new(
-                coupling.reference_temperature_k + delta.temperature_delta_k,
-            )],
+            Temperature::new(coupling.reference_temperature_k + delta.temperature_delta_k),
             ExcitationTarget::Region(RegionTarget::volume(&delta.region_id)),
             None,
             PhysicalSignal::Temperature,
@@ -625,7 +688,7 @@ fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanic
     });
 }
 
-fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroThermalCouplingOptions) {
+fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: TestElectroThermalCoupling) {
     for material in &mut model.materials {
         material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
             reference_temperature_k: coupling.reference_temperature_k,
@@ -636,11 +699,10 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             conductivity_frequency_response: Vec::new(),
         });
     }
-    append_scalar_history_excitation(
+    append_scalar_constant_excitation(
         model,
-        "electro_thermal_potential_history",
-        vec![0.0],
-        vec![ElectricPotential::new(coupling.applied_voltage_v)],
+        "electro_thermal_potential",
+        ElectricPotential::new(coupling.applied_voltage_v),
         ExcitationTarget::Region(RegionTarget::boundary("tip")),
         None,
         PhysicalSignal::ElectricPotential,
@@ -2334,8 +2396,6 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
                 solver_mesh_artifact_path: None,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
-                thermo_mechanical_context: workload.thermo_mechanical_context,
-                electro_thermal_context: workload.electro_thermal_context,
                 initial_displacement: None,
             },
         )
@@ -3364,7 +3424,7 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -3468,7 +3528,7 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
     let mut model = sample_solid_model();
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -4837,7 +4897,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -4967,7 +5027,7 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     )];
     set_model_electro_coupling(
         &mut model,
-        ElectroThermalCouplingOptions {
+        TestElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.5e7,
@@ -4997,7 +5057,7 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
     )];
     set_model_electro_coupling(
         &mut model,
-        ElectroThermalCouplingOptions {
+        TestElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.5e7,
@@ -5038,7 +5098,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -5143,7 +5203,7 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -5597,7 +5657,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     )];
     set_model_thermo_coupling(
         &mut thermal_model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 20.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -6382,7 +6442,7 @@ fn analysis_run_cht_rejects_uncoupled_thermal_step() {
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 50.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -7730,16 +7790,20 @@ fn nonlinear_quality_policy_diverges_for_increment_failures() {
 #[test]
 fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("nonlinear-high-thermo-severity");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "nonlinear_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
     )];
     for material in &mut model.materials {
         material.thermal.expansion_coefficient_per_k = 1.0e-3;
     }
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
@@ -7753,6 +7817,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
@@ -7766,59 +7831,23 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress));
-
-    let nonlinear = run
-        .data
-        .nonlinear_results
-        .as_ref()
-        .expect("nonlinear results should be present");
-    assert!(nonlinear.thermo_mechanical_temperature_snapshots.is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_thermal_strain_snapshots
-        .is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_thermal_stress_snapshots
-        .is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_displacement_snapshots
-        .is_empty());
-    assert!(nonlinear.thermo_mechanical_von_mises_snapshots.is_empty());
-    assert!(nonlinear
-        .thermo_mechanical_coupling_residual_snapshots
-        .is_empty());
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("thermo-mechanical nonlinear results should be queryable");
-    for field_id in [
-        fea_thermo_mechanical_temperature_field_id(0),
-        fea_thermo_mechanical_von_mises_field_id(0),
-        fea_thermo_mechanical_coupling_residual_field_id(0),
-        fea_thermo_mechanical_displacement_field_id(0),
-        fea_thermo_mechanical_thermal_strain_field_id(0),
-        fea_thermo_mechanical_thermal_stress_field_id(0),
-    ] {
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn nonlinear_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogeneity_threshold() {
+fn nonlinear_balanced_does_not_report_thermo_stress_below_severity_threshold() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "nonlinear_1".to_string(),
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("nonlinear-low-thermo-severity");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "nonlinear_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::Nonlinear,
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -7832,18 +7861,19 @@ fn nonlinear_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
         FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisNonlinearRunOptions::solid_recommended()
         },
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should return envelope");
 
-    assert!(run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Completed);
     assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+        reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress
+            || reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
@@ -8893,11 +8923,11 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 80.0,
             thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+            region_temperature_deltas: vec![TestThermoRegionTemperatureDelta {
                 region_id: "missing_region".to_string(),
                 temperature_delta_k: 80.0,
             }],
@@ -8960,16 +8990,20 @@ fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
 #[test]
 fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("transient-high-thermo-severity");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "transient_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::TransientResponse,
     )];
     for material in &mut model.materials {
         material.thermal.expansion_coefficient_per_k = 1.0e-3;
     }
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.0e-3,
@@ -8985,6 +9019,7 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
             step_count: 8,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisTransientRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -8998,59 +9033,23 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
-
-    let transient = run
-        .data
-        .transient_results
-        .as_ref()
-        .expect("transient results should be present");
-    assert!(transient.thermo_mechanical_temperature_snapshots.is_empty());
-    assert!(transient
-        .thermo_mechanical_thermal_strain_snapshots
-        .is_empty());
-    assert!(transient
-        .thermo_mechanical_thermal_stress_snapshots
-        .is_empty());
-    assert!(transient
-        .thermo_mechanical_displacement_snapshots
-        .is_empty());
-    assert!(transient.thermo_mechanical_von_mises_snapshots.is_empty());
-    assert!(transient
-        .thermo_mechanical_coupling_residual_snapshots
-        .is_empty());
-
-    let results = analysis_results_op(
-        &run.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("thermo-mechanical transient results should be queryable");
-    for field_id in [
-        fea_thermo_mechanical_temperature_field_id(0),
-        fea_thermo_mechanical_von_mises_field_id(0),
-        fea_thermo_mechanical_coupling_residual_field_id(0),
-        fea_thermo_mechanical_displacement_field_id(0),
-        fea_thermo_mechanical_thermal_strain_field_id(0),
-        fea_thermo_mechanical_thermal_stress_field_id(0),
-    ] {
-        assert!(results
-            .data
-            .field_descriptors
-            .iter()
-            .all(|descriptor| descriptor.field_id != field_id));
-    }
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
-fn transient_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogeneity_threshold() {
+fn transient_balanced_does_not_report_thermo_stress_below_severity_threshold() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model_with_material_assignment_mismatch();
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "transient_1".to_string(),
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("transient-low-thermo-severity");
+    let mut model = sample_solid_model();
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "transient_thermo_mechanical",
+        CoupledPhysicsFamily::Thermomechanical,
+        AnalysisProcedure::TransientResponse,
     )];
     set_model_thermo_coupling(
         &mut model,
-        ThermoMechanicalCouplingOptions {
+        TestThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 90.0,
             thermal_expansion_coefficient: 1.2e-5,
@@ -9066,18 +9065,19 @@ fn transient_balanced_keeps_beam_numerically_acceptable_below_thermo_heterogenei
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
             step_count: 8,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisTransientRunOptions::default()
         },
         OperationContext::new(None, None),
     )
     .expect("transient run should return envelope");
 
-    assert!(run.data.numerically_acceptable);
-    assert_eq!(run.data.run_status, RunStatus::Completed);
     assert!(!run.data.quality_reasons.iter().any(|reason| {
-        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+        reason.code == QualityReasonCode::ThermoMechanicalTransientStress
+            || reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]

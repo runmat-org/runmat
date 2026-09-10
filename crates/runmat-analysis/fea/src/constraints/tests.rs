@@ -754,8 +754,6 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
         &model,
         &static_excitations(&model),
         Some(mesh.clone()),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -818,8 +816,6 @@ fn affine_solver_rejects_a_substituted_reduction_before_iteration() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -871,8 +867,6 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         &model,
         &static_excitations(&model),
         Some(mesh.clone()),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -917,8 +911,6 @@ fn multiplier_solver_rejects_an_unremoved_mechanism_before_iteration() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -970,8 +962,6 @@ fn modal_reduction_enforces_the_complete_homogeneous_constraint_matrix() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -1004,8 +994,6 @@ fn modal_reduction_rejects_nonhomogeneous_constraints_before_iteration() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -1047,8 +1035,6 @@ fn transient_steps_enforce_affine_constraint_kinematics() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -1111,8 +1097,6 @@ fn transient_steps_enforce_nonzero_direct_prescriptions() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -1170,8 +1154,6 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
         &model,
         &static_excitations(&model),
         Some(mesh),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();
@@ -1259,8 +1241,6 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
         &model,
         &static_excitations(&model),
         Some(mesh.clone()),
-        None,
-        None,
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
     .unwrap();

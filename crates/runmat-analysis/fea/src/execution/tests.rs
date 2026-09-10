@@ -463,8 +463,6 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         require_solver_mesh_for_solid: true,
-        thermo_mechanical_context: None,
-        electro_thermal_context: None,
         initial_guess_transition: None,
     };
     let bytes = workload.canonical_bytes().unwrap();

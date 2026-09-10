@@ -22,6 +22,7 @@ use crate::{
 #[cfg(test)]
 mod convergence_tests;
 mod recovery;
+mod temperature_field;
 
 pub(crate) use recovery::ThermalEnergyBalance;
 
@@ -148,6 +149,18 @@ pub(crate) enum ThermalAssemblyError {
     UnmappedBoundary { operator_id: String },
     #[error("thermal constraints prescribe conflicting temperatures at solver node {node_id}")]
     ConflictingTemperature { node_id: u64 },
+    #[error("temperature-field excitation {excitation_id} uses an unsupported complex ordinate")]
+    ComplexTemperatureField { excitation_id: String },
+    #[error("temperature-field excitation {excitation_id} does not resolve any solver nodes")]
+    UnmappedTemperatureField { excitation_id: String },
+    #[error(
+        "temperature-field excitations {first_excitation_id} and {second_excitation_id} prescribe conflicting temperatures at {location}"
+    )]
+    ConflictingTemperatureFields {
+        first_excitation_id: String,
+        second_excitation_id: String,
+        location: String,
+    },
 }
 
 pub(crate) fn assemble(
@@ -315,7 +328,8 @@ pub(crate) fn assemble(
         source_evidence.push(evidence);
     }
 
-    let mut prescribed_temperature_k = vec![None; projection.nodes.len()];
+    let mut prescribed_temperature_k =
+        temperature_field::prescribed_temperatures(&projection, excitations)?;
     let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
     for constraint in &model.constraints {
         let AnalysisConstraint::Thermal(constraint) = constraint else {

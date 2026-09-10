@@ -457,8 +457,6 @@ pub struct LinearStaticSolveOptions {
     pub solver_mesh_artifact_path: Option<String>,
     pub solver_mesh: Option<SolverMeshArtifact>,
     pub require_solver_mesh_for_solid: bool,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
     /// Complete displacement state used only to initialize an iterative linear solve.
     pub initial_displacement: Option<Vec<f64>>,
 }
@@ -472,8 +470,6 @@ impl Default for LinearStaticSolveOptions {
             solver_mesh_artifact_path: None,
             solver_mesh: None,
             require_solver_mesh_for_solid: true,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
             initial_displacement: None,
         }
     }
@@ -484,8 +480,6 @@ pub struct ModalSolveOptions {
     pub formulation_requirement: FormulationRequirement,
     pub mode_count: usize,
     pub solver_mesh: Option<SolverMeshArtifact>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 impl Default for ModalSolveOptions {
@@ -494,8 +488,6 @@ impl Default for ModalSolveOptions {
             formulation_requirement: FormulationRequirement::Production,
             mode_count: 3,
             solver_mesh: None,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
         }
     }
 }

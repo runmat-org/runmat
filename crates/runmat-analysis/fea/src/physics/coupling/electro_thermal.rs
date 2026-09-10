@@ -1,6 +1,6 @@
-use crate::FeaElectroThermalContext;
+use crate::assembly::ElectroThermalAssemblySummary;
 
-pub fn severity(context: Option<&FeaElectroThermalContext>) -> f64 {
+pub fn severity(context: Option<&ElectroThermalAssemblySummary>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };

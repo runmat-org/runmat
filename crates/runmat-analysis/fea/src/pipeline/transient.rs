@@ -79,9 +79,6 @@ pub fn run_transient_with_options(
         ExcitationSamplePoint::time(start_time_s),
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let thermo_context = options.thermo_mechanical_context.clone();
-    let electro_context = options.electro_thermal_context.clone();
-
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::ModelAssembly,
@@ -94,8 +91,6 @@ pub fn run_transient_with_options(
         &active_model,
         &excitations,
         options.solver_mesh.clone(),
-        thermo_context,
-        electro_context,
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
@@ -147,8 +142,6 @@ pub fn run_transient_with_options(
                 &active_model,
                 &excitations,
                 options.solver_mesh.clone(),
-                options.thermo_mechanical_context.clone(),
-                options.electro_thermal_context.clone(),
                 StructuralFormulationRequirement::ExperimentalSyntheticOperator,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;

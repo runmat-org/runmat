@@ -152,8 +152,7 @@ use runmat_analysis_fea::{
     FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_runtime::analysis::{
-    AnalysisRunResult, ContactEnforcementOptions, ElectroThermalCouplingOptions,
-    PlasticityConstitutiveOptions, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    AnalysisRunResult, ContactEnforcementOptions, PlasticityConstitutiveOptions,
 };
 use sha2::{Digest, Sha256};
 
@@ -878,48 +877,67 @@ fn contact_for_fixture(spec_id: &str) -> Option<FixtureContactOptions> {
     }
 }
 
-fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCouplingOptions> {
+struct FixtureThermoRegionTemperatureDelta {
+    region_id: String,
+    temperature_delta_k: f64,
+}
+
+struct FixtureThermoMechanicalCoupling {
+    reference_temperature_k: f64,
+    applied_temperature_delta_k: f64,
+    thermal_expansion_coefficient: f64,
+    region_temperature_deltas: Vec<FixtureThermoRegionTemperatureDelta>,
+}
+
+struct FixtureElectroThermalCoupling {
+    reference_temperature_k: f64,
+    applied_voltage_v: f64,
+    base_electrical_conductivity_s_per_m: f64,
+    resistive_heating_coefficient: f64,
+}
+
+fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalCoupling> {
     match spec_id {
-        "thermo_mech_kickoff_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+        "thermo_mech_kickoff_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 75.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "mid_aluminum".to_string(),
                     temperature_delta_k: 55.0,
                 },
             ],
         }),
-        "thermo_gradient_benign_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+        "thermo_gradient_benign_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 55.0,
             thermal_expansion_coefficient: 1.0e-5,
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 60.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "mid_aluminum".to_string(),
                     temperature_delta_k: 50.0,
                 },
             ],
         }),
-        "thermo_gradient_pathological_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+        "thermo_gradient_pathological_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 220.0,
             thermal_expansion_coefficient: 2.5e-5,
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 260.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "polymer_segment".to_string(),
                     temperature_delta_k: 120.0,
                 },
@@ -929,32 +947,32 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             if spec_id == "thermo_ramp_smooth_gpu_provider"
                 || spec_id.starts_with("thermal_standalone_ramp_") =>
         {
-            Some(ThermoMechanicalCouplingOptions {
+            Some(FixtureThermoMechanicalCoupling {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 70.0,
                 thermal_expansion_coefficient: 1.1e-5,
                 region_temperature_deltas: vec![
-                    ThermoRegionTemperatureDelta {
+                    FixtureThermoRegionTemperatureDelta {
                         region_id: "tip_steel".to_string(),
                         temperature_delta_k: 72.0,
                     },
-                    ThermoRegionTemperatureDelta {
+                    FixtureThermoRegionTemperatureDelta {
                         region_id: "mid_aluminum".to_string(),
                         temperature_delta_k: 68.0,
                     },
                 ],
             })
         }
-        "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+        "thermo_shock_oscillatory_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 140.0,
             thermal_expansion_coefficient: 2.0e-5,
             region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
                     temperature_delta_k: 210.0,
                 },
-                ThermoRegionTemperatureDelta {
+                FixtureThermoRegionTemperatureDelta {
                     region_id: "polymer_segment".to_string(),
                     temperature_delta_k: 90.0,
                 },
@@ -982,27 +1000,27 @@ fn thermo_history_for_fixture(spec_id: &str) -> &'static [(f64, f64)] {
     }
 }
 
-fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingOptions> {
+fn electro_coupling_for_fixture(spec_id: &str) -> Option<FixtureElectroThermalCoupling> {
     match spec_id {
-        "electro_thermal_joule_benign_rejected" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_joule_benign_rejected" => Some(FixtureElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 3.8e7,
             resistive_heating_coefficient: 3.5e-4,
         }),
-        "electro_thermal_joule_pathological_rejected" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_joule_pathological_rejected" => Some(FixtureElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: 180.0,
             base_electrical_conductivity_s_per_m: 2.0e7,
             resistive_heating_coefficient: 9.5e-4,
         }),
-        "electro_thermal_invalid_voltage" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_invalid_voltage" => Some(FixtureElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: f64::NAN,
             base_electrical_conductivity_s_per_m: 3.8e7,
             resistive_heating_coefficient: 3.5e-4,
         }),
-        "electro_thermal_invalid_conductivity" => Some(ElectroThermalCouplingOptions {
+        "electro_thermal_invalid_conductivity" => Some(FixtureElectroThermalCoupling {
             reference_temperature_k: 293.15,
             applied_voltage_v: 36.0,
             base_electrical_conductivity_s_per_m: 0.0,
@@ -2474,7 +2492,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
 
     let mut thermo = thermo_coupling_for_fixture(spec_id);
     if thermo.is_none() && spec_id == "nonlinear_load_path_mix_gpu_provider" {
-        thermo = Some(ThermoMechanicalCouplingOptions {
+        thermo = Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 75.0,
             thermal_expansion_coefficient: 1.2e-5,

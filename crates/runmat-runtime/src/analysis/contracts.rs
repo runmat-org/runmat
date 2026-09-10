@@ -362,29 +362,6 @@ pub enum QualityPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThermoRegionTemperatureDelta {
-    pub region_id: String,
-    pub temperature_delta_k: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThermoMechanicalCouplingOptions {
-    pub reference_temperature_k: f64,
-    pub applied_temperature_delta_k: f64,
-    pub thermal_expansion_coefficient: f64,
-    #[serde(default)]
-    pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElectroThermalCouplingOptions {
-    pub reference_temperature_k: f64,
-    pub applied_voltage_v: f64,
-    pub base_electrical_conductivity_s_per_m: f64,
-    pub resistive_heating_coefficient: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlasticityConstitutiveOptions {
     pub enabled: bool,
     pub yield_strain: f64,

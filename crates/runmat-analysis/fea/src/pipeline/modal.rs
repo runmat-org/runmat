@@ -70,8 +70,6 @@ pub fn run_modal_with_options(
         model,
         &excitations,
         options.solver_mesh,
-        options.thermo_mechanical_context,
-        options.electro_thermal_context,
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;

@@ -58,7 +58,6 @@ pub fn analysis_prepare_structural_study_intent_op(
             step.authored_execution.backend,
             step.authored_execution.requirement,
             &options,
-            &study.context,
         )?;
         let mut authored_execution = step.authored_execution.clone();
         authored_execution.solver_options =

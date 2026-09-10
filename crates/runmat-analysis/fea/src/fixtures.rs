@@ -12,7 +12,9 @@ use runmat_analysis_core::{
     TranslationDofValue,
 };
 #[cfg(test)]
-use runmat_analysis_core::{ElectricCurrent, Position, ReferencePoint, Traction};
+use runmat_analysis_core::{
+    ElectricCurrent, ElectricPotential, Position, ReferencePoint, Temperature, Traction,
+};
 use runmat_geometry_core::UnitSystem;
 
 #[derive(Debug, Clone)]
@@ -92,6 +94,74 @@ pub(crate) fn replace_fixture_with_electric_current(
         action_ids: vec![ExcitationId(id.to_string())],
         activation: ExcitationCaseActivation::Always,
     }];
+}
+
+#[cfg(test)]
+pub(crate) fn append_fixture_temperature_field(
+    model: &mut AnalysisModel,
+    id: &str,
+    temperature_k: f64,
+    target: ExcitationTarget,
+) {
+    append_fixture_scalar_action(
+        model,
+        id,
+        target,
+        Temperature::new(temperature_k),
+        PhysicalSignal::Temperature,
+        ExcitationAction::TemperatureField,
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn append_fixture_terminal_voltage(
+    model: &mut AnalysisModel,
+    id: &str,
+    voltage_v: f64,
+    target: ExcitationTarget,
+) {
+    append_fixture_scalar_action(
+        model,
+        id,
+        target,
+        ElectricPotential::new(voltage_v),
+        PhysicalSignal::ElectricPotential,
+        ExcitationAction::TerminalVoltage,
+    );
+}
+
+#[cfg(test)]
+fn append_fixture_scalar_action<Q>(
+    model: &mut AnalysisModel,
+    id: &str,
+    target: ExcitationTarget,
+    value: Q,
+    signal: impl FnOnce(Signal<Q>) -> PhysicalSignal,
+    action: impl FnOnce(AnalysisExcitation) -> ExcitationAction,
+) {
+    let signal_id = SignalId(format!("{id}.signal"));
+    let case_id = ExcitationCaseId(format!("{id}.case"));
+    model.signals.push(signal(Signal {
+        signal_id: signal_id.clone(),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(value)),
+        precision: SignalPrecision::Real64,
+        evidence: exact_signal_evidence(),
+        provenance: SignalProvenance::Authored,
+    }));
+    model.excitations.push(action(fixture_action(
+        id,
+        case_id.clone(),
+        target,
+        signal_id,
+        ExcitationDistribution::Concentrated,
+    )));
+    model.excitation_cases.push(ExcitationCase {
+        case_id,
+        action_ids: vec![ExcitationId(id.to_string())],
+        activation: ExcitationCaseActivation::Always,
+    });
 }
 
 fn append_fixture_excitation(model: &mut AnalysisModel, specification: FixtureExcitation) {

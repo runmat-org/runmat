@@ -2,6 +2,7 @@
 
 mod action;
 mod activation;
+mod coupling;
 mod evidence;
 mod model;
 mod projection;
@@ -9,6 +10,7 @@ mod realize;
 mod sample;
 mod target;
 
+pub(crate) use coupling::realize_coupling_contexts;
 pub use evidence::{
     ProjectionScalar, ProjectionVector3, SpatialIntegrationRule, SpatialProjectionBalance,
     SpatialProjectionEvidence,

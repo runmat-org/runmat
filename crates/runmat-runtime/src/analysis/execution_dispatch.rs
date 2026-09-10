@@ -27,7 +27,6 @@ struct AnalysisOperationDescriptor {
     cancelled_error_code: &'static str,
     assembly_error_code: &'static str,
     formulation_admission_error_code: &'static str,
-    invalid_electro_thermal_options_error_code: &'static str,
 }
 
 impl AnalysisOperation {
@@ -55,8 +54,6 @@ impl AnalysisOperation {
                 assembly_error_code: "RM.FEA.RUN_LINEAR_STATIC.ASSEMBLY_FAILED",
                 formulation_admission_error_code:
                     "RM.FEA.RUN_LINEAR_STATIC.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_LINEAR_STATIC.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Modal => AnalysisOperationDescriptor {
                 name: "fea.run_modal",
@@ -65,8 +62,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_MODAL.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_MODAL.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_MODAL.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_MODAL.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Acoustic => AnalysisOperationDescriptor {
                 name: "fea.run_acoustic",
@@ -75,8 +70,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_ACOUSTIC.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_ACOUSTIC.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_ACOUSTIC.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_ACOUSTIC.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Transient => AnalysisOperationDescriptor {
                 name: "fea.run_transient",
@@ -85,8 +78,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_TRANSIENT.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_TRANSIENT.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_TRANSIENT.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_TRANSIENT.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Thermal => AnalysisOperationDescriptor {
                 name: "fea.run_thermal",
@@ -95,8 +86,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_THERMAL.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_THERMAL.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_THERMAL.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_THERMAL.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Nonlinear => AnalysisOperationDescriptor {
                 name: "fea.run_nonlinear",
@@ -105,8 +94,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_NONLINEAR.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_NONLINEAR.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_NONLINEAR.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Electromagnetic => AnalysisOperationDescriptor {
                 name: "fea.run_electromagnetic",
@@ -116,8 +103,6 @@ impl AnalysisOperation {
                 assembly_error_code: "RM.FEA.RUN_ELECTROMAGNETIC.ASSEMBLY_FAILED",
                 formulation_admission_error_code:
                     "RM.FEA.RUN_ELECTROMAGNETIC.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Cfd => AnalysisOperationDescriptor {
                 name: "fea.run_cfd",
@@ -126,8 +111,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_CFD.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_CFD.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_CFD.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_CFD.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Cht => AnalysisOperationDescriptor {
                 name: "fea.run_cht",
@@ -136,8 +119,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_CHT.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_CHT.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_CHT.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_CHT.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
             Self::Fsi => AnalysisOperationDescriptor {
                 name: "fea.run_fsi",
@@ -146,8 +127,6 @@ impl AnalysisOperation {
                 cancelled_error_code: "RM.FEA.RUN_FSI.CANCELLED",
                 assembly_error_code: "RM.FEA.RUN_FSI.ASSEMBLY_FAILED",
                 formulation_admission_error_code: "RM.FEA.RUN_FSI.FORMULATION_NOT_ADMITTED",
-                invalid_electro_thermal_options_error_code:
-                    "RM.FEA.RUN_FSI.INVALID_ELECTRO_THERMAL_OPTIONS",
             },
         }
     }
@@ -174,10 +153,6 @@ impl AnalysisOperation {
 
     pub(super) const fn formulation_admission_error_code(self) -> &'static str {
         self.descriptor().formulation_admission_error_code
-    }
-
-    pub(super) const fn invalid_electro_thermal_options_error_code(self) -> &'static str {
-        self.descriptor().invalid_electro_thermal_options_error_code
     }
 }
 
@@ -258,7 +233,6 @@ mod tests {
         let mut cancelled_codes = BTreeSet::new();
         let mut assembly_codes = BTreeSet::new();
         let mut admission_codes = BTreeSet::new();
-        let mut electro_thermal_codes = BTreeSet::new();
 
         for operation in AnalysisOperation::ALL {
             assert!(names.insert(operation.name()));
@@ -288,16 +262,10 @@ mod tests {
                 operation.formulation_admission_error_code(),
                 format!("{error_namespace}FORMULATION_NOT_ADMITTED")
             );
-            assert_eq!(
-                operation.invalid_electro_thermal_options_error_code(),
-                format!("{error_namespace}INVALID_ELECTRO_THERMAL_OPTIONS")
-            );
             assert!(invalid_model_codes.insert(operation.invalid_model_error_code()));
             assert!(cancelled_codes.insert(operation.cancelled_error_code()));
             assert!(assembly_codes.insert(operation.assembly_error_code()));
             assert!(admission_codes.insert(operation.formulation_admission_error_code()));
-            assert!(electro_thermal_codes
-                .insert(operation.invalid_electro_thermal_options_error_code()));
         }
     }
 

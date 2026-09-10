@@ -1180,8 +1180,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(tetrahedron4_mesh()),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("valid Tet4 system should assemble");
@@ -1256,8 +1254,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("component constraint should assemble");
@@ -1296,8 +1292,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(tetrahedron4_mesh()),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("valid Tet4 system should assemble");

@@ -181,8 +181,6 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         require_solver_mesh_for_solid: true,
-        thermo_mechanical_context: None,
-        electro_thermal_context: None,
         initial_guess_transition: None,
     };
 

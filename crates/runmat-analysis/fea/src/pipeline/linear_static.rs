@@ -120,8 +120,6 @@ fn run_linear_static_with_constraint_plan(
                     "a prepared constraint plan requires its canonical solver mesh".into(),
                 )
             })?,
-            options.thermo_mechanical_context.clone(),
-            options.electro_thermal_context.clone(),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
             plan,
         ),
@@ -129,8 +127,6 @@ fn run_linear_static_with_constraint_plan(
             model,
             &excitations,
             options.solver_mesh.clone(),
-            options.thermo_mechanical_context.clone(),
-            options.electro_thermal_context.clone(),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         ),
     }

@@ -539,8 +539,6 @@ fn execute_structural_linear(
             solver_mesh_artifact_path: None,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
-            thermo_mechanical_context: solve.thermo_mechanical_context,
-            electro_thermal_context: solve.electro_thermal_context,
             initial_displacement,
         },
         &constraint_plan,
@@ -776,8 +774,6 @@ mod tests {
             preconditioner: SpdPreconditionerKind::Jacobi,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             require_solver_mesh_for_solid: false,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
             initial_guess_transition: None,
         };
         let mut mesh =

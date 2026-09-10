@@ -16,7 +16,7 @@ use crate::{
     solve::{
         accelerator::AcceleratorPreparedLinearSystem, backend::kind::LinearAlgebraBackendKind,
     },
-    ComputeBackend, FeaElectroThermalContext, FeaThermoMechanicalContext,
+    ComputeBackend,
 };
 
 mod diagnostics;
@@ -50,8 +50,6 @@ pub struct TransientSolveOptions {
     pub progress_operation: String,
     #[serde(default)]
     pub solver_mesh: Option<SolverMeshArtifact>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 fn default_progress_operation() -> String {
@@ -79,8 +77,6 @@ impl Default for TransientSolveOptions {
             dt_bucket_rel_tolerance: 0.0,
             progress_operation: default_progress_operation(),
             solver_mesh: None,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
         }
     }
 }
@@ -149,10 +145,8 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     }
 
     let use_accelerator = backend == ComputeBackend::Gpu;
-    let thermo_context = options.thermo_mechanical_context.as_ref();
-    let electro_context = options.electro_thermal_context.as_ref();
-    let thermo_severity_base = thermo_mechanical::severity(thermo_context);
-    let electro_severity_base = electro_thermal::severity(electro_context);
+    let thermo_severity_base = thermo_mechanical::severity(summary.thermo_mechanical.as_ref());
+    let electro_severity_base = electro_thermal::severity(summary.electro_thermal.as_ref());
     let mut thermo_severity_sum = 0.0_f64;
     let mut electro_severity_sum = 0.0_f64;
     let mut electro_severity_peak = 0.0_f64;

@@ -1,4 +1,4 @@
-use crate::FeaThermoMechanicalContext;
+use crate::assembly::ThermoMechanicalAssemblySummary;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransientPolicy {
@@ -13,7 +13,7 @@ pub struct NonlinearPolicy {
     pub convergence_increment_target: f64,
 }
 
-pub fn severity(context: Option<&FeaThermoMechanicalContext>) -> f64 {
+pub fn severity(context: Option<&ThermoMechanicalAssemblySummary>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };

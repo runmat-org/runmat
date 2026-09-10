@@ -21,6 +21,7 @@ struct ChtKnownAnswerMetrics {
 pub(super) fn coupling_diagnostics(
     authored_interface_count: usize,
     reference_temperature_k: f64,
+    applied_temperature_delta_k: f64,
     inlet_velocity_m_per_s: f64,
     options: ChtCouplingOptions,
     domain: &CfdDomain,
@@ -37,7 +38,7 @@ pub(super) fn coupling_diagnostics(
             message: format!(
                 "reference_temperature_k={} applied_temperature_delta_k={} step_count={} time_step_s={} authored_interface_count={}",
                 reference_temperature_k,
-                options.applied_temperature_delta_k,
+                applied_temperature_delta_k,
                 options.step_count,
                 options.time_step_s,
                 authored_interface_count,

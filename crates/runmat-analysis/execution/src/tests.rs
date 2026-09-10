@@ -1094,8 +1094,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         require_solver_mesh_for_solid: true,
-        thermo_mechanical_context: None,
-        electro_thermal_context: None,
         initial_guess_transition: None,
     };
     let mut mesh =
@@ -1245,8 +1243,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             solver_mesh_artifact_path: None,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
             initial_displacement: None,
         },
     )
@@ -2073,8 +2069,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         require_solver_mesh_for_solid: true,
-        thermo_mechanical_context: None,
-        electro_thermal_context: None,
         initial_guess_transition: None,
     };
     let mut mesh =
@@ -2108,8 +2102,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             solver_mesh_artifact_path: None,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
             initial_displacement: None,
         },
     )

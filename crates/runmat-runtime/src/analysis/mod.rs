@@ -61,7 +61,6 @@ use policy::{
 
 mod contracts;
 mod excitation_authoring;
-mod excitation_query;
 mod execution_dispatch;
 mod execution_error;
 mod fea_document;
@@ -83,9 +82,6 @@ mod study_sweep;
 pub mod value_admission;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
-use excitation_query::{
-    applied_temperature_delta_k, applied_voltage_v, regional_temperature_deltas_k,
-};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
@@ -264,13 +260,12 @@ pub use contracts::{
     AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactEnforcementOptions,
-    ElectroThermalCouplingOptions, ElectromagneticResultsData, FallbackEvent, FallbackReason,
-    FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, TransientIntegrationMethod,
-    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ElectromagneticResultsData, FallbackEvent, FallbackReason, FallbackStage, ModalFrequencyBasis,
+    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
+    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode, ProductionPublicationReason,
+    ProductionPublicationReasonCode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, ThermalResultsData, TransientIntegrationMethod, TransientResultsData,
+    ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
     ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
     ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
     ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
@@ -1911,44 +1906,6 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
-    let thermo_options = model_thermo_coupling_options(model);
-    if let Some(thermo_options) = thermo_options.as_ref() {
-        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
-            return Err(operation_error(
-                AnalysisOperation::Modal.name(),
-                AnalysisOperation::Modal.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_MODAL.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-    let electro_options = model_electro_coupling_options(model);
-    if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
-            return Err(operation_error(
-                AnalysisOperation::Modal.name(),
-                AnalysisOperation::Modal.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: AnalysisOperation::Modal
-                        .invalid_electro_thermal_options_error_code(),
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -1964,8 +1921,6 @@ pub fn analysis_run_modal_with_options_op(
             formulation_requirement,
             mode_count: options.mode_count,
             solver_mesh: solver_mesh.clone(),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
@@ -2317,44 +2272,6 @@ pub fn analysis_run_acoustic_with_options_op(
                 ),
             ]),
         ));
-    }
-
-    let thermo_options = model_thermo_coupling_options(model);
-    if let Some(thermo_options) = thermo_options.as_ref() {
-        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
-            return Err(operation_error(
-                AnalysisOperation::Acoustic.name(),
-                AnalysisOperation::Acoustic.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-    let electro_options = model_electro_coupling_options(model);
-    if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
-            return Err(operation_error(
-                AnalysisOperation::Acoustic.name(),
-                AnalysisOperation::Acoustic.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: AnalysisOperation::Acoustic
-                        .invalid_electro_thermal_options_error_code(),
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
     }
 
     let render_topology = None;
@@ -3188,8 +3105,7 @@ pub fn analysis_run_cht_with_options_op(
         ));
     }
 
-    let thermo_options = model_thermo_coupling_options(model);
-    let Some(thermo_options) = thermo_options else {
+    if model.thermo_mechanical.is_none() {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
             AnalysisOperation::Cht.version(),
@@ -3204,21 +3120,6 @@ pub fn analysis_run_cht_with_options_op(
             BTreeMap::new(),
         ));
     };
-    if let Err((detail, metadata)) = validate_thermo_coupling_options(model, &thermo_options) {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            detail,
-            metadata,
-        ));
-    }
     if let Err((detail, metadata)) = validate_coupled_flow_interfaces(model, "CHT") {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
@@ -3234,8 +3135,6 @@ pub fn analysis_run_cht_with_options_op(
             metadata,
         ));
     }
-    let applied_temperature_delta_k = thermo_options.applied_temperature_delta_k;
-
     let solve_start = Instant::now();
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
@@ -3294,7 +3193,6 @@ pub fn analysis_run_cht_with_options_op(
         &topology,
         &thermal_run,
         ChtCouplingOptions {
-            applied_temperature_delta_k,
             time_step_s: options.time_step_s,
             step_count: options.step_count,
             procedure: cht_procedure,
@@ -4310,44 +4208,6 @@ pub fn analysis_run_transient_with_options_op(
         ));
     }
 
-    let thermo_options = model_thermo_coupling_options(model);
-    if let Some(thermo_options) = thermo_options.as_ref() {
-        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
-            return Err(operation_error(
-                AnalysisOperation::Transient.name(),
-                AnalysisOperation::Transient.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_TRANSIENT.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-    let electro_options = model_electro_coupling_options(model);
-    if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
-            return Err(operation_error(
-                AnalysisOperation::Transient.name(),
-                AnalysisOperation::Transient.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: AnalysisOperation::Transient
-                        .invalid_electro_thermal_options_error_code(),
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -4378,8 +4238,6 @@ pub fn analysis_run_transient_with_options_op(
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             progress_operation: AnalysisOperation::Transient.name().to_string(),
             solver_mesh: solver_mesh.clone(),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Transient, model, &context, err))?;
@@ -4856,43 +4714,6 @@ pub fn analysis_run_nonlinear_with_options_op(
         ));
     }
 
-    let thermo_options = model_thermo_coupling_options(model);
-    if let Some(thermo_options) = thermo_options.as_ref() {
-        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
-            return Err(operation_error(
-                AnalysisOperation::Nonlinear.name(),
-                AnalysisOperation::Nonlinear.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-    let electro_options = model_electro_coupling_options(model);
-    if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
-            return Err(operation_error(
-                AnalysisOperation::Nonlinear.name(),
-                AnalysisOperation::Nonlinear.version(),
-                &context,
-                OperationErrorSpec {
-                    error_code: AnalysisOperation::Nonlinear
-                        .invalid_electro_thermal_options_error_code(),
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
     let plasticity_options = model_plasticity_constitutive_options(model);
     if let Some(plasticity_options) = plasticity_options.as_ref() {
         if let Err((detail, metadata)) =
@@ -4971,8 +4792,6 @@ pub fn analysis_run_nonlinear_with_options_op(
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
             solver_mesh: solver_mesh.clone(),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
             plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
             contact_context: to_fea_contact_interface_context(contact_options),
         },
@@ -5391,7 +5210,6 @@ fn prepare_linear_static_step_run(
         backend,
         formulation_requirement,
         &options,
-        &context,
     )?;
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
@@ -5415,46 +5233,7 @@ fn prepare_linear_static_workload_template(
     backend: ComputeBackend,
     formulation_requirement: FormulationRequirement,
     options: &AnalysisRunOptions,
-    context: &OperationContext,
 ) -> Result<StructuralLinearWorkload, OperationErrorEnvelope> {
-    let thermo_options = model_thermo_coupling_options(model);
-    if let Some(thermo_options) = thermo_options.as_ref() {
-        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
-            return Err(operation_error(
-                AnalysisOperation::LinearStatic.name(),
-                AnalysisOperation::LinearStatic.version(),
-                context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_LINEAR_STATIC.INVALID_OPTIONS",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-    let electro_options = model_electro_coupling_options(model);
-    if let Some(electro_options) = electro_options.as_ref() {
-        if let Err((detail, metadata)) = validate_electro_coupling_options(electro_options) {
-            return Err(operation_error(
-                AnalysisOperation::LinearStatic.name(),
-                AnalysisOperation::LinearStatic.version(),
-                context,
-                OperationErrorSpec {
-                    error_code: AnalysisOperation::LinearStatic
-                        .invalid_electro_thermal_options_error_code(),
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                detail,
-                metadata,
-            ));
-        }
-    }
-
     let requested_preconditioner = match options.preconditioner_mode {
         PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
@@ -5480,8 +5259,6 @@ fn prepare_linear_static_workload_template(
         preconditioner: requested_preconditioner,
         algebra_backend: requested_solver_backend,
         require_solver_mesh_for_solid: true,
-        thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
-        electro_thermal_context: to_fea_electro_thermal_context(electro_options),
         initial_guess_transition: None,
     })
 }
@@ -5625,8 +5402,6 @@ fn analysis_run_linear_static_with_executor(
                 solver_mesh_artifact_path: prepared.options.solver_mesh_artifact_path.clone(),
                 solver_mesh: prepared.solver_mesh.clone(),
                 require_solver_mesh_for_solid: prepared.workload.require_solver_mesh_for_solid,
-                thermo_mechanical_context: prepared.workload.thermo_mechanical_context.clone(),
-                electro_thermal_context: prepared.workload.electro_thermal_context.clone(),
                 initial_displacement: None,
             },
         )
@@ -7051,69 +6826,6 @@ fn render_regions_from_triangle_indices(
         .collect()
 }
 
-fn model_thermo_coupling_options(model: &AnalysisModel) -> Option<ThermoMechanicalCouplingOptions> {
-    let domain = model.thermo_mechanical.as_ref()?;
-    let expansion = if model.materials.is_empty() {
-        1.2e-5
-    } else {
-        model
-            .materials
-            .iter()
-            .map(|material| material.thermal.expansion_coefficient_per_k.max(0.0))
-            .sum::<f64>()
-            / model.materials.len() as f64
-    };
-
-    Some(ThermoMechanicalCouplingOptions {
-        reference_temperature_k: domain.reference_temperature.kelvin,
-        applied_temperature_delta_k: applied_temperature_delta_k(model, domain).unwrap_or(0.0),
-        thermal_expansion_coefficient: expansion,
-        region_temperature_deltas: regional_temperature_deltas_k(model, domain)
-            .into_iter()
-            .map(
-                |(region_id, temperature_delta_k)| ThermoRegionTemperatureDelta {
-                    region_id,
-                    temperature_delta_k,
-                },
-            )
-            .collect(),
-    })
-}
-
-fn model_electro_coupling_options(model: &AnalysisModel) -> Option<ElectroThermalCouplingOptions> {
-    let domain = model.electro_thermal.as_ref()?;
-    let electrical_materials: Vec<_> = model
-        .materials
-        .iter()
-        .filter_map(|material| material.electrical.as_ref())
-        .collect();
-    let base_conductivity = if electrical_materials.is_empty() {
-        1.0
-    } else {
-        electrical_materials
-            .iter()
-            .map(|e| e.conductivity_s_per_m.max(1.0e-12))
-            .sum::<f64>()
-            / electrical_materials.len() as f64
-    };
-    let resistive_coeff = if electrical_materials.is_empty() {
-        0.0
-    } else {
-        electrical_materials
-            .iter()
-            .map(|e| e.resistive_heating_coefficient.max(0.0))
-            .sum::<f64>()
-            / electrical_materials.len() as f64
-    };
-
-    Some(ElectroThermalCouplingOptions {
-        reference_temperature_k: domain.reference_temperature.kelvin,
-        applied_voltage_v: applied_voltage_v(model).unwrap_or(0.0),
-        base_electrical_conductivity_s_per_m: base_conductivity,
-        resistive_heating_coefficient: resistive_coeff,
-    })
-}
-
 fn model_plasticity_constitutive_options(
     model: &AnalysisModel,
 ) -> Option<PlasticityConstitutiveOptions> {
@@ -7164,40 +6876,6 @@ fn model_contact_interface_options(
         .next()
 }
 
-fn to_fea_thermo_mechanical_context(
-    options: Option<ThermoMechanicalCouplingOptions>,
-) -> Option<runmat_analysis_fea::FeaThermoMechanicalContext> {
-    options.map(|tm| runmat_analysis_fea::FeaThermoMechanicalContext {
-        reference_temperature_k: tm.reference_temperature_k,
-        applied_temperature_delta_k: tm.applied_temperature_delta_k,
-        thermal_expansion_coefficient: tm.thermal_expansion_coefficient,
-        region_temperature_deltas: tm
-            .region_temperature_deltas
-            .into_iter()
-            .map(
-                |ThermoRegionTemperatureDelta {
-                     region_id,
-                     temperature_delta_k,
-                 }| runmat_analysis_fea::FeaThermoRegionTemperatureDelta {
-                    region_id,
-                    temperature_delta_k,
-                },
-            )
-            .collect(),
-    })
-}
-
-fn to_fea_electro_thermal_context(
-    options: Option<ElectroThermalCouplingOptions>,
-) -> Option<runmat_analysis_fea::FeaElectroThermalContext> {
-    options.map(|et| runmat_analysis_fea::FeaElectroThermalContext {
-        reference_temperature_k: et.reference_temperature_k,
-        applied_voltage_v: et.applied_voltage_v,
-        base_electrical_conductivity_s_per_m: et.base_electrical_conductivity_s_per_m,
-        resistive_heating_coefficient: et.resistive_heating_coefficient,
-    })
-}
-
 fn to_fea_plasticity_constitutive_context(
     options: Option<PlasticityConstitutiveOptions>,
 ) -> Option<runmat_analysis_fea::FeaPlasticityConstitutiveContext> {
@@ -7220,127 +6898,6 @@ fn to_fea_contact_interface_context(
         max_penetration_ratio: contact.max_penetration_ratio,
         friction_coefficient: contact.friction_coefficient,
     })
-}
-
-fn validate_thermo_coupling_options(
-    model: &AnalysisModel,
-    options: &ThermoMechanicalCouplingOptions,
-) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
-        return Err((
-            "thermo coupling requires finite positive reference_temperature_k".to_string(),
-            BTreeMap::from([(
-                "reference_temperature_k".to_string(),
-                options.reference_temperature_k.to_string(),
-            )]),
-        ));
-    }
-    if !options.applied_temperature_delta_k.is_finite() {
-        return Err((
-            "thermo coupling requires finite applied_temperature_delta_k".to_string(),
-            BTreeMap::from([(
-                "applied_temperature_delta_k".to_string(),
-                options.applied_temperature_delta_k.to_string(),
-            )]),
-        ));
-    }
-    if !options.thermal_expansion_coefficient.is_finite()
-        || options.thermal_expansion_coefficient < 0.0
-    {
-        return Err((
-            "thermo coupling requires finite non-negative thermal_expansion_coefficient"
-                .to_string(),
-            BTreeMap::from([(
-                "thermal_expansion_coefficient".to_string(),
-                options.thermal_expansion_coefficient.to_string(),
-            )]),
-        ));
-    }
-
-    let model_region_ids = model
-        .material_assignments
-        .iter()
-        .map(|assignment| assignment.region_id.as_str())
-        .chain(
-            model
-                .structural
-                .iter()
-                .flat_map(|structural| structural.elements.iter())
-                .map(|element| element.region_id.as_str()),
-        )
-        .collect::<HashSet<_>>();
-
-    for delta in &options.region_temperature_deltas {
-        if !delta.temperature_delta_k.is_finite() {
-            return Err((
-                "thermo region_temperature_deltas must use finite temperature_delta_k".to_string(),
-                BTreeMap::from([
-                    ("region_id".to_string(), delta.region_id.clone()),
-                    (
-                        "temperature_delta_k".to_string(),
-                        delta.temperature_delta_k.to_string(),
-                    ),
-                ]),
-            ));
-        }
-        if !model_region_ids.is_empty() && !model_region_ids.contains(delta.region_id.as_str()) {
-            return Err((
-                "thermo region_temperature_deltas region_id must exist in model material assignments"
-                    .to_string(),
-                BTreeMap::from([("region_id".to_string(), delta.region_id.clone())]),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_electro_coupling_options(
-    options: &ElectroThermalCouplingOptions,
-) -> Result<(), (String, BTreeMap<String, String>)> {
-    if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
-        return Err((
-            "electro-thermal coupling requires finite positive reference_temperature_k".to_string(),
-            BTreeMap::from([(
-                "reference_temperature_k".to_string(),
-                options.reference_temperature_k.to_string(),
-            )]),
-        ));
-    }
-    if !options.applied_voltage_v.is_finite() {
-        return Err((
-            "electro-thermal coupling requires finite applied_voltage_v".to_string(),
-            BTreeMap::from([(
-                "applied_voltage_v".to_string(),
-                options.applied_voltage_v.to_string(),
-            )]),
-        ));
-    }
-    if !options.base_electrical_conductivity_s_per_m.is_finite()
-        || options.base_electrical_conductivity_s_per_m <= 0.0
-    {
-        return Err((
-            "electro-thermal coupling requires finite positive base_electrical_conductivity_s_per_m"
-                .to_string(),
-            BTreeMap::from([(
-                "base_electrical_conductivity_s_per_m".to_string(),
-                options.base_electrical_conductivity_s_per_m.to_string(),
-            )]),
-        ));
-    }
-    if !options.resistive_heating_coefficient.is_finite()
-        || options.resistive_heating_coefficient < 0.0
-    {
-        return Err((
-            "electro-thermal coupling requires finite non-negative resistive_heating_coefficient"
-                .to_string(),
-            BTreeMap::from([(
-                "resistive_heating_coefficient".to_string(),
-                options.resistive_heating_coefficient.to_string(),
-            )]),
-        ));
-    }
-    Ok(())
 }
 
 fn validate_plasticity_constitutive_options(

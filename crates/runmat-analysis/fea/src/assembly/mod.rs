@@ -118,6 +118,7 @@ pub struct AssemblySummary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinearAssemblyError {
+    CouplingRealization(String),
     SparseOperator(String),
     ConstraintPlan(ConstraintPlanError),
     ConstraintAlgebra(ConstraintAlgebraError),
@@ -129,6 +130,9 @@ pub enum LinearAssemblyError {
 impl fmt::Display for LinearAssemblyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            LinearAssemblyError::CouplingRealization(message) => {
+                write!(f, "coupling realization failed: {message}")
+            }
             LinearAssemblyError::SparseOperator(message) => {
                 write!(f, "sparse operator construction failed: {message}")
             }
@@ -567,9 +571,10 @@ pub(crate) fn assemble_linear_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     solver_mesh: Option<SolverMeshArtifact>,
-    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    let (thermo_mechanical_context, electro_thermal_context) =
+        crate::excitation::realize_coupling_contexts(model, excitations)
+            .map_err(LinearAssemblyError::CouplingRealization)?;
     assemble_linear_system_impl(
         model,
         excitations,
@@ -585,10 +590,11 @@ pub(crate) fn assemble_structural_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     solver_mesh: Option<SolverMeshArtifact>,
-    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    electro_thermal_context: Option<FeaElectroThermalContext>,
     requirement: StructuralFormulationRequirement,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    let (thermo_mechanical_context, electro_thermal_context) =
+        crate::excitation::realize_coupling_contexts(model, excitations)
+            .map_err(LinearAssemblyError::CouplingRealization)?;
     assemble_linear_system_impl(
         model,
         excitations,
@@ -604,11 +610,12 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     solver_mesh: SolverMeshArtifact,
-    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    electro_thermal_context: Option<FeaElectroThermalContext>,
     requirement: StructuralFormulationRequirement,
     constraint_plan: &CanonicalStructuralConstraintPlan,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    let (thermo_mechanical_context, electro_thermal_context) =
+        crate::excitation::realize_coupling_contexts(model, excitations)
+            .map_err(LinearAssemblyError::CouplingRealization)?;
     assemble_linear_system_impl(
         model,
         excitations,
@@ -2493,8 +2500,6 @@ mod tests {
             model,
             &excitations,
             solver_mesh,
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
     }
@@ -2608,8 +2613,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(tetrahedron4_mesh()),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect_err("an uncoupled solid-plus-beam model must be rejected");
@@ -2704,8 +2707,6 @@ mod tests {
                 &model,
                 &static_excitations(&model),
                 Some(mesh),
-                None,
-                None,
                 StructuralFormulationRequirement::PhysicalDiscretization,
             )
             .expect_err("Tet4 connectivity must contain exactly four nodes");
@@ -2859,8 +2860,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("valid pressure boundary should assemble");
@@ -3106,8 +3105,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("valid wrench boundary should assemble");
@@ -3272,8 +3269,6 @@ mod tests {
                 &model,
                 &static_excitations(&model),
                 None,
-                None,
-                None,
                 StructuralFormulationRequirement::ExperimentalSyntheticOperator,
             )
             .expect_err(name);
@@ -3299,8 +3294,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             None,
-            None,
-            None,
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .expect_err("mixed beam-shell topology must require a coupling formulation");
@@ -3320,8 +3313,6 @@ mod tests {
         let error = assemble_structural_system(
             &model,
             &static_excitations(&model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
@@ -3358,8 +3349,6 @@ mod tests {
             let error = assemble_structural_system(
                 &model,
                 &static_excitations(&model),
-                None,
-                None,
                 None,
                 StructuralFormulationRequirement::PhysicalDiscretization,
             )
@@ -3434,9 +3423,9 @@ mod tests {
         let first_sample = static_excitations(&model);
         let second_sample = scaled_force_excitations(&first_sample, 2.0);
 
-        let first = assemble_linear_system(&model, &first_sample, None, None, None)
+        let first = assemble_linear_system(&model, &first_sample, None)
             .expect("first sampled load should assemble");
-        let second = assemble_linear_system(&model, &second_sample, None, None, None)
+        let second = assemble_linear_system(&model, &second_sample, None)
             .expect("second sampled load should assemble");
 
         assert_eq!(
@@ -3458,7 +3447,7 @@ mod tests {
         model.constraints.clear();
 
         let excitations = static_excitations(&model);
-        let summary = assemble_linear_system(&model, &excitations, None, None, None)
+        let summary = assemble_linear_system(&model, &excitations, None)
             .expect("nonstructural scaffolding must not select explicit structural assembly");
 
         assert_eq!(summary.load_count, 1);
@@ -3470,9 +3459,8 @@ mod tests {
             .iter()
             .any(|value| value.abs() > 0.0));
 
-        let mesh_summary =
-            assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()), None, None)
-                .expect("a solver mesh must not route a nonstructural source through mechanics");
+        let mesh_summary = assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()))
+            .expect("a solver mesh must not route a nonstructural source through mechanics");
         assert!(mesh_summary.structural_formulation.is_none());
         assert_eq!(
             mesh_summary.structural_sources,
@@ -3503,8 +3491,6 @@ mod tests {
         let error = assemble_structural_system(
             &model,
             &static_excitations(&model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
@@ -3543,8 +3529,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             None,
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect_err("unsupported scheduled constraints must not vanish during assembly");
@@ -3578,8 +3562,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("supported solid projections should assemble");
@@ -3604,8 +3586,6 @@ mod tests {
             Some(crate::assembly::solver_solid::tests::artifact(
                 ElementOrder::Tet4,
             )),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("Tet4 assembly should succeed");
@@ -3615,8 +3595,6 @@ mod tests {
             Some(crate::assembly::solver_solid::tests::artifact(
                 ElementOrder::Tet10,
             )),
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("Tet10 assembly should succeed");
@@ -3624,8 +3602,6 @@ mod tests {
         let beam = assemble_structural_system(
             &beam_model,
             &static_excitations(&beam_model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
@@ -3636,8 +3612,6 @@ mod tests {
             &shell_model,
             &static_excitations(&shell_model),
             None,
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("shell assembly should succeed");
@@ -3645,8 +3619,6 @@ mod tests {
         let synthetic = assemble_structural_system(
             &synthetic_model,
             &static_excitations(&synthetic_model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
@@ -3730,8 +3702,6 @@ mod tests {
             &model,
             &static_excitations(&model),
             None,
-            None,
-            None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .unwrap();
@@ -3748,8 +3718,6 @@ mod tests {
         let anchored = assemble_structural_system(
             &model,
             &static_excitations(&model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
@@ -3789,8 +3757,6 @@ mod tests {
         let summary = assemble_structural_system(
             &model,
             &static_excitations(&model),
-            None,
-            None,
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )

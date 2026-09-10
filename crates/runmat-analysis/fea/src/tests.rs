@@ -13,28 +13,28 @@ use crate::{
     fea_transient_rotation_field_id, fea_transient_strain_energy_field_id,
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{
-        fixture_model, replace_fixture_excitations, replace_fixture_with_electric_current,
-        FixtureExcitation, FixtureExcitationKind, FixtureId,
+        append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
+        replace_fixture_excitations, replace_fixture_with_electric_current, FixtureExcitation,
+        FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
-    ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext,
-    FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions, FEA_FIELD_MODAL_EIGENVALUE,
-    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
-    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
-    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
-    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
-    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
-    FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    ComputeBackend, ElectromagneticSolveOptions, FeaContactInterfaceContext, FeaRunResult,
+    LinearStaticSolveOptions, ModalSolveOptions, ThermalProcedureControl, ThermalSolveOptions,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
+    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
+    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 
 fn fixed_constraint(id: &str, region: &str) -> runmat_analysis_core::AnalysisConstraint {
@@ -99,6 +99,52 @@ fn experimental_transient_options() -> TransientSolveOptions {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..TransientSolveOptions::default()
     }
+}
+
+fn configure_thermo_mechanical_excitation(
+    model: &mut runmat_analysis_core::AnalysisModel,
+    temperature_delta_k: f64,
+    expansion_coefficient_per_k: f64,
+) {
+    let reference_temperature_k = 293.15;
+    model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(reference_temperature_k),
+    });
+    for material in &mut model.materials {
+        material.thermal.reference_temperature_k = reference_temperature_k;
+        material.thermal.expansion_coefficient_per_k = expansion_coefficient_per_k;
+    }
+    append_fixture_temperature_field(
+        model,
+        "coupled_temperature",
+        reference_temperature_k + temperature_delta_k,
+        runmat_analysis_core::ExcitationTarget::WholeModel,
+    );
+}
+
+fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::AnalysisModel) {
+    let reference_temperature_k = 293.15;
+    model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(reference_temperature_k),
+    });
+    for material in &mut model.materials {
+        material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+            reference_temperature_k,
+            conductivity_s_per_m: 3.5e7,
+            resistive_heating_coefficient: 4.0e-4,
+            relative_permittivity: 1.0,
+            relative_permeability: 1.0,
+            conductivity_frequency_response: Vec::new(),
+        });
+    }
+    append_fixture_terminal_voltage(
+        model,
+        "coupled_terminal_voltage",
+        36.0,
+        runmat_analysis_core::ExcitationTarget::Region(
+            runmat_analysis_core::RegionTarget::boundary("tip"),
+        ),
+    );
 }
 
 fn experimental_nonlinear_options() -> NonlinearSolveOptions {
@@ -445,8 +491,6 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         &inline_model,
         &static_excitations(&inline_model),
         None,
-        None,
-        None,
         crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .expect("inline prescribed value should assemble");
@@ -494,8 +538,6 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         &signal_model,
         &static_excitations(&signal_model),
         None,
-        None,
-        None,
         crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .expect("signal-backed prescribed value should assemble");
@@ -512,8 +554,6 @@ fn assembly_summary_reports_structural_dof_layout_metrics() {
     let summary = crate::assembly::assemble_structural_system(
         &model,
         &static_excitations(&model),
-        None,
-        None,
         None,
         crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
     )
@@ -537,8 +577,6 @@ fn beam_assembly_uses_lumped_rotational_inertia() {
     let summary = crate::assembly::assemble_structural_system(
         &model,
         &static_excitations(&model),
-        None,
-        None,
         None,
         crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
     )
@@ -821,6 +859,7 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
 #[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_static",
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
@@ -832,12 +871,6 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 65.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-            }),
             ..experimental_linear_static_options()
         },
     )
@@ -922,19 +955,14 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
 
 #[test]
 fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
     let error = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 65.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-            }),
             ..experimental_linear_static_options()
         },
     )
@@ -968,6 +996,7 @@ fn transient_rejects_thermomechanical_step_without_coupled_assembly() {
 #[test]
 fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_explicit_nonlinear",
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
@@ -976,15 +1005,7 @@ fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling(
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        NonlinearSolveOptions {
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 65.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-            }),
-            ..experimental_nonlinear_options()
-        },
+        experimental_nonlinear_options(),
     )
     .expect_err("explicit connectivity must not silently drop thermomechanical coupling");
 
@@ -2321,8 +2342,6 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             mode_count: 8,
             solver_mesh: None,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
         },
     )
     .expect("modal large fixture should solve");
@@ -2401,6 +2420,7 @@ fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
 #[test]
 fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
     let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_transient",
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
@@ -2411,12 +2431,6 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             step_count: 24,
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 65.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                region_temperature_deltas: Vec::new(),
-            }),
             ..experimental_transient_options()
         },
     )
@@ -2505,18 +2519,13 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
 
 #[test]
 fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
-    let model = fixture_model(FixtureId::ElectroThermalJouleBenign);
+    let mut model = fixture_model(FixtureId::ElectroThermalJouleBenign);
+    configure_electro_thermal_excitation(&mut model);
     let error = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
             step_count: 12,
-            electro_thermal_context: Some(FeaElectroThermalContext {
-                reference_temperature_k: 293.15,
-                applied_voltage_v: 36.0,
-                base_electrical_conductivity_s_per_m: 3.5e7,
-                resistive_heating_coefficient: 4.0e-4,
-            }),
             ..experimental_transient_options()
         },
     )
@@ -2750,6 +2759,7 @@ fn nonlinear_contact_reference_enforces_pressure_gap_complementarity() {
 #[test]
 fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
     let mut model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    configure_thermo_mechanical_excitation(&mut model, 90.0, 1.4e-5);
     model.sequence.steps = vec![ProcedureStep::coupled(
         "thermomechanical_nonlinear",
         runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
@@ -2758,15 +2768,7 @@ fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
     let result = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        NonlinearSolveOptions {
-            thermo_mechanical_context: Some(FeaThermoMechanicalContext {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.4e-5,
-                region_temperature_deltas: Vec::new(),
-            }),
-            ..experimental_nonlinear_options()
-        },
+        experimental_nonlinear_options(),
     )
     .expect("thermo-mechanical nonlinear solve should succeed");
 

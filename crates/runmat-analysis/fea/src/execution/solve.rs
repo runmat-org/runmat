@@ -6,9 +6,7 @@ use runmat_analysis_core::{
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::contracts::{
-    ComputeBackend, FeaElectroThermalContext, FeaRunResult, FeaThermoMechanicalContext,
-};
+use crate::contracts::{ComputeBackend, FeaRunResult};
 use crate::solve::backend::kind::LinearAlgebraBackendKind;
 use crate::solve::preconditioner::SpdPreconditionerKind;
 
@@ -34,8 +32,6 @@ pub struct StructuralLinearWorkload {
     pub preconditioner: SpdPreconditionerKind,
     pub algebra_backend: LinearAlgebraBackendKind,
     pub require_solver_mesh_for_solid: bool,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
     pub initial_guess_transition: Option<CanonicalStateTransition>,
 }
 

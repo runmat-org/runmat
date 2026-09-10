@@ -20,7 +20,6 @@ use super::{
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChtCouplingOptions {
-    pub applied_temperature_delta_k: f64,
     pub time_step_s: f64,
     pub step_count: usize,
     pub procedure: AnalysisProcedure,
@@ -197,6 +196,13 @@ pub fn couple_thermal_flow(
             .max_energy_residual
             .max(closure.heat_flux_balance_ratio),
     );
+    let applied_temperature_delta_k = thermal_run
+        .temperature_snapshots
+        .iter()
+        .filter_map(AnalysisField::as_host_f64)
+        .flatten()
+        .map(|temperature| (temperature - thermal_run.reference_temperature_k).abs())
+        .fold(0.0_f64, f64::max);
     let mut result_diagnostics = cfd::coupling_diagnostics(
         domain,
         topology,
@@ -216,6 +222,7 @@ pub fn couple_thermal_flow(
     result_diagnostics.extend(diagnostics::coupling_diagnostics(
         model.interfaces.len(),
         thermal_run.reference_temperature_k,
+        applied_temperature_delta_k,
         inlet_velocity_m_per_s,
         options,
         domain,

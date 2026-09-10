@@ -46,8 +46,6 @@ fn workload() -> StructuralLinearWorkload {
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         require_solver_mesh_for_solid: false,
-        thermo_mechanical_context: None,
-        electro_thermal_context: None,
         initial_guess_transition: None,
     }
 }

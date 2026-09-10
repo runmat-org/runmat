@@ -62,9 +62,6 @@ pub fn run_nonlinear_with_options(
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let thermo_context = options.thermo_mechanical_context.clone();
-    let electro_context = options.electro_thermal_context.clone();
-
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::ModelAssembly,
@@ -77,8 +74,6 @@ pub fn run_nonlinear_with_options(
         model,
         &excitations,
         options.solver_mesh.clone(),
-        thermo_context,
-        electro_context,
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;

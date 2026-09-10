@@ -144,9 +144,8 @@ pub fn run_electromagnetic_with_options(
         Some(5),
     );
     let solver_mesh = options.solver_mesh.as_ref();
-    let mut summary =
-        assemble_linear_system(model, &excitations, options.solver_mesh.clone(), None, None)
-            .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let mut summary = assemble_linear_system(model, &excitations, options.solver_mesh.clone())
+        .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
     emit_phase(
         "fea.run_electromagnetic",
         FeaProgressPhase::ModelAssembly,

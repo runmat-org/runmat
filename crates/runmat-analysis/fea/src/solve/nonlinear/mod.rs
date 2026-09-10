@@ -15,8 +15,7 @@ use crate::{
         backend::kind::LinearAlgebraBackendKind,
         transient::{solve_transient_system, TransientSolveOptions},
     },
-    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
-    FeaPlasticityConstitutiveContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaContactInterfaceContext, FeaPlasticityConstitutiveContext,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -36,8 +35,6 @@ pub struct NonlinearSolveOptions {
     pub tangent_refresh_interval: usize,
     #[serde(default)]
     pub solver_mesh: Option<SolverMeshArtifact>,
-    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
-    pub electro_thermal_context: Option<FeaElectroThermalContext>,
     pub plasticity_context: Option<FeaPlasticityConstitutiveContext>,
     pub contact_context: Option<FeaContactInterfaceContext>,
 }
@@ -56,8 +53,6 @@ impl Default for NonlinearSolveOptions {
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
             solver_mesh: None,
-            thermo_mechanical_context: None,
-            electro_thermal_context: None,
             plasticity_context: None,
             contact_context: None,
         }
@@ -159,8 +154,6 @@ pub fn solve_nonlinear_system(
             adapt_nonconverged_shrink: 1.0,
             dt_bucket_rel_tolerance: 0.0,
             progress_operation: "fea.run_nonlinear".to_string(),
-            thermo_mechanical_context: options.thermo_mechanical_context.clone(),
-            electro_thermal_context: options.electro_thermal_context.clone(),
         },
         backend,
     );
@@ -168,12 +161,10 @@ pub fn solve_nonlinear_system(
     let load_factors = (1..=options.increment_count)
         .map(|idx| idx as f64 / options.increment_count as f64)
         .collect::<Vec<_>>();
-    let thermo_context = options.thermo_mechanical_context.as_ref();
-    let electro_context = options.electro_thermal_context.as_ref();
     let plasticity_context = options.plasticity_context.as_ref();
     let contact_context = options.contact_context.as_ref();
-    let thermo_severity_base = thermo_mechanical::severity(thermo_context);
-    let electro_severity_base = electro_thermal::severity(electro_context);
+    let thermo_severity_base = thermo_mechanical::severity(summary.thermo_mechanical.as_ref());
+    let electro_severity_base = electro_thermal::severity(summary.electro_thermal.as_ref());
     let plasticity_severity_base = coupling_nonlinear::plasticity_severity(plasticity_context);
     let contact_severity_base = coupling_nonlinear::contact_severity(contact_context);
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
