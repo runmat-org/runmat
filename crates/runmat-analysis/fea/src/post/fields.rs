@@ -56,24 +56,36 @@ pub fn recover_result_fields(
     let node_count = structural_displacement_node_count(summary, dof_count);
     displacement_values = recover_displacement(summary, &displacement_values, node_count);
 
-    let strain_recovery = recover_structural_strain(summary, &displacement_values)?;
-    let element_count = strain_recovery.element_count;
-    let strain_values = strain_recovery.values;
-    let stress_values = strain_recovery
-        .stress
-        .unwrap_or_else(|| recover_stress(&strain_values, summary.structural_material));
-    let von_mises_values = recover_von_mises(&stress_values);
-    let nodal_von_mises_values =
-        recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
-    let strain_energy_density_values = strain_recovery
-        .strain_energy_density
-        .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
     let internal_force = apply_k(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
     let rotation_values = recover_rotation(summary, &solve_result.solution);
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
+    let continuum_fields = if publishes_continuum_fields(summary) {
+        let strain_recovery = recover_structural_strain(summary, &displacement_values)?;
+        let element_count = strain_recovery.element_count;
+        let strain_values = strain_recovery.values;
+        let stress_values = strain_recovery
+            .stress
+            .unwrap_or_else(|| recover_stress(&strain_values, summary.structural_material));
+        let von_mises_values = recover_von_mises(&stress_values);
+        let nodal_von_mises_values =
+            recover_nodal_averaged_scalar(summary, &von_mises_values, node_count);
+        let strain_energy_density_values = strain_recovery
+            .strain_energy_density
+            .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
+        Some((
+            element_count,
+            strain_values,
+            stress_values,
+            von_mises_values,
+            nodal_von_mises_values,
+            strain_energy_density_values,
+        ))
+    } else {
+        None
+    };
 
     let mut fields = vec![
         AnalysisField::host_f64(
@@ -85,31 +97,6 @@ pub fn recover_result_fields(
             FEA_FIELD_STRUCTURAL_ROTATION,
             rotation_shape(summary),
             rotation_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_VON_MISES,
-            vec![element_count],
-            von_mises_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN,
-            vec![element_count, TENSOR_COMPONENT_COUNT],
-            strain_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRESS,
-            vec![element_count, TENSOR_COMPONENT_COUNT],
-            stress_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-            vec![element_count],
-            strain_energy_density_values,
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-            vec![node_count],
-            nodal_von_mises_values,
         ),
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -137,6 +124,43 @@ pub fn recover_result_fields(
             vec![residual_metrics.equation_scale],
         ),
     ];
+    if let Some((
+        element_count,
+        strain_values,
+        stress_values,
+        von_mises_values,
+        nodal_von_mises_values,
+        strain_energy_density_values,
+    )) = continuum_fields
+    {
+        fields.extend([
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_VON_MISES,
+                vec![element_count],
+                von_mises_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRAIN,
+                vec![element_count, TENSOR_COMPONENT_COUNT],
+                strain_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRESS,
+                vec![element_count, TENSOR_COMPONENT_COUNT],
+                stress_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+                vec![element_count],
+                strain_energy_density_values,
+            ),
+            AnalysisField::host_f64(
+                FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+                vec![node_count],
+                nodal_von_mises_values,
+            ),
+        ]);
+    }
     if let Some(beam_fields) = recover_beam_result_fields(summary, &solve_result.solution) {
         fields.extend(beam_fields);
     }
@@ -144,6 +168,12 @@ pub fn recover_result_fields(
         fields.extend(shell_fields);
     }
     Ok(fields)
+}
+
+fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
+    !summary.structural_solid_recovery.is_empty()
+        || (summary.structural_beam_recovery.is_empty()
+            && summary.structural_shell_recovery.is_empty())
 }
 
 /// Moves spatial fields with stable physical semantics into the observation domain.
@@ -222,23 +252,6 @@ pub fn structural_observable_field_definitions(
             )
         })
         .collect()
-}
-
-pub fn recover_structural_stress_from_displacement(
-    summary: &AssemblySummary,
-    displacement: &[f64],
-) -> Result<Vec<f64>, SolidFieldRecoveryError> {
-    let mut displacement_values = displacement.to_vec();
-    let dof_count = summary.dof_count.max(3);
-    if displacement_values.len() < dof_count {
-        displacement_values.resize(dof_count, 0.0);
-    }
-    let node_count = dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1);
-    displacement_values.resize(node_count * VECTOR_COMPONENT_COUNT, 0.0);
-    let strain_recovery = recover_structural_strain(summary, &displacement_values)?;
-    Ok(strain_recovery
-        .stress
-        .unwrap_or_else(|| recover_stress(&strain_recovery.values, summary.structural_material)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

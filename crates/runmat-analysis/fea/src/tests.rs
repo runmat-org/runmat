@@ -1157,6 +1157,47 @@ fn explicit_beam_topology_does_not_require_solver_mesh() {
 }
 
 #[test]
+fn explicit_results_do_not_impersonate_continuum_stress_fields() {
+    for fixture in [
+        FixtureId::StructuralBeamCantileverEndMomentReference,
+        FixtureId::StructuralShellPlateMomentReference,
+    ] {
+        let model = fixture_model(fixture);
+        let result = crate::run_linear_static_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            experimental_linear_static_options(),
+        )
+        .expect("explicit structural solve");
+        for field_id in [
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            FEA_FIELD_STRUCTURAL_STRESS,
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+        ] {
+            assert!(
+                result.field(field_id).is_none(),
+                "explicit result must not publish continuum field {field_id}"
+            );
+        }
+    }
+
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("explicit beam solve");
+    assert!(
+        result
+            .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
+            .is_some(),
+        "formulation-specific beam stress remains available"
+    );
+}
+
+#[test]
 fn solver_mesh_linear_static_reports_solid_assembly_basis() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let mesh = single_tetrahedron_solver_mesh();
