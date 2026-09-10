@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, BoundaryOperator, EvidenceConfidence,
-    MagneticConstraintKind,
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, BoundaryOperator,
+    EvidenceConfidence, MagneticConstraintKind, ProcedureStep,
 };
 
 use crate::{
@@ -33,6 +33,50 @@ use crate::{
 };
 
 mod solver_mesh_topology;
+
+pub fn has_nonzero_source_at_frequency(
+    model: &AnalysisModel,
+    procedure: AnalysisProcedure,
+    frequency_hz: f64,
+) -> Result<bool, FeaRunError> {
+    let step = matching_step(model, procedure)?;
+    let excitations =
+        realize_step_excitations(model, step, ExcitationSamplePoint::frequency(frequency_hz))
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let has_source = excitations.iter().any(|excitation| match excitation.kind {
+        RealizedExcitationKind::ElectricCurrent(value) => value.real.hypot(value.imaginary) > 0.0,
+        RealizedExcitationKind::CurrentDensity(value) => value
+            .real
+            .iter()
+            .zip(value.imaginary)
+            .any(|(real, imaginary)| real.hypot(imaginary) > 0.0),
+        _ => false,
+    });
+    Ok(has_source)
+}
+
+fn matching_step(
+    model: &AnalysisModel,
+    procedure: AnalysisProcedure,
+) -> Result<&ProcedureStep, FeaRunError> {
+    let mut steps = model.sequence.steps.iter().filter(|step| {
+        step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
+            && step.procedure == procedure
+    });
+    let step = steps.next().ok_or_else(|| {
+        FeaRunError::InvalidModel(
+            "electromagnetic execution requires exactly one matching procedure step, but none was found"
+                .into(),
+        )
+    })?;
+    if steps.next().is_some() {
+        return Err(FeaRunError::InvalidModel(
+            "electromagnetic execution requires exactly one matching procedure step, but multiple were found"
+                .into(),
+        ));
+    }
+    Ok(step)
+}
 
 pub fn run_electromagnetic(
     model: &AnalysisModel,
@@ -83,22 +127,7 @@ pub fn run_electromagnetic_with_options(
             "electromagnetic solve requires a finite positive reference frequency".to_string(),
         ));
     }
-    let mut electromagnetic_steps = model.sequence.steps.iter().filter(|step| {
-        step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
-            && step.procedure == options.procedure
-    });
-    let electromagnetic_step = electromagnetic_steps.next().ok_or_else(|| {
-        FeaRunError::InvalidModel(
-            "electromagnetic execution requires exactly one matching procedure step, but none was found"
-                .into(),
-        )
-    })?;
-    if electromagnetic_steps.next().is_some() {
-        return Err(FeaRunError::InvalidModel(
-            "electromagnetic execution requires exactly one matching procedure step, but multiple were found"
-                .into(),
-        ));
-    }
+    let electromagnetic_step = matching_step(model, options.procedure)?;
     let excitations = realize_step_excitations(
         model,
         electromagnetic_step,

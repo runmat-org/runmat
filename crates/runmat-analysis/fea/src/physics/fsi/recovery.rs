@@ -71,10 +71,16 @@ pub fn couple_fluid_structure(
         step_count,
         options.time_step_s,
     )?;
+    let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
     let profile_scales = schedule.profile_scales;
     let final_step = step_count.saturating_sub(1);
-    let (final_velocity, final_pressure) =
-        cfd::recover_velocity_pressure(model, domain, topology, final_step, &profile_scales);
+    let (final_velocity, final_pressure) = cfd::recover_velocity_pressure(
+        domain,
+        topology,
+        final_step,
+        nominal_velocity_m_per_s,
+        &profile_scales,
+    );
     let (residual_momentum, residual_continuity) = cfd::residual_norms(
         &final_velocity,
         &final_pressure,
@@ -89,8 +95,13 @@ pub fn couple_fluid_structure(
     let mut closure = FsiInterfaceClosure::default();
 
     for step_index in 0..step_count {
-        let (fluid_velocity, fluid_pressure) =
-            cfd::recover_velocity_pressure(model, domain, topology, step_index, &profile_scales);
+        let (fluid_velocity, fluid_pressure) = cfd::recover_velocity_pressure(
+            domain,
+            topology,
+            step_index,
+            nominal_velocity_m_per_s,
+            &profile_scales,
+        );
         let interface_step = interface::solve_partitioned_interface(
             &fluid_pressure,
             topology,

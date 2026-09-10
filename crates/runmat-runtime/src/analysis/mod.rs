@@ -84,8 +84,7 @@ pub mod value_admission;
 
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use excitation_query::{
-    applied_temperature_delta_k, applied_voltage_v, has_nonzero_electromagnetic_source,
-    regional_temperature_deltas_k,
+    applied_temperature_delta_k, applied_voltage_v, regional_temperature_deltas_k,
 };
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
@@ -5802,6 +5801,40 @@ pub fn analysis_run_electromagnetic_with_options_op(
             BTreeMap::new(),
         )
     })?;
+    let has_electromagnetic_source = sweep_frequency_hz
+        .iter()
+        .map(|frequency_hz| {
+            runmat_analysis_fea::pipeline::electromagnetic::has_nonzero_source_at_frequency(
+                model,
+                electromagnetic_procedure,
+                *frequency_hz,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            map_fea_run_error(AnalysisOperation::Electromagnetic, model, &context, error)
+        })?
+        .into_iter()
+        .all(|has_source| has_source);
+    if !has_electromagnetic_source {
+        return Err(operation_error(
+            AnalysisOperation::Electromagnetic.name(),
+            AnalysisOperation::Electromagnetic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_electromagnetic requires a nonzero electric-current or current-density excitation at every requested frequency",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("excitation_count".to_string(), model.excitations.len().to_string()),
+                ("frequency_count".to_string(), sweep_frequency_hz.len().to_string()),
+            ]),
+        ));
+    }
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -6585,29 +6618,6 @@ fn validate_electromagnetic_run_model(
         "electromagnetic",
         context,
     )?;
-
-    let has_electromagnetic_source = has_nonzero_electromagnetic_source(model);
-    if !has_electromagnetic_source {
-        return Err(operation_error(
-            AnalysisOperation::Electromagnetic.name(),
-            AnalysisOperation::Electromagnetic.version(),
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE",
-                error_type: OperationErrorType::Validation,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_electromagnetic requires a nonzero electric-current or current-density excitation",
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                (
-                    "excitation_count".to_string(),
-                    model.excitations.len().to_string(),
-                ),
-            ]),
-        ));
-    }
 
     let has_electromagnetic_boundary = model
         .boundaries

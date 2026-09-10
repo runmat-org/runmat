@@ -1719,7 +1719,14 @@ fn analysis_create_model_supports_electromagnetic_template() {
         .as_ref()
         .expect("electromagnetic domain should be populated");
     assert_eq!(domain.reference_frequency.hertz, 60.0);
-    assert!(has_nonzero_electromagnetic_source(&envelope.data));
+    assert!(
+        runmat_analysis_fea::pipeline::electromagnetic::has_nonzero_source_at_frequency(
+            &envelope.data,
+            AnalysisProcedure::HarmonicResponse,
+            60.0,
+        )
+        .expect("authored electromagnetic source should realize")
+    );
 }
 
 #[test]
@@ -6764,6 +6771,52 @@ fn analysis_run_electromagnetic_rejects_missing_current_source() {
         OperationContext::new(Some("trace-em-run-missing-source".to_string()), None),
     )
     .expect_err("electromagnetic run should reject missing current source");
+    assert_eq!(
+        err.error_code,
+        "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"
+    );
+}
+
+#[test]
+fn analysis_run_electromagnetic_checks_sources_at_requested_frequencies() {
+    let mut model = sample_model();
+    model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
+    configure_valid_em_authoring(&mut model);
+    let PhysicalSignal::ElectricCurrent(signal) = &mut model.signals[0] else {
+        panic!("electromagnetic fixture should author a current signal");
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::FrequencyHertz,
+        knots: vec![
+            SignalKnot::continuous(
+                60.0,
+                SignalOrdinate::Real(SignalValue::Scalar(
+                    runmat_analysis_core::ElectricCurrent::new(0.0),
+                )),
+            ),
+            SignalKnot::continuous(
+                120.0,
+                SignalOrdinate::Real(SignalValue::Scalar(
+                    runmat_analysis_core::ElectricCurrent::new(120.0),
+                )),
+            ),
+        ],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::HoldEndpoint,
+    });
+
+    let err = analysis_run_electromagnetic_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisElectromagneticRunOptions {
+            sweep_enabled: true,
+            sweep_frequency_hz: vec![60.0, 120.0],
+            ..AnalysisElectromagneticRunOptions::default()
+        },
+        OperationContext::new(Some("trace-em-run-frequency-source".to_string()), None),
+    )
+    .expect_err("a zero source at an executed frequency should be rejected");
     assert_eq!(
         err.error_code,
         "RM.FEA.RUN_ELECTROMAGNETIC.MISSING_ELECTROMAGNETIC_SOURCE"

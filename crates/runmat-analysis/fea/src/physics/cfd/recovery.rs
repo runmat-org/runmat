@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisField, AnalysisModel, CfdDomain};
+use runmat_analysis_core::{AnalysisField, CfdDomain};
 
 use crate::{
     FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
@@ -12,13 +12,14 @@ use super::{
 };
 
 pub fn recover_velocity_pressure(
-    model: &AnalysisModel,
     domain: &CfdDomain,
     topology: &CfdDomainTopology,
     step_index: usize,
+    nominal_velocity_m_per_s: f64,
     profile_scales: &[f64],
 ) -> (Vec<f64>, Vec<f64>) {
-    let boundary_summary = CfdBoundarySummary::implicit_channel(model, topology.node_count);
+    let mut boundary_summary = CfdBoundarySummary::implicit_channel(topology.node_count);
+    boundary_summary.nominal_inlet_velocity_m_per_s = nominal_velocity_m_per_s;
     let solution = solve_velocity_pressure(
         domain,
         &boundary_summary,

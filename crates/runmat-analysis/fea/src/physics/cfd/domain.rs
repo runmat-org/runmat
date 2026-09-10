@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisModel, AnalysisProcedure, ExcitationAction, FluidConstraintKind,
-    PhysicalSignal, PhysicsFamily, SignalId, SignalOrdinate, SignalRepresentation, SignalValue,
+    PhysicsFamily,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -239,7 +239,7 @@ pub struct CfdBoundarySummary {
 }
 
 impl CfdBoundarySummary {
-    pub fn implicit_channel(model: &AnalysisModel, node_count: usize) -> Self {
+    pub fn implicit_channel(node_count: usize) -> Self {
         Self {
             inlet_boundary_count: 1,
             outlet_boundary_count: 1,
@@ -249,7 +249,7 @@ impl CfdBoundarySummary {
             authored_boundary_count: 0,
             boundary_coverage_ratio: 1.0,
             wall_boundary_coverage_ratio: 1.0,
-            nominal_inlet_velocity_m_per_s: nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+            nominal_inlet_velocity_m_per_s: 0.0,
             outlet_pressure_pa: 0.0,
         }
     }
@@ -266,7 +266,7 @@ impl CfdBoundarySummary {
             authored_boundary_count: 0,
             boundary_coverage_ratio: 0.0,
             wall_boundary_coverage_ratio: 0.0,
-            nominal_inlet_velocity_m_per_s: nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0),
+            nominal_inlet_velocity_m_per_s: 0.0,
             outlet_pressure_pa: 0.0,
         };
 
@@ -308,7 +308,7 @@ impl CfdBoundarySummary {
         }
 
         if summary.authored_boundary_count == 0 {
-            return Self::implicit_channel(model, node_count);
+            return Self::implicit_channel(node_count);
         }
 
         if summary.inlet_boundary_count > 0 {
@@ -394,92 +394,4 @@ pub fn validate_authored_boundary_conditions(model: &AnalysisModel) -> Result<()
         ));
     }
     Ok(())
-}
-
-pub fn nominal_inlet_velocity_m_per_s(model: &AnalysisModel) -> Option<f64> {
-    maximum_absolute(inlet_velocity_values(model))
-}
-
-fn inlet_velocity_values(model: &AnalysisModel) -> Vec<f64> {
-    model
-        .excitations
-        .iter()
-        .filter(|action| matches!(action, ExcitationAction::InletVelocity(_)))
-        .filter_map(|action| signal(model, &action.excitation().signal_id))
-        .filter_map(|signal| match signal {
-            PhysicalSignal::Velocity(signal) => {
-                scalar_or_vector_magnitudes(&signal.representation, |value| value.meters_per_second)
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect()
-}
-
-fn signal<'a>(model: &'a AnalysisModel, id: &SignalId) -> Option<&'a PhysicalSignal> {
-    model.signals.iter().find(|signal| signal.signal_id() == id)
-}
-
-fn maximum_absolute(values: Vec<f64>) -> Option<f64> {
-    values
-        .into_iter()
-        .filter(|value| value.is_finite())
-        .map(f64::abs)
-        .reduce(f64::max)
-}
-
-fn scalar_or_vector_magnitudes<Q>(
-    representation: &SignalRepresentation<Q>,
-    component: impl Fn(&Q) -> f64,
-) -> Option<Vec<f64>> {
-    signal_values(representation)?
-        .map(|value| match value {
-            SignalValue::Scalar(value) => Some(component(value)),
-            SignalValue::Vector3(values) => Some(
-                values
-                    .iter()
-                    .map(|value| component(value).powi(2))
-                    .sum::<f64>()
-                    .sqrt(),
-            ),
-            SignalValue::Tensor { .. } => None,
-        })
-        .collect()
-}
-
-fn signal_values<'a, Q>(
-    representation: &'a SignalRepresentation<Q>,
-) -> Option<Box<dyn Iterator<Item = &'a SignalValue<Q>> + 'a>> {
-    match representation {
-        SignalRepresentation::Constant(value) => Some(Box::new(std::iter::once(value))),
-        SignalRepresentation::Tabulated(table) => Some(Box::new(
-            table
-                .knots
-                .iter()
-                .flat_map(knot_ordinates)
-                .filter_map(|ordinate| match ordinate {
-                    SignalOrdinate::Real(value) => Some(value),
-                    SignalOrdinate::Complex { .. } => None,
-                }),
-        )),
-        SignalRepresentation::Waveform(waveform) => {
-            Some(Box::new(std::iter::once(&waveform.amplitude)))
-        }
-        SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => None,
-    }
-}
-
-fn knot_ordinates<Q>(
-    knot: &runmat_analysis_core::SignalKnot<Q>,
-) -> impl Iterator<Item = &SignalOrdinate<Q>> {
-    match &knot.value {
-        runmat_analysis_core::SignalKnotValue::Continuous(value) => [Some(value), None],
-        runmat_analysis_core::SignalKnotValue::Jump {
-            left_limit,
-            right_limit,
-            ..
-        } => [Some(left_limit), Some(right_limit)],
-    }
-    .into_iter()
-    .flatten()
 }

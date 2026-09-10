@@ -9,8 +9,8 @@ mod solve;
 
 pub use diagnostics::{assembly_diagnostic, coupling_diagnostics, CfdCouplingEvidence};
 pub use domain::{
-    nominal_inlet_velocity_m_per_s, realize_velocity_schedule, reynolds_number_for_velocity,
-    validate_authored_boundary_conditions, CfdDomainTopology, CfdVelocitySchedule,
+    realize_velocity_schedule, reynolds_number_for_velocity, validate_authored_boundary_conditions,
+    CfdDomainTopology, CfdVelocitySchedule,
 };
 pub use interface::{
     cell_centered_scalar, connectivity_coverage_ratio as interface_connectivity_coverage_ratio,

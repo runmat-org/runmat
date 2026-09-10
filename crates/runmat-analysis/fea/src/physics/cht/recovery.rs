@@ -74,10 +74,16 @@ pub fn couple_thermal_flow(
         options.step_count,
         options.time_step_s,
     )?;
+    let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
     let profile_scales = schedule.profile_scales;
     let field_step = options.step_count.saturating_sub(1);
-    let (fluid_velocity, fluid_pressure) =
-        recover_velocity_pressure(model, domain, topology, field_step, &profile_scales);
+    let (fluid_velocity, fluid_pressure) = recover_velocity_pressure(
+        domain,
+        topology,
+        field_step,
+        nominal_velocity_m_per_s,
+        &profile_scales,
+    );
     let (residual_momentum, residual_continuity) = cfd::residual_norms(
         &fluid_velocity,
         &fluid_pressure,

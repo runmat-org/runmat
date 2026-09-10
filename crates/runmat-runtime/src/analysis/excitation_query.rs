@@ -141,56 +141,6 @@ fn scalar_value<Q>(value: &SignalValue<Q>, component: &impl Fn(&Q) -> f64) -> Op
     }
 }
 
-pub(crate) fn has_nonzero_electromagnetic_source(model: &AnalysisModel) -> bool {
-    model.excitations.iter().any(|action| match action {
-        ExcitationAction::ElectricCurrent(value) => signal(model, &value.signal_id)
-            .and_then(|signal| match signal {
-                PhysicalSignal::ElectricCurrent(signal) => Some(representation_has_nonzero(
-                    &signal.representation,
-                    |value| value.amperes,
-                )),
-                _ => None,
-            })
-            .unwrap_or(false),
-        ExcitationAction::CurrentDensity(value) => signal(model, &value.signal_id)
-            .and_then(|signal| match signal {
-                PhysicalSignal::ElectricCurrentDensity(signal) => Some(representation_has_nonzero(
-                    &signal.representation,
-                    |value| value.amperes_per_square_meter,
-                )),
-                _ => None,
-            })
-            .unwrap_or(false),
-        _ => false,
-    })
-}
-
-fn representation_has_nonzero<Q>(
-    representation: &SignalRepresentation<Q>,
-    component: impl Fn(&Q) -> f64,
-) -> bool {
-    match representation {
-        SignalRepresentation::Constant(value) => value_has_nonzero(value, &component),
-        SignalRepresentation::Tabulated(table) => {
-            table
-                .knots
-                .iter()
-                .flat_map(knot_ordinates)
-                .any(|ordinate| match ordinate {
-                    SignalOrdinate::Real(value) => value_has_nonzero(value, &component),
-                    SignalOrdinate::Complex { real, imaginary } => {
-                        value_has_nonzero(real, &component)
-                            || value_has_nonzero(imaginary, &component)
-                    }
-                })
-        }
-        SignalRepresentation::Waveform(waveform) => {
-            value_has_nonzero(&waveform.amplitude, &component)
-        }
-        SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => false,
-    }
-}
-
 fn knot_ordinates<Q>(
     knot: &runmat_analysis_core::SignalKnot<Q>,
 ) -> impl Iterator<Item = &SignalOrdinate<Q>> {
@@ -204,14 +154,4 @@ fn knot_ordinates<Q>(
     }
     .into_iter()
     .flatten()
-}
-
-fn value_has_nonzero<Q>(value: &SignalValue<Q>, component: &impl Fn(&Q) -> f64) -> bool {
-    match value {
-        SignalValue::Scalar(value) => component(value).abs() > 0.0,
-        SignalValue::Vector3(values) => values.iter().any(|value| component(value).abs() > 0.0),
-        SignalValue::Tensor { values, .. } => {
-            values.iter().any(|value| component(value).abs() > 0.0)
-        }
-    }
 }
