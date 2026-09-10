@@ -1834,8 +1834,8 @@ fn assemble_explicit_structural_system(
         )
     } else {
         StructuralFormulationRealization::new(
-            StructuralOperatorImplementation::MindlinReissnerTri3Shell,
-            Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
+            StructuralOperatorImplementation::Mitc3TriangularShell,
+            Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
         )
     };
     let stiffness = stiffness_assembler
@@ -4213,8 +4213,8 @@ mod tests {
             ),
             (
                 shell,
-                StructuralOperatorImplementation::MindlinReissnerTri3Shell,
-                Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
+                StructuralOperatorImplementation::Mitc3TriangularShell,
+                Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
                 SourceImplementation::ExplicitRegionNodalDistribution,
                 BoundaryTransferImplementation::ExplicitRegionConnectivity,
             ),
@@ -4328,12 +4328,19 @@ mod tests {
         .unwrap();
 
         assert!(summary.operator.nullspace_evidence().is_none());
-        assert!(matches!(
-            summary.operator.prepare_linear(),
-            Err(crate::algebra::RealSystemError::Coercivity(
-                crate::algebra::CoercivityError::NonPositivePivot { .. }
-            ))
-        ));
+        let error = summary
+            .operator
+            .prepare_linear()
+            .expect_err("an unconstrained shell must be rejected before iteration");
+        assert!(
+            matches!(
+                error,
+                crate::algebra::RealSystemError::Coercivity(
+                    crate::algebra::CoercivityError::NonPositivePivot { .. }
+                )
+            ),
+            "unexpected preparation error: {error:?}"
+        );
     }
 
     fn tetrahedron4_mesh() -> SolverMeshArtifact {

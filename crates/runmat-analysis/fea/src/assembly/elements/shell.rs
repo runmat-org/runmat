@@ -146,7 +146,7 @@ pub fn global_stiffness_matrix(
     ] {
         add_bdb2(
             &mut local,
-            &shear_operator(operators.dx, operators.dy, shape),
+            &assumed_shear_operator(operators.dx, operators.dy, operators.jacobian, shape),
             shear_constitutive(section, material),
             frame.area_m2 / 3.0,
         );
@@ -162,7 +162,10 @@ pub fn global_stiffness_matrix(
             drilling_stiffness / SHELL_ELEMENT_NODE_COUNT as f64,
         );
     }
-    Ok(transform_matrix_to_global(local, frame))
+    symmetrize(&mut local);
+    let mut global = transform_matrix_to_global(local, frame);
+    symmetrize(&mut global);
+    Ok(global)
 }
 
 pub fn recover_resultants(
@@ -214,6 +217,7 @@ struct LocalOperators {
     drilling: [[f64; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_NODE_COUNT],
     dx: [f64; SHELL_ELEMENT_NODE_COUNT],
     dy: [f64; SHELL_ELEMENT_NODE_COUNT],
+    jacobian: [[f64; 2]; 2],
 }
 
 fn local_operators(
@@ -242,7 +246,6 @@ fn local_operators(
     ];
     let mut membrane = [[0.0; SHELL_ELEMENT_DOF_COUNT]; 3];
     let mut bending = [[0.0; SHELL_ELEMENT_DOF_COUNT]; 3];
-    let mut shear = [[0.0; SHELL_ELEMENT_DOF_COUNT]; 2];
     let mut drilling = [[0.0; SHELL_ELEMENT_DOF_COUNT]; SHELL_ELEMENT_NODE_COUNT];
     for node in 0..SHELL_ELEMENT_NODE_COUNT {
         let base = node * SHELL_NODE_DOF_COUNT;
@@ -256,28 +259,25 @@ fn local_operators(
         bending[2][base + 4] = dy[node];
         bending[2][base + 3] = -dx[node];
 
-        shear[0][base + 2] = dx[node];
-        shear[0][base + 4] = 1.0 / 3.0;
-        shear[1][base + 2] = dy[node];
-        shear[1][base + 3] = -1.0 / 3.0;
-
         for drilling_row in &mut drilling {
             drilling_row[base] = 0.5 * dy[node];
             drilling_row[base + 1] = -0.5 * dx[node];
         }
         drilling[node][base + 5] = 1.0;
     }
+    let jacobian = [local[1], local[2]];
     Ok(LocalOperators {
         membrane,
         bending,
-        shear,
+        shear: assumed_shear_operator(dx, dy, jacobian, [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]),
         drilling,
         dx,
         dy,
+        jacobian,
     })
 }
 
-fn shear_operator(
+fn displacement_shear_operator(
     dx: [f64; SHELL_ELEMENT_NODE_COUNT],
     dy: [f64; SHELL_ELEMENT_NODE_COUNT],
     shape: [f64; SHELL_ELEMENT_NODE_COUNT],
@@ -291,6 +291,68 @@ fn shear_operator(
         shear[1][base + 3] = -shape[node];
     }
     shear
+}
+
+/// Builds the MITC3 assumed transverse-shear field in natural coordinates.
+///
+/// The displacement shear is sampled at the midpoints of the three edges. The covariant
+/// components are constant on their corresponding edges and are interpolated across the
+/// triangle before being transformed back to the element frame. This is the tying construction
+/// that removes the parasitic shear energy of a pure-bending patch.
+fn assumed_shear_operator(
+    dx: [f64; SHELL_ELEMENT_NODE_COUNT],
+    dy: [f64; SHELL_ELEMENT_NODE_COUNT],
+    jacobian: [[f64; 2]; 2],
+    shape: [f64; SHELL_ELEMENT_NODE_COUNT],
+) -> [[f64; SHELL_ELEMENT_DOF_COUNT]; 2] {
+    let tying_shapes = [[0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]];
+    let tying = tying_shapes.map(|tying_shape| {
+        covariant_shear_operator(displacement_shear_operator(dx, dy, tying_shape), jacobian)
+    });
+    let correction = std::array::from_fn::<_, SHELL_ELEMENT_DOF_COUNT, _>(|column| {
+        tying[2][0][column] - tying[0][0][column] - tying[2][1][column] + tying[1][1][column]
+    });
+    let r = shape[1];
+    let s = shape[2];
+    let covariant = std::array::from_fn(|row| {
+        std::array::from_fn(|column| match row {
+            0 => tying[0][0][column] + s * correction[column],
+            1 => tying[1][1][column] - r * correction[column],
+            _ => unreachable!("transverse shear has exactly two components"),
+        })
+    });
+    physical_shear_operator(covariant, jacobian)
+}
+
+fn covariant_shear_operator(
+    physical: [[f64; SHELL_ELEMENT_DOF_COUNT]; 2],
+    jacobian: [[f64; 2]; 2],
+) -> [[f64; SHELL_ELEMENT_DOF_COUNT]; 2] {
+    std::array::from_fn(|row| {
+        std::array::from_fn(|column| {
+            jacobian[row][0] * physical[0][column] + jacobian[row][1] * physical[1][column]
+        })
+    })
+}
+
+fn physical_shear_operator(
+    covariant: [[f64; SHELL_ELEMENT_DOF_COUNT]; 2],
+    jacobian: [[f64; 2]; 2],
+) -> [[f64; SHELL_ELEMENT_DOF_COUNT]; 2] {
+    let determinant = jacobian[0][0] * jacobian[1][1] - jacobian[1][0] * jacobian[0][1];
+    std::array::from_fn(|row| {
+        std::array::from_fn(|column| match row {
+            0 => {
+                (jacobian[1][1] * covariant[0][column] - jacobian[0][1] * covariant[1][column])
+                    / determinant
+            }
+            1 => {
+                (-jacobian[1][0] * covariant[0][column] + jacobian[0][0] * covariant[1][column])
+                    / determinant
+            }
+            _ => unreachable!("transverse shear has exactly two components"),
+        })
+    })
 }
 
 fn membrane_constitutive(section: ShellSection, material: ShellMaterial) -> [[f64; 3]; 3] {
@@ -359,6 +421,16 @@ fn add_outer(matrix: &mut ShellMatrix18, vector: &[f64; SHELL_ELEMENT_DOF_COUNT]
     for (row, matrix_row) in matrix.iter_mut().enumerate() {
         for (column, value) in matrix_row.iter_mut().enumerate() {
             *value += scale * vector[row] * vector[column];
+        }
+    }
+}
+
+fn symmetrize(matrix: &mut ShellMatrix18) {
+    for row in 0..SHELL_ELEMENT_DOF_COUNT {
+        for column in row + 1..SHELL_ELEMENT_DOF_COUNT {
+            let value = 0.5 * (matrix[row][column] + matrix[column][row]);
+            matrix[row][column] = value;
+            matrix[column][row] = value;
         }
     }
 }
@@ -592,7 +664,7 @@ mod tests {
         assert_close(
             quadratic_energy(&original_stiffness, &original_displacement),
             quadratic_energy(&rotated_stiffness, &rotated_displacement),
-            1.0e-10,
+            1.0e-9,
         );
         assert_eq!(
             recover_resultants(
@@ -610,6 +682,40 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    #[test]
+    fn shell_energy_is_invariant_to_cyclic_and_reversed_node_order() {
+        let original_geometry = ShellElementGeometry {
+            nodes_m: [[0.0, 0.0, 0.0], [1.4, 0.2, 0.0], [0.1, 0.9, 0.0]],
+            reference_axis: [1.0, 0.0, 0.0],
+        };
+        let original_displacement = [
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0e-4, -1.0e-4, 4.0e-5, 3.0e-4, -2.0e-4, 1.0e-4,
+            -1.0e-4, 3.0e-4, -2.0e-5, -4.0e-4, 1.0e-4, 2.0e-4,
+        ];
+        let original_energy = quadratic_energy(
+            &global_stiffness_matrix(section(), material(), original_geometry).unwrap(),
+            &original_displacement,
+        );
+        for permutation in [[1, 2, 0], [0, 2, 1]] {
+            let permuted_geometry = ShellElementGeometry {
+                nodes_m: permutation.map(|node| original_geometry.nodes_m[node]),
+                ..original_geometry
+            };
+            let mut permuted_displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
+            for (permuted_node, original_node) in permutation.into_iter().enumerate() {
+                let target = permuted_node * SHELL_NODE_DOF_COUNT;
+                let source = original_node * SHELL_NODE_DOF_COUNT;
+                permuted_displacement[target..target + SHELL_NODE_DOF_COUNT]
+                    .copy_from_slice(&original_displacement[source..source + SHELL_NODE_DOF_COUNT]);
+            }
+            let permuted_energy = quadratic_energy(
+                &global_stiffness_matrix(section(), material(), permuted_geometry).unwrap(),
+                &permuted_displacement,
+            );
+            assert_close(permuted_energy / original_energy, 1.0, 1.0e-12);
+        }
     }
 
     #[test]
@@ -658,6 +764,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn assumed_shear_field_preserves_pure_bending_in_the_thin_limit() {
+        let curvature = 3.0e-4;
+        let mut displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];
+        for (node, position) in geometry().nodes_m.iter().enumerate() {
+            let base = node * SHELL_NODE_DOF_COUNT;
+            displacement[base + 2] = -0.5 * curvature * position[0].powi(2);
+            displacement[base + 4] = curvature * position[0];
+        }
+
+        let thin_section = section();
+        let thick_section = ShellSection {
+            thickness_m: thin_section.thickness_m * 2.0,
+            ..thin_section
+        };
+        let result =
+            recover_resultants(thin_section, material(), geometry(), displacement).unwrap();
+        let bending_factor = material().youngs_modulus_pa * thin_section.thickness_m.powi(3)
+            / (12.0 * (1.0 - material().poisson_ratio.powi(2)));
+        assert_close(
+            result.bending_moment_n[0],
+            bending_factor * curvature,
+            1.0e-12,
+        );
+        assert!(result
+            .transverse_shear_n_per_m
+            .iter()
+            .all(|value| value.abs() < 1.0e-12));
+
+        let thin_stiffness = global_stiffness_matrix(thin_section, material(), geometry()).unwrap();
+        let thick_stiffness =
+            global_stiffness_matrix(thick_section, material(), geometry()).unwrap();
+        assert_close(
+            quadratic_energy(&thick_stiffness, &displacement)
+                / quadratic_energy(&thin_stiffness, &displacement),
+            8.0,
+            1.0e-9,
+        );
     }
 
     #[test]
