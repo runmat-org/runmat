@@ -300,7 +300,7 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
         .map(|(operator, recovery)| {
             thermomechanical_exact_realization(ThermomechanicalRealizationInput {
                 structural: StructuralRealizationInput {
-                    assembly: StructuralFormulationRealization::new(operator, recovery),
+                    assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
                     procedure,
                     coupling: CouplingImplementation::OnePassPrescribedThermomechanicalProfile,
                     sources: vec![SourceImplementation::NotApplicable],

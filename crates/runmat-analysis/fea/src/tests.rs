@@ -700,6 +700,37 @@ fn shell_moment_solves_rotation_and_reaction_moment() {
 }
 
 #[test]
+fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+    model
+        .material_assignments
+        .extend(shell_model.material_assignments.clone());
+    let shell = shell_model.structural.expect("shell topology");
+    let structural = model.structural.as_mut().expect("beam topology");
+    structural.nodes.push(shell.nodes[2]);
+    structural.elements.push(shell.elements[0].clone());
+    structural.shell_sections = shell.shell_sections;
+
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("the shared-node beam-shell model must complete one admitted solve");
+
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE).shape,
+        vec![1]
+    );
+    assert_eq!(
+        field(&result, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT).shape,
+        vec![1, 3]
+    );
+    assert!(result.field(FEA_FIELD_STRUCTURAL_STRESS).is_none());
+}
+
+#[test]
 fn beam_end_moment_solves_rotation_and_reaction_moment() {
     let moment_n_m = 1.25;
     let length_m = 1.0;

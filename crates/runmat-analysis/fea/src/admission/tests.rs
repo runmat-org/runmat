@@ -147,7 +147,7 @@ fn registered_realizations(
             .into_iter()
             .map(|assembly| {
                 structural_exact_realization(StructuralRealizationInput {
-                    assembly,
+                    assemblies: vec![assembly],
                     procedure,
                     coupling: CouplingImplementation::Uncoupled,
                     sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],

@@ -80,11 +80,12 @@ pub(super) fn admit_structural(
     step: &ProcedureStep,
     requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
-    let assembly = summary.structural_formulation.ok_or_else(|| {
-        FeaRunError::Assembly(
+    if summary.structural_formulations.is_empty() {
+        return Err(FeaRunError::Assembly(
             "structural assembly did not report its exact formulation realization".to_string(),
-        )
-    })?;
+        ));
+    }
+    let assemblies = summary.structural_formulations.clone();
     if summary
         .electro_thermal
         .as_ref()
@@ -117,7 +118,7 @@ pub(super) fn admit_structural(
         runmat_analysis_core::CouplingImplementation::Uncoupled
     };
     let input = StructuralRealizationInput {
-        assembly,
+        assemblies,
         procedure: step.procedure,
         coupling,
         sources: summary.structural_sources.clone(),

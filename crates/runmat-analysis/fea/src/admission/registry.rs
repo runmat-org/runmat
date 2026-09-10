@@ -144,21 +144,48 @@ fn validate_structural_identity(
     request: &FormulationAdmissionRequest,
     thermomechanical: bool,
 ) -> Result<ExactFormulationRealization, FormulationAdmissionRejectionReason> {
-    let Some(component) = request.realization.components.first() else {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::SpatialOperator,
-        ));
-    };
-    if request.realization.components.len() != if thermomechanical { 2 } else { 1 } {
+    let structural_component_count = request
+        .realization
+        .components
+        .len()
+        .checked_sub(usize::from(thermomechanical))
+        .ok_or(FormulationAdmissionRejectionReason::InvalidRealization)?;
+    if structural_component_count == 0 {
         return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
             FormulationAxis::SpatialOperator,
         ));
     }
-    let SpatialOperatorImplementation::Structural(operator) = component.spatial_operator else {
+    let structural_components = &request.realization.components[..structural_component_count];
+    let sources = structural_components[0].sources.clone();
+    if structural_components
+        .iter()
+        .any(|component| component.sources != sources)
+    {
         return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::SpatialOperator,
+            FormulationAxis::Source,
         ));
-    };
+    }
+    let assemblies = structural_components
+        .iter()
+        .map(|component| {
+            let SpatialOperatorImplementation::Structural(operator) = component.spatial_operator
+            else {
+                return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+                    FormulationAxis::SpatialOperator,
+                ));
+            };
+            let recovery = match component.recovery {
+                RecoveryImplementation::Structural(recovery) => Some(recovery),
+                RecoveryImplementation::Unavailable => None,
+                _ => {
+                    return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+                        FormulationAxis::Recovery,
+                    ))
+                }
+            };
+            Ok(StructuralFormulationRealization::new(operator, recovery))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let expected_coupling = if thermomechanical {
         CouplingImplementation::OnePassPrescribedThermomechanicalProfile
     } else {
@@ -170,29 +197,19 @@ fn validate_structural_identity(
         ));
     }
 
-    let recovery = match component.recovery {
-        RecoveryImplementation::Structural(recovery) => Some(recovery),
-        RecoveryImplementation::Unavailable => None,
-        _ => {
-            return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-                FormulationAxis::Recovery,
-            ))
-        }
-    };
-    let assembly = StructuralFormulationRealization::new(operator, recovery);
     let structural_boundaries = request.realization.boundary_transfers.clone();
     let input = StructuralRealizationInput {
-        assembly,
+        assemblies,
         procedure: request.procedure,
         coupling: expected_coupling,
-        sources: component.sources.clone(),
+        sources,
         boundary_transfers: structural_boundaries,
     };
     if thermomechanical {
         let profile_sources = request
             .realization
             .components
-            .get(1)
+            .get(structural_component_count)
             .map(|component| component.sources.clone())
             .ok_or(FormulationAdmissionRejectionReason::InvalidRealization)?;
         thermomechanical_exact_realization(ThermomechanicalRealizationInput {
@@ -268,10 +285,10 @@ mod tests {
     #[test]
     fn qualification_whitelist_matches_the_complete_exact_realization() {
         let canonical = structural_exact_realization(StructuralRealizationInput {
-            assembly: StructuralFormulationRealization::new(
+            assemblies: vec![StructuralFormulationRealization::new(
                 StructuralOperatorImplementation::Tet4LinearElasticity,
                 Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
-            ),
+            )],
             procedure: AnalysisProcedure::Static,
             coupling: CouplingImplementation::Uncoupled,
             sources: vec![SourceImplementation::CanonicalBoundaryProjection],

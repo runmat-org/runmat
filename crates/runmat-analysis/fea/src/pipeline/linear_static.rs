@@ -459,7 +459,17 @@ fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<Fea
     let has_solid_mass = !summary.operator.operators().mass().values().is_empty()
         && summary.structural_solid_total_mass_kg.is_finite()
         && summary.structural_solid_total_mass_kg > 0.0;
-    let basis = match summary.structural_formulation.map(|value| value.operator) {
+    let basis = match summary
+        .structural_formulations
+        .iter()
+        .map(|value| value.operator)
+        .find(|operator| {
+            matches!(
+                operator,
+                StructuralOperatorImplementation::Tet4LinearElasticity
+                    | StructuralOperatorImplementation::Tet10LinearElasticity
+            )
+        }) {
         Some(StructuralOperatorImplementation::Tet4LinearElasticity) => "tet4_linear_elasticity",
         Some(StructuralOperatorImplementation::Tet10LinearElasticity) => "tet10_linear_elasticity",
         _ => "non_solid",

@@ -107,7 +107,7 @@ pub struct AssemblySummary {
     #[serde(default)]
     pub structural_shell_recovery: Vec<ShellRecoveryElementSummary>,
     #[serde(default)]
-    pub structural_formulation: Option<StructuralFormulationRealization>,
+    pub structural_formulations: Vec<StructuralFormulationRealization>,
     #[serde(default)]
     pub structural_sources: Vec<SourceImplementation>,
     #[serde(default)]
@@ -231,10 +231,6 @@ pub enum StructuralAssemblyError {
     MixedSolidAndExplicit {
         explicit_element_count: usize,
     },
-    MixedExplicitDimensions {
-        beam_element_count: usize,
-        shell_element_count: usize,
-    },
     MissingNodes,
     DuplicateNodeId {
         node_id: u32,
@@ -331,13 +327,6 @@ impl fmt::Display for StructuralAssemblyError {
             } => write!(
                 f,
                 "solid and explicit beam/shell discretizations cannot be assembled together until typed coupling is implemented: explicit_element_count={explicit_element_count}"
-            ),
-            Self::MixedExplicitDimensions {
-                beam_element_count,
-                shell_element_count,
-            } => write!(
-                f,
-                "mixed beam and shell connectivity requires an explicit coupling formulation: beam_element_count={beam_element_count} shell_element_count={shell_element_count}"
             ),
             Self::MissingNodes => write!(
                 f,
@@ -1207,7 +1196,7 @@ fn assemble_linear_system_impl(
         structural_dof_layout: structural_dof_layout.clone(),
         structural_beam_recovery: Vec::new(),
         structural_shell_recovery: Vec::new(),
-        structural_formulation: structural_requirement.and_then(|requirement| {
+        structural_formulations: structural_requirement.map_or_else(Vec::new, |requirement| {
             solid_topology
                 .as_ref()
                 .map(|topology| {
@@ -1232,6 +1221,8 @@ fn assemble_linear_system_impl(
                             )
                         })
                 })
+                .into_iter()
+                .collect()
         }),
         structural_sources: structural_requirement.map_or_else(
             || vec![SourceImplementation::NotApplicable],
@@ -1489,12 +1480,6 @@ fn assemble_explicit_structural_system(
         .iter()
         .filter(|element| matches!(element.kind, StructuralElementKind::Shell(_)))
         .collect::<Vec<_>>();
-    if !beam_elements.is_empty() && !shell_elements.is_empty() {
-        return Err(StructuralAssemblyError::MixedExplicitDimensions {
-            beam_element_count: beam_elements.len(),
-            shell_element_count: shell_elements.len(),
-        });
-    }
     if beam_elements.is_empty() && shell_elements.is_empty() {
         return Err(StructuralAssemblyError::MissingDiscretization);
     }
@@ -1827,17 +1812,19 @@ fn assemble_explicit_structural_system(
         })
         .count();
 
-    let structural_formulation = if !beam_elements.is_empty() {
-        StructuralFormulationRealization::new(
+    let mut structural_formulations = Vec::new();
+    if !beam_elements.is_empty() {
+        structural_formulations.push(StructuralFormulationRealization::new(
             StructuralOperatorImplementation::EulerBernoulliBeam3d,
             Some(StructuralRecoveryImplementation::BeamSectionResultants),
-        )
-    } else {
-        StructuralFormulationRealization::new(
+        ));
+    }
+    if !shell_elements.is_empty() {
+        structural_formulations.push(StructuralFormulationRealization::new(
             StructuralOperatorImplementation::Mitc3TriangularShell,
             Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
-        )
-    };
+        ));
+    }
     let stiffness = stiffness_assembler
         .finish()
         .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
@@ -1914,7 +1901,7 @@ fn assemble_explicit_structural_system(
         structural_dof_layout,
         structural_beam_recovery,
         structural_shell_recovery,
-        structural_formulation: Some(structural_formulation),
+        structural_formulations,
         structural_sources: structural_source_implementations(
             excitations,
             StructuralProjectionBasis::ExplicitConnectivity,
@@ -3840,9 +3827,12 @@ mod tests {
     }
 
     #[test]
-    fn mixed_explicit_dimensions_are_rejected_without_partial_assembly() {
+    fn mixed_beam_shell_connectivity_assembles_one_shared_dof_system() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         let shell_model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        model
+            .material_assignments
+            .extend(shell_model.material_assignments.clone());
         let structural = model
             .structural
             .as_mut()
@@ -3850,24 +3840,25 @@ mod tests {
         let shell = shell_model
             .structural
             .expect("shell fixture has structural topology");
+        structural.nodes.push(shell.nodes[2]);
         structural.elements.push(shell.elements[0].clone());
         structural.shell_sections = shell.shell_sections;
 
-        let error = assemble_structural_system(
+        let summary = assemble_structural_system(
             &model,
             &static_excitations(&model),
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("mixed beam-shell topology must require a coupling formulation");
+        .expect("shared beam-shell nodes must assemble into one physical system");
 
-        assert_eq!(
-            error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::MixedExplicitDimensions {
-                beam_element_count: 1,
-                shell_element_count: 1,
-            })
-        );
+        assert_eq!(summary.dof_count, 18);
+        assert_eq!(summary.structural_node_count, 3);
+        assert_eq!(summary.structural_beam_element_count, 1);
+        assert_eq!(summary.structural_shell_element_count, 1);
+        assert_eq!(summary.structural_formulations.len(), 2);
+        assert!(summary.operator.nullspace_evidence().is_some());
+        summary.operator.prepare_linear().unwrap();
     }
 
     #[test]
@@ -4016,7 +4007,7 @@ mod tests {
 
         assert_eq!(summary.load_count, 1);
         assert_eq!(summary.structural_beam_element_count, 0);
-        assert!(summary.structural_formulation.is_none());
+        assert!(summary.structural_formulations.is_empty());
         assert!(summary
             .operator
             .load()
@@ -4025,7 +4016,7 @@ mod tests {
 
         let mesh_summary = assemble_linear_system(&model, &excitations, Some(tetrahedron4_mesh()))
             .expect("a solver mesh must not route a nonstructural source through mechanics");
-        assert!(mesh_summary.structural_formulation.is_none());
+        assert!(mesh_summary.structural_formulations.is_empty());
         assert_eq!(
             mesh_summary.structural_sources,
             vec![SourceImplementation::NotApplicable]
@@ -4228,9 +4219,9 @@ mod tests {
         ];
 
         for (summary, operator, recovery, source, boundary) in cases {
-            let realization = summary
-                .structural_formulation
-                .expect("structural assembly must record its exact realization");
+            let [realization] = summary.structural_formulations.as_slice() else {
+                panic!("single-formulation assembly must record exactly one realization");
+            };
             assert_eq!(realization.operator, operator);
             assert_eq!(realization.recovery, recovery);
             assert_eq!(summary.structural_sources, vec![source]);

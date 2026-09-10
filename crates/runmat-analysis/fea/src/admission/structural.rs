@@ -9,7 +9,7 @@ use runmat_analysis_core::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuralRealizationInput {
-    pub assembly: StructuralFormulationRealization,
+    pub assemblies: Vec<StructuralFormulationRealization>,
     pub procedure: AnalysisProcedure,
     pub coupling: CouplingImplementation,
     pub sources: Vec<SourceImplementation>,
@@ -34,7 +34,50 @@ pub fn structural_exact_realization(
 
     let temporal = structural_temporal(input.procedure)
         .ok_or(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure)?;
-    let (topologies, recovery) = match input.assembly.operator {
+    if input.assemblies.is_empty() {
+        return Err(FormulationAdmissionRejectionReason::InvalidRealization);
+    }
+    input
+        .assemblies
+        .sort_by_key(|assembly| structural_operator_order(assembly.operator));
+    if input
+        .assemblies
+        .windows(2)
+        .any(|pair| pair[0].operator == pair[1].operator)
+    {
+        return Err(FormulationAdmissionRejectionReason::InvalidRealization);
+    }
+
+    canonicalize_sources(&mut input.sources);
+    canonicalize_boundary_transfers(&mut input.boundary_transfers);
+    let components = input
+        .assemblies
+        .into_iter()
+        .map(|assembly| {
+            structural_component(
+                assembly,
+                input.procedure,
+                &input.sources,
+                &input.boundary_transfers,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(ExactFormulationRealization {
+        components,
+        temporals: vec![temporal],
+        coupling: input.coupling,
+        boundary_transfers: input.boundary_transfers,
+    })
+}
+
+fn structural_component(
+    assembly: StructuralFormulationRealization,
+    procedure: AnalysisProcedure,
+    sources: &[SourceImplementation],
+    boundary_transfers: &[BoundaryTransferImplementation],
+) -> Result<ExactFormulationComponent, FormulationAdmissionRejectionReason> {
+    let (topologies, recovery) = match assembly.operator {
         StructuralOperatorImplementation::Tet4LinearElasticity => (
             vec![TopologyImplementation::CanonicalSolverMeshTet4],
             RecoveryImplementation::Structural(
@@ -63,41 +106,40 @@ pub fn structural_exact_realization(
         ),
     };
 
-    canonicalize_sources(&mut input.sources);
-    canonicalize_boundary_transfers(&mut input.boundary_transfers);
-    validate_projection_evidence(
-        input.assembly.operator,
-        &input.sources,
-        &input.boundary_transfers,
-    )?;
+    validate_projection_evidence(assembly.operator, sources, boundary_transfers)?;
 
     let expected_recovery = match recovery {
         RecoveryImplementation::Structural(value) => Some(value),
         RecoveryImplementation::Unavailable => None,
         _ => return Err(FormulationAdmissionRejectionReason::InvalidRealization),
     };
-    if input.assembly.recovery != expected_recovery {
+    if assembly.recovery != expected_recovery {
         return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
             FormulationAxis::Recovery,
         ));
     }
 
-    Ok(ExactFormulationRealization {
-        components: vec![ExactFormulationComponent {
-            spatial_operator: SpatialOperatorImplementation::Structural(input.assembly.operator),
-            constitutive: if input.procedure == AnalysisProcedure::Nonlinear {
-                ConstitutiveImplementation::ReducedScalarStructuralNonlinearity
-            } else {
-                ConstitutiveImplementation::IsotropicLinearElasticity
-            },
-            recovery,
-            topologies,
-            sources: input.sources,
-        }],
-        temporals: vec![temporal],
-        coupling: input.coupling,
-        boundary_transfers: input.boundary_transfers,
+    Ok(ExactFormulationComponent {
+        spatial_operator: SpatialOperatorImplementation::Structural(assembly.operator),
+        constitutive: if procedure == AnalysisProcedure::Nonlinear {
+            ConstitutiveImplementation::ReducedScalarStructuralNonlinearity
+        } else {
+            ConstitutiveImplementation::IsotropicLinearElasticity
+        },
+        recovery,
+        topologies,
+        sources: sources.to_vec(),
     })
+}
+
+const fn structural_operator_order(operator: StructuralOperatorImplementation) -> u8 {
+    match operator {
+        StructuralOperatorImplementation::Tet4LinearElasticity => 0,
+        StructuralOperatorImplementation::Tet10LinearElasticity => 1,
+        StructuralOperatorImplementation::EulerBernoulliBeam3d => 2,
+        StructuralOperatorImplementation::Mitc3TriangularShell => 3,
+        StructuralOperatorImplementation::SyntheticDiagonalChain => 4,
+    }
 }
 
 pub fn thermomechanical_exact_realization(
@@ -284,10 +326,10 @@ mod tests {
 
     fn structural_input(sources: Vec<SourceImplementation>) -> StructuralRealizationInput {
         StructuralRealizationInput {
-            assembly: StructuralFormulationRealization::new(
+            assemblies: vec![StructuralFormulationRealization::new(
                 StructuralOperatorImplementation::Tet4LinearElasticity,
                 Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
-            ),
+            )],
             procedure: AnalysisProcedure::Static,
             coupling: CouplingImplementation::Uncoupled,
             sources,
@@ -362,5 +404,47 @@ mod tests {
             rejection.reason,
             FormulationAdmissionRejectionReason::IncompatibleAxis(FormulationAxis::Source)
         );
+    }
+
+    #[test]
+    fn mixed_beam_shell_realization_is_canonical_and_admissible() {
+        let input = StructuralRealizationInput {
+            assemblies: vec![
+                StructuralFormulationRealization::new(
+                    StructuralOperatorImplementation::Mitc3TriangularShell,
+                    Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
+                ),
+                StructuralFormulationRealization::new(
+                    StructuralOperatorImplementation::EulerBernoulliBeam3d,
+                    Some(StructuralRecoveryImplementation::BeamSectionResultants),
+                ),
+            ],
+            procedure: AnalysisProcedure::Static,
+            coupling: CouplingImplementation::Uncoupled,
+            sources: vec![SourceImplementation::ExplicitRegionNodalDistribution],
+            boundary_transfers: vec![BoundaryTransferImplementation::ExplicitRegionConnectivity],
+        };
+        let realization = structural_exact_realization(input).expect("valid mixed realization");
+        assert_eq!(realization.components.len(), 2);
+        assert!(matches!(
+            realization.components[0].spatial_operator,
+            SpatialOperatorImplementation::Structural(
+                StructuralOperatorImplementation::EulerBernoulliBeam3d
+            )
+        ));
+        assert!(matches!(
+            realization.components[1].spatial_operator,
+            SpatialOperatorImplementation::Structural(
+                StructuralOperatorImplementation::Mitc3TriangularShell
+            )
+        ));
+        admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::Static,
+            solution_space: SolutionSpace::Direct,
+            requirement: FormulationRequirement::Experimental,
+            realization,
+        })
+        .expect("the exact mixed formulation must pass admission");
     }
 }

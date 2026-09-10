@@ -1229,7 +1229,7 @@ mod tests {
         assert!((strain[0] - 0.5).abs() < 1.0e-13);
         assert!(strain[1..].iter().all(|value| value.abs() < 1.0e-13));
         assert_eq!(
-            summary.structural_formulation.as_ref().unwrap().recovery,
+            summary.structural_formulations[0].recovery,
             Some(runmat_analysis_core::StructuralRecoveryImplementation::Tet10VolumeAverageStrain)
         );
         let metrics = structural_field_recovery_metrics(&summary, &solve.solution).unwrap();
