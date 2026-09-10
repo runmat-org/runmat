@@ -66,13 +66,22 @@ pub fn solve_reduced_finite_volume(
         .fold(0.0_f64, f64::max);
     let known_answer_metrics = diagnostics::known_answer_metrics(&solution);
     let fields = recovery::build_run_fields(domain, &solution);
-    let residual_severity = if max_momentum_residual <= options.residual_warn_threshold
-        && max_continuity_residual <= options.residual_warn_threshold
-    {
-        FeaDiagnosticSeverity::Info
-    } else {
-        FeaDiagnosticSeverity::Warning
-    };
+    let mut run_diagnostics = diagnostics::coupling_diagnostics(
+        domain,
+        &topology,
+        diagnostics::CfdCouplingEvidence {
+            inlet_velocity_m_per_s: solution.nominal_inlet_velocity_m_per_s,
+            profile_point_count: profile_scales.len(),
+            step_count,
+            time_step_s: options.time_step_s,
+            transient,
+            pressure_drop_pa: solution.pressure_drop_pa,
+            mass_balance_residual: solution.mass_balance_residual,
+            max_momentum_residual,
+            max_continuity_residual,
+            residual_warn_threshold: options.residual_warn_threshold,
+        },
+    );
     FeaRunResult {
         identity,
         requested_backend: backend,
@@ -85,28 +94,8 @@ pub fn solve_reduced_finite_volume(
         accelerator_evidence: Vec::new(),
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
-        diagnostics: vec![
-            FeaDiagnostic {
-                code: "FEA_CFD_RESIDUAL".to_string(),
-                severity: residual_severity,
-                message: format!(
-                    "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
-                    max_momentum_residual,
-                    max_continuity_residual,
-                    options.residual_warn_threshold,
-                    node_count,
-                    step_count,
-                ),
-            },
-            diagnostics::assembly_diagnostic(
-                &solution.topology,
-                domain,
-                solution.nominal_inlet_velocity_m_per_s,
-                options.time_step_s,
-                solution.pressure_drop_pa,
-                solution.mass_balance_residual,
-                options.residual_warn_threshold,
-            ),
+        diagnostics: {
+            run_diagnostics.extend([
             FeaDiagnostic {
                 code: "FEA_CFD_BOUNDARY_CONDITIONS".to_string(),
                 severity: if solution.boundary_coverage_ratio >= 1.0
@@ -170,33 +159,10 @@ pub fn solve_reduced_finite_volume(
                     solution.transient_scale_variation,
                 ),
             },
-            diagnostics::known_answer_diagnostic(&known_answer_metrics, &topology),
-            FeaDiagnostic {
-                code: "FEA_CFD_FLOW".to_string(),
-                severity: FeaDiagnosticSeverity::Info,
-                message: format!(
-                    "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
-                    domain.density.kilograms_per_cubic_meter,
-                    domain.dynamic_viscosity.pascal_seconds,
-                    boundary_summary.nominal_inlet_velocity_m_per_s,
-                    domain.turbulence_intensity.ratio,
-                    domain::reynolds_number_for_velocity(
-                        domain,
-                        boundary_summary.nominal_inlet_velocity_m_per_s,
-                    ),
-                    if transient { "transient" } else { "steady_state" },
-                    profile_scales.len(),
-                    topology.basis.as_str(),
-                    topology.control_volume_count,
-                    topology.control_volume_face_count,
-                    topology.control_volume_internal_face_count,
-                    topology.control_volume_boundary_face_count,
-                    topology.control_volume_connectivity_coverage_ratio,
-                    topology.domain_length_m,
-                    topology.hydraulic_diameter_m,
-                ),
-            },
-        ],
+                diagnostics::known_answer_diagnostic(&known_answer_metrics, &topology),
+            ]);
+            run_diagnostics
+        },
         fields,
     }
 }

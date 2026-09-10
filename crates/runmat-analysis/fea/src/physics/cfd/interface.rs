@@ -100,6 +100,14 @@ pub fn pressure_drop(pressure: &[f64]) -> f64 {
     }
 }
 
+pub fn mean_axial_velocity(velocity: &[f64]) -> f64 {
+    let node_count = velocity.len() / 3;
+    (0..node_count)
+        .map(|node| velocity.get(node * 3).copied().unwrap_or(0.0))
+        .sum::<f64>()
+        / node_count.max(1) as f64
+}
+
 pub fn cell_centered_scalar(nodal: &[f64]) -> Vec<f64> {
     let node_count = nodal.len();
     let cell_count = node_count.saturating_sub(1).max(1);

@@ -108,6 +108,22 @@ const runtimeCfdKernelDeclarations = [
 if (runtimeCfdKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
   fail("runmat-runtime must adapt CFD operations without owning CFD numerical kernels");
 }
+const runtimeChtKernelDeclarations = [
+  /\bfn\s+(?:build|solve)_cht_/,
+  /\bfn\s+cht_(?:advection|interface|known_answer)/,
+  /\bstruct\s+Cht(?:ConjugateInterfaceSolution|InterfaceClosure|KnownAnswerMetrics)\b/,
+];
+if (runtimeChtKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
+  fail("runmat-runtime must adapt CHT operations without owning CHT numerical kernels");
+}
+const runtimeFsiKernelDeclarations = [
+  /\bfn\s+(?:build|solve)_fsi_/,
+  /\bfn\s+fsi_(?:known_answer|structural_compliance)/,
+  /\bstruct\s+Fsi(?:InterfaceClosure|KnownAnswerMetrics|PartitionedInterfaceStep|StructuralInterfaceResponse)\b/,
+];
+if (runtimeFsiKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
+  fail("runmat-runtime must adapt FSI operations without owning FSI numerical kernels");
+}
 if (
   allRust.some(
     ({ path: sourcePath, text }) =>

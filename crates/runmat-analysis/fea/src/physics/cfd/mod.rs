@@ -7,7 +7,7 @@ mod recovery;
 mod reduced;
 mod solve;
 
-pub use diagnostics::assembly_diagnostic;
+pub use diagnostics::{assembly_diagnostic, coupling_diagnostics, CfdCouplingEvidence};
 pub use domain::{
     nominal_inlet_velocity_m_per_s, reynolds_number_for_velocity,
     validate_authored_boundary_conditions, velocity_scales, CfdDomainTopology,
@@ -15,7 +15,7 @@ pub use domain::{
 pub use interface::{
     cell_centered_scalar, connectivity_coverage_ratio as interface_connectivity_coverage_ratio,
     face_count as interface_face_count, graph_edges_for_topology as interface_graph_edges,
-    pressure_drop, resample_scalar_profile,
+    mean_axial_velocity, pressure_drop, resample_scalar_profile,
 };
 pub use recovery::recover_velocity_pressure;
 pub use reduced::{solve_reduced_finite_volume, ReducedCfdSolveOptions};

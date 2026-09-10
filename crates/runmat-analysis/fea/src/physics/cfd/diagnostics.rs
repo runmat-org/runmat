@@ -4,6 +4,82 @@ use crate::diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity};
 
 use super::{domain::CfdDomainTopology, solve::CfdVelocityPressureSolution};
 
+#[derive(Clone, Copy, Debug)]
+pub struct CfdCouplingEvidence {
+    pub inlet_velocity_m_per_s: f64,
+    pub profile_point_count: usize,
+    pub step_count: usize,
+    pub time_step_s: f64,
+    pub transient: bool,
+    pub pressure_drop_pa: f64,
+    pub mass_balance_residual: f64,
+    pub max_momentum_residual: f64,
+    pub max_continuity_residual: f64,
+    pub residual_warn_threshold: f64,
+}
+
+pub fn coupling_diagnostics(
+    domain: &CfdDomain,
+    topology: &CfdDomainTopology,
+    evidence: CfdCouplingEvidence,
+) -> Vec<FeaDiagnostic> {
+    let residual_severity = if evidence.max_momentum_residual <= evidence.residual_warn_threshold
+        && evidence.max_continuity_residual <= evidence.residual_warn_threshold
+    {
+        FeaDiagnosticSeverity::Info
+    } else {
+        FeaDiagnosticSeverity::Warning
+    };
+    vec![
+        FeaDiagnostic {
+            code: "FEA_CFD_FLOW".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_number={} solve_family={} profile_point_count={} topology_basis={} control_volume_count={} control_volume_face_count={} control_volume_internal_face_count={} control_volume_boundary_face_count={} control_volume_connectivity_coverage_ratio={} domain_length_m={} hydraulic_diameter_m={}",
+                domain.density.kilograms_per_cubic_meter,
+                domain.dynamic_viscosity.pascal_seconds,
+                evidence.inlet_velocity_m_per_s,
+                domain.turbulence_intensity.ratio,
+                super::domain::reynolds_number_for_velocity(
+                    domain,
+                    evidence.inlet_velocity_m_per_s,
+                ),
+                if evidence.transient { "transient" } else { "steady_state" },
+                evidence.profile_point_count,
+                topology.basis.as_str(),
+                topology.control_volume_count,
+                topology.control_volume_face_count,
+                topology.control_volume_internal_face_count,
+                topology.control_volume_boundary_face_count,
+                topology.control_volume_connectivity_coverage_ratio,
+                topology.domain_length_m,
+                topology.hydraulic_diameter_m,
+            ),
+        },
+        FeaDiagnostic {
+            code: "FEA_CFD_RESIDUAL".to_string(),
+            severity: residual_severity,
+            message: format!(
+                "max_momentum_residual={} max_continuity_residual={} residual_warn_threshold={} cfd_node_count={} cfd_step_count={}",
+                evidence.max_momentum_residual,
+                evidence.max_continuity_residual,
+                evidence.residual_warn_threshold,
+                topology.node_count,
+                evidence.step_count,
+            ),
+        },
+        assembly_diagnostic(
+            topology,
+            domain,
+            evidence.inlet_velocity_m_per_s,
+            evidence.time_step_s,
+            evidence.pressure_drop_pa,
+            evidence.mass_balance_residual,
+            evidence.residual_warn_threshold,
+        ),
+    ]
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct CfdKnownAnswerMetrics {
     pub pressure_drop_balance_ratio: f64,

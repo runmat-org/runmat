@@ -4723,13 +4723,17 @@ fn analysis_trends_classifies_cht_runs_separately() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
 
+    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-trends");
     let model = sample_cht_model();
     for _ in 0..3 {
         let _ = analysis_run_cht_with_options_op(
             &model,
             ComputeBackend::Cpu,
             FormulationRequirement::Experimental,
-            Default::default(),
+            AnalysisChtRunOptions {
+                solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+                ..Default::default()
+            },
             OperationContext::new(None, None),
         )
         .expect("cht run should persist for trends");
@@ -8335,7 +8339,8 @@ fn canonical_boundary_faces_define_complete_tetrahedral_interface_connectivity()
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let topology = CfdDomainTopology::from_solver_mesh(&mesh);
 
-    let (edges, mesh_coverage) = coupled_interface_graph_edges_for_topology(&topology, 4);
+    let (edges, mesh_coverage) =
+        runmat_analysis_fea::physics::cfd::interface_graph_edges(&topology, 4);
 
     assert_eq!(edges.len(), 6);
     assert_eq!(mesh_coverage, 1.0);
@@ -8521,8 +8526,9 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         .expect("thermal heat-flux snapshot should carry a recovery domain");
     let solver_mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let expected_interface_face_count =
-        fluid_interface_face_count(&CfdDomainTopology::from_model(&model, Some(&solver_mesh)));
+    let expected_interface_face_count = runmat_analysis_fea::physics::cfd::interface_face_count(
+        &CfdDomainTopology::from_model(&model, Some(&solver_mesh)),
+    );
     assert_eq!(solid_temperature.shape, fluid_temperature.shape);
     assert!(expected_interface_face_count >= thermal_flux_face_count);
     assert_eq!(
