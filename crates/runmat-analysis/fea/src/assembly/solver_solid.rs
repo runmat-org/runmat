@@ -4,6 +4,9 @@ use runmat_analysis_core::MechanicalDampingModel;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement};
 
 use crate::algebra::{OperatorRole, RealSparseMatrix};
+use crate::physics::structural::material::{
+    StructuralElementMaterial, StructuralMaterialInventory,
+};
 
 use super::{
     elements::solid::{
@@ -48,12 +51,6 @@ pub enum SolverSolidAssemblyError {
     },
     InvalidMassOperator,
     SparseOperator(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SolverSolidMaterial {
-    pub elasticity: SolidMaterial,
-    pub damping: MechanicalDampingModel,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,8 +129,7 @@ pub fn solver_solid_topology(
 
 pub fn assemble_solver_solid_operators(
     artifact: &SolverMeshArtifact,
-    default_material: Option<SolverSolidMaterial>,
-    materials_by_region: &BTreeMap<String, SolverSolidMaterial>,
+    materials: &StructuralMaterialInventory,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact)?;
     let nodes = artifact
@@ -145,20 +141,21 @@ pub fn assemble_solver_solid_operators(
         .collect::<BTreeMap<_, _>>();
     let mut rows = SolidOperatorRows::new(topology.dof_count);
     for element in &artifact.topology.volume_elements {
-        let material = resolve_element_material(element, default_material, materials_by_region)?;
+        let material = resolve_element_material(element, materials)?;
+        let elasticity = solid_material(material);
         match element.order {
             ElementOrder::Tet4 => {
                 let (coordinates, offsets) =
                     element_geometry::<4>(element.element_id, &element.node_ids, &nodes)?;
                 let stiffness = tetrahedron4_stiffness(
-                    material.elasticity,
+                    elasticity,
                     Tetrahedron4ElementGeometry {
                         nodes_m: coordinates,
                     },
                 )
                 .map_err(|failure| element_failure(element.element_id, failure))?;
                 let mass = tetrahedron4_consistent_mass_matrix(
-                    material.elasticity,
+                    elasticity,
                     Tetrahedron4ElementGeometry {
                         nodes_m: coordinates,
                     },
@@ -170,14 +167,14 @@ pub fn assemble_solver_solid_operators(
                 let (coordinates, offsets) =
                     element_geometry::<10>(element.element_id, &element.node_ids, &nodes)?;
                 let stiffness = tetrahedron10_global_stiffness_matrix(
-                    material.elasticity,
+                    elasticity,
                     Tetrahedron10ElementGeometry {
                         nodes_m: coordinates,
                     },
                 )
                 .map_err(|failure| element_failure(element.element_id, failure))?;
                 let mass = tetrahedron10_consistent_mass_matrix(
-                    material.elasticity,
+                    elasticity,
                     Tetrahedron10ElementGeometry {
                         nodes_m: coordinates,
                     },
@@ -198,17 +195,22 @@ pub fn assemble_solver_solid_operators(
 
 pub(super) fn resolve_element_material(
     element: &SolverVolumeElement,
-    default_material: Option<SolverSolidMaterial>,
-    materials_by_region: &BTreeMap<String, SolverSolidMaterial>,
-) -> Result<SolverSolidMaterial, SolverSolidAssemblyError> {
-    materials_by_region
-        .get(&element.region_id.source_topology_id)
-        .copied()
-        .or(default_material)
+    materials: &StructuralMaterialInventory,
+) -> Result<StructuralElementMaterial, SolverSolidAssemblyError> {
+    materials
+        .resolve(&element.region_id.source_topology_id)
         .ok_or_else(|| SolverSolidAssemblyError::UnassignedRegion {
             element_id: element.element_id,
             region_id: element.region_id.source_topology_id.clone(),
         })
+}
+
+fn solid_material(material: StructuralElementMaterial) -> SolidMaterial {
+    SolidMaterial {
+        youngs_modulus_pa: material.youngs_modulus_pa,
+        poisson_ratio: material.poisson_ratio,
+        density_kg_per_m3: material.density_kg_per_m3,
+    }
 }
 
 fn add_lumped_mass<const D: usize>(

@@ -33,7 +33,7 @@ use self::{
     },
     solver_solid::{
         assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
-        SolverSolidAssemblyError, SolverSolidMaterial,
+        SolverSolidAssemblyError,
     },
     solver_solid_boundary::apply_solver_mesh_structural_loads,
     structural_inputs::{
@@ -42,6 +42,7 @@ use self::{
         structural_source_implementations, validate_structural_inputs, StructuralProjectionBasis,
     },
 };
+use crate::physics::structural::material::StructuralMaterialInventory;
 use moment_projection::project_moment;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
@@ -245,6 +246,10 @@ pub enum StructuralAssemblyError {
         element_id: String,
         section_id: String,
     },
+    UnassignedExplicitRegion {
+        element_id: String,
+        region_id: String,
+    },
     BeamElement {
         element_id: String,
         error: BeamElementError,
@@ -273,7 +278,9 @@ pub enum StructuralAssemblyError {
     UnsupportedScheduledConstraint {
         constraint_id: String,
     },
-    UnsupportedExplicitDamping,
+    UnsupportedShellDamping {
+        element_id: String,
+    },
     UnsupportedConstraintFrame {
         constraint_id: String,
         frame: String,
@@ -336,6 +343,13 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "shell element references an unknown section: element_id={element_id} section_id={section_id}"
             ),
+            Self::UnassignedExplicitRegion {
+                element_id,
+                region_id,
+            } => write!(
+                f,
+                "explicit structural element region has no material assignment: element_id={element_id} region_id={region_id}"
+            ),
             Self::BeamElement { element_id, error } => {
                 write!(f, "beam element assembly failed: element_id={element_id} error={error}")
             }
@@ -381,9 +395,9 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "structural assembly requires study-constant prescribed constraints: constraint_id={constraint_id}"
             ),
-            Self::UnsupportedExplicitDamping => write!(
+            Self::UnsupportedShellDamping { element_id } => write!(
                 f,
-                "Rayleigh damping is not implemented for explicit beam or shell connectivity"
+                "Rayleigh damping is not implemented for the shell proxy: element_id={element_id}"
             ),
             Self::UnsupportedConstraintFrame {
                 constraint_id,
@@ -1037,39 +1051,16 @@ fn assemble_linear_system_impl(
         });
     }
 
-    let default_solid_material = match model.materials.as_slice() {
-        [material] => Some(SolverSolidMaterial {
-            elasticity: SolidMaterial {
-                youngs_modulus_pa: material.mechanical.youngs_modulus_pa,
-                poisson_ratio: material.mechanical.poisson_ratio,
-                density_kg_per_m3: material.mechanical.density_kg_per_m3,
-            },
-            damping: material.mechanical.damping,
-        }),
-        _ => None,
-    };
-    let solid_materials_by_region = solid_materials_by_region(model);
+    let structural_materials = StructuralMaterialInventory::from_model(model);
     let structural_solid_recovery = solver_mesh
         .as_ref()
-        .map(|mesh| {
-            solid_recovery_from_solver_mesh(
-                mesh,
-                default_solid_material,
-                &solid_materials_by_region,
-            )
-        })
+        .map(|mesh| solid_recovery_from_solver_mesh(mesh, &structural_materials))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?
         .unwrap_or_default();
     let solid_operators = solver_mesh
         .as_ref()
-        .map(|mesh| {
-            assemble_solver_solid_operators(
-                mesh,
-                default_solid_material,
-                &solid_materials_by_region,
-            )
-        })
+        .map(|mesh| assemble_solver_solid_operators(mesh, &structural_materials))
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
     let structural_solid_total_mass_kg = solid_operators
@@ -1299,8 +1290,7 @@ fn assemble_linear_system_impl(
 
 fn solid_recovery_from_solver_mesh(
     mesh: &SolverMeshArtifact,
-    default_material: Option<SolverSolidMaterial>,
-    materials_by_region: &BTreeMap<String, SolverSolidMaterial>,
+    materials: &StructuralMaterialInventory,
 ) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     let node_indices = mesh
         .topology
@@ -1314,8 +1304,7 @@ fn solid_recovery_from_solver_mesh(
         .volume_elements
         .iter()
         .map(|element| {
-            let material =
-                resolve_element_material(element, default_material, materials_by_region)?;
+            let material = resolve_element_material(element, materials)?;
             let geometry = match element.order {
                 ElementOrder::Tet4 => {
                     let (node_indices, coordinates_m) = recovery_geometry::<4>(
@@ -1345,7 +1334,11 @@ fn solid_recovery_from_solver_mesh(
             Ok(SolidRecoveryElementSummary {
                 element_id: element.element_id.to_string(),
                 region_id: element.region_id.source_topology_id.clone(),
-                material: material.elasticity,
+                material: SolidMaterial {
+                    youngs_modulus_pa: material.youngs_modulus_pa,
+                    poisson_ratio: material.poisson_ratio,
+                    density_kg_per_m3: material.density_kg_per_m3,
+                },
                 geometry,
             })
         })
@@ -1456,15 +1449,7 @@ fn assemble_explicit_structural_system(
     }
 
     let structural_material = structural_material_summary(model);
-    let beam_material = BeamMaterial {
-        youngs_modulus_pa: structural_material.youngs_modulus_pa,
-        shear_modulus_pa: structural_material.shear_modulus_pa,
-    };
-    let shell_material = ShellMaterial {
-        youngs_modulus_pa: structural_material.youngs_modulus_pa,
-        poisson_ratio: structural_material.poisson_ratio,
-        shear_modulus_pa: structural_material.shear_modulus_pa,
-    };
+    let materials = StructuralMaterialInventory::from_model(model);
     let node_count = structural.nodes.len();
     let structural_dof_layout = StructuralDofLayout::from_node_sets(vec![
         StructuralNodeDofSet::translational_rotational();
@@ -1480,6 +1465,12 @@ fn assemble_explicit_structural_system(
         domain: ContributionDomain::Structural,
         contribution_id: ContributionId("explicit_beam_shell_stiffness".to_string()),
     });
+    let mut damping_assembler = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    let mut has_rayleigh_damping = false;
     let mut rhs = vec![0.0_f64; dof_count];
     let mut mass_diag = vec![0.0_f64; dof_count];
     let mut structural_beam_recovery = Vec::new();
@@ -1509,6 +1500,16 @@ fn assemble_explicit_structural_system(
                 section_id: beam.section_id.clone(),
             }
         })?;
+        let material = materials.resolve(&element.region_id).ok_or_else(|| {
+            StructuralAssemblyError::UnassignedExplicitRegion {
+                element_id: element.element_id.clone(),
+                region_id: element.region_id.clone(),
+            }
+        })?;
+        let beam_material = BeamMaterial {
+            youngs_modulus_pa: material.youngs_modulus_pa,
+            shear_modulus_pa: material.shear_modulus_pa(),
+        };
         let geometry = BeamElementGeometry {
             node_i_m: structural.nodes[node_i_index].coordinates_m,
             node_j_m: structural.nodes[node_j_index].coordinates_m,
@@ -1537,6 +1538,22 @@ fn assemble_explicit_structural_system(
                 stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
             }
         }
+        let element_mass = lumped_beam_mass(
+            section,
+            material.density_kg_per_m3,
+            frame.length_m,
+            &transform_global_to_local,
+        );
+        for (local, &global) in element_dofs.iter().enumerate() {
+            mass_diag[global] += element_mass[local];
+        }
+        has_rayleigh_damping |= add_rayleigh_element_damping(
+            &mut damping_assembler,
+            &element_dofs,
+            &stiffness,
+            &element_mass,
+            material.damping,
+        );
         structural_beam_recovery.push(BeamRecoveryElementSummary {
             element_id: element.element_id.clone(),
             region_id: element.region_id.clone(),
@@ -1547,15 +1564,6 @@ fn assemble_explicit_structural_system(
             material: beam_material,
             transform_global_to_local,
         });
-
-        add_lumped_beam_mass(
-            &mut mass_diag,
-            &element_dofs,
-            section,
-            structural_material.density_kg_per_m3,
-            frame.length_m,
-            &transform_global_to_local,
-        );
     }
 
     for element in &shell_elements {
@@ -1577,6 +1585,22 @@ fn assemble_explicit_structural_system(
                 section_id: shell.section_id.clone(),
             }
         })?;
+        let material = materials.resolve(&element.region_id).ok_or_else(|| {
+            StructuralAssemblyError::UnassignedExplicitRegion {
+                element_id: element.element_id.clone(),
+                region_id: element.region_id.clone(),
+            }
+        })?;
+        if material.damping != runmat_analysis_core::MechanicalDampingModel::Undamped {
+            return Err(StructuralAssemblyError::UnsupportedShellDamping {
+                element_id: element.element_id.clone(),
+            });
+        }
+        let shell_material = ShellMaterial {
+            youngs_modulus_pa: material.youngs_modulus_pa,
+            poisson_ratio: material.poisson_ratio,
+            shear_modulus_pa: material.shear_modulus_pa(),
+        };
         let geometry = ShellElementGeometry {
             nodes_m: [
                 structural.nodes[node_indices[0]].coordinates_m,
@@ -1610,7 +1634,7 @@ fn assemble_explicit_structural_system(
             &mut mass_diag,
             &element_dofs,
             section,
-            structural_material.density_kg_per_m3,
+            material.density_kg_per_m3,
             frame.area_m2,
         );
         structural_shell_recovery.push(ShellRecoveryElementSummary {
@@ -1853,21 +1877,20 @@ fn assemble_explicit_structural_system(
         domain: ContributionDomain::Structural,
         contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
     });
-    if model.materials.iter().any(|material| {
-        material.mechanical.damping != runmat_analysis_core::MechanicalDampingModel::Undamped
-    }) {
-        return Err(StructuralAssemblyError::UnsupportedExplicitDamping);
-    }
-    let damping = RealSparseMatrix::diagonal(
-        vec![0.0; dof_count],
-        OperatorRole::Damping,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    )
-    .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
-    .with_contribution(ContributionProvenance {
+    damping_assembler.add_contribution(ContributionProvenance {
         domain: ContributionDomain::Structural,
-        contribution_id: ContributionId("undamped_explicit_structure".to_string()),
+        contribution_id: ContributionId(
+            if has_rayleigh_damping {
+                "explicit_beam_rayleigh_damping"
+            } else {
+                "undamped_explicit_structure"
+            }
+            .to_string(),
+        ),
     });
+    let damping = damping_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
     let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
         .expect("assembled explicit operator roles and dimensions are valid");
     let nullspace_evidence = if !beam_elements.is_empty() {
@@ -1978,36 +2001,6 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
     }
 }
 
-fn solid_materials_by_region(model: &AnalysisModel) -> BTreeMap<String, SolverSolidMaterial> {
-    let materials = model
-        .materials
-        .iter()
-        .map(|material| {
-            (
-                material.material_id.clone(),
-                SolverSolidMaterial {
-                    elasticity: SolidMaterial {
-                        youngs_modulus_pa: material.mechanical.youngs_modulus_pa,
-                        poisson_ratio: material.mechanical.poisson_ratio,
-                        density_kg_per_m3: material.mechanical.density_kg_per_m3,
-                    },
-                    damping: material.mechanical.damping,
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    model
-        .material_assignments
-        .iter()
-        .filter_map(|assignment| {
-            materials
-                .get(&assignment.assigned_material_id)
-                .copied()
-                .map(|material| (assignment.region_id.clone(), material))
-        })
-        .collect()
-}
-
 fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
     structural
         .nodes
@@ -2081,27 +2074,23 @@ fn shell_element_dof_indices(
     Some(indices)
 }
 
-fn add_lumped_beam_mass(
-    mass_diag: &mut [f64],
-    element_dofs: &[usize; BEAM_ELEMENT_DOF_COUNT],
+fn lumped_beam_mass(
     section: BeamSection,
     density_kg_per_m3: f64,
     length_m: f64,
     transform_global_to_local: &BeamTransform12,
-) {
-    let density = density_kg_per_m3.max(1.0);
-    let length = length_m.max(1.0e-12);
-    let nodal_mass = density * section.area_m2.max(1.0e-18) * length / 2.0;
+) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
+    let nodal_mass = density_kg_per_m3 * section.area_m2 * length_m / 2.0;
     let local_rotational_inertia = [
-        density * section.torsion_j_m4.max(1.0e-24) * length / 2.0,
-        density * section.iy_m4.max(1.0e-24) * length / 2.0,
-        density * section.iz_m4.max(1.0e-24) * length / 2.0,
+        density_kg_per_m3 * section.torsion_j_m4 * length_m / 2.0,
+        density_kg_per_m3 * section.iy_m4 * length_m / 2.0,
+        density_kg_per_m3 * section.iz_m4 * length_m / 2.0,
     ];
+    let mut element_mass = [0.0; BEAM_ELEMENT_DOF_COUNT];
 
     for node_offset in [0usize, 6] {
         for component in 0..3 {
-            let dof = element_dofs[node_offset + component];
-            mass_diag[dof] += nodal_mass;
+            element_mass[node_offset + component] = nodal_mass;
         }
         for global_component in 0..3 {
             let local_col = node_offset + 3 + global_component;
@@ -2113,10 +2102,42 @@ fn add_lumped_beam_mass(
                     local_inertia * transform_global_to_local[row][local_col].powi(2)
                 })
                 .sum::<f64>();
-            let dof = element_dofs[node_offset + 3 + global_component];
-            mass_diag[dof] += inertia.max(1.0e-18);
+            element_mass[node_offset + 3 + global_component] = inertia;
         }
     }
+    element_mass
+}
+
+fn add_rayleigh_element_damping<const D: usize>(
+    damping: &mut RealSparseAssembler,
+    element_dofs: &[usize; D],
+    stiffness: &[[f64; D]; D],
+    lumped_mass: &[f64; D],
+    law: runmat_analysis_core::MechanicalDampingModel,
+) -> bool {
+    let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+        mass_coefficient,
+        stiffness_coefficient,
+    } = law
+    else {
+        return false;
+    };
+    for (local_row, &global_row) in element_dofs.iter().enumerate() {
+        for (local_column, &global_column) in element_dofs.iter().enumerate() {
+            let mass = if local_row == local_column {
+                lumped_mass[local_row]
+            } else {
+                0.0
+            };
+            damping.add(
+                global_row,
+                global_column,
+                mass_coefficient.per_second * mass
+                    + stiffness_coefficient.seconds * stiffness[local_row][local_column],
+            );
+        }
+    }
+    true
 }
 
 fn add_lumped_shell_mass(
@@ -2126,11 +2147,8 @@ fn add_lumped_shell_mass(
     density_kg_per_m3: f64,
     area_m2: f64,
 ) {
-    let density = density_kg_per_m3.max(1.0);
-    let thickness = section.thickness_m.max(1.0e-12);
-    let area = area_m2.max(1.0e-18);
-    let nodal_mass = density * thickness * area / 3.0;
-    let nodal_rotary_inertia = nodal_mass * thickness.powi(2) / 12.0;
+    let nodal_mass = density_kg_per_m3 * section.thickness_m * area_m2 / 3.0;
+    let nodal_rotary_inertia = nodal_mass * section.thickness_m.powi(2) / 12.0;
     for node_offset in [0usize, 6, 12] {
         for component in 0..3 {
             let dof = element_dofs[node_offset + component];
@@ -2138,7 +2156,7 @@ fn add_lumped_shell_mass(
         }
         for component in 3..6 {
             let dof = element_dofs[node_offset + component];
-            mass_diag[dof] += nodal_rotary_inertia.max(1.0e-18);
+            mass_diag[dof] += nodal_rotary_inertia;
         }
     }
 }
@@ -2838,8 +2856,41 @@ mod tests {
     }
 
     #[test]
-    fn explicit_connectivity_rejects_unimplemented_rayleigh_damping() {
+    fn explicit_beam_assembles_authored_rayleigh_damping() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let alpha = 1.0;
+        let beta = 2.0e-5;
+        model.materials[0].mechanical.damping =
+            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(alpha),
+                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
+                    beta,
+                ),
+            };
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("physical beam damping must assemble");
+        let operators = summary.operator.operators();
+        for row in 0..summary.dof_count {
+            for column in 0..summary.dof_count {
+                let expected = alpha * operators.mass().get(row, column)
+                    + beta * operators.stiffness().get(row, column);
+                assert!(
+                    (operators.damping().get(row, column) - expected).abs()
+                        <= expected.abs().max(1.0) * 1.0e-12
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shell_proxy_rejects_authored_rayleigh_damping() {
+        let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         model.materials[0].mechanical.damping =
             runmat_analysis_core::MechanicalDampingModel::Rayleigh {
                 mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(1.0),
@@ -2852,11 +2903,130 @@ mod tests {
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("explicit damping must fail until its operator is implemented");
+        .expect_err("shell proxy damping must fail until its physical operator is implemented");
 
         assert_eq!(
             error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::UnsupportedExplicitDamping)
+            LinearAssemblyError::Structural(StructuralAssemblyError::UnsupportedShellDamping {
+                element_id: "shell_1".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn explicit_beam_elements_use_their_exact_region_materials() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        model.materials[0].mechanical.youngs_modulus_pa = 100.0e9;
+        model.materials[0].mechanical.density_kg_per_m3 = 1_000.0;
+        model.materials[0].mechanical.damping =
+            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.1),
+                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
+                    1.0e-5,
+                ),
+            };
+        let mut second_material = model.materials[0].clone();
+        second_material.material_id = "mat_second".into();
+        second_material.mechanical.youngs_modulus_pa = 200.0e9;
+        second_material.mechanical.density_kg_per_m3 = 2_000.0;
+        second_material.mechanical.damping =
+            runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
+                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
+                    2.0e-5,
+                ),
+            };
+        model.materials.push(second_material);
+        model.material_assignments = vec![
+            runmat_analysis_core::MaterialAssignment {
+                region_id: "span_first".into(),
+                expected_material_id: "mat_steel".into(),
+                assigned_material_id: "mat_steel".into(),
+                confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+            },
+            runmat_analysis_core::MaterialAssignment {
+                region_id: "span_second".into(),
+                expected_material_id: "mat_second".into(),
+                assigned_material_id: "mat_second".into(),
+                confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+            },
+        ];
+        let structural = model.structural.as_mut().expect("beam topology");
+        structural.elements[0].region_id = "span_first".into();
+        structural.nodes.push(runmat_analysis_core::StructuralNode {
+            node_id: 3,
+            coordinates_m: [2.0, 0.0, 0.0],
+        });
+        let mut second_element = structural.elements[0].clone();
+        second_element.element_id = "beam_2".into();
+        second_element.region_id = "span_second".into();
+        let StructuralElementKind::Beam(beam) = &mut second_element.kind else {
+            unreachable!("fixture element is a beam")
+        };
+        beam.node_ids = [2, 3];
+        structural.elements.push(second_element);
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("multi-material beam assembly");
+        assert_eq!(summary.structural_beam_recovery.len(), 2);
+        assert_eq!(
+            summary.structural_beam_recovery[0]
+                .material
+                .youngs_modulus_pa,
+            100.0e9
+        );
+        assert_eq!(
+            summary.structural_beam_recovery[1]
+                .material
+                .youngs_modulus_pa,
+            200.0e9
+        );
+
+        let operators = summary.operator.operators();
+        let first_endpoint = 0;
+        let second_endpoint = 12;
+        assert_relative(
+            operators.mass().get(second_endpoint, second_endpoint)
+                / operators.mass().get(first_endpoint, first_endpoint),
+            2.0,
+            1.0e-12,
+        );
+        for (dof, alpha, beta) in [
+            (first_endpoint, 0.1, 1.0e-5),
+            (second_endpoint, 0.2, 2.0e-5),
+        ] {
+            let expected =
+                alpha * operators.mass().get(dof, dof) + beta * operators.stiffness().get(dof, dof);
+            assert_relative(operators.damping().get(dof, dof), expected, 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn explicit_element_with_ambiguous_unassigned_material_fails_closed() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let mut second = model.materials[0].clone();
+        second.material_id = "second".into();
+        model.materials.push(second);
+        model.material_assignments.clear();
+
+        let error = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("multi-material explicit topology requires an exact region assignment");
+        assert_eq!(
+            error,
+            LinearAssemblyError::Structural(StructuralAssemblyError::UnassignedExplicitRegion {
+                element_id: "beam_1".into(),
+                region_id: "beam_span".into(),
+            })
         );
     }
 
@@ -4013,6 +4183,14 @@ mod tests {
         assert!(
             (actual - expected).abs() <= 1.0e-8,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
+        let relative = (actual - expected).abs() / expected.abs().max(1.0);
+        assert!(
+            relative <= tolerance,
+            "actual={actual} expected={expected} relative={relative} tolerance={tolerance}"
         );
     }
 

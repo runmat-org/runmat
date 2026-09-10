@@ -1,3 +1,5 @@
+pub mod material;
+
 pub fn displacement_increment_norm(a: &[f64], b: &[f64]) -> f64 {
     let mut sum = 0.0_f64;
     for (av, bv) in a.iter().zip(b.iter()) {
