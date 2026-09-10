@@ -159,7 +159,7 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    dense_capability_snapshot(provider, 3, WGPU_OPERATIONS)
+    dense_capability_snapshot(provider, 4, WGPU_OPERATIONS)
 }
 
 pub(crate) fn dense_capability_snapshot(

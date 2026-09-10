@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{
     ProviderCostEstimate, ProviderRejectionCode, ProviderSparseCapabilities,
     SparseCancellationCapability, SparseCostQuery, SparseFeasibility, SparseFeasibilityQuery,
-    SparseFormat, SparseIndexWidth, SparseKrylovMethod, SparseOperation, SparsePreconditionerKind,
-    SparseResourceEstimate, SparseTranspose,
+    SparseFormat, SparseIndexWidth, SparseKrylovCapability, SparseKrylovMethod, SparseOperation,
+    SparsePreconditionerKind, SparseResourceEstimate, SparseTranspose,
 };
 use runmat_execution::ExecutionCostComponents;
 
@@ -14,8 +14,16 @@ pub(in crate::simple_provider) fn capabilities() -> ProviderSparseCapabilities {
         storage: vec![runmat_accelerate_api::GpuTensorStorage::Real],
         transpose_modes: vec![SparseTranspose::None],
         preconditioners: vec![SparsePreconditionerKind::Jacobi],
-        krylov_methods: vec![SparseKrylovMethod::ConjugateGradient],
-        resident_krylov: true,
+        krylov: vec![
+            SparseKrylovCapability {
+                method: SparseKrylovMethod::ConjugateGradient,
+                preconditioner: None,
+            },
+            SparseKrylovCapability {
+                method: SparseKrylovMethod::ConjugateGradient,
+                preconditioner: Some(SparsePreconditionerKind::Jacobi),
+            },
+        ],
         max_host_synchronizations_per_solve: Some(0),
         cancellation: SparseCancellationCapability::Cooperative {
             maximum_work_units_between_checks:

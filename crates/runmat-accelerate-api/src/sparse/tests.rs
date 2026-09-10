@@ -290,8 +290,10 @@ fn sparse_capabilities_require_resident_krylov_and_exact_envelope_match() {
         storage: vec![GpuTensorStorage::Real],
         transpose_modes: vec![SparseTranspose::None],
         preconditioners: vec![SparsePreconditionerKind::Jacobi],
-        krylov_methods: vec![SparseKrylovMethod::ConjugateGradient],
-        resident_krylov: true,
+        krylov: vec![SparseKrylovCapability {
+            method: SparseKrylovMethod::ConjugateGradient,
+            preconditioner: Some(SparsePreconditionerKind::Jacobi),
+        }],
         max_host_synchronizations_per_solve: Some(1),
         cancellation: SparseCancellationCapability::Cooperative {
             maximum_work_units_between_checks: 1_024,
@@ -322,6 +324,13 @@ fn sparse_capabilities_require_resident_krylov_and_exact_envelope_match() {
     assert!(capabilities.validate().is_ok());
     assert!(capabilities.supports(query));
     assert!(!capabilities.supports(SparseFeasibilityQuery {
+        operation: SparseOperation::KrylovSolve {
+            method: SparseKrylovMethod::ConjugateGradient,
+            preconditioner: None,
+        },
+        ..query
+    }));
+    assert!(!capabilities.supports(SparseFeasibilityQuery {
         element_type: NumericElementType::F32,
         ..query
     }));
@@ -338,9 +347,9 @@ fn sparse_capabilities_require_resident_krylov_and_exact_envelope_match() {
     invalid.transactional_results = false;
     assert!(invalid.validate().is_err());
 
-    let mut nonresident = capabilities;
-    nonresident.resident_krylov = false;
-    assert!(nonresident.validate().is_err());
+    let mut invalid_pairing = capabilities;
+    invalid_pairing.krylov[0].preconditioner = Some(SparsePreconditionerKind::Ilu0);
+    assert!(invalid_pairing.validate().is_err());
 }
 
 #[test]

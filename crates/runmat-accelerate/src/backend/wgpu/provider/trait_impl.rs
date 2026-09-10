@@ -124,6 +124,13 @@ impl AccelProvider for WgpuProvider {
         self.sparse.free_preconditioner(self, preconditioner)
     }
 
+    fn sparse_krylov_solve<'a>(
+        &'a self,
+        request: &'a runmat_accelerate_api::SparseKrylovRequest<'a>,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::SparseKrylovResult> {
+        sparse::execute_krylov(self, request)
+    }
+
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
         // WebGPU exposes a maximum single-buffer size, not a trustworthy total
         // device-memory budget. Keep total capacity unknown rather than

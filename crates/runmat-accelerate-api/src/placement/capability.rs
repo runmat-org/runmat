@@ -4,7 +4,7 @@ use crate::{AccelProvider, ApiDeviceInfo, ProviderSparseCapabilities, SpawnHandl
 
 use super::{ProviderElementType, ProviderOperationIdentity};
 
-pub const PROVIDER_CAPABILITY_SCHEMA_VERSION: u16 = 3;
+pub const PROVIDER_CAPABILITY_SCHEMA_VERSION: u16 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

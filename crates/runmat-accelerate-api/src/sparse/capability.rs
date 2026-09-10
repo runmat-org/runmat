@@ -22,6 +22,13 @@ pub enum SparseCancellationCapability {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SparseKrylovCapability {
+    pub method: SparseKrylovMethod,
+    pub preconditioner: Option<SparsePreconditionerKind>,
+}
+
 impl SparseCancellationCapability {
     pub const fn supports_resident_solve(self) -> bool {
         matches!(
@@ -42,8 +49,7 @@ pub struct ProviderSparseCapabilities {
     pub storage: Vec<GpuTensorStorage>,
     pub transpose_modes: Vec<SparseTranspose>,
     pub preconditioners: Vec<SparsePreconditionerKind>,
-    pub krylov_methods: Vec<SparseKrylovMethod>,
-    pub resident_krylov: bool,
+    pub krylov: Vec<SparseKrylovCapability>,
     pub max_host_synchronizations_per_solve: Option<u32>,
     pub cancellation: SparseCancellationCapability,
     pub transactional_results: bool,
@@ -60,7 +66,7 @@ impl ProviderSparseCapabilities {
         ensure_unique(&self.storage, "sparse storage layouts")?;
         ensure_unique(&self.transpose_modes, "sparse transpose modes")?;
         ensure_unique(&self.preconditioners, "sparse preconditioners")?;
-        ensure_unique(&self.krylov_methods, "sparse Krylov methods")?;
+        ensure_unique(&self.krylov, "sparse Krylov capabilities")?;
         ensure!(
             self.element_types
                 .iter()
@@ -68,19 +74,21 @@ impl ProviderSparseCapabilities {
             "sparse capabilities may advertise only floating-point values"
         );
         ensure!(
-            self.krylov_methods.is_empty() || self.resident_krylov,
-            "sparse Krylov capability must own a resident solve loop"
+            self.krylov.iter().all(|capability| capability
+                .preconditioner
+                .is_none_or(|kind| self.preconditioners.contains(&kind))),
+            "sparse Krylov capability references an unsupported preconditioner"
         );
         ensure!(
-            !self.resident_krylov || self.max_host_synchronizations_per_solve.is_some(),
+            self.krylov.is_empty() || self.max_host_synchronizations_per_solve.is_some(),
             "resident sparse Krylov capability requires a synchronization bound"
         );
         ensure!(
-            !self.resident_krylov || self.cancellation.supports_resident_solve(),
+            self.krylov.is_empty() || self.cancellation.supports_resident_solve(),
             "resident sparse Krylov capability requires cooperative cancellation"
         );
         ensure!(
-            !self.resident_krylov || self.transactional_results,
+            self.krylov.is_empty() || self.transactional_results,
             "resident sparse Krylov capability requires transactional results"
         );
         ensure!(
@@ -114,11 +122,10 @@ impl ProviderSparseCapabilities {
             SparseOperation::KrylovSolve {
                 method,
                 preconditioner,
-            } => {
-                self.resident_krylov
-                    && self.krylov_methods.contains(&method)
-                    && preconditioner.is_none_or(|kind| self.preconditioners.contains(&kind))
-            }
+            } => self.krylov.contains(&SparseKrylovCapability {
+                method,
+                preconditioner,
+            }),
         };
         operation_supported
             && self.formats.contains(&query.pattern.format)

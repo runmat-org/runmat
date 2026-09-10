@@ -3,14 +3,17 @@ use std::sync::Arc;
 use anyhow::{anyhow, ensure};
 use runmat_accelerate_api::NumericElementType;
 
+mod cg;
 mod contract;
 mod jacobi;
+mod jacobi_kernels;
 mod pipelines;
 mod spmv;
 mod storage;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
+pub(super) use cg::execute as execute_krylov;
 pub(super) use contract::{capabilities, cost, feasibility};
 pub(super) use jacobi::{apply as apply_preconditioner, prepare as prepare_preconditioner};
 pub(super) use pipelines::SparsePipelines;

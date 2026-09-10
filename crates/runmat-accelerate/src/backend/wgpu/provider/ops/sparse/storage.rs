@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{anyhow, ensure};
@@ -39,6 +40,22 @@ struct SparseStorage {
 #[derive(Default)]
 pub(in crate::backend::wgpu::provider) struct SparseState {
     storage: Mutex<SparseStorage>,
+    transient_bytes: AtomicU64,
+}
+
+pub(super) struct SparseTransientReservation<'a> {
+    state: &'a SparseState,
+    bytes: u64,
+}
+
+impl Drop for SparseTransientReservation<'_> {
+    fn drop(&mut self) {
+        let previous = self
+            .state
+            .transient_bytes
+            .fetch_sub(self.bytes, Ordering::AcqRel);
+        debug_assert!(previous >= self.bytes);
+    }
 }
 
 impl SparseState {
@@ -46,6 +63,18 @@ impl SparseState {
         self.storage
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    pub(super) fn reserve_transient(
+        &self,
+        bytes: u64,
+    ) -> anyhow::Result<SparseTransientReservation<'_>> {
+        self.transient_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(bytes)
+            })
+            .map_err(|_| anyhow!("sparse transient-byte accounting overflow"))?;
+        Ok(SparseTransientReservation { state: self, bytes })
     }
 
     pub(in crate::backend::wgpu::provider) fn upload_pattern(
@@ -289,12 +318,13 @@ impl SparseState {
         let matrix_bytes = storage.matrices.values().fold(total, |bytes, matrix| {
             bytes.saturating_add(matrix.values.size())
         });
-        storage
+        let persistent_bytes = storage
             .preconditioners
             .values()
             .fold(matrix_bytes, |bytes, preconditioner| {
                 bytes.saturating_add(preconditioner.inverse_diagonal.size())
-            })
+            });
+        persistent_bytes.saturating_add(self.transient_bytes.load(Ordering::Acquire))
     }
 
     pub(in crate::backend::wgpu::provider) fn clear(&self) {
@@ -302,5 +332,25 @@ impl SparseState {
         storage.preconditioners.clear();
         storage.matrices.clear();
         storage.patterns.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SparseState;
+
+    #[test]
+    fn transient_reservations_are_visible_and_release_on_drop() {
+        let state = SparseState::default();
+        let first = state.reserve_transient(128).expect("first reservation");
+        assert_eq!(state.resident_bytes(), 128);
+        {
+            let second = state.reserve_transient(64).expect("second reservation");
+            assert_eq!(state.resident_bytes(), 192);
+            drop(second);
+        }
+        assert_eq!(state.resident_bytes(), 128);
+        drop(first);
+        assert_eq!(state.resident_bytes(), 0);
     }
 }
