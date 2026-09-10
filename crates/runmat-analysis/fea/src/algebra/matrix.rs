@@ -8,6 +8,8 @@ use super::{SparsePattern, SparsePatternError};
 
 const VALUES_IDENTITY_PREFIX: &[u8] = b"runmat-fea-sparse-values/v1\0";
 const VALUES_IDENTITY_DOMAIN: &str = "analysis.fea.sparse-values/v1";
+const NUMERICAL_IDENTITY_PREFIX: &[u8] = b"runmat-fea-sparse-numerics\0";
+const NUMERICAL_IDENTITY_DOMAIN: &str = "analysis.fea.sparse-numerics";
 const VALUES_IDENTITY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 4096, 16);
 
@@ -267,6 +269,27 @@ impl RealSparseMatrix {
                 self.role,
                 self.properties,
                 &self.contributions,
+            ),
+            VALUES_IDENTITY_LIMITS,
+        )
+        .map(Digest::sha256)
+    }
+    /// Stable identity for the executable numerical matrix, excluding contribution provenance.
+    ///
+    /// Prepared-system caches may reuse this identity across assemblies with identical numerical
+    /// coefficients but distinct load provenance. Changes to topology, coefficients, scalar
+    /// representation, role, or declared properties still invalidate the identity.
+    pub fn numerical_identity(&self) -> Result<Digest, CanonicalCodecError> {
+        runmat_canonical_codec::encode_contract(
+            NUMERICAL_IDENTITY_PREFIX,
+            NUMERICAL_IDENTITY_DOMAIN,
+            &(
+                self.pattern.identity()?,
+                &self.values,
+                self.scalar_domain,
+                self.precision,
+                self.role,
+                self.properties,
             ),
             VALUES_IDENTITY_LIMITS,
         )
@@ -536,6 +559,19 @@ mod tests {
         assert_ne!(
             first.values_identity().unwrap(),
             changed_metadata.values_identity().unwrap()
+        );
+
+        let changed_provenance = first.clone().with_contribution(ContributionProvenance {
+            domain: ContributionDomain::TimeIntegration,
+            contribution_id: ContributionId("sample-1".to_string()),
+        });
+        assert_ne!(
+            first.values_identity().unwrap(),
+            changed_provenance.values_identity().unwrap()
+        );
+        assert_eq!(
+            first.numerical_identity().unwrap(),
+            changed_provenance.numerical_identity().unwrap()
         );
     }
 

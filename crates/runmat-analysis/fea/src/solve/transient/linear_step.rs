@@ -1,6 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
+use runmat_execution::Digest;
+
 use crate::{
     algebra::{
         apply_k, apply_m, apply_prepared, AssembledRealSystem, CanonicalRealOperators,
@@ -33,12 +35,20 @@ pub(super) struct LinearStepStats {
 }
 
 pub(super) struct AcceleratorStepCache<'a> {
-    pub(super) prepared_systems_by_dt: &'a mut HashMap<u64, AcceleratorPreparedLinearSystem>,
-    pub(super) prepared_lru: &'a mut VecDeque<u64>,
+    pub(super) prepared_systems_by_dt:
+        &'a mut HashMap<AcceleratorStepCacheKey, AcceleratorPreparedLinearSystem>,
+    pub(super) prepared_lru: &'a mut VecDeque<AcceleratorStepCacheKey>,
     pub(super) cache_hits: &'a mut usize,
     pub(super) cache_misses: &'a mut usize,
     pub(super) prepared_build_ms: &'a mut f64,
     pub(super) dt_bucket_rel_tolerance: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct AcceleratorStepCacheKey {
+    dt_bucket: u64,
+    stiffness_numerics: Digest,
+    mass_numerics: Digest,
 }
 
 pub(super) fn build_step_rhs_with_load(
@@ -58,6 +68,7 @@ pub(super) fn solve_implicit_step_system(
     summary: &AssemblySummary,
     rhs: &[f64],
     dt: f64,
+    nominal_dt: f64,
     options: &TransientSolveOptions,
     use_accelerator: bool,
     accelerator_cache: AcceleratorStepCache<'_>,
@@ -103,11 +114,22 @@ pub(super) fn solve_implicit_step_system(
     };
     let mut accelerator_admission_diagnostics = Vec::new();
     if use_accelerator {
-        let dt_key = dt_cache_key(
-            dt,
-            options.time_step_s,
-            accelerator_cache.dt_bucket_rel_tolerance,
-        );
+        let Ok(stiffness_numerics) = summary
+            .operator
+            .operators()
+            .stiffness()
+            .numerical_identity()
+        else {
+            return (vec![0.0; summary.dof_count], f64::INFINITY, false, None);
+        };
+        let Ok(mass_numerics) = summary.operator.operators().mass().numerical_identity() else {
+            return (vec![0.0; summary.dof_count], f64::INFINITY, false, None);
+        };
+        let dt_key = AcceleratorStepCacheKey {
+            dt_bucket: dt_cache_key(dt, nominal_dt, accelerator_cache.dt_bucket_rel_tolerance),
+            stiffness_numerics,
+            mass_numerics,
+        };
         if accelerator_cache
             .prepared_systems_by_dt
             .contains_key(&dt_key)

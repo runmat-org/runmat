@@ -606,7 +606,7 @@ impl Default for ElectromagneticSolveOptions {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThermalProcedureControl {
     Steady,
-    BackwardEuler { step_count: usize, time_step_s: f64 },
+    BackwardEuler { snapshot_count: usize },
 }
 
 impl ThermalProcedureControl {
@@ -630,10 +630,7 @@ impl Default for ThermalSolveOptions {
     fn default() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Production,
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 10,
-                time_step_s: 1.0e-2,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
             residual_target: 1.0e-4,
             solver_mesh: None,
         }

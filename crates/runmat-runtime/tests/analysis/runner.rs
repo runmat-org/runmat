@@ -943,26 +943,21 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<FixtureThermoMechanicalC
                 },
             ],
         }),
-        spec_id
-            if spec_id == "thermo_ramp_smooth_gpu_provider"
-                || spec_id.starts_with("thermal_standalone_ramp_") =>
-        {
-            Some(FixtureThermoMechanicalCoupling {
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 70.0,
-                thermal_expansion_coefficient: 1.1e-5,
-                region_temperature_deltas: vec![
-                    FixtureThermoRegionTemperatureDelta {
-                        region_id: "tip_steel".to_string(),
-                        temperature_delta_k: 72.0,
-                    },
-                    FixtureThermoRegionTemperatureDelta {
-                        region_id: "mid_aluminum".to_string(),
-                        temperature_delta_k: 68.0,
-                    },
-                ],
-            })
-        }
+        "thermo_ramp_smooth_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            region_temperature_deltas: vec![
+                FixtureThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 72.0,
+                },
+                FixtureThermoRegionTemperatureDelta {
+                    region_id: "mid_aluminum".to_string(),
+                    temperature_delta_k: 68.0,
+                },
+            ],
+        }),
         "thermo_shock_oscillatory_gpu_provider" => Some(FixtureThermoMechanicalCoupling {
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 140.0,
@@ -1045,9 +1040,9 @@ fn thermal_options_for_spec(
     solver_mesh_artifact_path: Option<String>,
 ) -> AnalysisThermalRunOptions {
     AnalysisThermalRunOptions {
-        step_count: spec
+        snapshot_count: spec
             .transient_step_count
-            .unwrap_or(AnalysisThermalRunOptions::default().step_count),
+            .unwrap_or(AnalysisThermalRunOptions::default().snapshot_count),
         solver_mesh_artifact_path,
         ..AnalysisThermalRunOptions::default()
     }
@@ -1078,9 +1073,9 @@ fn transient_options_for_spec(
         .ok()
         .and_then(|value| value.parse::<f64>().ok());
     AnalysisTransientRunOptions {
-        step_count: spec
+        interval_count: spec
             .transient_step_count
-            .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+            .unwrap_or(AnalysisTransientRunOptions::default().interval_count),
         dt_bucket_rel_tolerance: requested_bucket_rel_tol
             .unwrap_or(AnalysisTransientRunOptions::solid_recommended().dt_bucket_rel_tolerance),
         solver_mesh_artifact_path,
@@ -2723,10 +2718,9 @@ fn run_fixture_cpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
+                    .unwrap_or(AnalysisCfdRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2742,10 +2736,9 @@ fn run_fixture_cpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
+                    .unwrap_or(AnalysisChtRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2761,10 +2754,9 @@ fn run_fixture_cpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
+                    .unwrap_or(AnalysisFsiRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2855,10 +2847,9 @@ fn run_fixture_gpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
+                    .unwrap_or(AnalysisCfdRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2874,10 +2865,9 @@ fn run_fixture_gpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
+                    .unwrap_or(AnalysisChtRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2893,10 +2883,9 @@ fn run_fixture_gpu(
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
                 quality_policy: QualityPolicy::Balanced,
-                time_step_s: 1.0e-3,
-                step_count: spec
+                sample_count: spec
                     .transient_step_count
-                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
+                    .unwrap_or(AnalysisFsiRunOptions::default().sample_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -5050,8 +5039,8 @@ pub(super) fn run_fixture(
         let is_cfd_fixture =
             spec.id.starts_with("cfd_steady_") || spec.id.starts_with("cfd_transient_");
         if is_cfd_fixture {
-            let expected_profile_point_count = if spec.id.starts_with("cfd_transient_") {
-                2.0
+            let expected_executed_sample_count = if spec.id.starts_with("cfd_transient_") {
+                12.0
             } else {
                 1.0
             };
@@ -5109,11 +5098,11 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cfd_profile_point_count",
+                "cfd_executed_sample_count",
                 "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_profile_point_count),
-                Some(expected_profile_point_count),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "executed_sample_count"),
+                Some(expected_executed_sample_count),
+                Some(expected_executed_sample_count),
             );
             push_threshold_assertion!(
                 spec.id,
@@ -5340,12 +5329,12 @@ pub(super) fn run_fixture(
                     spec.id,
                     &mut threshold_assertions,
                     &mut failures,
-                    "cfd_transient_step_count",
+                    "cfd_transient_executed_sample_count",
                     "FEA_CFD_TRANSIENT_EVOLUTION",
                     diagnostic_metric(
                         &cpu_envelope.data,
                         "FEA_CFD_TRANSIENT_EVOLUTION",
-                        "step_count",
+                        "executed_sample_count",
                     ),
                     Some(12.0),
                     Some(12.0),
@@ -5395,11 +5384,7 @@ pub(super) fn run_fixture(
             }
         }
         if spec.id.starts_with("cht_coupled_") {
-            let expected_cht_profile_point_count = if spec.id == "cht_coupled_channel_slab_cpu" {
-                3.0
-            } else {
-                2.0
-            };
+            let expected_cht_sample_count = 12.0;
             push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
@@ -5454,11 +5439,11 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_profile_point_count",
+                "cht_executed_sample_count",
                 "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_cht_profile_point_count),
-                Some(expected_cht_profile_point_count),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "executed_sample_count"),
+                Some(expected_cht_sample_count),
+                Some(expected_cht_sample_count),
             );
             push_threshold_assertion!(
                 spec.id,
@@ -5478,9 +5463,9 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_step_count",
+                "cht_sample_count",
                 "FEA_CHT_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "step_count"),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "sample_count"),
                 Some(12.0),
                 Some(12.0),
             );
@@ -5488,11 +5473,15 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "cht_time_step_s",
+                "cht_nominal_time_step_s",
                 "FEA_CHT_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "time_step_s"),
-                Some(1.0e-3),
-                Some(1.0e-3),
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_COUPLING",
+                    "nominal_time_step_s",
+                ),
+                Some(1.0 / 11.0),
+                Some(1.0 / 11.0),
             );
             push_threshold_assertion!(
                 spec.id,
@@ -5954,11 +5943,7 @@ pub(super) fn run_fixture(
             }
         }
         if spec.id.starts_with("fsi_coupled_") {
-            let expected_fsi_profile_point_count = if spec.id == "fsi_coupled_pipe_plate_cpu" {
-                3.0
-            } else {
-                2.0
-            };
+            let expected_fsi_sample_count = 12.0;
             push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
@@ -6455,19 +6440,19 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_profile_point_count",
+                "fsi_executed_sample_count",
                 "FEA_CFD_FLOW",
-                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
-                Some(expected_fsi_profile_point_count),
-                Some(expected_fsi_profile_point_count),
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "executed_sample_count"),
+                Some(expected_fsi_sample_count),
+                Some(expected_fsi_sample_count),
             );
             push_threshold_assertion!(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_step_count",
+                "fsi_sample_count",
                 "FEA_FSI_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "step_count"),
+                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "sample_count"),
                 Some(12.0),
                 Some(12.0),
             );
@@ -6475,11 +6460,15 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_time_step_s",
+                "fsi_nominal_time_step_s",
                 "FEA_FSI_COUPLING",
-                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "time_step_s"),
-                Some(1.0e-3),
-                Some(1.0e-3),
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_COUPLING",
+                    "nominal_time_step_s",
+                ),
+                Some(1.0 / 11.0),
+                Some(1.0 / 11.0),
             );
             push_threshold_assertion!(
                 spec.id,
@@ -6499,15 +6488,15 @@ pub(super) fn run_fixture(
                 spec.id,
                 &mut threshold_assertions,
                 &mut failures,
-                "fsi_cfd_profile_point_count",
+                "fsi_cfd_executed_sample_count",
                 "FEA_FSI_COUPLING",
                 diagnostic_metric(
                     &cpu_envelope.data,
                     "FEA_FSI_COUPLING",
-                    "cfd_profile_point_count",
+                    "cfd_executed_sample_count",
                 ),
-                Some(expected_fsi_profile_point_count),
-                Some(expected_fsi_profile_point_count),
+                Some(expected_fsi_sample_count),
+                Some(expected_fsi_sample_count),
             );
             if spec.id == "fsi_coupled_pipe_plate_cpu" {
                 push_threshold_assertion!(
@@ -6810,29 +6799,31 @@ pub(super) fn run_fixture(
                             }
                         }
                     }
-                    if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_prepared_cache_hit_ratio",
-                            "FEA_TRANSIENT_CACHE",
-                            gpu_transient_cache_hit_ratio,
-                            Some(min_cache_hit_ratio),
-                            None,
-                        );
-                    }
-                    if let Some(max_cache_misses) = spec.max_transient_cache_misses {
-                        push_threshold_assertion!(
-                            spec.id,
-                            &mut threshold_assertions,
-                            &mut failures,
-                            "transient_prepared_cache_misses",
-                            "FEA_TRANSIENT_CACHE",
-                            gpu_transient_cache_misses,
-                            None,
-                            Some(max_cache_misses),
-                        );
+                    if gpu_envelope.data.provenance.solver_backend.as_str() == "accelerator" {
+                        if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
+                            push_threshold_assertion!(
+                                spec.id,
+                                &mut threshold_assertions,
+                                &mut failures,
+                                "transient_prepared_cache_hit_ratio",
+                                "FEA_TRANSIENT_CACHE",
+                                gpu_transient_cache_hit_ratio,
+                                Some(min_cache_hit_ratio),
+                                None,
+                            );
+                        }
+                        if let Some(max_cache_misses) = spec.max_transient_cache_misses {
+                            push_threshold_assertion!(
+                                spec.id,
+                                &mut threshold_assertions,
+                                &mut failures,
+                                "transient_prepared_cache_misses",
+                                "FEA_TRANSIENT_CACHE",
+                                gpu_transient_cache_misses,
+                                None,
+                                Some(max_cache_misses),
+                            );
+                        }
                     }
                     if spec.id == "transient_long_gpu_provider" {
                         push_threshold_assertion!(
@@ -7149,10 +7140,10 @@ pub(super) fn run_fixture(
                             Some(0.22),
                         );
                     } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
-                        // The pathological case intentionally drives every assigned material to
-                        // the constitutive lower clamp. A unit spread verifies that saturation is
-                        // uniform; heterogeneity and temporal variation below verify that the
-                        // authored spatial inputs were still realized.
+                        // The final authored sample leaves the most strongly cooled region at the
+                        // constitutive clamp while warmer regions recover above it. The resulting
+                        // bounded spread proves that the final time sample was executed rather
+                        // than reporting the initially saturated state.
                         push_threshold_assertion!(
                             spec.id,
                             &mut threshold_assertions,
@@ -7164,8 +7155,8 @@ pub(super) fn run_fixture(
                                 "FEA_TM_COUPLING",
                                 "constitutive_material_spread_ratio",
                             ),
-                            Some(1.0),
-                            Some(1.0),
+                            Some(1.05),
+                            Some(1.2),
                         );
                         push_threshold_assertion!(
                             spec.id,

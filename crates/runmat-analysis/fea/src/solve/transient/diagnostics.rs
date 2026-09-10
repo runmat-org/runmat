@@ -38,7 +38,7 @@ pub(super) fn push_transient_quality_diagnostics(
     inputs: TransientQualityDiagnosticInputs<'_>,
 ) {
     let options = inputs.options;
-    let converged_all = inputs.converged_steps == options.step_count;
+    let converged_all = inputs.converged_steps == inputs.accepted_time_steps_s.len();
     diagnostics.push(FeaDiagnostic {
         code: "FEA_TRANSIENT_CONVERGENCE".to_string(),
         severity: if converged_all {
@@ -47,8 +47,16 @@ pub(super) fn push_transient_quality_diagnostics(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "step_count={} converged_steps={} dt_initial={} dt_final={}",
-            options.step_count, inputs.converged_steps, options.time_step_s, inputs.dt_final
+            "nominal_interval_count={} accepted_step_count={} converged_steps={} dt_initial={} dt_final={}",
+            options.interval_count,
+            inputs.accepted_time_steps_s.len(),
+            inputs.converged_steps,
+            inputs
+                .accepted_time_steps_s
+                .first()
+                .copied()
+                .unwrap_or(0.0),
+            inputs.dt_final
         ),
     });
     if !inputs.accepted_time_steps_s.is_empty() {

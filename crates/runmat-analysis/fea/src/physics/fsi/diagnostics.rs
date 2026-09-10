@@ -6,7 +6,8 @@ use super::recovery::{FsiCouplingOptions, FsiInterfaceClosure};
 
 pub(super) fn coupling_diagnostics(
     model: &AnalysisModel,
-    cfd_profile_point_count: usize,
+    cfd_executed_sample_count: usize,
+    nominal_time_step_s: f64,
     structural_compliance_per_pa: f64,
     options: FsiCouplingOptions,
     closure: &FsiInterfaceClosure,
@@ -35,16 +36,16 @@ pub(super) fn coupling_diagnostics(
             code: "FEA_FSI_COUPLING".to_string(),
             severity: FeaDiagnosticSeverity::Info,
             message: format!(
-                "step_count={} time_step_s={} fsi_procedure_count={} cfd_profile_point_count={} authored_interface_count={} interface_node_count={} interface_face_count={} max_linear_iters={} tolerance={}",
-                options.step_count,
-                options.time_step_s,
+                "sample_count={} nominal_time_step_s={} fsi_procedure_count={} cfd_executed_sample_count={} authored_interface_count={} interface_node_count={} interface_face_count={} max_linear_iters={} tolerance={}",
+                options.sample_count,
+                nominal_time_step_s,
                 model
                     .sequence
                     .steps
                     .iter()
                     .filter(|step| step.procedure == AnalysisProcedure::TransientResponse)
                     .count(),
-                cfd_profile_point_count,
+                cfd_executed_sample_count,
                 model.interfaces.len(),
                 closure.interface_node_count,
                 closure.interface_face_count,

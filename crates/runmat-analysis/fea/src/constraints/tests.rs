@@ -1047,10 +1047,9 @@ fn transient_steps_enforce_affine_constraint_kinematics() {
         let result = solve_transient_system(
             &enforced,
             TransientSolveOptions {
-                time_step_s: 0.01,
-                min_time_step_s: 0.01,
-                max_time_step_s: 0.01,
-                step_count: 2,
+                min_time_step_s: 0.5,
+                max_time_step_s: 0.5,
+                interval_count: 2,
                 adaptive_time_step: false,
                 ..TransientSolveOptions::default()
             },
@@ -1107,10 +1106,9 @@ fn transient_steps_enforce_nonzero_direct_prescriptions() {
     let result = solve_transient_system(
         &summary,
         TransientSolveOptions {
-            time_step_s: 0.01,
-            min_time_step_s: 0.01,
-            max_time_step_s: 0.01,
-            step_count: 2,
+            min_time_step_s: 0.5,
+            max_time_step_s: 0.5,
+            interval_count: 2,
             adaptive_time_step: false,
             ..TransientSolveOptions::default()
         },

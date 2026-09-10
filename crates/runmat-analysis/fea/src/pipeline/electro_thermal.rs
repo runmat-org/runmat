@@ -221,6 +221,41 @@ pub(crate) fn recover_electro_thermal_fields(
     }
 }
 
+pub(crate) fn recover_realized_electro_thermal_fields(
+    summaries: &[Option<ElectroThermalAssemblySummary>],
+    residual_norms: &[f64],
+    dof_count: usize,
+    solver_mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+) -> ElectroThermalFields {
+    let mut combined = ElectroThermalFields::default();
+    for (index, summary) in summaries.iter().enumerate() {
+        let mut snapshot = recover_electro_thermal_fields(
+            summary.as_ref(),
+            &[1.0],
+            &[residual_norms.get(index).copied().unwrap_or(0.0)],
+            dof_count,
+            solver_mesh,
+        );
+        for field in &mut snapshot.temperature_snapshots {
+            field.field_id = fea_electro_thermal_temperature_field_id(index);
+        }
+        for field in &mut snapshot.thermal_residual_snapshots {
+            field.field_id = fea_electro_thermal_thermal_residual_field_id(index);
+        }
+        combined
+            .temperature_snapshots
+            .append(&mut snapshot.temperature_snapshots);
+        combined
+            .thermal_residual_snapshots
+            .append(&mut snapshot.thermal_residual_snapshots);
+        if index + 1 == summaries.len() {
+            combined.static_fields = snapshot.static_fields;
+            combined.diagnostics = snapshot.diagnostics;
+        }
+    }
+    combined
+}
+
 fn edge_electric_field_values(solve: &ElectroThermalPotentialSolve) -> Vec<f64> {
     if solve.graph.edges.is_empty() {
         return vec![0.0; VECTOR_COMPONENT_COUNT];

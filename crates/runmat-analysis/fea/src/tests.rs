@@ -348,10 +348,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         &thermal_model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 2,
-                time_step_s: 1.0e-2,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 2 },
             solver_mesh: Some(mesh.clone()),
             ..experimental_thermal_options()
         },
@@ -365,7 +362,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         &transient_model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            step_count: 2,
+            interval_count: 2,
             solver_mesh: Some(mesh.clone()),
             ..experimental_transient_options()
         },
@@ -1831,10 +1828,9 @@ fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
     );
     signal.evidence.sample_count = 3;
     let options = TransientSolveOptions {
-        time_step_s: 0.6,
         min_time_step_s: 0.6,
         max_time_step_s: 0.6,
-        step_count: 2,
+        interval_count: 2,
         adaptive_time_step: false,
         ..experimental_transient_options()
     };
@@ -1842,7 +1838,7 @@ fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
     let result = crate::run_transient_with_options(&model, ComputeBackend::Cpu, options)
         .expect("jump-aware structural transient should solve");
 
-    assert_eq!(result.time_points_s.last().copied(), Some(1.2));
+    assert_eq!(result.time_points_s.last().copied(), Some(1.0));
     assert!(result.time_points_s.contains(&0.5));
     assert!(result
         .time_points_s
@@ -1922,10 +1918,7 @@ fn thermal_solver_emits_heat_transfer_fields() {
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 4,
-                time_step_s: 1.0e-2,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -2153,10 +2146,7 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 2,
-                time_step_s: 1.0,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 2 },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -2223,10 +2213,7 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 3,
-                time_step_s: 0.1,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -2309,10 +2296,7 @@ fn canonical_mesh_thermal_pipeline_starts_from_the_authored_temperature_state() 
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: 3,
-                time_step_s: 0.1,
-            },
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh),
             ..experimental_thermal_options()
         },
@@ -2372,7 +2356,7 @@ fn transient_long_fixture_emits_stability_diagnostics() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            step_count: 24,
+            interval_count: 24,
             ..experimental_transient_options()
         },
     )
@@ -2398,7 +2382,7 @@ fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            step_count: 48,
+            interval_count: 48,
             ..experimental_transient_options()
         },
     )
@@ -2430,7 +2414,7 @@ fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            step_count: 24,
+            interval_count: 24,
             ..experimental_transient_options()
         },
     )
@@ -2525,7 +2509,7 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
         &model,
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            step_count: 12,
+            interval_count: 12,
             ..experimental_transient_options()
         },
     )

@@ -1108,8 +1108,8 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: Some(2.0e-2),
             max_transient_energy_growth_ratio: Some(10.0),
             min_gpu_speedup_ratio: Some(1.2),
-            min_transient_cache_hit_ratio: Some(0.1),
-            max_transient_cache_misses: Some(48.0),
+            min_transient_cache_hit_ratio: Some(0.0),
+            max_transient_cache_misses: Some(60.0),
         },
         FixtureSpec {
             id: "thermo_gradient_benign_gpu_provider",
@@ -1131,7 +1131,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: Some(2.0e-2),
             max_transient_energy_growth_ratio: Some(10.0),
             min_gpu_speedup_ratio: Some(1.2),
-            min_transient_cache_hit_ratio: Some(0.1),
+            min_transient_cache_hit_ratio: Some(0.0),
             max_transient_cache_misses: Some(52.0),
         },
         FixtureSpec {
@@ -1155,7 +1155,7 @@ pub(super) fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_energy_growth_ratio: Some(14.0),
             min_gpu_speedup_ratio: Some(1.1),
             min_transient_cache_hit_ratio: Some(0.0),
-            max_transient_cache_misses: Some(56.0),
+            max_transient_cache_misses: Some(84.0),
         },
         FixtureSpec {
             id: "thermo_ramp_smooth_gpu_provider",

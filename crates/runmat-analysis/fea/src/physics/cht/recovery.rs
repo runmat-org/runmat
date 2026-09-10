@@ -20,8 +20,7 @@ use super::{
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChtCouplingOptions {
-    pub time_step_s: f64,
-    pub step_count: usize,
+    pub sample_count: usize,
     pub procedure: AnalysisProcedure,
     pub residual_warn_threshold: f64,
 }
@@ -70,12 +69,12 @@ pub fn couple_thermal_flow(
         model,
         PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
         options.procedure,
-        options.step_count,
-        options.time_step_s,
+        options.sample_count,
     )?;
+    let nominal_time_step_s = schedule.nominal_time_step_s;
     let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
     let profile_scales = schedule.profile_scales;
-    let field_step = options.step_count.saturating_sub(1);
+    let field_step = options.sample_count.saturating_sub(1);
     let (fluid_velocity, fluid_pressure) = recover_velocity_pressure(
         domain,
         topology,
@@ -88,7 +87,7 @@ pub fn couple_thermal_flow(
         &fluid_pressure,
         domain,
         topology,
-        options.step_count,
+        options.sample_count,
     );
     let max_cfd_momentum_residual = residual_momentum.iter().copied().fold(0.0_f64, f64::max);
     let max_cfd_continuity_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
@@ -208,9 +207,8 @@ pub fn couple_thermal_flow(
         topology,
         cfd::CfdCouplingEvidence {
             inlet_velocity_m_per_s,
-            profile_point_count: profile_scales.len(),
-            step_count: options.step_count,
-            time_step_s: options.time_step_s,
+            executed_sample_count: profile_scales.len(),
+            nominal_time_step_s,
             transient: options.procedure == AnalysisProcedure::TransientResponse,
             pressure_drop_pa,
             mass_balance_residual: max_cfd_continuity_residual,
@@ -220,13 +218,16 @@ pub fn couple_thermal_flow(
         },
     );
     result_diagnostics.extend(diagnostics::coupling_diagnostics(
-        model.interfaces.len(),
-        thermal_run.reference_temperature_k,
-        applied_temperature_delta_k,
-        inlet_velocity_m_per_s,
-        options,
-        domain,
-        &closure,
+        diagnostics::ChtDiagnosticInputs {
+            authored_interface_count: model.interfaces.len(),
+            reference_temperature_k: thermal_run.reference_temperature_k,
+            applied_temperature_delta_k,
+            inlet_velocity_m_per_s,
+            nominal_time_step_s,
+            options,
+            domain,
+            closure: &closure,
+        },
     ));
     Ok(ChtCouplingResult {
         fields,

@@ -2541,10 +2541,9 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.5e-3,
-            min_time_step_s: 1.5e-3,
-            max_time_step_s: 1.5e-3,
-            step_count: 4,
+            min_time_step_s: 0.25,
+            max_time_step_s: 0.25,
+            interval_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_target: 1.0e-6,
@@ -2570,7 +2569,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
         .as_ref()
         .expect("transient payload should exist");
     assert_eq!(transient.time_points_s.len(), 5);
-    assert!((transient.time_points_s[4] - 6.0e-3).abs() < 1.0e-12);
+    assert!((transient.time_points_s[4] - 1.0).abs() < 1.0e-12);
     assert!(envelope.data.provenance.deterministic_mode);
 }
 
@@ -2657,7 +2656,7 @@ fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
-            step_count: 24,
+            interval_count: 24,
             ..AnalysisTransientRunOptions::balanced()
         },
         OperationContext::new(Some("trace-contract-transient-long-1".to_string()), None),

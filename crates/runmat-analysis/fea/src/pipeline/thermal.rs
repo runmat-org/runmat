@@ -49,19 +49,10 @@ pub fn run_thermal_with_options(
 }
 
 fn validate_controls(options: &ThermalSolveOptions) -> Result<(), FeaRunError> {
-    if let ThermalProcedureControl::BackwardEuler {
-        step_count,
-        time_step_s,
-    } = options.procedure
-    {
-        if step_count < 2 {
+    if let ThermalProcedureControl::BackwardEuler { snapshot_count } = options.procedure {
+        if snapshot_count < 2 {
             return Err(FeaRunError::InvalidModel(
                 "transient thermal solve requires at least two snapshots".into(),
-            ));
-        }
-        if !time_step_s.is_finite() || time_step_s <= 0.0 {
-            return Err(FeaRunError::InvalidModel(
-                "thermal time step must be finite and positive".into(),
             ));
         }
     }

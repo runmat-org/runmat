@@ -1579,14 +1579,17 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let solid = AnalysisTransientRunOptions::solid_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
-    assert!(coarse.step_count < balanced.step_count);
-    assert!(balanced.step_count < high_accuracy.step_count);
+    assert!(coarse.interval_count < balanced.interval_count);
+    assert!(balanced.interval_count < high_accuracy.interval_count);
 
     assert!(coarse.tolerance > balanced.tolerance);
     assert!(balanced.tolerance > high_accuracy.tolerance);
 
-    assert!(coarse.time_step_s > balanced.time_step_s);
-    assert!(balanced.time_step_s > high_accuracy.time_step_s);
+    assert!(high_accuracy.max_time_step_s < balanced.max_time_step_s);
+    assert!(serde_json::to_value(&balanced)
+        .unwrap()
+        .get("time_step_s")
+        .is_none());
 
     assert_eq!(solid.quality_policy, QualityPolicy::Balanced);
     assert!(solid.deterministic_mode);
@@ -6589,8 +6592,7 @@ fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
+            sample_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
@@ -6719,8 +6721,7 @@ fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
+            sample_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
@@ -7317,7 +7318,7 @@ fn analysis_run_thermal_returns_temperature_payload() {
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
-            step_count: 6,
+            snapshot_count: 6,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
@@ -7487,7 +7488,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            step_count: 8,
+            snapshot_count: 8,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
@@ -8220,8 +8221,7 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
+            sample_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
@@ -8479,8 +8479,7 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
-            step_count: 4,
+            sample_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
@@ -8669,8 +8668,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0 / 3.0,
-            step_count: 4,
+            sample_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_warn_threshold: 1.0e-4,
@@ -8786,7 +8784,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("cfd_profile_point_count=4")
+            && diag.message.contains("cfd_executed_sample_count=4")
             && diag.message.contains("authored_interface_count=")
             && diag.message.contains("interface_node_count=")
             && diag.message.contains("interface_face_count=")));
@@ -8882,10 +8880,9 @@ fn analysis_run_transient_with_options_controls_timeline() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 2.0e-3,
-            min_time_step_s: 2.0e-3,
-            max_time_step_s: 2.0e-3,
-            step_count: 3,
+            min_time_step_s: 1.0 / 3.0,
+            max_time_step_s: 1.0 / 3.0,
+            interval_count: 3,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
             residual_target: 1.0e-6,
@@ -9018,7 +9015,7 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         AnalysisTransientRunOptions {
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
-            step_count: 8,
+            interval_count: 8,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisTransientRunOptions::default()
         },
@@ -9064,7 +9061,7 @@ fn transient_balanced_does_not_report_thermo_stress_below_severity_threshold() {
         AnalysisTransientRunOptions {
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
-            step_count: 8,
+            interval_count: 8,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisTransientRunOptions::default()
         },

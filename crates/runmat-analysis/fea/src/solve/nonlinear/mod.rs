@@ -138,10 +138,9 @@ pub fn solve_nonlinear_system(
         TransientSolveOptions {
             formulation_requirement: options.formulation_requirement,
             solver_mesh: None,
-            time_step_s: 1.0 / options.increment_count as f64,
             min_time_step_s: 1.0 / options.increment_count as f64,
             max_time_step_s: 1.0 / options.increment_count as f64,
-            step_count: options.increment_count,
+            interval_count: options.increment_count,
             max_linear_iters: options.max_newton_iters.saturating_mul(8).max(32),
             tolerance: options.tolerance,
             residual_target: options.tolerance * 5.0,

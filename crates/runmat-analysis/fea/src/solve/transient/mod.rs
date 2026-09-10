@@ -25,16 +25,15 @@ mod linear_step;
 use diagnostics::{push_transient_quality_diagnostics, TransientQualityDiagnosticInputs};
 use linear_step::{
     build_step_rhs_with_load, solve_implicit_step_system, strain_energy, AcceleratorStepCache,
-    LinearStepStats,
+    AcceleratorStepCacheKey, LinearStepStats,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
     pub formulation_requirement: FormulationRequirement,
-    pub time_step_s: f64,
     pub min_time_step_s: f64,
     pub max_time_step_s: f64,
-    pub step_count: usize,
+    pub interval_count: usize,
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_target: f64,
@@ -60,10 +59,9 @@ impl Default for TransientSolveOptions {
     fn default() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Production,
-            time_step_s: 1.0e-3,
             min_time_step_s: 1.0e-6,
             max_time_step_s: 2.0e-2,
-            step_count: 10,
+            interval_count: 10,
             max_linear_iters: 128,
             tolerance: 1.0e-8,
             residual_target: 1.0e-6,
@@ -97,6 +95,10 @@ pub struct TransientSolveResult {
     pub device_apply_k_attempt_count: u32,
     pub preconditioner: SolverPreconditioner,
     pub accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
+    #[serde(skip)]
+    pub(crate) assembly_snapshots: Vec<AssemblySummary>,
+    #[serde(skip)]
+    pub(crate) strain_energy_snapshots: Vec<f64>,
 }
 
 pub fn solve_transient_system(
@@ -104,26 +106,27 @@ pub fn solve_transient_system(
     options: TransientSolveOptions,
     backend: ComputeBackend,
 ) -> TransientSolveResult {
-    match solve_transient_system_with_forcing(summary, options, backend, 0.0, &[], |_, _| {
-        Ok::<_, std::convert::Infallible>(summary.operator.load().to_vec())
+    match solve_transient_system_with_assembly(summary, options, backend, 0.0, 1.0, &[], |_, _| {
+        Ok::<_, std::convert::Infallible>(summary.clone())
     }) {
         Ok(result) => result,
         Err(error) => match error {},
     }
 }
 
-pub(crate) fn solve_transient_system_with_forcing<E>(
+pub(crate) fn solve_transient_system_with_assembly<E>(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
     backend: ComputeBackend,
     start_time_s: f64,
+    end_time_s: f64,
     discontinuities: &[f64],
-    mut load_at: impl FnMut(f64, SignalSampleApproach) -> Result<Vec<f64>, E>,
+    mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
 ) -> Result<TransientSolveResult, E> {
-    if summary.dof_count == 0 || options.step_count == 0 {
+    if summary.dof_count == 0 || options.interval_count == 0 {
         return Ok(TransientSolveResult {
             converged_steps: 0,
-            total_steps: options.step_count,
+            total_steps: options.interval_count,
             time_points_s: vec![start_time_s],
             displacement_snapshots: vec![vec![0.0; summary.dof_count]],
             residual_norms: Vec::new(),
@@ -131,7 +134,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_TRANSIENT_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
-                message: "transient solve skipped because assembled system has zero DOFs or step_count is zero"
+                message: "transient solve skipped because assembled system has zero DOFs or interval_count is zero"
                     .to_string(),
             }],
             solver_method: SolverMethod::ImplicitEulerPcg,
@@ -141,31 +144,34 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             device_apply_k_attempt_count: 0,
             preconditioner: SolverPreconditioner::None,
             accelerator_evidence: Vec::new(),
+            assembly_snapshots: vec![summary.clone()],
+            strain_energy_snapshots: vec![strain_energy(summary, &vec![0.0; summary.dof_count])],
         });
     }
 
     let use_accelerator = backend == ComputeBackend::Gpu;
-    let thermo_severity_base = thermo_mechanical::severity(summary.thermo_mechanical.as_ref());
-    let electro_severity_base = electro_thermal::severity(summary.electro_thermal.as_ref());
     let mut thermo_severity_sum = 0.0_f64;
     let mut electro_severity_sum = 0.0_f64;
     let mut electro_severity_peak = 0.0_f64;
+    let mut coupling_sample_count = 0_usize;
     let mut thermo_severity_peak = 0.0_f64;
     let mut effective_residual_target_peak = options.residual_target;
     let mut thermo_growth_limit_min = 1.0_f64;
     let mut thermo_nonconverged_shrink_min = 1.0_f64;
     let min_dt = options.min_time_step_s.max(1.0e-9);
     let max_dt = options.max_time_step_s.max(min_dt);
-    let mut dt = options.time_step_s.clamp(min_dt, max_dt);
+    let nominal_time_step_s = (end_time_s - start_time_s) / options.interval_count as f64;
+    let mut dt = nominal_time_step_s.clamp(min_dt, max_dt);
     let mut x = vec![0.0; summary.dof_count];
     let mut time_points_s = vec![start_time_s];
     let mut displacement_snapshots = vec![x.clone()];
-    let mut residual_norms = Vec::with_capacity(options.step_count);
-    let mut accepted_time_steps_s = Vec::with_capacity(options.step_count);
+    let mut residual_norms = Vec::with_capacity(options.interval_count);
+    let mut accepted_time_steps_s = Vec::with_capacity(options.interval_count);
     let mut converged_steps = 0usize;
     let mut retry_budget_hits = 0usize;
-    let mut energies = Vec::with_capacity(options.step_count + 1);
+    let mut energies = Vec::with_capacity(options.interval_count + 1);
     energies.push(strain_energy(summary, &x));
+    let mut assembly_snapshots = vec![summary.clone()];
     let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
@@ -173,8 +179,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     let mut selected_preconditioner = SolverPreconditioner::None;
     let mut linear_diagnostics = Vec::new();
     let mut accelerator_evidence = Vec::new();
-    let mut prepared_accelerator_systems_by_dt: HashMap<u64, AcceleratorPreparedLinearSystem> =
-        HashMap::new();
+    let mut prepared_accelerator_systems_by_dt: HashMap<
+        AcceleratorStepCacheKey,
+        AcceleratorPreparedLinearSystem,
+    > = HashMap::new();
     let mut prepared_accelerator_system_lru = VecDeque::new();
     let mut prepared_accelerator_cache_hits = 0usize;
     let mut prepared_accelerator_cache_misses = 0usize;
@@ -190,8 +198,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
     let dt_bucket_rel_tolerance = options.dt_bucket_rel_tolerance.max(0.0);
     let progress_operation = options.progress_operation.as_str();
 
-    let nominal_step_count = options.step_count;
-    let final_time_s = start_time_s + nominal_step_count as f64 * options.time_step_s;
+    let final_time_s = end_time_s;
     let mut step_index = 0_usize;
     while time_points_s
         .last()
@@ -216,37 +223,40 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             Some(step_index as u64),
             None,
         );
-        let thermo_severity = thermo_severity_base;
-        let electro_severity = electro_severity_base;
-        thermo_severity_sum += thermo_severity;
-        thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
-        electro_severity_sum += electro_severity;
-        electro_severity_peak = electro_severity_peak.max(electro_severity);
-        let thermo_policy =
-            thermo_mechanical::transient_policy(options.residual_target, thermo_severity);
-        let effective_residual_target = thermo_policy.effective_residual_target;
-        let thermo_growth_limit = thermo_policy.growth_limit;
-        let thermo_nonconverged_shrink = thermo_policy.nonconverged_shrink;
-        effective_residual_target_peak =
-            effective_residual_target_peak.max(effective_residual_target);
-        thermo_growth_limit_min = thermo_growth_limit_min.min(thermo_growth_limit);
-        thermo_nonconverged_shrink_min =
-            thermo_nonconverged_shrink_min.min(thermo_nonconverged_shrink);
         let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
         let mut step_dt = dt.min(final_time_s - current_time);
         let mut retries = 0usize;
-        let (next_x, residual_norm, converged, step_stats) = loop {
+        let (
+            next_x,
+            residual_norm,
+            converged,
+            step_stats,
+            accepted_effective_residual_target,
+            accepted_thermo_growth_limit,
+            accepted_thermo_nonconverged_shrink,
+            accepted_assembly,
+        ) = loop {
             let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
             let (next_time, approach) =
                 next_step_boundary(current_time, step_dt, final_time_s, discontinuities);
             step_dt = next_time - current_time;
-            let load = load_at(next_time, approach)?;
-            let rhs = build_step_rhs_with_load(summary, &x, step_dt, &load);
+            let step_summary = assembly_at(next_time, approach)?;
+            let thermo_severity =
+                thermo_mechanical::severity(step_summary.thermo_mechanical.as_ref());
+            let electro_severity = electro_thermal::severity(step_summary.electro_thermal.as_ref());
+            let thermo_policy =
+                thermo_mechanical::transient_policy(options.residual_target, thermo_severity);
+            let effective_residual_target = thermo_policy.effective_residual_target;
+            let thermo_growth_limit = thermo_policy.growth_limit;
+            let thermo_nonconverged_shrink = thermo_policy.nonconverged_shrink;
+            let rhs =
+                build_step_rhs_with_load(&step_summary, &x, step_dt, step_summary.operator.load());
             let solve_start = Instant::now();
             let solved = solve_implicit_step_system(
-                summary,
+                &step_summary,
                 &rhs,
                 step_dt,
+                nominal_time_step_s,
                 &options,
                 use_accelerator,
                 AcceleratorStepCache {
@@ -259,8 +269,29 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                 },
             );
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
+            coupling_sample_count += 1;
+            thermo_severity_sum += thermo_severity;
+            thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
+            electro_severity_sum += electro_severity;
+            electro_severity_peak = electro_severity_peak.max(electro_severity);
+            effective_residual_target_peak =
+                effective_residual_target_peak.max(effective_residual_target);
+            thermo_growth_limit_min = thermo_growth_limit_min.min(thermo_growth_limit);
+            thermo_nonconverged_shrink_min =
+                thermo_nonconverged_shrink_min.min(thermo_nonconverged_shrink);
             if !options.adaptive_time_step {
-                break solved;
+                let (candidate_x, candidate_residual, candidate_converged, candidate_stats) =
+                    solved;
+                break (
+                    candidate_x,
+                    candidate_residual,
+                    candidate_converged,
+                    candidate_stats,
+                    effective_residual_target,
+                    thermo_growth_limit,
+                    thermo_nonconverged_shrink,
+                    step_summary,
+                );
             }
             let (candidate_x, candidate_residual, candidate_converged, candidate_stats) = solved;
             if candidate_converged && candidate_residual <= effective_residual_target * 4.0 {
@@ -269,6 +300,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                     candidate_residual,
                     candidate_converged,
                     candidate_stats,
+                    effective_residual_target,
+                    thermo_growth_limit,
+                    thermo_nonconverged_shrink,
+                    step_summary,
                 );
             }
             if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
@@ -278,6 +313,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                     candidate_residual,
                     candidate_converged,
                     candidate_stats,
+                    effective_residual_target,
+                    thermo_growth_limit,
+                    thermo_nonconverged_shrink,
+                    step_summary,
                 );
             }
             step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
@@ -313,7 +352,8 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
         displacement_snapshots.push(x.clone());
         residual_norms.push(residual_norm);
         accepted_time_steps_s.push(step_dt);
-        energies.push(strain_energy(summary, &x));
+        energies.push(strain_energy(&accepted_assembly, &x));
+        assembly_snapshots.push(accepted_assembly);
         if converged {
             converged_steps += 1;
         }
@@ -322,7 +362,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             let next_dt = recommend_next_time_step(structural::TransientAdaptivityInput {
                 step_dt,
                 residual_norm,
-                residual_target: effective_residual_target,
+                residual_target: accepted_effective_residual_target,
                 min_dt,
                 max_dt,
                 converged,
@@ -332,8 +372,8 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
                 adapt_min_scale: options.adapt_min_scale,
                 adapt_max_scale: options.adapt_max_scale,
                 adapt_retry_growth_cap: options.adapt_retry_growth_cap,
-                thermo_growth_limit,
-                thermo_nonconverged_shrink,
+                thermo_growth_limit: accepted_thermo_growth_limit,
+                thermo_nonconverged_shrink: accepted_thermo_nonconverged_shrink,
             });
             let scale = next_dt / step_dt.max(1.0e-12);
             adapt_scale_sum += scale;
@@ -348,7 +388,7 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             }
             dt = next_dt;
         } else {
-            dt = options.time_step_s.clamp(min_dt, max_dt);
+            dt = nominal_time_step_s.clamp(min_dt, max_dt);
         }
         step_index += 1;
     }
@@ -432,10 +472,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             dt_bucket_rel_tolerance,
             max_step_l2_jump_ratio,
             nonfinite_displacement_count,
-            thermo_severity_mean: if total_steps == 0 {
+            thermo_severity_mean: if coupling_sample_count == 0 {
                 0.0
             } else {
-                thermo_severity_sum / total_steps as f64
+                thermo_severity_sum / coupling_sample_count as f64
             },
             thermo_severity_peak,
             effective_residual_target_peak,
@@ -453,10 +493,10 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
             },
             message: format!(
                 "severity_mean={} severity_peak={}",
-                if total_steps == 0 {
+                if coupling_sample_count == 0 {
                     0.0
                 } else {
-                    electro_severity_sum / total_steps as f64
+                    electro_severity_sum / coupling_sample_count as f64
                 },
                 electro_severity_peak,
             ),
@@ -478,6 +518,8 @@ pub(crate) fn solve_transient_system_with_forcing<E>(
         device_apply_k_attempt_count,
         preconditioner: selected_preconditioner,
         accelerator_evidence,
+        assembly_snapshots,
+        strain_energy_snapshots: energies,
     })
 }
 

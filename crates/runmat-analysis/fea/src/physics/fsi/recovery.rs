@@ -14,8 +14,7 @@ use super::{super::cfd, diagnostics, interface};
 
 #[derive(Clone, Copy, Debug)]
 pub struct FsiCouplingOptions {
-    pub time_step_s: f64,
-    pub step_count: usize,
+    pub sample_count: usize,
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
@@ -63,17 +62,17 @@ pub fn couple_fluid_structure(
     topology: &cfd::CfdDomainTopology,
     options: FsiCouplingOptions,
 ) -> Result<FsiCouplingResult, String> {
-    let step_count = options.step_count.max(1);
+    let sample_count = options.sample_count;
     let schedule = cfd::realize_velocity_schedule(
         model,
         PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
         AnalysisProcedure::TransientResponse,
-        step_count,
-        options.time_step_s,
+        sample_count,
     )?;
+    let nominal_time_step_s = schedule.nominal_time_step_s;
     let nominal_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
     let profile_scales = schedule.profile_scales;
-    let final_step = step_count.saturating_sub(1);
+    let final_step = sample_count.saturating_sub(1);
     let (final_velocity, final_pressure) = cfd::recover_velocity_pressure(
         domain,
         topology,
@@ -86,7 +85,7 @@ pub fn couple_fluid_structure(
         &final_pressure,
         domain,
         topology,
-        step_count,
+        sample_count,
     );
     let max_cfd_momentum_residual = residual_momentum.iter().copied().fold(0.0_f64, f64::max);
     let max_cfd_continuity_residual = residual_continuity.iter().copied().fold(0.0_f64, f64::max);
@@ -94,7 +93,7 @@ pub fn couple_fluid_structure(
     let mut fields = Vec::new();
     let mut closure = FsiInterfaceClosure::default();
 
-    for step_index in 0..step_count {
+    for step_index in 0..sample_count {
         let (fluid_velocity, fluid_pressure) = cfd::recover_velocity_pressure(
             domain,
             topology,
@@ -171,9 +170,8 @@ pub fn couple_fluid_structure(
         topology,
         cfd::CfdCouplingEvidence {
             inlet_velocity_m_per_s,
-            profile_point_count: profile_scales.len(),
-            step_count,
-            time_step_s: options.time_step_s,
+            executed_sample_count: profile_scales.len(),
+            nominal_time_step_s,
             transient: true,
             pressure_drop_pa: cfd::pressure_drop(&final_pressure),
             mass_balance_residual: max_cfd_continuity_residual,
@@ -185,6 +183,7 @@ pub fn couple_fluid_structure(
     result_diagnostics.extend(diagnostics::coupling_diagnostics(
         model,
         profile_scales.len(),
+        nominal_time_step_s,
         structural_compliance_per_pa,
         options,
         &closure,

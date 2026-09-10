@@ -16,8 +16,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReducedCfdSolveOptions {
-    pub time_step_s: f64,
-    pub step_count: usize,
+    pub sample_count: usize,
     pub max_linear_iters: usize,
     pub tolerance: f64,
     pub residual_warn_threshold: f64,
@@ -33,10 +32,14 @@ pub fn solve_reduced_finite_volume(
 ) -> Result<FeaRunResult, String> {
     let topology = CfdDomainTopology::from_model(model, solver_mesh);
     let node_count = topology.node_count;
-    let step_count = options.step_count.max(1);
+    let sample_count = if identity.procedure() == AnalysisProcedure::TransientResponse {
+        options.sample_count
+    } else {
+        1
+    };
     let transient = identity.procedure() == AnalysisProcedure::TransientResponse;
     let field_step = if transient {
-        step_count.saturating_sub(1)
+        sample_count.saturating_sub(1)
     } else {
         0
     };
@@ -44,8 +47,7 @@ pub fn solve_reduced_finite_volume(
         model,
         identity.family(),
         identity.procedure(),
-        step_count,
-        options.time_step_s,
+        sample_count,
     )?;
     let mut boundary_summary = CfdBoundarySummary::from_model(model, node_count);
     if schedule.has_inlet_excitation {
@@ -59,7 +61,7 @@ pub fn solve_reduced_finite_volume(
         field_step,
         &profile_scales,
         solve::CfdIterationControl {
-            step_count,
+            step_count: sample_count,
             max_linear_iters: options.max_linear_iters,
             tolerance: options.tolerance,
         },
@@ -81,9 +83,8 @@ pub fn solve_reduced_finite_volume(
         &topology,
         diagnostics::CfdCouplingEvidence {
             inlet_velocity_m_per_s: solution.nominal_inlet_velocity_m_per_s,
-            profile_point_count: profile_scales.len(),
-            step_count,
-            time_step_s: options.time_step_s,
+            executed_sample_count: profile_scales.len(),
+            nominal_time_step_s: schedule.nominal_time_step_s,
             transient,
             pressure_drop_pa: solution.pressure_drop_pa,
             mass_balance_residual: solution.mass_balance_residual,
@@ -159,11 +160,10 @@ pub fn solve_reduced_finite_volume(
                 code: "FEA_CFD_TRANSIENT_EVOLUTION".to_string(),
                 severity: FeaDiagnosticSeverity::Info,
                 message: format!(
-                    "solve_family={} step_count={} time_step_s={} transient_profile_point_count={} transient_scale_min={} transient_scale_max={} transient_scale_variation={}",
+                    "solve_family={} executed_sample_count={} nominal_time_step_s={} transient_scale_min={} transient_scale_max={} transient_scale_variation={}",
                     if transient { "transient" } else { "steady_state" },
-                    step_count,
-                    options.time_step_s,
                     profile_scales.len(),
+                    schedule.nominal_time_step_s,
                     solution.transient_scale_min,
                     solution.transient_scale_max,
                     solution.transient_scale_variation,

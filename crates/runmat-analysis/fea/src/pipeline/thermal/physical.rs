@@ -115,21 +115,23 @@ pub(super) fn run(
             requested_solver_backend,
             algebra.as_ref(),
         )?,
-        ThermalProcedureControl::BackwardEuler {
-            step_count,
-            time_step_s,
-        } => solve_transient(TransientSolveInput {
-            model: &active_model,
-            mesh,
-            step: thermal_step,
-            initial_assembly: &initial_assembly,
-            initial_temperature_k: &initial.temperature_k,
-            time_origin_s,
-            step_count,
-            time_step_s,
-            requested_solver_backend,
-            algebra: algebra.as_ref(),
-        })?,
+        ThermalProcedureControl::BackwardEuler { snapshot_count } => {
+            let time_grid = crate::excitation::ProcedureTimeGrid::from_sample_count(
+                thermal_step,
+                snapshot_count,
+            )
+            .map_err(FeaRunError::InvalidModel)?;
+            solve_transient(TransientSolveInput {
+                model: &active_model,
+                mesh,
+                step: thermal_step,
+                initial_assembly: &initial_assembly,
+                initial_temperature_k: &initial.temperature_k,
+                time_grid,
+                requested_solver_backend,
+                algebra: algebra.as_ref(),
+            })?
+        }
     };
     emit_phase(
         "fea.run_thermal",
@@ -257,19 +259,24 @@ struct TransientSolveInput<'a> {
     step: &'a runmat_analysis_core::ProcedureStep,
     initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
     initial_temperature_k: &'a [f64],
-    time_origin_s: f64,
-    step_count: usize,
-    time_step_s: f64,
+    time_grid: crate::excitation::ProcedureTimeGrid,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
-    let end_time_s = input.time_origin_s + (input.step_count - 1) as f64 * input.time_step_s;
-    let events = time_discontinuities(input.model, input.step, input.time_origin_s, end_time_s)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let mut solve_times = (0..input.step_count)
-        .map(|index| input.time_origin_s + index as f64 * input.time_step_s)
+    let events = time_discontinuities(
+        input.model,
+        input.step,
+        input.time_grid.start_s(),
+        input.time_grid.end_s(),
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let mut solve_times = input
+        .time_grid
+        .points_s()
+        .iter()
+        .copied()
         .chain(events.iter().copied())
         .collect::<Vec<_>>();
     solve_times.sort_by(f64::total_cmp);
@@ -284,10 +291,10 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         input.initial_assembly,
         &previous,
         None,
-        input.time_step_s,
+        input.time_grid.nominal_interval_s(),
         &mut recovered,
     )?;
-    time_points_s.push(input.time_origin_s);
+    time_points_s.push(input.time_grid.start_s());
     let mut last_solve = None;
     let mut host_sync_count = 0_u32;
     let mut device_apply_count = 0_u32;

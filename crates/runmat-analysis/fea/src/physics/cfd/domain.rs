@@ -25,6 +25,7 @@ pub struct CfdVelocitySchedule {
     pub nominal_velocity_m_per_s: f64,
     pub profile_scales: Vec<f64>,
     pub has_inlet_excitation: bool,
+    pub nominal_time_step_s: f64,
 }
 
 pub fn realize_velocity_schedule(
@@ -32,7 +33,6 @@ pub fn realize_velocity_schedule(
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
     step_count: usize,
-    time_step_s: f64,
 ) -> Result<CfdVelocitySchedule, String> {
     let matching_steps = model
         .sequence
@@ -50,14 +50,23 @@ pub fn realize_velocity_schedule(
         .excitations
         .iter()
         .any(|action| matches!(action, ExcitationAction::InletVelocity(_)));
-    let sample_count = step_count.max(1);
+    let (sample_points, nominal_time_step_s) = if procedure == AnalysisProcedure::TransientResponse
+    {
+        let grid = crate::excitation::ProcedureTimeGrid::from_sample_count(step, step_count)?;
+        (
+            grid.points_s()
+                .iter()
+                .copied()
+                .map(crate::excitation::ExcitationSamplePoint::time)
+                .collect::<Vec<_>>(),
+            grid.nominal_interval_s(),
+        )
+    } else {
+        (vec![crate::excitation::ExcitationSamplePoint::Static], 0.0)
+    };
+    let sample_count = sample_points.len();
     let mut velocities = Vec::with_capacity(sample_count);
-    for sample_index in 0..sample_count {
-        let sample = if procedure == AnalysisProcedure::TransientResponse {
-            crate::excitation::ExcitationSamplePoint::time(sample_index as f64 * time_step_s)
-        } else {
-            crate::excitation::ExcitationSamplePoint::Static
-        };
+    for sample in sample_points {
         let realized = crate::excitation::realize_step_excitations(model, step, sample)
             .map_err(|error| format!("CFD inlet excitation realization failed: {error}"))?;
         let velocity = realized
@@ -102,6 +111,7 @@ pub fn realize_velocity_schedule(
         nominal_velocity_m_per_s,
         profile_scales,
         has_inlet_excitation,
+        nominal_time_step_s,
     })
 }
 

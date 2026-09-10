@@ -1,10 +1,8 @@
-use runmat_analysis_core::{
-    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, IndependentDomain,
-};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
-    algebra::{apply_k, apply_m},
+    algebra::apply_m,
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
@@ -20,10 +18,10 @@ use crate::{
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
     excitation::{realize_step_excitations, time_discontinuities, ExcitationSamplePoint},
-    pipeline::electro_thermal::recover_electro_thermal_fields,
-    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
+    pipeline::electro_thermal::recover_realized_electro_thermal_fields,
+    pipeline::thermo_mechanical::recover_realized_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::transient::{solve_transient_system_with_forcing, TransientSolveOptions},
+    solve::transient::{solve_transient_system_with_assembly, TransientSolveOptions},
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -64,14 +62,12 @@ pub fn run_transient_with_options(
         Some(5),
     );
     check_cancelled("fea.run_transient")?;
-    let start_time_s = match &execution_step.independent_domain {
-        IndependentDomain::TimeSeconds { start, .. } => *start,
-        _ => {
-            return Err(FeaRunError::InvalidModel(
-                "structural transient execution requires a time-domain procedure step".into(),
-            ));
-        }
-    };
+    let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
+        execution_step,
+        options.interval_count,
+    )
+    .map_err(FeaRunError::InvalidModel)?;
+    let start_time_s = time_grid.start_s();
     let active_model = super::activation::model_with_active_constraints(model, execution_step);
     let excitations = realize_step_excitations(
         &active_model,
@@ -118,15 +114,16 @@ pub fn run_transient_with_options(
         Some(2),
         Some(5),
     );
-    let end_time_s = start_time_s + options.step_count as f64 * options.time_step_s;
+    let end_time_s = time_grid.end_s();
     let discontinuities =
         time_discontinuities(&active_model, execution_step, start_time_s, end_time_s)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let transient = solve_transient_system_with_forcing(
+    let transient = solve_transient_system_with_assembly(
         &summary,
         options.clone(),
         backend,
         start_time_s,
+        end_time_s,
         &discontinuities,
         |time_s, approach| {
             let excitations = realize_step_excitations(
@@ -145,9 +142,20 @@ pub fn run_transient_with_options(
                 StructuralFormulationRequirement::ExperimentalSyntheticOperator,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-            Ok::<Vec<f64>, FeaRunError>(assembly.operator.load().to_vec())
+            if assembly.dof_count != summary.dof_count {
+                return Err(FeaRunError::Assembly(format!(
+                    "transient reassembly changed structural DOF count from {} to {}",
+                    summary.dof_count, assembly.dof_count
+                )));
+            }
+            Ok::<AssemblySummary, FeaRunError>(assembly)
         },
     )?;
+    let reporting_summary = transient
+        .assembly_snapshots
+        .last()
+        .cloned()
+        .unwrap_or_else(|| summary.clone());
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::Solve,
@@ -171,7 +179,7 @@ pub fn run_transient_with_options(
         &mut diagnostics,
         CommonRunDiagnosticInputs {
             model,
-            summary: &summary,
+            summary: &reporting_summary,
         },
     );
 
@@ -179,7 +187,7 @@ pub fn run_transient_with_options(
         .displacement_snapshots
         .last()
         .cloned()
-        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
+        .unwrap_or_else(|| vec![0.0; reporting_summary.dof_count.max(3)]);
     let von_mises = displacement
         .iter()
         .map(|value| value.abs())
@@ -203,13 +211,13 @@ pub fn run_transient_with_options(
         solver_host_sync_count: transient.solver_host_sync_count,
         accelerator_evidence: transient.accelerator_evidence.clone(),
         diagnostics,
-        spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        spatial_projection_evidence: reporting_summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-                vector_shape(summary.dof_count),
-                padded_vector_values(displacement, summary.dof_count),
+                vector_shape(reporting_summary.dof_count),
+                padded_vector_values(displacement, reporting_summary.dof_count),
             ),
             AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
         ],
@@ -218,21 +226,26 @@ pub fn run_transient_with_options(
     let velocity_values = recover_velocity_snapshots(
         &transient.displacement_snapshots,
         &transient.time_points_s,
-        summary.dof_count,
+        reporting_summary.dof_count,
     );
     let acceleration_values = recover_acceleration_snapshots(
         &velocity_values,
         &transient.time_points_s,
-        summary.dof_count,
+        reporting_summary.dof_count,
     );
-    let rotation_values = recover_rotational_snapshots(&summary, &transient.displacement_snapshots);
-    let angular_velocity_values = recover_rotational_snapshots(&summary, &velocity_values);
-    let angular_acceleration_values = recover_rotational_snapshots(&summary, &acceleration_values);
-    let von_mises_values =
-        recover_von_mises_snapshots(&transient.displacement_snapshots, summary.dof_count);
-    let kinetic_energy_values = recover_kinetic_energy_snapshots(&summary, &velocity_values);
-    let strain_energy_values =
-        recover_strain_energy_snapshots(&summary, &transient.displacement_snapshots);
+    let rotation_values =
+        recover_rotational_snapshots(&reporting_summary, &transient.displacement_snapshots);
+    let angular_velocity_values =
+        recover_rotational_snapshots(&reporting_summary, &velocity_values);
+    let angular_acceleration_values =
+        recover_rotational_snapshots(&reporting_summary, &acceleration_values);
+    let von_mises_values = recover_von_mises_snapshots(
+        &transient.displacement_snapshots,
+        reporting_summary.dof_count,
+    );
+    let kinetic_energy_values =
+        recover_kinetic_energy_snapshots(&transient.assembly_snapshots, &velocity_values);
+    let strain_energy_values = transient.strain_energy_snapshots.clone();
     run.diagnostics.push(transient_energy_balance_diagnostic(
         &kinetic_energy_values,
         &strain_energy_values,
@@ -249,8 +262,8 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_displacement_field_id(index),
-                vector_shape(summary.dof_count.max(snapshot.len())),
-                padded_vector_values(snapshot, summary.dof_count),
+                vector_shape(reporting_summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, reporting_summary.dof_count),
             )
         })
         .collect::<Vec<_>>();
@@ -260,7 +273,7 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_rotation_field_id(index),
-                rotational_vector_shape(&summary),
+                rotational_vector_shape(&reporting_summary),
                 snapshot,
             )
         })
@@ -271,8 +284,8 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_velocity_field_id(index),
-                vector_shape(summary.dof_count.max(snapshot.len())),
-                padded_vector_values(snapshot, summary.dof_count),
+                vector_shape(reporting_summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, reporting_summary.dof_count),
             )
         })
         .collect::<Vec<_>>();
@@ -282,7 +295,7 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_angular_velocity_field_id(index),
-                rotational_vector_shape(&summary),
+                rotational_vector_shape(&reporting_summary),
                 snapshot,
             )
         })
@@ -293,8 +306,8 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_acceleration_field_id(index),
-                vector_shape(summary.dof_count.max(snapshot.len())),
-                padded_vector_values(snapshot, summary.dof_count),
+                vector_shape(reporting_summary.dof_count.max(snapshot.len())),
+                padded_vector_values(snapshot, reporting_summary.dof_count),
             )
         })
         .collect::<Vec<_>>();
@@ -304,7 +317,7 @@ pub fn run_transient_with_options(
         .map(|(index, snapshot)| {
             AnalysisField::host_f64(
                 fea_transient_angular_acceleration_field_id(index),
-                rotational_vector_shape(&summary),
+                rotational_vector_shape(&reporting_summary),
                 snapshot,
             )
         })
@@ -354,19 +367,27 @@ pub fn run_transient_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
-        summary.thermo_mechanical.as_ref(),
-        &normalized_time_factors(&transient.time_points_s, displacement_snapshots.len()),
+    let thermo_mechanical_summaries = transient
+        .assembly_snapshots
+        .iter()
+        .map(|summary| summary.thermo_mechanical.clone())
+        .collect::<Vec<_>>();
+    let electro_thermal_summaries = transient
+        .assembly_snapshots
+        .iter()
+        .map(|summary| summary.electro_thermal.clone())
+        .collect::<Vec<_>>();
+    let thermo_mechanical_fields = recover_realized_thermo_mechanical_snapshots(
+        &thermo_mechanical_summaries,
         &displacement_snapshots,
         &von_mises_snapshots,
         &residual_norm_values,
-        element_count_for_dofs(summary.dof_count),
+        element_count_for_dofs(reporting_summary.dof_count),
     );
-    let electro_thermal_fields = recover_electro_thermal_fields(
-        summary.electro_thermal.as_ref(),
-        &normalized_time_factors(&transient.time_points_s, displacement_snapshots.len()),
+    let electro_thermal_fields = recover_realized_electro_thermal_fields(
+        &electro_thermal_summaries,
         &residual_norm_values,
-        summary.dof_count,
+        reporting_summary.dof_count,
         options.solver_mesh.as_ref(),
     );
     run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
@@ -466,27 +487,6 @@ fn rotational_component(kind: StructuralDofKind) -> Option<usize> {
     }
 }
 
-fn normalized_time_factors(time_points_s: &[f64], snapshot_count: usize) -> Vec<f64> {
-    if snapshot_count == 0 {
-        return Vec::new();
-    }
-    let end_time = time_points_s
-        .last()
-        .copied()
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or((snapshot_count.saturating_sub(1)).max(1) as f64);
-    (0..snapshot_count)
-        .map(|index| {
-            time_points_s
-                .get(index)
-                .copied()
-                .unwrap_or(index as f64)
-                .clamp(0.0, end_time)
-                / end_time
-        })
-        .collect()
-}
-
 fn recover_velocity_snapshots(
     displacement_snapshots: &[Vec<f64>],
     time_points_s: &[f64],
@@ -561,34 +561,21 @@ fn recover_von_mises_snapshots(displacement_snapshots: &[Vec<f64>], dof_count: u
 }
 
 fn recover_kinetic_energy_snapshots(
-    summary: &crate::assembly::AssemblySummary,
+    summaries: &[crate::assembly::AssemblySummary],
     velocity_snapshots: &[Vec<f64>],
 ) -> Vec<f64> {
     velocity_snapshots
         .iter()
-        .map(|velocity| {
+        .enumerate()
+        .map(|(index, velocity)| {
+            let Some(summary) = summaries.get(index).or_else(|| summaries.last()) else {
+                return 0.0;
+            };
             let momentum = apply_m(&summary.operator, velocity);
             0.5 * velocity
                 .iter()
                 .zip(momentum.iter())
                 .map(|(v, p)| v * p)
-                .sum::<f64>()
-        })
-        .collect()
-}
-
-fn recover_strain_energy_snapshots(
-    summary: &crate::assembly::AssemblySummary,
-    displacement_snapshots: &[Vec<f64>],
-) -> Vec<f64> {
-    displacement_snapshots
-        .iter()
-        .map(|displacement| {
-            let internal_force = apply_k(&summary.operator, displacement);
-            0.5 * displacement
-                .iter()
-                .zip(internal_force.iter())
-                .map(|(u, force)| u * force)
                 .sum::<f64>()
         })
         .collect()

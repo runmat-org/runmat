@@ -18,34 +18,37 @@ struct ChtKnownAnswerMetrics {
     known_answer_coverage_ratio: f64,
 }
 
-pub(super) fn coupling_diagnostics(
-    authored_interface_count: usize,
-    reference_temperature_k: f64,
-    applied_temperature_delta_k: f64,
-    inlet_velocity_m_per_s: f64,
-    options: ChtCouplingOptions,
-    domain: &CfdDomain,
-    closure: &ChtInterfaceClosure,
-) -> Vec<FeaDiagnostic> {
+pub(super) struct ChtDiagnosticInputs<'a> {
+    pub(super) authored_interface_count: usize,
+    pub(super) reference_temperature_k: f64,
+    pub(super) applied_temperature_delta_k: f64,
+    pub(super) inlet_velocity_m_per_s: f64,
+    pub(super) nominal_time_step_s: f64,
+    pub(super) options: ChtCouplingOptions,
+    pub(super) domain: &'a CfdDomain,
+    pub(super) closure: &'a ChtInterfaceClosure,
+}
+
+pub(super) fn coupling_diagnostics(input: ChtDiagnosticInputs<'_>) -> Vec<FeaDiagnostic> {
     let known_answer = known_answer_metrics(
-        super::super::cfd::reynolds_number_for_velocity(domain, inlet_velocity_m_per_s),
-        closure,
+        super::super::cfd::reynolds_number_for_velocity(input.domain, input.inlet_velocity_m_per_s),
+        input.closure,
     );
     vec![
         FeaDiagnostic {
             code: "FEA_CHT_COUPLING".to_string(),
             severity: FeaDiagnosticSeverity::Info,
             message: format!(
-                "reference_temperature_k={} applied_temperature_delta_k={} step_count={} time_step_s={} authored_interface_count={}",
-                reference_temperature_k,
-                applied_temperature_delta_k,
-                options.step_count,
-                options.time_step_s,
-                authored_interface_count,
+                "reference_temperature_k={} applied_temperature_delta_k={} sample_count={} nominal_time_step_s={} authored_interface_count={}",
+                input.reference_temperature_k,
+                input.applied_temperature_delta_k,
+                input.options.sample_count,
+                input.nominal_time_step_s,
+                input.authored_interface_count,
             ),
         },
-        closure_diagnostic(closure, options.residual_warn_threshold),
-        known_answer_diagnostic(&known_answer, options.residual_warn_threshold),
+        closure_diagnostic(input.closure, input.options.residual_warn_threshold),
+        known_answer_diagnostic(&known_answer, input.options.residual_warn_threshold),
     ]
 }
 

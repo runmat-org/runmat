@@ -2614,7 +2614,12 @@ pub fn analysis_run_cfd_with_options_op(
         ));
     }
 
-    if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
+    let minimum_sample_count = if cfd_procedure == AnalysisProcedure::TransientResponse {
+        2
+    } else {
+        1
+    };
+    if options.sample_count < minimum_sample_count {
         return Err(operation_error(
             AnalysisOperation::Cfd.name(),
             AnalysisOperation::Cfd.version(),
@@ -2625,23 +2630,10 @@ pub fn analysis_run_cfd_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_cfd options require finite positive time_step_s",
-            BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
-        ));
-    }
-    if options.step_count == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Cfd.name(),
-            AnalysisOperation::Cfd.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cfd options require step_count greater than zero",
-            BTreeMap::from([("step_count".to_string(), options.step_count.to_string())]),
+            format!(
+                "fea.run_cfd options require at least {minimum_sample_count} time samples for this procedure"
+            ),
+            BTreeMap::from([("sample_count".to_string(), options.sample_count.to_string())]),
         ));
     }
     if options.max_linear_iters == 0 {
@@ -2723,8 +2715,7 @@ pub fn analysis_run_cfd_with_options_op(
         backend,
         identity,
         &runmat_analysis_fea::physics::cfd::ReducedCfdSolveOptions {
-            time_step_s: options.time_step_s,
-            step_count: options.step_count,
+            sample_count: options.sample_count,
             max_linear_iters: options.max_linear_iters,
             tolerance: options.tolerance,
             residual_warn_threshold: options.residual_warn_threshold,
@@ -2752,8 +2743,8 @@ pub fn analysis_run_cfd_with_options_op(
             code: "FEA_CFD_COST".to_string(),
             severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
             message: format!(
-                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
-                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+                "solve_ms={} sample_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.sample_count, options.max_linear_iters, options.tolerance,
             ),
         });
     let mut fallback_events = Vec::new();
@@ -3041,7 +3032,7 @@ pub fn analysis_run_cht_with_options_op(
         "CHT",
         &context,
     )?;
-    if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
+    if options.sample_count < 2 || options.max_linear_iters == 0 {
         return Err(operation_error(
             AnalysisOperation::Cht.name(),
             AnalysisOperation::Cht.version(),
@@ -3052,22 +3043,7 @@ pub fn analysis_run_cht_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_cht options require finite positive time_step_s",
-            BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
-        ));
-    }
-    if options.step_count == 0 || options.max_linear_iters == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht options require step_count/max_linear_iters greater than zero",
+            "fea.run_cht options require at least two time samples and max_linear_iters greater than zero",
             BTreeMap::new(),
         ));
     }
@@ -3177,8 +3153,7 @@ pub fn analysis_run_cht_with_options_op(
         ThermalSolveOptions {
             formulation_requirement,
             procedure: ThermalProcedureControl::BackwardEuler {
-                step_count: options.step_count,
-                time_step_s: options.time_step_s,
+                snapshot_count: options.sample_count,
             },
             residual_target: options.residual_warn_threshold,
             solver_mesh: Some(solver_mesh.clone()),
@@ -3193,8 +3168,7 @@ pub fn analysis_run_cht_with_options_op(
         &topology,
         &thermal_run,
         ChtCouplingOptions {
-            time_step_s: options.time_step_s,
-            step_count: options.step_count,
+            sample_count: options.sample_count,
             procedure: cht_procedure,
             residual_warn_threshold: options.residual_warn_threshold,
         },
@@ -3229,8 +3203,8 @@ pub fn analysis_run_cht_with_options_op(
             code: "FEA_CHT_COST".to_string(),
             severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
             message: format!(
-                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
-                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+                "solve_ms={} sample_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.sample_count, options.max_linear_iters, options.tolerance,
             ),
         });
 
@@ -3516,7 +3490,7 @@ pub fn analysis_run_fsi_with_options_op(
         "FSI",
         &context,
     )?;
-    if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
+    if options.sample_count < 2 || options.max_linear_iters == 0 {
         return Err(operation_error(
             AnalysisOperation::Fsi.name(),
             AnalysisOperation::Fsi.version(),
@@ -3527,22 +3501,7 @@ pub fn analysis_run_fsi_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_fsi options require finite positive time_step_s",
-            BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
-        ));
-    }
-    if options.step_count == 0 || options.max_linear_iters == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi options require step_count/max_linear_iters greater than zero",
+            "fea.run_fsi options require at least two time samples and max_linear_iters greater than zero",
             BTreeMap::new(),
         ));
     }
@@ -3622,8 +3581,7 @@ pub fn analysis_run_fsi_with_options_op(
         cfd_domain,
         &topology,
         FsiCouplingOptions {
-            time_step_s: options.time_step_s,
-            step_count: options.step_count,
+            sample_count: options.sample_count,
             max_linear_iters: options.max_linear_iters,
             tolerance: options.tolerance,
             residual_warn_threshold: options.residual_warn_threshold,
@@ -3668,8 +3626,8 @@ pub fn analysis_run_fsi_with_options_op(
             code: "FEA_FSI_COST".to_string(),
             severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
             message: format!(
-                "solve_ms={} step_count={} max_linear_iters={} tolerance={}",
-                solve_ms, options.step_count, options.max_linear_iters, options.tolerance,
+                "solve_ms={} sample_count={} max_linear_iters={} tolerance={}",
+                solve_ms, options.sample_count, options.max_linear_iters, options.tolerance,
             ),
         });
 
@@ -3813,8 +3771,7 @@ pub fn analysis_run_thermal_with_options_op(
             },
             "fea.run_thermal requires a finite positive residual control",
             BTreeMap::from([
-                ("step_count".into(), options.step_count.to_string()),
-                ("time_step_s".into(), options.time_step_s.to_string()),
+                ("snapshot_count".into(), options.snapshot_count.to_string()),
                 (
                     "residual_warn_threshold".into(),
                     options.residual_warn_threshold.to_string(),
@@ -3853,11 +3810,7 @@ pub fn analysis_run_thermal_with_options_op(
         ));
     };
     let thermal_procedure = thermal_step.procedure;
-    if thermal_procedure == AnalysisProcedure::TransientResponse
-        && (options.step_count < 2
-            || !options.time_step_s.is_finite()
-            || options.time_step_s <= 0.0)
-    {
+    if thermal_procedure == AnalysisProcedure::TransientResponse && options.snapshot_count < 2 {
         return Err(operation_error(
             AnalysisOperation::Thermal.name(),
             AnalysisOperation::Thermal.version(),
@@ -3868,11 +3821,8 @@ pub fn analysis_run_thermal_with_options_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "transient fea.run_thermal requires at least two snapshots and a finite positive time step",
-            BTreeMap::from([
-                ("step_count".into(), options.step_count.to_string()),
-                ("time_step_s".into(), options.time_step_s.to_string()),
-            ]),
+            "transient fea.run_thermal requires at least two snapshots",
+            BTreeMap::from([("snapshot_count".into(), options.snapshot_count.to_string())]),
         ));
     }
     validate_thermal_run_model(model, &context)?;
@@ -3924,8 +3874,7 @@ pub fn analysis_run_thermal_with_options_op(
             procedure: match thermal_procedure {
                 AnalysisProcedure::Static => ThermalProcedureControl::Steady,
                 AnalysisProcedure::TransientResponse => ThermalProcedureControl::BackwardEuler {
-                    step_count: options.step_count,
-                    time_step_s: options.time_step_s,
+                    snapshot_count: options.snapshot_count,
                 },
                 _ => unreachable!("thermal procedure was validated before execution"),
             },
@@ -4221,10 +4170,9 @@ pub fn analysis_run_transient_with_options_op(
         backend,
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
             formulation_requirement,
-            time_step_s: options.time_step_s,
             min_time_step_s: options.min_time_step_s,
             max_time_step_s: options.max_time_step_s,
-            step_count: options.step_count,
+            interval_count: options.interval_count,
             max_linear_iters: options.max_linear_iters,
             tolerance: options.tolerance,
             residual_target: options.residual_target,
