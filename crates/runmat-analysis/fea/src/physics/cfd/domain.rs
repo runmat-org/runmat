@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, ExcitationAction, FluidConstraintKind, PhysicalSignal,
-    SignalId, SignalOrdinate, SignalRepresentation, SignalValue,
+    AnalysisConstraint, AnalysisModel, AnalysisProcedure, ExcitationAction, FluidConstraintKind,
+    PhysicalSignal, PhysicsFamily, SignalId, SignalOrdinate, SignalRepresentation, SignalValue,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -18,6 +18,91 @@ pub(super) fn profile_scale(profile_scales: &[f64], step_index: usize) -> f64 {
         .copied()
         .filter(|scale| scale.is_finite() && *scale >= 0.0)
         .unwrap_or(1.0)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CfdVelocitySchedule {
+    pub nominal_velocity_m_per_s: f64,
+    pub profile_scales: Vec<f64>,
+    pub has_inlet_excitation: bool,
+}
+
+pub fn realize_velocity_schedule(
+    model: &AnalysisModel,
+    family: PhysicsFamily,
+    procedure: AnalysisProcedure,
+    step_count: usize,
+    time_step_s: f64,
+) -> Result<CfdVelocitySchedule, String> {
+    let matching_steps = model
+        .sequence
+        .steps
+        .iter()
+        .filter(|step| step.family == family && step.procedure == procedure)
+        .collect::<Vec<_>>();
+    let [step] = matching_steps.as_slice() else {
+        return Err(format!(
+            "CFD excitation realization requires exactly one matching procedure step, found {}",
+            matching_steps.len()
+        ));
+    };
+    let has_inlet_excitation = model
+        .excitations
+        .iter()
+        .any(|action| matches!(action, ExcitationAction::InletVelocity(_)));
+    let sample_count = step_count.max(1);
+    let mut velocities = Vec::with_capacity(sample_count);
+    for sample_index in 0..sample_count {
+        let sample = if procedure == AnalysisProcedure::TransientResponse {
+            crate::excitation::ExcitationSamplePoint::time(sample_index as f64 * time_step_s)
+        } else {
+            crate::excitation::ExcitationSamplePoint::Static
+        };
+        let realized = crate::excitation::realize_step_excitations(model, step, sample)
+            .map_err(|error| format!("CFD inlet excitation realization failed: {error}"))?;
+        let velocity = realized
+            .iter()
+            .filter_map(|excitation| match &excitation.kind {
+                crate::excitation::RealizedExcitationKind::InletVelocity(value) => Some(value),
+                _ => None,
+            })
+            .map(|value| {
+                if value.imaginary.iter().any(|component| *component != 0.0) {
+                    return Err(
+                        "CFD inlet velocity must be real in steady and transient solves"
+                            .to_string(),
+                    );
+                }
+                Ok(value
+                    .real
+                    .iter()
+                    .map(|component| component * component)
+                    .sum::<f64>()
+                    .sqrt())
+            })
+            .collect::<Result<Vec<_>, String>>()?
+            .into_iter()
+            .fold(0.0_f64, f64::max);
+        velocities.push(velocity);
+    }
+    if !has_inlet_excitation {
+        let constrained = CfdBoundarySummary::from_model(model, 2).nominal_inlet_velocity_m_per_s;
+        velocities.fill(constrained);
+    }
+    let nominal_velocity_m_per_s = velocities.iter().copied().fold(0.0_f64, f64::max);
+    let profile_scales = if nominal_velocity_m_per_s > f64::EPSILON {
+        velocities
+            .into_iter()
+            .map(|velocity| velocity / nominal_velocity_m_per_s)
+            .collect()
+    } else {
+        vec![1.0; sample_count]
+    };
+    Ok(CfdVelocitySchedule {
+        nominal_velocity_m_per_s,
+        profile_scales,
+        has_inlet_excitation,
+    })
 }
 
 fn node_count_from_model(model: &AnalysisModel) -> usize {
@@ -311,10 +396,6 @@ pub fn validate_authored_boundary_conditions(model: &AnalysisModel) -> Result<()
     Ok(())
 }
 
-pub fn velocity_scales(model: &AnalysisModel) -> Vec<f64> {
-    normalized_scales(inlet_velocity_values(model))
-}
-
 pub fn nominal_inlet_velocity_m_per_s(model: &AnalysisModel) -> Option<f64> {
     maximum_absolute(inlet_velocity_values(model))
 }
@@ -337,16 +418,6 @@ fn inlet_velocity_values(model: &AnalysisModel) -> Vec<f64> {
 
 fn signal<'a>(model: &'a AnalysisModel, id: &SignalId) -> Option<&'a PhysicalSignal> {
     model.signals.iter().find(|signal| signal.signal_id() == id)
-}
-
-fn normalized_scales(values: Vec<f64>) -> Vec<f64> {
-    let Some(nominal) = maximum_absolute(values.clone()) else {
-        return Vec::new();
-    };
-    if nominal <= f64::EPSILON {
-        return Vec::new();
-    }
-    values.into_iter().map(|value| value / nominal).collect()
 }
 
 fn maximum_absolute(values: Vec<f64>) -> Option<f64> {

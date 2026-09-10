@@ -30,7 +30,7 @@ pub fn solve_reduced_finite_volume(
     identity: AnalysisRunIdentity,
     options: &ReducedCfdSolveOptions,
     solver_mesh: Option<&SolverMeshArtifact>,
-) -> FeaRunResult {
+) -> Result<FeaRunResult, String> {
     let topology = CfdDomainTopology::from_model(model, solver_mesh);
     let node_count = topology.node_count;
     let step_count = options.step_count.max(1);
@@ -40,8 +40,18 @@ pub fn solve_reduced_finite_volume(
     } else {
         0
     };
-    let boundary_summary = CfdBoundarySummary::from_model(model, node_count);
-    let profile_scales = domain::velocity_scales(model);
+    let schedule = domain::realize_velocity_schedule(
+        model,
+        identity.family(),
+        identity.procedure(),
+        step_count,
+        options.time_step_s,
+    )?;
+    let mut boundary_summary = CfdBoundarySummary::from_model(model, node_count);
+    if schedule.has_inlet_excitation {
+        boundary_summary.nominal_inlet_velocity_m_per_s = schedule.nominal_velocity_m_per_s;
+    }
+    let profile_scales = schedule.profile_scales;
     let solution = solve::solve_velocity_pressure(
         domain,
         &boundary_summary,
@@ -82,7 +92,7 @@ pub fn solve_reduced_finite_volume(
             residual_warn_threshold: options.residual_warn_threshold,
         },
     );
-    FeaRunResult {
+    Ok(FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
@@ -164,5 +174,5 @@ pub fn solve_reduced_finite_volume(
             run_diagnostics
         },
         fields,
-    }
+    })
 }

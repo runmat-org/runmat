@@ -21,7 +21,7 @@ use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, SequenceIdentity, SolverResultIdentity,
     StepIdentity, StructuralLinearWorkload, StudyIdentity,
 };
-use runmat_analysis_fea::physics::cfd::{nominal_inlet_velocity_m_per_s, CfdDomainTopology};
+use runmat_analysis_fea::physics::cfd::CfdDomainTopology;
 use runmat_analysis_fea::physics::cht::{couple_thermal_flow, ChtCouplingOptions};
 use runmat_analysis_fea::physics::fsi::{couple_fluid_structure, FsiCouplingOptions};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
@@ -2236,7 +2236,41 @@ pub fn analysis_run_acoustic_with_options_op(
         "acoustic",
         &context,
     )?;
-    if !runmat_analysis_fea::physics::acoustic::has_nonzero_pressure_source(model) {
+    if options.mode_count == 0 {
+        return Err(operation_error(
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "fea.run_acoustic options require mode_count greater than zero",
+            BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
+        ));
+    }
+    let has_pressure_source = runmat_analysis_fea::physics::acoustic::has_nonzero_pressure_source(
+        model,
+        options.mode_count,
+    )
+    .map_err(|detail| {
+        operation_error(
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.EXCITATION_REALIZATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        )
+    })?;
+    if !has_pressure_source {
         return Err(operation_error(
             AnalysisOperation::Acoustic.name(),
             AnalysisOperation::Acoustic.version(),
@@ -2283,22 +2317,6 @@ pub fn analysis_run_acoustic_with_options_op(
                     model.boundaries.len().to_string(),
                 ),
             ]),
-        ));
-    }
-
-    if options.mode_count == 0 {
-        return Err(operation_error(
-            AnalysisOperation::Acoustic.name(),
-            AnalysisOperation::Acoustic.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ACOUSTIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_acoustic options require mode_count greater than zero",
-            BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
         ));
     }
 
@@ -2359,7 +2377,22 @@ pub fn analysis_run_acoustic_with_options_op(
         identity,
         options.mode_count,
         options.residual_warn_threshold,
-    );
+    )
+    .map_err(|detail| {
+        operation_error(
+            AnalysisOperation::Acoustic.name(),
+            AnalysisOperation::Acoustic.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_ACOUSTIC.EXCITATION_REALIZATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        )
+    })?;
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -2615,30 +2648,6 @@ pub fn analysis_run_cfd_with_options_op(
             )]),
         ));
     }
-    if !nominal_inlet_velocity_m_per_s(model)
-        .unwrap_or(0.0)
-        .is_finite()
-        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Cfd.name(),
-            AnalysisOperation::Cfd.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CFD.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cfd requires finite non-negative inlet_velocity_m_per_s",
-            BTreeMap::from([(
-                "inlet_velocity_m_per_s".to_string(),
-                nominal_inlet_velocity_m_per_s(model)
-                    .unwrap_or(0.0)
-                    .to_string(),
-            )]),
-        ));
-    }
     if !cfd_domain.turbulence_intensity.ratio.is_finite()
         || cfd_domain.turbulence_intensity.ratio < 0.0
         || cfd_domain.turbulence_intensity.ratio > 1.0
@@ -2805,7 +2814,22 @@ pub fn analysis_run_cfd_with_options_op(
             residual_warn_threshold: options.residual_warn_threshold,
         },
         solver_mesh.as_ref(),
-    );
+    )
+    .map_err(|detail| {
+        operation_error(
+            AnalysisOperation::Cfd.name(),
+            AnalysisOperation::Cfd.version(),
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_CFD.EXCITATION_REALIZATION_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            BTreeMap::new(),
+        )
+    })?;
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
@@ -3072,30 +3096,6 @@ pub fn analysis_run_cht_with_options_op(
             )]),
         ));
     }
-    if !nominal_inlet_velocity_m_per_s(model)
-        .unwrap_or(0.0)
-        .is_finite()
-        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Cht.name(),
-            AnalysisOperation::Cht.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_CHT.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_cht requires finite non-negative inlet_velocity_m_per_s",
-            BTreeMap::from([(
-                "inlet_velocity_m_per_s".to_string(),
-                nominal_inlet_velocity_m_per_s(model)
-                    .unwrap_or(0.0)
-                    .to_string(),
-            )]),
-        ));
-    }
     if !cfd_domain.turbulence_intensity.ratio.is_finite()
         || cfd_domain.turbulence_intensity.ratio < 0.0
         || cfd_domain.turbulence_intensity.ratio > 1.0
@@ -3298,7 +3298,7 @@ pub fn analysis_run_cht_with_options_op(
             applied_temperature_delta_k,
             time_step_s: options.time_step_s,
             step_count: options.step_count,
-            transient: cht_procedure == AnalysisProcedure::TransientResponse,
+            procedure: cht_procedure,
             residual_warn_threshold: options.residual_warn_threshold,
         },
     )
@@ -3587,30 +3587,6 @@ pub fn analysis_run_fsi_with_options_op(
             BTreeMap::from([(
                 "dynamic_viscosity_pa_s".to_string(),
                 cfd_domain.dynamic_viscosity.pascal_seconds.to_string(),
-            )]),
-        ));
-    }
-    if !nominal_inlet_velocity_m_per_s(model)
-        .unwrap_or(0.0)
-        .is_finite()
-        || nominal_inlet_velocity_m_per_s(model).unwrap_or(0.0) < 0.0
-    {
-        return Err(operation_error(
-            AnalysisOperation::Fsi.name(),
-            AnalysisOperation::Fsi.version(),
-            &context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_FSI.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "fea.run_fsi requires finite non-negative inlet_velocity_m_per_s",
-            BTreeMap::from([(
-                "inlet_velocity_m_per_s".to_string(),
-                nominal_inlet_velocity_m_per_s(model)
-                    .unwrap_or(0.0)
-                    .to_string(),
             )]),
         ));
     }

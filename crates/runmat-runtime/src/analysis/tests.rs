@@ -49,19 +49,20 @@ use runmat_analysis_fea::{
     fea_transient_strain_energy_field_id, fea_transient_velocity_field_id,
     fea_transient_von_mises_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
     SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY, FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-    FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
-    FEA_FIELD_EM_CURRENT_DENSITY_REAL, FEA_FIELD_EM_ELECTRIC_FIELD_REAL,
-    FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_ENERGY_DENSITY,
-    FEA_FIELD_EM_MAGNETIC_FIELD_REAL, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE,
-    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL, FEA_FIELD_EM_POYNTING_VECTOR_REAL,
-    FEA_FIELD_EM_RESIDUAL_REAL, FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG,
-    FEA_FIELD_EM_VECTOR_POTENTIAL_REAL, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
+    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
+    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
+    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
+    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_EM_CURRENT_DENSITY_REAL,
+    FEA_FIELD_EM_ELECTRIC_FIELD_REAL, FEA_FIELD_EM_ELECTRIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_ENERGY_DENSITY, FEA_FIELD_EM_MAGNETIC_FIELD_REAL,
+    FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_MAGNITUDE, FEA_FIELD_EM_MAGNETIC_FLUX_DENSITY_REAL,
+    FEA_FIELD_EM_POYNTING_VECTOR_REAL, FEA_FIELD_EM_RESIDUAL_REAL,
+    FEA_FIELD_EM_VECTOR_POTENTIAL_IMAG, FEA_FIELD_EM_VECTOR_POTENTIAL_REAL,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -8585,7 +8586,7 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
-            time_step_s: 1.0e-3,
+            time_step_s: 1.0 / 3.0,
             step_count: 4,
             max_linear_iters: 64,
             tolerance: 1.0e-8,
@@ -8702,10 +8703,24 @@ fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("cfd_profile_point_count=2")
+            && diag.message.contains("cfd_profile_point_count=4")
             && diag.message.contains("authored_interface_count=")
             && diag.message.contains("interface_node_count=")
             && diag.message.contains("interface_face_count=")));
+    let first_fluid_velocity = envelope
+        .data
+        .run
+        .field(&fea_fsi_fluid_velocity_field_id(0))
+        .and_then(AnalysisField::as_host_f64)
+        .expect("first FSI fluid velocity should be host-real");
+    let final_fluid_velocity = envelope
+        .data
+        .run
+        .field(&fea_fsi_fluid_velocity_field_id(3))
+        .and_then(AnalysisField::as_host_f64)
+        .expect("final FSI fluid velocity should be host-real");
+    assert!((first_fluid_velocity[0] - 2.4).abs() <= 1.0e-12);
+    assert!((final_fluid_velocity[0] - 4.0).abs() <= 1.0e-12);
     let interface_pressure = envelope
         .data
         .run
@@ -9317,6 +9332,92 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     assert!(field_ids
         .iter()
         .any(|field_id| field_id.starts_with("acoustic.frequency_response.")));
+}
+
+#[test]
+fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let mut complex_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_complex_frequency_source".to_string(),
+            template: AnalysisModelTemplate::AcousticHarmonic,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created")
+    .data;
+    let PhysicalSignal::Pressure(signal) = &mut complex_model.signals[0] else {
+        panic!("acoustic template should author a pressure signal");
+    };
+    signal.representation = SignalRepresentation::Tabulated(TabulatedSignal {
+        domain: TabulatedSignalDomain::FrequencyHertz,
+        knots: vec![
+            SignalKnot::continuous(
+                50.0,
+                SignalOrdinate::Complex {
+                    real: SignalValue::Scalar(runmat_analysis_core::Pressure::new(1.0)),
+                    imaginary: SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.25)),
+                },
+            ),
+            SignalKnot::continuous(
+                20_000.0,
+                SignalOrdinate::Complex {
+                    real: SignalValue::Scalar(runmat_analysis_core::Pressure::new(2.0)),
+                    imaginary: SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.5)),
+                },
+            ),
+        ],
+        interpolation: SignalInterpolation::Linear,
+        extrapolation: SignalExtrapolation::HoldEndpoint,
+    });
+    signal.precision = SignalPrecision::Complex128;
+
+    let mut real_model = complex_model.clone();
+    let PhysicalSignal::Pressure(signal) = &mut real_model.signals[0] else {
+        panic!("acoustic template should author a pressure signal");
+    };
+    let SignalRepresentation::Tabulated(table) = &mut signal.representation else {
+        panic!("test should have authored a tabulated pressure signal");
+    };
+    for knot in &mut table.knots {
+        let runmat_analysis_core::SignalKnotValue::Continuous(SignalOrdinate::Complex {
+            imaginary,
+            ..
+        }) = &mut knot.value
+        else {
+            panic!("test should have authored complex pressure knots");
+        };
+        *imaginary = SignalValue::Scalar(runmat_analysis_core::Pressure::new(0.0));
+    }
+
+    let run = |model: &AnalysisModel| {
+        analysis_run_acoustic_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            FormulationRequirement::Experimental,
+            Default::default(),
+            OperationContext::new(None, None),
+        )
+        .expect("frequency-domain acoustic source should be realized")
+        .data
+        .run
+    };
+    let complex_run = run(&complex_model);
+    let real_run = run(&real_model);
+    let complex_imag = complex_run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_IMAG)
+        .and_then(AnalysisField::as_host_f64)
+        .expect("complex acoustic solve should return imaginary pressure");
+    let real_imag = real_run
+        .field(FEA_FIELD_ACOUSTIC_PRESSURE_IMAG)
+        .and_then(AnalysisField::as_host_f64)
+        .expect("real acoustic solve should return imaginary pressure");
+    assert!(complex_imag
+        .iter()
+        .zip(real_imag)
+        .any(|(complex, real)| (complex - real).abs() > 1.0e-10));
 }
 
 #[test]

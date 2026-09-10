@@ -1,4 +1,6 @@
-use runmat_analysis_core::{AnalysisField, AnalysisModel, CfdDomain};
+use runmat_analysis_core::{
+    AnalysisField, AnalysisModel, AnalysisProcedure, CfdDomain, CoupledPhysicsFamily, PhysicsFamily,
+};
 
 use crate::{
     diagnostics::FeaDiagnostic, fea_fsi_coupling_iteration_count_field_id,
@@ -62,7 +64,14 @@ pub fn couple_fluid_structure(
     options: FsiCouplingOptions,
 ) -> Result<FsiCouplingResult, String> {
     let step_count = options.step_count.max(1);
-    let profile_scales = cfd::velocity_scales(model);
+    let schedule = cfd::realize_velocity_schedule(
+        model,
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+        AnalysisProcedure::TransientResponse,
+        step_count,
+        options.time_step_s,
+    )?;
+    let profile_scales = schedule.profile_scales;
     let final_step = step_count.saturating_sub(1);
     let (final_velocity, final_pressure) =
         cfd::recover_velocity_pressure(model, domain, topology, final_step, &profile_scales);

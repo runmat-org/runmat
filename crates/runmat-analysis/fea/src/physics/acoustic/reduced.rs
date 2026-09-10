@@ -22,13 +22,12 @@ pub fn solve_reduced_harmonic(
     identity: AnalysisRunIdentity,
     mode_count: usize,
     residual_warn_threshold: f64,
-) -> FeaRunResult {
+) -> Result<FeaRunResult, String> {
     let node_count = domain::node_count(model);
     let material = medium::material_summary(model, mode_count);
     let boundary = medium::boundary_summary(model, material.characteristic_impedance_pa_s_per_m());
     let drive_frequency_hz = domain::drive_frequency_hz(mode_count, node_count);
-    let source_real = domain::source_vector(model, node_count);
-    let source_imag = vec![0.0; node_count];
+    let (source_real, source_imag) = domain::source_vectors(model, node_count, drive_frequency_hz)?;
     let topology = domain::topology(node_count);
     let system = domain::helmholtz_operator(
         topology,
@@ -72,6 +71,8 @@ pub fn solve_reduced_harmonic(
     let mut sweep_peak_pressure_pa = 0.0_f64;
     let mut sweep_residual_norm = 0.0_f64;
     for frequency_hz in &sweep_frequencies_hz {
+        let (sweep_source_real, sweep_source_imag) =
+            domain::source_vectors(model, node_count, *frequency_hz)?;
         let sweep_system = domain::helmholtz_operator(
             topology,
             *frequency_hz,
@@ -79,8 +80,11 @@ pub fn solve_reduced_harmonic(
             material.damping_ratio,
             &boundary,
         );
-        let (sweep_real, sweep_imag) =
-            linear::solve_complex_graph_operator(&sweep_system, &source_real, &source_imag);
+        let (sweep_real, sweep_imag) = linear::solve_complex_graph_operator(
+            &sweep_system,
+            &sweep_source_real,
+            &sweep_source_imag,
+        );
         let sweep_magnitude = sweep_real
             .iter()
             .zip(&sweep_imag)
@@ -92,8 +96,8 @@ pub fn solve_reduced_harmonic(
             &sweep_system,
             &sweep_real,
             &sweep_imag,
-            &source_real,
-            &source_imag,
+            &sweep_source_real,
+            &sweep_source_imag,
         ));
         frequency_response_fields.push(AnalysisField::host_f64(
             crate::fea_acoustic_frequency_response_field_id(*frequency_hz),
@@ -147,7 +151,7 @@ pub fn solve_reduced_harmonic(
     ];
     let acoustic_field_count = fields.len() + frequency_response_fields.len();
     fields.extend(frequency_response_fields);
-    FeaRunResult {
+    Ok(FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::Cpu,
@@ -178,7 +182,7 @@ pub fn solve_reduced_harmonic(
             known_answer,
         }),
         fields,
-    }
+    })
 }
 
 struct DiagnosticInputs<'a> {

@@ -1,7 +1,4 @@
-use runmat_analysis_core::{
-    AnalysisModel, ExcitationAction, ExcitationTarget, PhysicalSignal, SignalOrdinate,
-    SignalRepresentation, SignalValue,
-};
+use runmat_analysis_core::{AnalysisModel, AnalysisProcedure, PhysicsFamily};
 
 use super::medium::AcousticBoundarySummary;
 
@@ -147,13 +144,22 @@ pub(super) fn topology(node_count: usize) -> AcousticDomainTopology {
     }
 }
 
-pub(super) fn source_vector(model: &AnalysisModel, node_count: usize) -> Vec<f64> {
-    let mut source = vec![0.0; node_count.max(1)];
-    for (index, (target_id, amplitude)) in pressure_sources(model).into_iter().enumerate() {
-        let node = (index * 3 + target_id.len()) % source.len();
-        source[node] += amplitude;
+pub(super) fn source_vectors(
+    model: &AnalysisModel,
+    node_count: usize,
+    frequency_hz: f64,
+) -> Result<(Vec<f64>, Vec<f64>), String> {
+    let mut source_real = vec![0.0; node_count.max(1)];
+    let mut source_imag = vec![0.0; node_count.max(1)];
+    for (index, (target_id, real, imaginary)) in pressure_sources(model, frequency_hz)?
+        .into_iter()
+        .enumerate()
+    {
+        let node = (index * 3 + target_id.len()) % source_real.len();
+        source_real[node] += real;
+        source_imag[node] += imaginary;
     }
-    source
+    Ok((source_real, source_imag))
 }
 
 pub(super) fn helmholtz_operator(
@@ -247,52 +253,52 @@ pub(super) fn source_norm(source_real: &[f64], source_imag: &[f64]) -> f64 {
         .sqrt()
 }
 
-pub(super) fn pressure_sources(model: &AnalysisModel) -> Vec<(String, f64)> {
-    model
-        .excitations
+pub(super) fn pressure_sources(
+    model: &AnalysisModel,
+    frequency_hz: f64,
+) -> Result<Vec<(String, f64, f64)>, String> {
+    let matching_steps = model
+        .sequence
+        .steps
         .iter()
-        .filter_map(|action| match action {
-            ExcitationAction::Pressure(value) | ExcitationAction::AcousticPressure(value) => {
-                let target = match &value.target {
-                    ExcitationTarget::Region(value) => value.region_id.clone(),
-                    ExcitationTarget::ReferencePoint(value) => value.reference_point_id.clone(),
-                    ExcitationTarget::Port { port_id } => port_id.clone(),
-                    ExcitationTarget::Interface { interface_id } => interface_id.clone(),
-                    ExcitationTarget::WholeModel => "whole_model".to_string(),
-                };
-                let signal = model
-                    .signals
-                    .iter()
-                    .find(|signal| signal.signal_id() == &value.signal_id)?;
-                let PhysicalSignal::Pressure(signal) = signal else {
-                    return None;
-                };
-                first_scalar(&signal.representation).map(|amplitude| (target, amplitude))
-            }
-            _ => None,
+        .filter(|step| {
+            step.family == PhysicsFamily::Acoustic
+                && step.procedure == AnalysisProcedure::HarmonicResponse
         })
-        .collect()
-}
-
-fn first_scalar(
-    representation: &SignalRepresentation<runmat_analysis_core::Pressure>,
-) -> Option<f64> {
-    let value = match representation {
-        SignalRepresentation::Constant(value) => value,
-        SignalRepresentation::Tabulated(table) => match &table.knots.first()?.value {
-            runmat_analysis_core::SignalKnotValue::Continuous(ordinate)
-            | runmat_analysis_core::SignalKnotValue::Jump {
-                left_limit: ordinate,
-                ..
-            } => match ordinate {
-                SignalOrdinate::Real(value) | SignalOrdinate::Complex { real: value, .. } => value,
-            },
-        },
-        SignalRepresentation::Waveform(waveform) => &waveform.amplitude,
-        SignalRepresentation::Artifact(_) | SignalRepresentation::Generator(_) => return None,
+        .collect::<Vec<_>>();
+    let [step] = matching_steps.as_slice() else {
+        return Err(format!(
+            "acoustic excitation realization requires exactly one harmonic acoustic step, found {}",
+            matching_steps.len()
+        ));
     };
-    match value {
-        SignalValue::Scalar(value) => Some(value.pascals),
-        SignalValue::Vector3(_) | SignalValue::Tensor { .. } => None,
-    }
+    let realized = crate::excitation::realize_step_excitations(
+        model,
+        step,
+        crate::excitation::ExcitationSamplePoint::frequency(frequency_hz),
+    )
+    .map_err(|error| format!("acoustic pressure excitation realization failed: {error}"))?;
+    Ok(realized
+        .iter()
+        .filter_map(|excitation| {
+            let value = match excitation.kind {
+                crate::excitation::RealizedExcitationKind::Pressure(value)
+                | crate::excitation::RealizedExcitationKind::AcousticPressure(value) => value,
+                _ => return None,
+            };
+            let target = match &excitation.target {
+                crate::excitation::RealizedExcitationTarget::Region(id)
+                | crate::excitation::RealizedExcitationTarget::Port(id)
+                | crate::excitation::RealizedExcitationTarget::Interface(id) => id.clone(),
+                crate::excitation::RealizedExcitationTarget::ReferencePoint {
+                    reference_point_id,
+                    ..
+                } => reference_point_id.clone(),
+                crate::excitation::RealizedExcitationTarget::WholeModel => {
+                    "whole_model".to_string()
+                }
+            };
+            Some((target, value.real, value.imaginary))
+        })
+        .collect())
 }

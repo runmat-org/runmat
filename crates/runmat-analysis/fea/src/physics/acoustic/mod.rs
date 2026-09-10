@@ -14,10 +14,17 @@ pub use reduced::solve_reduced_harmonic;
 
 /// Returns whether the authored model contains a materialized nonzero pressure source that the
 /// reduced acoustic formulation can consume.
-pub fn has_nonzero_pressure_source(model: &runmat_analysis_core::AnalysisModel) -> bool {
-    domain::pressure_sources(model)
+pub fn has_nonzero_pressure_source(
+    model: &runmat_analysis_core::AnalysisModel,
+    mode_count: usize,
+) -> Result<bool, String> {
+    let node_count = domain::node_count(model);
+    let frequency_hz = domain::drive_frequency_hz(mode_count, node_count);
+    Ok(domain::pressure_sources(model, frequency_hz)?
         .iter()
-        .any(|(_, magnitude)| magnitude.is_finite() && magnitude.abs() > 0.0)
+        .any(|(_, real, imaginary)| {
+            real.is_finite() && imaginary.is_finite() && real.hypot(*imaginary) > 0.0
+        }))
 }
 
 #[cfg(test)]

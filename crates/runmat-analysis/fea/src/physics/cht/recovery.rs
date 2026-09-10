@@ -1,5 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisField, AnalysisInterfaceKind, AnalysisModel, CfdDomain, ThermalInterfaceTransfer,
+    AnalysisField, AnalysisInterfaceKind, AnalysisModel, AnalysisProcedure, CfdDomain,
+    CoupledPhysicsFamily, PhysicsFamily, ThermalInterfaceTransfer,
 };
 
 use crate::{
@@ -22,7 +23,7 @@ pub struct ChtCouplingOptions {
     pub applied_temperature_delta_k: f64,
     pub time_step_s: f64,
     pub step_count: usize,
-    pub transient: bool,
+    pub procedure: AnalysisProcedure,
     pub residual_warn_threshold: f64,
 }
 
@@ -66,7 +67,14 @@ pub fn couple_thermal_flow(
     thermal_run: &FeaThermalRunResult,
     options: ChtCouplingOptions,
 ) -> Result<ChtCouplingResult, String> {
-    let profile_scales = cfd::velocity_scales(model);
+    let schedule = cfd::realize_velocity_schedule(
+        model,
+        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+        options.procedure,
+        options.step_count,
+        options.time_step_s,
+    )?;
+    let profile_scales = schedule.profile_scales;
     let field_step = options.step_count.saturating_sub(1);
     let (fluid_velocity, fluid_pressure) =
         recover_velocity_pressure(model, domain, topology, field_step, &profile_scales);
@@ -191,7 +199,7 @@ pub fn couple_thermal_flow(
             profile_point_count: profile_scales.len(),
             step_count: options.step_count,
             time_step_s: options.time_step_s,
-            transient: options.transient,
+            transient: options.procedure == AnalysisProcedure::TransientResponse,
             pressure_drop_pa,
             mass_balance_residual: max_cfd_continuity_residual,
             max_momentum_residual: max_cfd_momentum_residual,
