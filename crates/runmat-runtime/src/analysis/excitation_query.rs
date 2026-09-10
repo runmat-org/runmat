@@ -196,26 +196,6 @@ fn scalar_value<Q>(value: &SignalValue<Q>, component: &impl Fn(&Q) -> f64) -> Op
     }
 }
 
-pub(crate) fn pressure_sources(model: &AnalysisModel) -> Vec<(String, f64)> {
-    model
-        .excitations
-        .iter()
-        .filter_map(|action| match action {
-            ExcitationAction::Pressure(value) | ExcitationAction::AcousticPressure(value) => {
-                let target = target_id(&value.target);
-                let signal = signal(model, &value.signal_id)?;
-                let PhysicalSignal::Pressure(signal) = signal else {
-                    return None;
-                };
-                scalar_values(&signal.representation, |value| value.pascals)
-                    .and_then(|values| values.first().copied())
-                    .map(|magnitude| (target, magnitude))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 pub(crate) fn has_nonzero_electromagnetic_source(model: &AnalysisModel) -> bool {
     model.excitations.iter().any(|action| match action {
         ExcitationAction::ElectricCurrent(value) => signal(model, &value.signal_id)
@@ -238,16 +218,6 @@ pub(crate) fn has_nonzero_electromagnetic_source(model: &AnalysisModel) -> bool 
             .unwrap_or(false),
         _ => false,
     })
-}
-
-fn target_id(target: &ExcitationTarget) -> String {
-    match target {
-        ExcitationTarget::Region(target) => target.region_id.clone(),
-        ExcitationTarget::ReferencePoint(value) => value.reference_point_id.clone(),
-        ExcitationTarget::Port { port_id } => port_id.clone(),
-        ExcitationTarget::Interface { interface_id } => interface_id.clone(),
-        ExcitationTarget::WholeModel => "whole_model".to_string(),
-    }
 }
 
 fn representation_has_nonzero<Q>(

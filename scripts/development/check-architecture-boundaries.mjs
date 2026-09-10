@@ -90,6 +90,17 @@ for (const { path: sourcePath, text } of allRust) {
   }
 }
 
+const runtimeAnalysisSource = read("crates/runmat-runtime/src/analysis/mod.rs");
+const runtimeAcousticKernelDeclarations = [
+  /\bfn\s+solve_acoustic_/,
+  /\bfn\s+recover_acoustic_/,
+  /\bfn\s+acoustic_(?:axis_derivative|boundary_summary|domain_topology|drive_frequency|helmholtz|known_answer|material_summary|node_count|residual_norm|source_vector|sweep_frequencies)/,
+  /\bstruct\s+Acoustic(?:BoundarySummary|DomainSystem|DomainTopology|GraphEdge|KnownAnswerMetrics|MaterialSummary)\b/,
+];
+if (runtimeAcousticKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
+  fail("runmat-runtime must adapt acoustic operations without owning acoustic numerical kernels");
+}
+
 const builtinsSources = allRust
   .filter(({ path: sourcePath }) => sourcePath.startsWith("crates/runmat-builtins/"))
   .map(({ text }) => text)
