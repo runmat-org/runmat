@@ -16,15 +16,6 @@ fn struct_container_type(ty: &Type) -> Option<Type> {
         Type::Struct { known_fields } => Some(Type::Struct {
             known_fields: known_fields.clone(),
         }),
-        Type::Cell {
-            element_type: Some(element_type),
-            ..
-        } => match &**element_type {
-            Type::Struct { known_fields } => Some(Type::cell_of(Type::Struct {
-                known_fields: known_fields.clone(),
-            })),
-            _ => None,
-        },
         _ => None,
     }
 }
@@ -32,16 +23,6 @@ fn struct_container_type(ty: &Type) -> Option<Type> {
 fn drop_struct_fields(ty: Type) -> Type {
     match ty {
         Type::Struct { .. } => Type::Struct { known_fields: None },
-        Type::Cell {
-            element_type: Some(element_type),
-            ..
-        } => match *element_type {
-            Type::Struct { .. } => Type::cell_of(Type::Struct { known_fields: None }),
-            other => Type::Cell {
-                element_type: Some(Box::new(other)),
-                length: None,
-            },
-        },
         other => other,
     }
 }

@@ -506,29 +506,15 @@ pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> Buil
             let names = options.table.variable_names.unwrap_or(names);
             table_from_columns_with_properties(names, columns, options.table.row_names)
         }
-        Value::Cell(cell)
-            if cell
-                .data
-                .iter()
-                .all(|value| matches!(value, Value::Struct(_))) =>
-        {
-            let rows = cell.data.len();
-            let first = cell.data.iter().find_map(|value| match value {
-                Value::Struct(st) => Some(st),
-                _ => None,
-            });
-            let field_names = first
-                .map(|st| st.fields.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default();
+        Value::StructArray(array) => {
+            let rows = array.len();
+            let field_names = array.field_names().cloned().collect::<Vec<_>>();
             let mut columns = Vec::with_capacity(field_names.len());
             for name in &field_names {
-                let mut values = Vec::with_capacity(rows);
-                for value in &cell.data {
-                    let Value::Struct(st) = value else {
-                        unreachable!("checked above")
-                    };
-                    values.push(st.fields.get(name).cloned().unwrap_or(Value::Num(f64::NAN)));
-                }
+                let values = array
+                    .field_values(name)
+                    .ok_or_else(|| invalid_variable("structure array field is missing"))?
+                    .to_vec();
                 if let Some(integer_column) = compatible_integer_column(&values, rows)? {
                     columns.push(integer_column);
                 } else {
@@ -591,11 +577,9 @@ pub(crate) async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> Buil
             })?;
             st.insert(name.clone(), row_value(value, row)?);
         }
-        rows.push(Value::Struct(st));
+        rows.push(st);
     }
-    CellArray::new(rows, height, 1)
-        .map(Value::Cell)
-        .map_err(invalid_variable)
+    runmat_value::StructArray::normalize(names, rows, vec![height, 1]).map_err(invalid_variable)
 }
 
 #[runtime_builtin(
@@ -753,11 +737,18 @@ mod cell2table_tests {
         first.insert("id", Value::Int(IntValue::U64(u64::MAX)));
         let mut second = StructValue::new();
         second.insert("id", Value::Int(IntValue::U64(1_u64 << 63)));
-        let structs = CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 2, 1)
-            .expect("struct array");
+        let structs = runmat_value::StructArray::with_fields(
+            vec!["id".into()],
+            vec![first.clone(), second.clone()],
+            vec![2, 1],
+        )
+        .expect("structure array");
 
-        let table =
-            block_on(struct2table_builtin(Value::Cell(structs), Vec::new())).expect("struct2table");
+        let table = block_on(struct2table_builtin(
+            Value::StructArray(structs),
+            Vec::new(),
+        ))
+        .expect("struct2table");
         let variables = table_variables(&into_table_object(table, "test").unwrap()).unwrap();
         let Value::Tensor(ids) = variables.fields.get("id").expect("id variable") else {
             panic!("expected homogeneous integer variable");
@@ -766,6 +757,12 @@ mod cell2table_tests {
             ids.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
         );
+
+        let cell = CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 2, 1)
+            .expect("ordinary cell array");
+        let error = block_on(struct2table_builtin(Value::Cell(cell), Vec::new()))
+            .expect_err("cell contents do not define structure-array identity");
+        assert!(error.message().contains("expected struct or struct array"));
     }
 
     #[test]

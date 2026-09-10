@@ -16,7 +16,8 @@ use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericStorage;
 use runmat_value::{
-    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
+    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, StringArray, StructValue,
+    Tensor, Value,
 };
 
 use crate::builtins::common::broadcast as matlab_broadcast;
@@ -1871,11 +1872,18 @@ fn convert_contained_strings_to_chars(value: Value) -> BuiltinResult<Value> {
             make_cell_with_shape(values, cell.shape)
                 .map_err(|e| compat_error("convertContainedStringsToChars", e))
         }
-        Value::Struct(mut st) => {
-            for value in st.fields.values_mut() {
-                *value = convert_contained_member_to_chars(value.clone())?;
-            }
-            Ok(Value::Struct(st))
+        Value::Struct(st) => Ok(Value::Struct(StructValue {
+            fields: st
+                .fields
+                .into_iter()
+                .map(|(name, value)| {
+                    convert_contained_member_to_chars(value).map(|value| (name, value))
+                })
+                .collect::<BuiltinResult<_>>()?,
+        })),
+        Value::StructArray(array) => {
+            let array = array.try_map_values(convert_contained_member_to_chars)?;
+            Ok(Value::StructArray(array))
         }
         other => Ok(other),
     }
@@ -1892,7 +1900,9 @@ fn string_scalar_to_chars(text: &str) -> CharArray {
 fn convert_contained_member_to_chars(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::String(_) | Value::StringArray(_) => convert_strings_to_chars(value),
-        Value::Cell(_) | Value::Struct(_) => convert_contained_strings_to_chars(value),
+        Value::Cell(_) | Value::Struct(_) | Value::StructArray(_) => {
+            convert_contained_strings_to_chars(value)
+        }
         other => Ok(other),
     }
 }
@@ -3701,6 +3711,33 @@ mod tests {
             panic!("expected cell");
         };
         assert_eq!(preserved.data, vec![resident]);
+    }
+
+    #[test]
+    fn convert_contained_strings_maps_typed_structure_arrays() {
+        let mut first = StructValue::new();
+        first.insert("label", Value::String("first".into()));
+        let mut second = StructValue::new();
+        second.insert("label", Value::String("second".into()));
+        let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1]).unwrap();
+
+        let converted = block(convert_contained_strings_to_chars_builtin(
+            Value::StructArray(array),
+            Vec::new(),
+        ))
+        .unwrap();
+        let Value::StructArray(converted) = converted else {
+            panic!("expected structure array");
+        };
+        assert_eq!(converted.shape(), [2, 1]);
+        assert!(matches!(
+            converted.get_linear(0).unwrap().fields.get("label"),
+            Some(Value::CharArray(value)) if value.data.iter().collect::<String>() == "first"
+        ));
+        assert!(matches!(
+            converted.get_linear(1).unwrap().fields.get("label"),
+            Some(Value::CharArray(value)) if value.data.iter().collect::<String>() == "second"
+        ));
     }
 
     #[test]

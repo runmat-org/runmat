@@ -578,6 +578,8 @@ async fn interpret_with_vars_inner(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(RuntimeError::new)?;
     let _debug_frame_guard = runmat_runtime::debug_context::push_frame(
         current_function_name.unwrap_or("<main>"),
         bytecode.source_id,
@@ -742,6 +744,7 @@ async fn run_interpreter_inner(
     let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
+    let mut sequence_register = interp_dispatch::SequenceState::default();
     while pc < bytecode.instructions.len() {
         if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
             break;
@@ -921,6 +924,7 @@ async fn run_interpreter_inner(
             interp_dispatch::DispatchState {
                 stack: &mut stack,
                 vars: &mut vars,
+                sequence_register: &mut sequence_register,
                 context: &mut context,
                 try_stack: &mut try_stack,
                 last_exception: &mut last_exception,
@@ -943,19 +947,22 @@ async fn run_interpreter_inner(
         .await;
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
-            Err(err) => match interp_dispatch::redirect_exception_to_catch(
-                err,
-                &mut try_stack,
-                &mut vars,
-                &mut last_exception,
-                &mut pc,
-                refresh_workspace_state,
-            ) {
-                interp_dispatch::ExceptionHandling::Caught => {
-                    continue;
+            Err(err) => {
+                sequence_register.clear(&mut stack);
+                match interp_dispatch::redirect_exception_to_catch(
+                    err,
+                    &mut try_stack,
+                    &mut vars,
+                    &mut last_exception,
+                    &mut pc,
+                    refresh_workspace_state,
+                ) {
+                    interp_dispatch::ExceptionHandling::Caught => {
+                        continue;
+                    }
+                    interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
                 }
-                interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
-            },
+            }
         };
         if let Some(decision) = dispatch_result {
             match decision {
@@ -1018,13 +1025,53 @@ async fn run_interpreter_inner(
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMemberDynamic
             | Instr::LoadMemberDynamicOrInit
+            | Instr::LoadMemberSequence { .. }
+            | Instr::LoadMemberDynamicSequence { .. }
+            | Instr::MemberSequenceCardinality
+            | Instr::LoadMemberSequenceUsingOutputSlot { .. }
+            | Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. }
+            | Instr::CaptureCallOutputSequence
+            | Instr::CaptureScalarSequence
+            | Instr::CaptureMemberSequence { .. }
+            | Instr::CaptureMemberDynamicSequence { .. }
+            | Instr::CaptureCellContentsSequence { .. }
+            | Instr::CaptureReturnedOutputsSequence { .. }
+            | Instr::ReadSubscriptPath { .. }
+            | Instr::CaptureSubscriptPath { .. }
+            | Instr::BeginSubscriptEndReceiver { .. }
+            | Instr::LoadSubscriptEnd { .. }
+            | Instr::FinishSubscriptEndReceiver { .. }
+            | Instr::BeginOutputAssignment { .. }
+            | Instr::PrepareFixedOutputTarget
+            | Instr::PrepareDiscardOutputTarget
+            | Instr::PrepareMemberSequenceOutputTarget { .. }
+            | Instr::PrepareMemberDynamicSequenceOutputTarget { .. }
+            | Instr::PrepareIndexedMemberSequenceOutputTarget { .. }
+            | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
+            | Instr::PrepareCellContentsSequenceOutputTarget { .. }
+            | Instr::BeginSequenceOutputTarget { .. }
+            | Instr::PrepareMemberPathStep(_)
+            | Instr::PrepareDynamicMemberPathStep
+            | Instr::BeginPreparedIndexSelectors { .. }
+            | Instr::LoadPreparedIndexEnd { .. }
+            | Instr::BeginContextualIndexSelectors { .. }
+            | Instr::LoadContextualIndexEnd { .. }
+            | Instr::FinishContextualIndexSelectors { .. }
+            | Instr::PrepareParenthesesPathStep { .. }
+            | Instr::PrepareBracesPathStep { .. }
+            | Instr::FinishMemberSequenceOutputTarget(_)
+            | Instr::FinishDynamicMemberSequenceOutputTarget
+            | Instr::FinishCellContentsSequenceOutputTarget { .. }
+            | Instr::LoadPreparedOutputCardinality
+            | Instr::CommitPreparedOutputTargets { .. }
             | Instr::StoreMember(_)
             | Instr::StoreMemberOrInit(_)
             | Instr::StoreMemberDynamic
             | Instr::StoreMemberDynamicOrInit
+            | Instr::StoreMemberSequence(_)
+            | Instr::StoreMemberDynamicSequence
             | Instr::Index(_)
             | Instr::IndexSlice(_, _, _, _)
-            | Instr::IndexSliceExpr { .. }
             | Instr::IndexCell { .. }
             | Instr::IndexCellExpand { .. }
             | Instr::IndexCellList { .. }
@@ -1034,8 +1081,6 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexCellDelete { .. }
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceDelete(_, _, _, _)
-            | Instr::StoreSliceExpr { .. }
-            | Instr::StoreSliceExprDelete { .. }
             | Instr::CallMethodOrMemberIndexMulti { .. }
             | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. }
             | Instr::LoadMethod(_)
@@ -1090,6 +1135,7 @@ async fn run_interpreter_inner(
             | Instr::DeclarePersistent(_)
             | Instr::DeclarePersistentNamed(_, _)
             | Instr::CreateCell2D(_, _)
+            | Instr::CreateCellFromSequences { .. }
             | Instr::CreateStructLiteral(_)
             | Instr::CreateObjectLiteral { .. }
             | Instr::Add
@@ -1121,6 +1167,7 @@ async fn run_interpreter_inner(
             | Instr::Collective { .. }
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
+            | Instr::CreateMatrixFromSequences { .. }
             | Instr::CreateMatrixDynamic(_)
             | Instr::CreateRange(_)
             | Instr::PackToRow(_)

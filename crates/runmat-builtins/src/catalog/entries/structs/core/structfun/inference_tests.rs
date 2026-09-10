@@ -30,13 +30,13 @@ fn structure(fields: &[(&str, ValueFact)]) -> ValueFact {
     structure_with_completeness(fields, true)
 }
 fn structure_with_completeness(fields: &[(&str, ValueFact)], fields_complete: bool) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: fields
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        fields
             .iter()
             .map(|(name, value)| ((*name).into(), value.clone()))
             .collect::<BTreeMap<_, _>>(),
         fields_complete,
-    }))
+    )))
 }
 
 #[test]

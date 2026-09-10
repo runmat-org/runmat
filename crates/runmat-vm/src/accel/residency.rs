@@ -70,6 +70,19 @@ fn clear_handles_in_value_excluding_with_visited(
                 )?;
             }
         }
+        Value::StructArray(array) => {
+            let mut result = Ok(());
+            array.for_each_value(|elem| {
+                if result.is_ok() {
+                    result = clear_handles_in_value_excluding_with_visited(
+                        elem,
+                        keep_handles,
+                        visited_handle_targets,
+                    );
+                }
+            });
+            result?;
+        }
         Value::Object(object_value) => {
             for elem in object_value.properties.values() {
                 clear_handles_in_value_excluding_with_visited(
@@ -178,6 +191,19 @@ fn collect_gpu_handle_identities_with_visited(
             for elem in struct_value.fields.values() {
                 collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
             }
+        }
+        Value::StructArray(array) => {
+            let mut result = Ok(());
+            array.for_each_value(|elem| {
+                if result.is_ok() {
+                    result = collect_gpu_handle_identities_with_visited(
+                        elem,
+                        output,
+                        visited_handle_targets,
+                    );
+                }
+            });
+            result?;
         }
         Value::Object(object_value) => {
             for elem in object_value.properties.values() {

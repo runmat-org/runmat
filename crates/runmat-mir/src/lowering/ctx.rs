@@ -1,4 +1,4 @@
-use crate::{MirLocal, MirLocalId, MirLocalKind};
+use crate::{MirLocal, MirLocalId, MirLocalKind, MirSequenceLocalId};
 use runmat_hir::{BindingId, FunctionId, HirError, HirFunction, Span};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -13,6 +13,7 @@ pub(crate) struct MirLoweringContext {
     active_spmd_regions: RefCell<Vec<runmat_types::ParallelRegionId>>,
     next_distributed_value: Cell<u32>,
     next_collective: Cell<u32>,
+    next_sequence_local: Cell<usize>,
 }
 
 impl Default for MirLoweringContext {
@@ -26,6 +27,7 @@ impl Default for MirLoweringContext {
             active_spmd_regions: RefCell::new(Vec::new()),
             next_distributed_value: Cell::new(0),
             next_collective: Cell::new(0),
+            next_sequence_local: Cell::new(0),
         }
     }
 }
@@ -160,6 +162,12 @@ impl MirLoweringContext {
             span,
         });
         local
+    }
+
+    pub(crate) fn fresh_sequence_local(&self) -> MirSequenceLocalId {
+        let next = self.next_sequence_local.get();
+        self.next_sequence_local.set(next + 1);
+        MirSequenceLocalId(next)
     }
 
     pub(crate) fn take_temp_locals(&self) -> Vec<MirLocal> {

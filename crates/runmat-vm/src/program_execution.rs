@@ -89,12 +89,16 @@ pub fn materialize_deferred_call(
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
-    let artifact = ProgramArtifact::materialize(
-        &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        program.to_vec(),
-    )
-    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    let executable_form = if matches!(
+        &callable,
+        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+    ) {
+        ExecutableForm::InterpreterScriptV2
+    } else {
+        ExecutableForm::InterpreterBytecodeV2
+    };
+    let artifact = ProgramArtifact::materialize(&recipe, executable_form, program.to_vec())
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let arguments = arguments
         .iter()
         .map(runmat_runtime::execution::value_codec::encode_inline_value)
@@ -155,8 +159,8 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
         digest,
         digest,
         ProgramEnvironment::new(
-            1,
-            1,
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
             Digest::sha256(format!(
                 "runmat-runtime-abi-v1\0{}",
                 env!("CARGO_PKG_VERSION")
@@ -189,6 +193,11 @@ async fn execute_program_request_in_context(
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
+    if let Err(error) = request.recipe.program_revision.validate_current_compiler() {
+        return ProgramExecutionResponse::Failure {
+            message: format!("worker rejected compiler-incompatible program: {error}"),
+        };
+    }
     if request.artifact.form == ExecutableForm::TestAttemptV1 {
         return ProgramExecutionResponse::Failure {
             message: "test-attempt programs require a test-capable execution host".into(),
@@ -212,10 +221,40 @@ async fn execute_program_request_in_context(
     let _assignment = runtime.enter_execution_assignment(request.assignment.clone());
     let _job = runtime.enter_execution_job(request.job_id);
     if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
+        return ProgramExecutionResponse::Failure {
+            message: format!(
+                "worker rejected legacy script bytecode; rebuild the program for bytecode schema {}",
+                crate::BYTECODE_SCHEMA_VERSION
+            ),
+        };
+    }
+    if request.artifact.form == ExecutableForm::InterpreterScriptV2
+        && !matches!(
+            &request.callable,
+            ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+        )
+    {
         return execute_script_request(request, runtime).await;
     }
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request, runtime).await;
+    }
+    if request.artifact.form == ExecutableForm::InterpreterBytecodeV1 {
+        return ProgramExecutionResponse::Failure {
+            message: format!(
+                "worker rejected legacy interpreter bytecode; expected schema {}. Rebuild the program with this RunMat version",
+                crate::BYTECODE_SCHEMA_VERSION
+            ),
+        };
+    }
+    if request.artifact.form != ExecutableForm::InterpreterBytecodeV2
+        && request.artifact.form != ExecutableForm::InterpreterScriptV2
+    {
+        return ProgramExecutionResponse::Failure {
+            message:
+                "worker rejected an unsupported interpreter artifact form; rebuild the program"
+                    .into(),
+        };
     }
     if matches!(request.callable, ProgramCallable::ParallelRegion { .. }) {
         return execute_parallel_region_request(request, runtime).await;
@@ -224,7 +263,7 @@ async fn execute_program_request_in_context(
         return execute_spmd_region_request(request, runtime).await;
     }
     let registry: crate::FunctionRegistry =
-        match serde_json::from_slice(&request.artifact.executable_bytes) {
+        match crate::decode_interpreter_program_v2(&request.artifact.executable_bytes) {
             Ok(registry) => registry,
             Err(error) => {
                 return ProgramExecutionResponse::Failure {
@@ -330,15 +369,15 @@ async fn execute_spmd_region_request(
             }
         }
     };
-    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
-    {
-        Ok(bytecode) => bytecode,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid SPMD bytecode: {error}"),
+    let bytecode: crate::Bytecode =
+        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
+            Ok(bytecode) => bytecode,
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected invalid SPMD bytecode: {error}"),
+                }
             }
-        }
-    };
+        };
     let Some(executable) = bytecode
         .spmd_regions
         .iter()
@@ -466,15 +505,15 @@ async fn execute_parallel_region_request(
             message: "parallel region tasks return one typed result envelope".into(),
         };
     }
-    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
-    {
-        Ok(bytecode) => bytecode,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected invalid parallel bytecode: {error}"),
+    let bytecode: crate::Bytecode =
+        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
+            Ok(bytecode) => bytecode,
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected invalid parallel bytecode: {error}"),
+                }
             }
-        }
-    };
+        };
     let Some(executable) = bytecode
         .parfor_regions
         .iter()
@@ -561,6 +600,19 @@ async fn execute_unit_request(
     request: ProgramExecutionRequest,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
+    let admission = match runmat_execution::ExecutableUnitEnvelope::admission(
+        &request.artifact.executable_bytes,
+    ) {
+        Ok(admission) => admission,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected an invalid executable unit header: {error}"),
+            }
+        }
+    };
+    if let Some(message) = unsupported_executable_revisions(&admission.revisions) {
+        return ProgramExecutionResponse::Failure { message };
+    }
     let envelope = match request.artifact.executable_unit() {
         Ok(Some(envelope)) => envelope,
         Ok(None) => {
@@ -574,6 +626,10 @@ async fn execute_unit_request(
             }
         }
     };
+    let revisions = &envelope.manifest.revisions;
+    if let Some(message) = unsupported_executable_revisions(revisions) {
+        return ProgramExecutionResponse::Failure { message };
+    }
     let Some(bytecode_payload) =
         envelope.component(runmat_execution::ExecutableComponentKind::Bytecode)
     else {
@@ -589,6 +645,7 @@ async fn execute_unit_request(
             }
         }
     };
+
     if !bytecode.bound_functions.is_empty()
         || !bytecode.function_registry.functions.is_empty()
         || bytecode.layout.is_some()
@@ -640,6 +697,37 @@ async fn execute_unit_request(
             execute_function_request(&request, &registry, &runtime).await
         }
     }
+}
+
+fn unsupported_executable_revisions(
+    revisions: &runmat_execution::ExecutableComponentRevisions,
+) -> Option<String> {
+    let supported = revisions.mir_schema == runmat_mir::MIR_SCHEMA_VERSION
+        && revisions.analysis_schema == runmat_mir::analysis::ANALYSIS_STORE_SCHEMA_VERSION
+        && revisions.bytecode_schema == crate::BYTECODE_SCHEMA_VERSION
+        && revisions.vm_layout_schema == crate::VM_LAYOUT_SCHEMA_VERSION
+        && revisions.function_registry_schema == crate::FUNCTION_REGISTRY_SCHEMA_VERSION
+        && revisions.contract_schema == runmat_types::RUNMAT_TYPES_SCHEMA.major
+        && u32::from(revisions.catalog_schema) == runmat_builtins::BUILTIN_CATALOG_SCHEMA;
+    (!supported).then(|| {
+        format!(
+            "worker rejected stale executable component revisions: MIR actual {} expected {}; analysis actual {} expected {}; bytecode actual {} expected {}; VM layout actual {} expected {}; function registry actual {} expected {}; contract actual {} expected {}; catalog actual {} expected {}. Rebuild the program with this RunMat version",
+            revisions.mir_schema,
+            runmat_mir::MIR_SCHEMA_VERSION,
+            revisions.analysis_schema,
+            runmat_mir::analysis::ANALYSIS_STORE_SCHEMA_VERSION,
+            revisions.bytecode_schema,
+            crate::BYTECODE_SCHEMA_VERSION,
+            revisions.vm_layout_schema,
+            crate::VM_LAYOUT_SCHEMA_VERSION,
+            revisions.function_registry_schema,
+            crate::FUNCTION_REGISTRY_SCHEMA_VERSION,
+            revisions.contract_schema,
+            runmat_types::RUNMAT_TYPES_SCHEMA.major,
+            revisions.catalog_schema,
+            runmat_builtins::BUILTIN_CATALOG_SCHEMA,
+        )
+    })
 }
 
 async fn execute_function_request(
@@ -778,6 +866,82 @@ mod tests {
     use super::{execute_program_request, recipe_supports_capabilities};
     use crate::{Bytecode, Instr};
 
+    fn script_request(
+        environment: ProgramEnvironment,
+        form: ExecutableForm,
+        executable_bytes: Vec<u8>,
+    ) -> ProgramExecutionRequest {
+        let revision = ProgramRevision::new(
+            Digest::sha256(b"fixture-graph"),
+            Digest::sha256(b"fixture-source"),
+            environment,
+        )
+        .unwrap();
+        let recipe = ProgramBuildRecipe {
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: revision,
+            entrypoint: "script".into(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("portable-script-test"),
+            interop: runmat_types::InteropManifest::empty(),
+            accelerators: Vec::new(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let artifact = ProgramArtifact::materialize(&recipe, form, executable_bytes).unwrap();
+        ProgramExecutionRequest {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            recipe,
+            artifact,
+            callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
+            arguments: Vec::new(),
+            requested_outputs: 1,
+        }
+    }
+
+    fn executable_unit_request(bytes: &[u8]) -> ProgramExecutionRequest {
+        let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(bytes)
+            .expect("frozen executable-unit fixture remains canonically decodable");
+        let recipe = ProgramBuildRecipe {
+            schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: envelope.manifest.identity.program.clone(),
+            entrypoint: envelope.manifest.identity.entrypoint.clone(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: runmat_execution_artifact::ProgramTarget::portable("frozen-unit-test"),
+            interop: envelope.manifest.interop.clone(),
+            accelerators: Vec::new(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let artifact =
+            ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes.to_vec())
+                .unwrap();
+        ProgramExecutionRequest {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            recipe,
+            artifact,
+            callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
+            arguments: Vec::new(),
+            requested_outputs: 1,
+        }
+    }
+
     #[test]
     fn exact_script_program_executes_top_level_bytecode() {
         let mut bytecode = Bytecode::with_instructions(
@@ -789,8 +953,8 @@ mod tests {
             Digest::sha256(b"graph"),
             Digest::sha256(b"source"),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",
@@ -816,8 +980,8 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::InterpreterScriptV1,
-            serde_json::to_vec(&bytecode).unwrap(),
+            ExecutableForm::InterpreterScriptV2,
+            crate::encode_interpreter_script_v2(&bytecode).unwrap(),
         )
         .unwrap();
         let response =
@@ -836,13 +1000,87 @@ mod tests {
     }
 
     #[test]
+    fn worker_rejects_stale_compiler_and_frozen_v1_before_decoding() {
+        let bytecode = crate::encode_interpreter_script_v2(&Bytecode::with_instructions(
+            vec![Instr::Return],
+            0,
+        ))
+        .unwrap();
+        let stale_compiler = ProgramEnvironment::new(
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            1,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap();
+        let response = futures::executor::block_on(execute_program_request(script_request(
+            stale_compiler,
+            ExecutableForm::InterpreterScriptV2,
+            bytecode,
+        )));
+        assert!(matches!(
+            response,
+            ProgramExecutionResponse::Failure { message }
+                if message.contains("compiler schema actual 1 expected 2")
+        ));
+
+        let current = ProgramEnvironment::new(
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "matlab",
+        )
+        .unwrap();
+        let response = futures::executor::block_on(execute_program_request(script_request(
+            current,
+            ExecutableForm::InterpreterScriptV1,
+            include_bytes!("../tests/fixtures/interpreter-script-legacy-raw.json").to_vec(),
+        )));
+        assert!(matches!(
+            response,
+            ProgramExecutionResponse::Failure { message }
+                if message.contains("legacy script bytecode")
+        ));
+    }
+
+    #[test]
+    fn worker_rejects_frozen_unit_components_and_compiler_independently() {
+        let stale_components = include_bytes!(
+            "../../runmat-execution/tests/fixtures/executable-unit-stale-components.json"
+        );
+        let response = futures::executor::block_on(execute_program_request(
+            executable_unit_request(stale_components),
+        ));
+        assert!(matches!(
+            response,
+            ProgramExecutionResponse::Failure { message }
+                if message.contains("MIR actual 2 expected 3")
+                    && message.contains("analysis actual 2 expected 3")
+                    && message.contains("bytecode actual 6 expected 7")
+        ));
+
+        let compiler_one =
+            include_bytes!("../../runmat-execution/tests/fixtures/executable-unit-compiler-1.json");
+        let response = futures::executor::block_on(execute_program_request(
+            executable_unit_request(compiler_one),
+        ));
+        assert!(matches!(
+            response,
+            ProgramExecutionResponse::Failure { message }
+                if message.contains("compiler schema actual 1 expected 2")
+        ));
+    }
+
+    #[test]
     fn generic_vm_rejects_meshing_workload_for_specialized_host() {
         let revision = ProgramRevision::new(
             Digest::sha256(b"mesh-graph"),
             Digest::sha256(b"mesh-source"),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",
@@ -898,8 +1136,8 @@ mod tests {
             Digest::sha256(b"capability-graph"),
             Digest::sha256(b"capability-source"),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",

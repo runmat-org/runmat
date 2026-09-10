@@ -22,7 +22,7 @@ use crate::builtins::common::tensor;
 use crate::builtins::math::linalg::ops::matrix_arithmetic::{
     mldivide::mldivide_eval, mrdivide::mrdivide_eval,
 };
-use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "decomposition";
 const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
@@ -396,7 +396,7 @@ const UNARY_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Matrix decomposition object.",
 }];
 
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -405,18 +405,11 @@ const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Matrix decomposition object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Indexing payload.",
+        description: "Standard substruct indexing path.",
     },
 ];
 
@@ -462,7 +455,7 @@ const UNARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
 }];
 
 const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = decomposition.subsref(obj, kind, payload)",
+    label: "out = decomposition.subsref(obj, S)",
     inputs: &SUBSREF_INPUTS,
     outputs: &OUTPUT,
 }];
@@ -703,13 +696,21 @@ fn is_nonfloating_coefficient_matrix(value: &Value) -> bool {
     ),
     builtin_path = "crate::builtins::math::linalg::factor::decomposition"
 )]
-async fn decomposition_subsref(obj: Value, kind: String, payload: Value) -> BuiltinResult<Value> {
-    if kind != OBJECT_INDEX_MEMBER {
+async fn decomposition_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(obj, path, decomposition_read_step, None).await
+}
+
+async fn decomposition_read_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> BuiltinResult<Value> {
+    if step.kind() != crate::object::indexing::ObjectIndexKind::Member {
         return Err(invalid(
             "decomposition objects only support property indexing",
         ));
     }
-    let field = text_from_value(&payload)
+    let field = text_from_value(&step.selector_value()?)
         .ok_or_else(|| invalid("decomposition property name must be a text scalar"))?;
     let spec = object_to_spec(&obj)?;
     ensure_nonfloating_object_enabled(&spec)?;
@@ -2207,8 +2208,19 @@ fn complex_div(lhs: (f64, f64), rhs: (f64, f64)) -> BuiltinResult<(f64, f64)> {
 mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::OBJECT_INDEX_MEMBER;
     use futures::executor::block_on;
     use runmat_value::{IntegerComplexStorage, IntegerStorage, NumericScalar};
+
+    async fn decomposition_subsref(
+        obj: Value,
+        kind: String,
+        payload: Value,
+    ) -> BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::decomposition_subsref(obj, subscript).await
+    }
 
     fn tensor(data: &[f64], rows: usize, cols: usize) -> Value {
         Value::Tensor(Tensor::new(data.to_vec(), vec![rows, cols]).unwrap())

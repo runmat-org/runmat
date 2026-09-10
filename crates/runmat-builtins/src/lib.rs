@@ -377,7 +377,7 @@ impl Type {
                 shape: Some(vec![Some(1), Some(1)]),
             },
             Value::Listener(_) => Type::Unknown,
-            Value::Struct(_) => Type::Struct { known_fields: None },
+            Value::Struct(_) | Value::StructArray(_) => Type::Struct { known_fields: None },
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
@@ -726,6 +726,16 @@ pub fn builtin_function_by_name(name: &str) -> Option<&'static BuiltinFunction> 
 
 pub fn builtin_name_is_known(name: &str) -> bool {
     builtin_catalog_entry_by_name(name).is_some() || builtin_function_by_name(name).is_some()
+}
+
+/// Resolve a declaration spelling to the canonical typed builtin identity.
+pub fn builtin_callable_identity_by_name(name: &str) -> Option<runmat_types::CallableIdentity> {
+    let canonical = builtin_catalog_entry_by_name(name)
+        .map(|entry| entry.identity.name)
+        .or_else(|| builtin_function_by_name(name).map(|function| function.name))?;
+    Some(runmat_types::CallableIdentity::Builtin(
+        runmat_types::BuiltinId(canonical.to_owned()),
+    ))
 }
 
 /// Returns the canonical public call descriptor for a builtin.

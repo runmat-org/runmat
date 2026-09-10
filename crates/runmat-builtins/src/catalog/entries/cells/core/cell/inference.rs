@@ -142,10 +142,9 @@ fn empty_element(request: &CallRequest) -> ValueFact {
             elements: Vec::new(),
             elements_complete: true,
         }),
-        Some(ValueKindFact::Struct(_)) => ValueKindFact::Struct(StructFact {
-            fields: BTreeMap::new(),
-            fields_complete: true,
-        }),
+        Some(ValueKindFact::Struct(_)) => {
+            ValueKindFact::Struct(StructFact::array(BTreeMap::new(), true, Vec::new(), true))
+        }
         _ => ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,

@@ -59,14 +59,47 @@ pub fn value_fact(value: &Value) -> ValueFact {
                 &value.shape,
             )
         }
-        Value::Struct(value) => scalar(ValueKindFact::Struct(StructFact {
-            fields: value
+        Value::Struct(value) => scalar(ValueKindFact::Struct(StructFact::scalar(
+            value
                 .fields
                 .iter()
                 .map(|(name, value)| (name.clone(), value_fact(value)))
                 .collect(),
-            fields_complete: true,
-        })),
+            true,
+        ))),
+        Value::StructArray(value) => {
+            let fields = value
+                .field_names()
+                .map(|name| {
+                    let joined = value
+                        .field_values(name)
+                        .into_iter()
+                        .flatten()
+                        .map(value_fact)
+                        .reduce(|left, right| runmat_types::FactJoin::join(&left, &right))
+                        .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue));
+                    (name.clone(), joined)
+                })
+                .collect();
+            dense(
+                ValueKindFact::Struct(StructFact::array(
+                    fields,
+                    true,
+                    value
+                        .elements()
+                        .map(|element| {
+                            element
+                                .fields
+                                .iter()
+                                .map(|(name, value)| (name.clone(), value_fact(value)))
+                                .collect()
+                        })
+                        .collect(),
+                    true,
+                )),
+                value.shape(),
+            )
+        }
         Value::GpuTensor(value) => {
             let kind = gpu_kind(value);
             ValueFact {

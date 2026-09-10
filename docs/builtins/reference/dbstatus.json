@@ -25,7 +25,7 @@
   "behaviors": [
     "`dbstatus` accepts MATLAB-style file and `'-completenames'` text arguments.",
     "RunMat does not yet implement execution breakpoints or `dbstop`, so the current status is an empty 0-by-0 cell list.",
-    "The empty-list representation uses a cell because RunMat does not yet have first-class MATLAB struct arrays."
+    "Until breakpoint records are implemented, the empty result uses the existing 0-by-0 cell-list contract."
   ],
   "examples": [
     {

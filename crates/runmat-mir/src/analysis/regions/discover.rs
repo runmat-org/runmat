@@ -260,6 +260,8 @@ fn statement_is_pure(
                 MirOutputTarget::Discard | MirOutputTarget::Place(MirPlace::Local(_))
             )
         }),
+        MirStmtKind::SequenceAssign { .. } => false,
+        MirStmtKind::CaptureSequence { .. } => false,
         MirStmtKind::Expr(_) => true,
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
@@ -295,6 +297,7 @@ fn rvalue_calls_are_pure(value: &MirRvalue) -> bool {
         }
         MirRvalue::Future { .. }
         | MirRvalue::Spawn(_)
+        | MirRvalue::SubscriptChain(_)
         | MirRvalue::Distributed(_)
         | MirRvalue::Collective(_) => false,
         _ => true,

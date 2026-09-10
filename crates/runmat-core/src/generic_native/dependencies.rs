@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use runmat_hir::{CallableIdentity, FunctionId};
 use runmat_mir::{
-    MirCallArg, MirCallee, MirIndexComponent, MirIndexing, MirOperand, MirPlace, MirRvalue,
-    MirStmt, MirStmtKind, MirTerminatorKind,
+    MirCallArg, MirCallee, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirSubscriptChain, MirTerminatorKind,
 };
 
 pub(super) struct ReferencedFunctions {
@@ -50,21 +50,39 @@ fn visit_operand(operand: &MirOperand, out: &mut ReferencedFunctions) {
 fn visit_call_arg(argument: &MirCallArg, out: &mut ReferencedFunctions) {
     match argument {
         MirCallArg::Single(operand) => visit_operand(operand, out),
-        MirCallArg::Expansion { base, indices, .. } => {
-            visit_operand(base, out);
-            for index in indices {
-                visit_operand(index, out);
-            }
+        MirCallArg::Expansion(source) => {
+            source.visit_operands(|operand| visit_operand(operand, out));
         }
+        MirCallArg::CapturedSequence(_) => {}
     }
 }
 
 fn visit_indexing(indexing: &MirIndexing, out: &mut ReferencedFunctions) {
-    for component in &indexing.components {
-        if let MirIndexComponent::Expr(operand) = component {
-            visit_operand(operand, out);
+    indexing.visit_operands(|operand| visit_operand(operand, out));
+    indexing.visit_expression_regions(|region| {
+        for step in region.steps() {
+            match step {
+                runmat_mir::MirExpressionStep::Let { value, .. } => visit_rvalue(value, out),
+                runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_operands(|operand| visit_operand(operand, out));
+                }
+            }
         }
-    }
+    });
+}
+
+fn visit_subscript_chain(chain: &MirSubscriptChain, out: &mut ReferencedFunctions) {
+    chain.visit_operands(|operand| visit_operand(operand, out));
+    chain.visit_expression_regions(|region| {
+        for step in region.steps() {
+            match step {
+                runmat_mir::MirExpressionStep::Let { value, .. } => visit_rvalue(value, out),
+                runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_operands(|operand| visit_operand(operand, out));
+                }
+            }
+        }
+    });
 }
 
 fn visit_place(place: &MirPlace, out: &mut ReferencedFunctions) {
@@ -125,7 +143,9 @@ fn visit_rvalue(value: &MirRvalue, out: &mut ReferencedFunctions) {
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                visit_operand(element, out);
+                if let Some(operand) = element.operand() {
+                    visit_operand(operand, out);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -137,8 +157,9 @@ fn visit_rvalue(value: &MirRvalue, out: &mut ReferencedFunctions) {
             visit_operand(base, out);
             visit_indexing(indexing, out);
         }
+        MirRvalue::SubscriptChain(chain) => visit_subscript_chain(chain, out),
         MirRvalue::Member { base, .. } => visit_operand(base, out),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             visit_operand(base, out);
             visit_operand(member, out);
         }
@@ -164,11 +185,24 @@ fn visit_statement(statement: &MirStmt, out: &mut ReferencedFunctions) {
         }
         MirStmtKind::MultiAssign { targets, value } => {
             for target in &targets.targets {
-                if let runmat_mir::MirOutputTarget::Place(place) = target {
-                    visit_place(place, out);
+                match target {
+                    runmat_mir::MirOutputTarget::Place(place) => visit_place(place, out),
+                    runmat_mir::MirOutputTarget::Sequence(target) => {
+                        visit_place(target.base(), out);
+                        target.visit_operands(|operand| visit_operand(operand, out));
+                    }
+                    runmat_mir::MirOutputTarget::Discard => {}
                 }
             }
             visit_rvalue(value, out);
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            visit_place(target.base(), out);
+            target.visit_operands(|operand| visit_operand(operand, out));
+            visit_rvalue(value, out);
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            source.visit_operands(|operand| visit_operand(operand, out));
         }
         MirStmtKind::Expr(value) => visit_rvalue(value, out),
         MirStmtKind::PlaceMutation(mutation) => visit_place(&mutation.place, out),

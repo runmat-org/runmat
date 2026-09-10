@@ -16,8 +16,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "`[S,Pout] = orderfields(...)` returns the original position of every field in the new order. `Pout` is a host double column vector and can be passed to another structure with the same field schema.",
         "The operation applies only to top-level fields. Nested structures retain their own field order.",
     ] },
-    BuiltinDocumentationSection { heading: "Represented arrays and resident values", paragraphs: &[
-        "RunMat currently represents structure arrays with a cell-backed container. Every element must have the same field set; `orderfields` preserves the container dimensions and applies one order to every element.",
+    BuiltinDocumentationSection { heading: "Structure arrays and resident values", paragraphs: &[
+        "Every structure-array element has the same field set and order. `orderfields` preserves the array dimensions and applies one order to every element.",
         "Field ordering changes host metadata only. Fixed-width integers retain their exact class and payload, and nested device handles retain provider ownership without a gather or accelerator kernel.",
     ] },
 ];
@@ -71,8 +71,8 @@ const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("orderfields"), slug: Some("orderfields"),
-    summary: "Reorder the top-level fields of a structure or represented structure array.",
-    description: "`orderfields` sorts fields or applies a reference, name list, or numeric permutation while preserving values and represented-array dimensions.",
+    summary: "Reorder the top-level fields of a structure or structure array.",
+    description: "`orderfields` sorts fields or applies a reference, name list, or numeric permutation while preserving values and structure-array dimensions.",
     keywords: &[
         "orderfields",
         "field order",

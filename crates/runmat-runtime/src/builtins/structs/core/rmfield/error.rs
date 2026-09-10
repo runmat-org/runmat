@@ -9,10 +9,6 @@ pub(super) fn invalid_target(value: &runmat_value::Value) -> crate::RuntimeError
     build(format!("{} (got {value:?})", error.message), error)
 }
 
-pub(super) fn invalid_target_kind() -> crate::RuntimeError {
-    build_from(&runmat_builtins::RMFIELD_ERROR_INVALID_TARGET)
-}
-
 pub(super) fn field_name_type(context: Option<&str>) -> crate::RuntimeError {
     contextual(&runmat_builtins::RMFIELD_ERROR_FIELD_NAME_TYPE, context)
 }
@@ -24,11 +20,6 @@ pub(super) fn empty_field_name(context: Option<&str>) -> crate::RuntimeError {
 pub(super) fn missing_field(name: &str) -> crate::RuntimeError {
     let error = &runmat_builtins::RMFIELD_ERROR_MISSING_FIELD;
     build(format!("{} '{name}'.", error.message), error)
-}
-
-pub(super) fn rebuild(message: impl std::fmt::Display) -> crate::RuntimeError {
-    let error = &runmat_builtins::RMFIELD_ERROR_REBUILD_FAILED;
-    build(format!("{}: {message}", error.message), error)
 }
 
 fn contextual(

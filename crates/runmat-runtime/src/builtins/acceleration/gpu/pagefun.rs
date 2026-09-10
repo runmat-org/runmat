@@ -1239,7 +1239,7 @@ impl TypeName for Value {
                 numeric_array_type_name(tensor.numeric_dtype(), "complex")
             }
             Value::Cell(_) => "cell array",
-            Value::Struct(_) => "struct",
+            Value::Struct(_) | Value::StructArray(_) => "struct",
             Value::GpuTensor(_) => "gpuArray",
             Value::ObjectArray(_) | Value::Object(_) => "object",
             Value::HandleObject(_) => "handle object",

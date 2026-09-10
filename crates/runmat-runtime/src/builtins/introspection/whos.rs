@@ -11,7 +11,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
+use runmat_value::{StructArray, StructValue, Value};
 
 use crate::builtins::common::shape::value_dimensions;
 use crate::builtins::common::spec::{
@@ -21,7 +21,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::whos_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::whos")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -55,7 +55,7 @@ const WHOS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Cell array of structs describing matching variables.",
+    description: "Structure array describing matching variables.",
 }];
 
 const WHOS_SIG_NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
@@ -244,10 +244,28 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut values = Vec::with_capacity(records.len());
     for record in records {
-        values.push(record.into_value()?);
+        let Value::Struct(value) = record.into_value()? else {
+            unreachable!("whos records are scalar structures")
+        };
+        values.push(value);
     }
     let rows = values.len();
-    make_cell(values, rows, 1).map_err(|err| build_runtime_error(err).with_builtin("whos").build())
+    StructArray::normalize(
+        vec![
+            "name".into(),
+            "size".into(),
+            "bytes".into(),
+            "class".into(),
+            "global".into(),
+            "sparse".into(),
+            "complex".into(),
+            "nesting".into(),
+            "persistent".into(),
+        ],
+        values,
+        vec![rows, 1],
+    )
+    .map_err(|error| build_runtime_error(error).with_builtin("whos").build())
 }
 
 #[derive(Debug)]
@@ -618,6 +636,22 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             }
             total
         }
+        Value::StructArray(array) => {
+            let mut total = 0usize;
+            let mut error = None;
+            array.for_each_value(|value| {
+                if error.is_none() {
+                    match value_memory_bytes(value, seen) {
+                        Ok(bytes) => total = total.saturating_add(bytes),
+                        Err(err) => error = Some(err),
+                    }
+                }
+            });
+            if let Some(error) = error {
+                return Err(error);
+            }
+            total
+        }
         Value::GpuTensor(handle) => {
             let elem_size = if handle_is_logical(handle) {
                 1
@@ -794,14 +828,7 @@ pub(crate) mod tests {
 
     fn structs_from_value(value: Value) -> Vec<TestStruct> {
         match value {
-            Value::Cell(cell) => cell
-                .data
-                .into_iter()
-                .map(|value| match value {
-                    Value::Struct(st) => st,
-                    other => panic!("expected struct entry, got {other:?}"),
-                })
-                .collect(),
+            Value::StructArray(array) => array.into_elements(),
             Value::Struct(st) => vec![st],
             other => panic!("expected struct array, got {other:?}"),
         }

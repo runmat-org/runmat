@@ -31,7 +31,7 @@
       "builtins::io::json::jsondecode::tests::jsondecode_string_array",
       "builtins::io::json::jsondecode::tests::jsondecode_mixed_array_returns_cell",
       "builtins::io::json::jsondecode::tests::jsondecode_rectangular_cell_array_preserves_layout",
-      "builtins::io::json::jsondecode::tests::jsondecode_array_of_objects_returns_cell",
+      "builtins::io::json::jsondecode::tests::jsondecode_array_of_objects_returns_typed_column_vector",
       "builtins::io::json::jsondecode::tests::jsondecode_null_returns_empty_double",
       "builtins::io::json::jsondecode::tests::jsondecode_round_trip_with_jsonencode"
     ]
@@ -42,7 +42,7 @@
     "JSON numbers decode to double-precision scalars or dense tensors that follow MATLAB's column-major layout.",
     "JSON booleans decode to logical scalars or logical arrays with the same shape as the source JSON array.",
     "JSON strings decode to char row vectors; homogeneous JSON arrays of strings become string arrays with matching dimensions.",
-    "JSON objects decode to scalar structs whose field names match the JSON keys; arrays of objects become cell arrays of structs that preserve element order.",
+    "JSON objects decode to scalar structs with fields in deterministic canonical lexical key order. Rectangular arrays of objects with one common field set become typed struct arrays in column-major order; differing field sets remain cell arrays of scalar structs.",
     "JSON arrays decode to numeric, logical, or string arrays when every element shares the same type and the array is perfectly rectangular. Rectangular heterogeneous arrays (including those that mix `null` with other types) become cell arrays that preserve the original row/column layout, while irregular arrays fall back to 1-by-N cell vectors that keep element order.",
     "JSON `null` decodes to the empty double `[]`. When it appears inside a heterogeneous array it becomes a cell element containing `[]`.",
     "Invalid JSON raises `jsondecode: invalid JSON text (...)` with the underlying parser message."
@@ -60,13 +60,13 @@
     },
     {
       "description": "Converting a JSON object into a struct",
-      "input": "person = jsondecode('{\"name\":\"Ada\",\"age\":37}');\ndisp(person.name);\ndisp(person.age)",
-      "output": "Ada\n    37"
+      "input": "record = jsondecode('{\"name\":\"entry\",\"age\":37}');\ndisp(record.name);\ndisp(record.age)",
+      "output": "entry\n    37"
     },
     {
-      "description": "Decoding an array of objects into a cell array",
-      "input": "text = '[{\"name\":\"Ada\",\"role\":\"Researcher\"},{\"name\":\"Grace\",\"role\":\"Engineer\"}]';\npeople = jsondecode(text);\npeople{1}.name\npeople{2}.role",
-      "output": "people =\n  1x2 cell array\n    {1x1 struct}    {1x1 struct}\n\nans = 'Ada'\nans = 'Engineer'"
+      "description": "Decoding an array of objects into a structure array",
+      "input": "text = '[{\"name\":\"first\",\"role\":\"review\"},{\"name\":\"second\",\"role\":\"build\"}]';\nrecords = jsondecode(text);\nrecords(1).name\nrecords(2).role",
+      "output": "ans = 'first'\nans = 'build'"
     },
     {
       "description": "Handling heterogeneous arrays with cell arrays",
@@ -86,7 +86,7 @@
     },
     {
       "question": "How are JSON objects represented?",
-      "answer": "As scalar structs. Array-of-object JSON values become cell arrays of structs to preserve ordering."
+      "answer": "A JSON object becomes a scalar struct. A rectangular array of objects with one common field set becomes a typed structure array; objects with differing field sets remain scalar structs inside a cell array. Object keys use deterministic canonical lexical order at this JSON boundary."
     },
     {
       "question": "What happens with JSON numbers that overflow double?",

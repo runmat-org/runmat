@@ -120,7 +120,7 @@ impl NativeCompilationInput {
             .collectives
             .retain(|collective| retained.contains(&collective.id.region.0.function));
         let mut registry: runmat_vm::FunctionRegistry =
-            serde_json::from_slice(&self.program_capture).map_err(|error| {
+            runmat_vm::decode_interpreter_program_v2(&self.program_capture).map_err(|error| {
                 native_product_error(format!("failed to decode native program capture: {error}"))
             })?;
         registry
@@ -133,9 +133,10 @@ impl NativeCompilationInput {
             functions.retain(|function| retained_local.contains(function));
             !functions.is_empty()
         });
-        self.program_capture = serde_json::to_vec(&registry).map_err(|error| {
-            native_product_error(format!("failed to encode retained native program: {error}"))
-        })?;
+        self.program_capture =
+            runmat_vm::encode_interpreter_program_v2(&registry).map_err(|error| {
+                native_product_error(format!("failed to encode retained native program: {error}"))
+            })?;
         Ok(self)
     }
 
@@ -246,9 +247,10 @@ impl ExecutableUnit {
         let envelope = self
             .portable_envelope_for_with_interop(preferred_function, interop)
             .map_err(native_product_error)?;
-        let program_capture = serde_json::to_vec(self.functions()).map_err(|error| {
-            native_product_error(format!("failed to capture native program: {error}"))
-        })?;
+        let program_capture =
+            runmat_vm::encode_interpreter_program_v2(self.functions()).map_err(|error| {
+                native_product_error(format!("failed to capture native program: {error}"))
+            })?;
         let mut interpreter_resume_points = self
             .vm_layout()
             .functions
@@ -400,7 +402,8 @@ end
             .iter()
             .all(|region| retained.contains(&region.id.function)));
         let registry: runmat_vm::FunctionRegistry =
-            serde_json::from_slice(&input.program_capture).expect("decode retained registry");
+            runmat_vm::decode_interpreter_program_v2(&input.program_capture)
+                .expect("decode retained registry");
         assert_eq!(registry.functions.len(), 1);
         assert!(registry.names.contains_key("helper"));
         assert!(!registry.names.contains_key("unused_nested"));

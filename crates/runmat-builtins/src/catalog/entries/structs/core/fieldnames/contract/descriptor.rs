@@ -17,7 +17,7 @@ const INPUT: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Structure, represented structure array, or supported RunMat object.",
+    description: "Structure or supported RunMat object.",
 }];
 const SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
     label: "names = fieldnames(S)",

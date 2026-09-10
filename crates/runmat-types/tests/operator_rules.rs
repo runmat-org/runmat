@@ -139,10 +139,10 @@ fn explicit_unknown_and_zero_range_steps_are_not_treated_as_implicit_one() {
 
 #[test]
 fn proven_invalid_operator_categories_fail_but_unknowns_remain_conservative() {
-    let structure = ValueFact::scalar(ValueKindFact::Struct(runmat_types::StructFact {
-        fields: Default::default(),
-        fields_complete: true,
-    }));
+    let structure = ValueFact::scalar(ValueKindFact::Struct(runmat_types::StructFact::scalar(
+        Default::default(),
+        true,
+    )));
     assert_eq!(
         infer_binary(OperatorKind::Add, &structure, &numeric(ShapeFact::Scalar)).diagnostics[0]
             .code,

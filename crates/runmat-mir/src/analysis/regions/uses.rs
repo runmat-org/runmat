@@ -21,10 +21,32 @@ pub(crate) fn statement_uses_defs(statement: &MirStmt) -> (Locals, Locals) {
         MirStmtKind::MultiAssign { targets, value } => {
             rvalue_uses(value, &mut uses, &mut defs);
             for target in &targets.targets {
-                if let MirOutputTarget::Place(place) = target {
-                    place_uses_defs(place, &mut uses, &mut defs);
+                match target {
+                    MirOutputTarget::Place(place) => place_uses_defs(place, &mut uses, &mut defs),
+                    MirOutputTarget::Sequence(target) => {
+                        sequence_target_uses_defs(target, &mut uses, &mut defs)
+                    }
+                    MirOutputTarget::Discard => {}
                 }
             }
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            rvalue_uses(value, &mut uses, &mut defs);
+            let base = match target {
+                crate::MirSequenceTarget::Member { base, .. } => base,
+                crate::MirSequenceTarget::DynamicMember { base, member } => {
+                    operand_uses(member, &mut uses);
+                    base
+                }
+                crate::MirSequenceTarget::CellContents { base, indexing } => {
+                    indexing_uses(indexing, &mut uses);
+                    base
+                }
+            };
+            place_uses_defs(base, &mut uses, &mut defs);
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            source.visit_outer_operands(|operand| operand_uses(operand, &mut uses));
         }
         MirStmtKind::Expr(value) => rvalue_uses(value, &mut uses, &mut defs),
         MirStmtKind::PlaceMutation(mutation) => {
@@ -37,6 +59,24 @@ pub(crate) fn statement_uses_defs(statement: &MirStmt) -> (Locals, Locals) {
         MirStmtKind::EnvironmentEffect(_) => {}
     }
     (uses, defs)
+}
+
+fn sequence_target_uses_defs(
+    target: &crate::MirSequenceTarget,
+    uses: &mut Locals,
+    defs: &mut Locals,
+) {
+    match target {
+        crate::MirSequenceTarget::Member { base, .. } => place_uses_defs(base, uses, defs),
+        crate::MirSequenceTarget::DynamicMember { base, member } => {
+            operand_uses(member, uses);
+            place_uses_defs(base, uses, defs);
+        }
+        crate::MirSequenceTarget::CellContents { base, indexing } => {
+            indexing_uses(indexing, uses);
+            place_uses_defs(base, uses, defs);
+        }
+    }
 }
 
 pub(crate) fn terminator_uses_defs(kind: &MirTerminatorKind) -> (Locals, Locals) {
@@ -248,18 +288,18 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
             for argument in &call.args {
                 match argument {
                     MirCallArg::Single(argument) => operand_uses(argument, uses),
-                    MirCallArg::Expansion { base, indices, .. } => {
-                        operand_uses(base, uses);
-                        for index in indices {
-                            operand_uses(index, uses);
-                        }
+                    MirCallArg::Expansion(source) => {
+                        source.visit_outer_operands(|operand| operand_uses(operand, uses));
                     }
+                    MirCallArg::CapturedSequence(_) => {}
                 }
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                operand_uses(element, uses);
+                if let Some(operand) = element.operand() {
+                    operand_uses(operand, uses);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -271,8 +311,11 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
             operand_uses(base, uses);
             indexing_uses(indexing, uses);
         }
+        MirRvalue::SubscriptChain(chain) => {
+            chain.visit_outer_operands(|operand| operand_uses(operand, uses));
+        }
         MirRvalue::Member { base, .. } => operand_uses(base, uses),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             operand_uses(base, uses);
             operand_uses(member, uses);
         }
@@ -280,12 +323,10 @@ fn rvalue_uses(value: &MirRvalue, uses: &mut Locals, defs: &mut Locals) {
             for argument in args {
                 match argument {
                     MirCallArg::Single(argument) => operand_uses(argument, uses),
-                    MirCallArg::Expansion { base, indices, .. } => {
-                        operand_uses(base, uses);
-                        for index in indices {
-                            operand_uses(index, uses);
-                        }
+                    MirCallArg::Expansion(source) => {
+                        source.visit_outer_operands(|operand| operand_uses(operand, uses));
                     }
+                    MirCallArg::CapturedSequence(_) => {}
                 }
             }
         }
@@ -365,8 +406,12 @@ fn place_root_local(place: &MirPlace) -> Option<MirLocalId> {
 
 fn indexing_uses(indexing: &MirIndexing, uses: &mut Locals) {
     for component in &indexing.components {
-        if let MirIndexComponent::Expr(value) = component {
-            operand_uses(value, uses);
+        match component {
+            MirIndexComponent::Expr(value) => operand_uses(value, uses),
+            MirIndexComponent::ContextualExpr(region) => {
+                region.visit_external_operands(|operand| operand_uses(operand, uses));
+            }
+            MirIndexComponent::Colon => {}
         }
     }
 }

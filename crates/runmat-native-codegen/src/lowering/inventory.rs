@@ -53,8 +53,10 @@ fn statement_rvalue(statement: &MirStmtKind) -> Option<&MirRvalue> {
     match statement {
         MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => Some(value),
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,
     }

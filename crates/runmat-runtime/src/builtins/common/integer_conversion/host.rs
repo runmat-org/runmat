@@ -43,7 +43,9 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
             .ok_or(CastError::Unsupported(UnsupportedValueKind::Symbolic)),
         Value::SymbolicArray(array) => cast_symbolic_array(target, array),
         Value::Cell(_) => Err(CastError::Unsupported(UnsupportedValueKind::Cell)),
-        Value::Struct(_) => Err(CastError::Unsupported(UnsupportedValueKind::Struct)),
+        Value::Struct(_) | Value::StructArray(_) => {
+            Err(CastError::Unsupported(UnsupportedValueKind::Struct))
+        }
         Value::ObjectArray(array) => Err(CastError::Unsupported(UnsupportedValueKind::Object(
             array.class_name().to_string(),
         ))),

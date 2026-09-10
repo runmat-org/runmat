@@ -311,6 +311,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             RenderMode::TopLevel => format_struct(struct_value),
             RenderMode::Nested => vec!["[1x1 struct]".to_string()],
         },
+        Value::StructArray(array) => vec![array.to_string()],
         Value::Cell(cell) => match mode {
             RenderMode::TopLevel => format_cell(cell),
             RenderMode::Nested => vec![format!(
@@ -739,6 +740,10 @@ fn summarize_for_cell(value: &Value) -> String {
             }
         }
         Value::Struct(_) => "[1x1 struct]".to_string(),
+        Value::StructArray(array) => format!(
+            "[{} struct]",
+            dims_to_string(&canonical_dims(array.shape()))
+        ),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)

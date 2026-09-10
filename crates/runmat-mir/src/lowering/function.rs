@@ -38,6 +38,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         let source = u32::try_from(module.source_id.0)
             .map(runmat_types::ProgramSourceId)
             .map_err(|_| HirError::new("function source identity exceeds the portable schema"))?;
+        let class_method_owner = class_method_owner(hir, function)?;
         assembly.functions.insert(
             function.id,
             MirFunctionMetadata {
@@ -45,6 +46,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
                 name: function.name.clone(),
                 parent: function.parent,
                 enclosing_class: function.enclosing_class,
+                class_method_owner,
                 kind: function.kind.clone(),
                 argument_validations: function.argument_validations.clone(),
                 captures: function.captures.clone(),
@@ -61,6 +63,41 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         );
     }
     Ok(assembly)
+}
+
+fn class_method_owner(
+    hir: &HirAssembly,
+    function: &HirFunction,
+) -> Result<Option<runmat_types::ClassMethodOwner>, HirError> {
+    let runmat_hir::FunctionKind::ClassMethod { is_static } = &function.kind else {
+        return Ok(None);
+    };
+    let is_static = *is_static;
+    let class_id = function
+        .enclosing_class
+        .ok_or_else(|| HirError::new("class method is missing its enclosing class identity"))?;
+    let class = hir
+        .classes
+        .iter()
+        .find(|class| class.declaration.id == class_id)
+        .ok_or_else(|| HirError::new("class method references a missing class declaration"))?;
+    let method = class
+        .declaration
+        .methods
+        .iter()
+        .find(|method| method.function == function.id)
+        .ok_or_else(|| HirError::new("class method is absent from its class declaration"))?;
+    if method.is_static != is_static {
+        return Err(HirError::new(
+            "class method static ownership disagrees with its function kind",
+        ));
+    }
+    Ok(Some(runmat_types::ClassMethodOwner {
+        declaring_class: runmat_types::ClassIdentity::from_qualified_name(&class.declaration.name)
+            .map_err(|error| HirError::new(error.to_string()))?,
+        method: method.name.clone(),
+        is_static,
+    }))
 }
 
 fn lower_function_with_context(

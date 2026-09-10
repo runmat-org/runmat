@@ -1,6 +1,7 @@
 use runmat_hir::{
     lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionId, FunctionKind, HirAssembly,
-    HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
+    HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, HirSubscriptStep, IndexKind,
+    LoweringContext,
 };
 use runmat_parser::parse;
 use std::collections::{HashMap, HashSet};
@@ -175,12 +176,27 @@ z = f(3)
 fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
     let method = lower_assembly("obj = 1; obj.method(1);");
     assert!(entry_body(&method).iter().any(|stmt| {
-        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Call(_)))
+        matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::SubscriptChain(chain)
+                        if matches!(&chain.root.kind, HirExprKind::Binding(_))
+                            && matches!(
+                                chain.steps.as_slice(),
+                                [HirSubscriptStep::DottedInvoke { member, indexing }]
+                                    if member.0 == "method"
+                                        && indexing.kind == IndexKind::Paren
+                                        && indexing.components.len() == 1
+                            )
+                )
+        )
     }));
 
     let member = lower_assembly("obj = 1; obj.field;");
     assert!(entry_body(&member).iter().any(|stmt| {
-        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Member(_, _)))
+        matches!(&stmt.kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Member { .. }))
     }));
 
     let handle = lower_assembly("@sin;");

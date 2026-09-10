@@ -275,6 +275,18 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps).await?),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(mut array) => {
+            for _ in 0..steps {
+                let mut order = (0..array.shape().len()).collect::<Vec<_>>();
+                order.swap(0, 1);
+                array = array
+                    .permute(&order)
+                    .and_then(|array| array.flip(0))
+                    .map_err(|error| rot90_error_with_message(error, &ROT90_ERROR_INTERNAL))?;
+            }
+            Ok(Value::StructArray(array))
+        }
         Value::Cell(_) => Err(rot90_error_with_message(
             "rot90: cell arrays are not yet supported",
             &ROT90_ERROR_UNSUPPORTED_INPUT,
@@ -285,7 +297,6 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)

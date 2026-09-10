@@ -9,7 +9,7 @@ pub const RMFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinError
 pub const RMFIELD_ERROR_INVALID_TARGET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RMFIELD.INVALID_TARGET",
     identifier: Some("RunMat:rmfield:InvalidTarget"),
-    when: "The first input is not a structure or represented structure array.",
+    when: "The first input is not a structure.",
     message: "rmfield: expected struct or struct array",
 };
 pub const RMFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -33,7 +33,7 @@ pub const RMFIELD_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDesc
 pub const RMFIELD_ERROR_REBUILD_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RMFIELD.REBUILD_FAILED",
     identifier: Some("RunMat:rmfield:RebuildFailed"),
-    when: "The updated represented structure array cannot retain its original shape.",
+    when: "The updated structure array cannot retain its original shape.",
     message: "rmfield: failed to rebuild struct array",
 };
 

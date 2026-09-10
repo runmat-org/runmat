@@ -4,11 +4,6 @@ pub(super) fn invalid_target(message: impl Into<String>) -> crate::RuntimeError 
     build(message, &runmat_builtins::FIELDNAMES_ERROR_INVALID_TARGET)
 }
 
-pub(super) fn invalid_struct_array() -> crate::RuntimeError {
-    let error = &runmat_builtins::FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS;
-    build(error.message, error)
-}
-
 pub(super) fn internal(message: impl Into<String>) -> crate::RuntimeError {
     build(message, &runmat_builtins::FIELDNAMES_ERROR_INTERNAL)
 }

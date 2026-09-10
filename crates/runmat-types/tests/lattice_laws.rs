@@ -46,6 +46,19 @@ fn join_is_commutative_associative_and_idempotent() {
     }
 }
 
+#[test]
+fn struct_position_facts_are_local_precision_not_wire_state() {
+    let common = BTreeMap::from([("value".into(), numeric(NumericClass::Double))]);
+    let fact = StructFact::array(common.clone(), true, vec![common], true);
+    let encoded = serde_json::to_string(&fact).expect("serialize structure fact");
+    assert!(!encoded.contains("elements"));
+    let decoded: StructFact = serde_json::from_str(&encoded).expect("deserialize structure fact");
+    assert_eq!(decoded.fields, fact.fields);
+    assert!(decoded.fields_complete);
+    assert!(decoded.elements.is_empty());
+    assert!(!decoded.elements_complete);
+}
+
 fn representative_facts() -> Vec<ValueFact> {
     let mut shaped = numeric(NumericClass::Double);
     shaped.shape = ShapeFact::Shaped {
@@ -73,13 +86,13 @@ fn representative_facts() -> Vec<ValueFact> {
         invalidation: InvalidationVector::default(),
     };
     let mut structure = numeric(NumericClass::Double);
-    structure.kind = ValueKindFact::Struct(StructFact {
-        fields: BTreeMap::from([
+    structure.kind = ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::from([
             ("count".into(), numeric(NumericClass::UInt64)),
             ("payload".into(), recursive.clone()),
         ]),
-        fields_complete: true,
-    });
+        true,
+    ));
     let mut callable = numeric(NumericClass::Double);
     callable.kind = ValueKindFact::Callable(CallableFact {
         identity: Some(CallableIdentity::DynamicName(SymbolName("f".into()))),

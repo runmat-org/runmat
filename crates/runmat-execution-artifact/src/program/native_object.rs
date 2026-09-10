@@ -81,6 +81,11 @@ impl NativeObjectPayload {
             ));
         }
         let schema_version = decoder.u16().map_err(decoding)?;
+        if schema_version != NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION {
+            return Err(ArtifactError::Invalid(format!(
+                "native object payload schema mismatch: actual {schema_version}, expected {NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION}"
+            )));
+        }
         let object_format = NativeObjectFormat::from_token(decoder.str().map_err(decoding)?)
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         let metadata_digest = decode_digest(&mut decoder)?;
@@ -133,7 +138,9 @@ fn decoding(error: minicbor::decode::Error) -> ArtifactError {
 
 #[cfg(test)]
 mod tests {
-    use super::{NativeObjectFormat, NativeObjectPayload};
+    use super::{
+        NativeObjectFormat, NativeObjectPayload, NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION, PREFIX,
+    };
 
     #[test]
     fn canonical_payload_round_trips_and_rejects_tampering() {
@@ -152,5 +159,20 @@ mod tests {
         let mut tampered = payload;
         tampered.object.push(0);
         assert!(tampered.validate().is_err());
+    }
+
+    #[test]
+    fn stale_schema_is_rejected_before_later_fields_are_decoded() {
+        let mut bytes = PREFIX.to_vec();
+        let mut encoder = minicbor::Encoder::new(&mut bytes);
+        encoder.array(6).unwrap().u16(0).unwrap();
+
+        let error = NativeObjectPayload::from_canonical_bytes(&bytes).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "invalid execution artifact: native object payload schema mismatch: actual 0, expected {NATIVE_OBJECT_PAYLOAD_SCHEMA_VERSION}"
+            )
+        );
     }
 }

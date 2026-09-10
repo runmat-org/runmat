@@ -34,6 +34,14 @@ pub(super) fn checkpoint(
     safepoint: Option<NativeSafepointId>,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<bool> {
+    // Contextual expression progress and completed asynchronous values are
+    // invocation-owned state that the interpreter/native deopt frame cannot
+    // yet encode. Re-entering the owning site through deoptimization would
+    // replay effects or lose rooted results, so defer guards and injected
+    // safepoints until the transient channel has been consumed.
+    if state.deoptimization_transients_live() {
+        return Ok(false);
+    }
     for boundary in boundaries.iter().filter(|boundary| {
         boundary.kind == NativeRegionBoundaryKind::Entry && boundary.point == site.point
     }) {

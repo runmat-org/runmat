@@ -55,7 +55,7 @@ pub fn recipe(revision: ProgramRevision) -> ProgramBuildRecipe {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable("portable-bytecode-v1"),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-bytecode-v2"),
         interop: runmat_types::InteropManifest::empty(),
         accelerators: Vec::new(),
         features: BTreeSet::new(),

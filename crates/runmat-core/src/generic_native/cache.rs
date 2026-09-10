@@ -678,6 +678,7 @@ fn function_revision(
     let runmat_vm::FunctionBytecode {
         function,
         display_name,
+        class_method_owner,
         private_owner_scope,
         source_id,
         capabilities,
@@ -717,6 +718,7 @@ fn function_revision(
     }
     append!(function);
     append!(display_name);
+    append!(class_method_owner);
     append!(private_owner_scope);
     append!(source_id);
     append!(capabilities);
@@ -807,6 +809,20 @@ mod revision_tests {
         assert_ne!(
             session_catalog_revision(&first).unwrap(),
             session_catalog_revision(&reordered).unwrap()
+        );
+
+        let before_owner = session_catalog_revision(&first).unwrap();
+        let function = reordered.functions.get_mut(&FunctionId(7)).unwrap();
+        function.instructions[0] = runmat_vm::Instr::LoadConst(1.0);
+        function.class_method_owner = Some(runmat_types::ClassMethodOwner {
+            declaring_class: runmat_types::ClassIdentity::new("RevisionOwner").unwrap(),
+            method: runmat_types::MethodName::from("revisionTarget"),
+            is_static: false,
+        });
+        assert_ne!(
+            before_owner,
+            session_catalog_revision(&reordered).unwrap(),
+            "declaration owner identity participates in the executable function revision"
         );
     }
 }

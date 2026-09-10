@@ -64,7 +64,7 @@ pub(super) async fn execute(
                 runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
                     captures.clone(),
                 ))?;
-                let program = serde_json::to_vec(bytecode).map_err(|error| {
+                let program = crate::encode_interpreter_script_v2(bytecode).map_err(|error| {
                     crate::interpreter::errors::mex(
                         "ExecutionProgram",
                         &format!("failed to encode the exact SPMD program: {error}"),

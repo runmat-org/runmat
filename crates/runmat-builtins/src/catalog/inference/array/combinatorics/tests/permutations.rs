@@ -39,10 +39,7 @@ fn rejects_unsupported_representations() {
     let inferred = crate::infer_catalog_call(
         entry,
         &request(vec![ValueFact::scalar(ValueKindFact::Struct(
-            runmat_types::StructFact {
-                fields: Default::default(),
-                fields_complete: true,
-            },
+            runmat_types::StructFact::scalar(Default::default(), true),
         ))]),
     );
     assert!(!inferred.diagnostics.is_empty());

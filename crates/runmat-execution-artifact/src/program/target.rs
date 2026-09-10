@@ -64,7 +64,9 @@ impl ProgramTarget {
         let compatible = match form {
             ExecutableForm::NativeObjectV1 => self.cohort == ProgramTargetCohort::Native,
             ExecutableForm::InterpreterBytecodeV1
+            | ExecutableForm::InterpreterBytecodeV2
             | ExecutableForm::InterpreterScriptV1
+            | ExecutableForm::InterpreterScriptV2
             | ExecutableForm::TestAttemptV1
             | ExecutableForm::MeshingWorkload
             | ExecutableForm::ExecutableUnitV3 => self.cohort == ProgramTargetCohort::Portable,

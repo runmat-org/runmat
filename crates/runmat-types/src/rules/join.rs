@@ -113,12 +113,33 @@ impl FactJoin for ValueKindFact {
                             .map(|other| (name.clone(), fact.join(other)))
                     })
                     .collect::<BTreeMap<_, _>>();
-                Struct(StructFact {
-                    fields_complete: left.fields_complete
+                let elements_complete = left.elements_complete
+                    && right.elements_complete
+                    && left.elements.len() == right.elements.len();
+                Struct(StructFact::array(
+                    fields,
+                    left.fields_complete
                         && right.fields_complete
                         && left.fields.keys().eq(right.fields.keys()),
-                    fields,
-                })
+                    if elements_complete {
+                        left.elements
+                            .iter()
+                            .zip(&right.elements)
+                            .map(|(left, right)| {
+                                left.iter()
+                                    .filter_map(|(name, fact)| {
+                                        right
+                                            .get(name)
+                                            .map(|other| (name.clone(), fact.join(other)))
+                                    })
+                                    .collect()
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
+                    elements_complete,
+                ))
             }
             (Object(left), Object(right)) => Object(ObjectFact {
                 class: exact_or(&left.class, &right.class, None),

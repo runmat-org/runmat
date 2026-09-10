@@ -2,7 +2,6 @@
 mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
-use runmat_runtime::indexing::EndExpr;
 use runmat_value::{IntegerStorage, Value};
 use runmat_vm::Instr;
 use std::convert::TryInto;
@@ -18,6 +17,27 @@ fn execute_source(source: &str) -> Vec<Value> {
 fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).map_err(Box::new)
+}
+
+fn is_expand_all_cell_contents(
+    spec: &runmat_runtime::call::arguments::ArgumentSpec,
+    expected_num_indices: usize,
+) -> bool {
+    use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
+
+    match spec {
+        ArgumentSpec::Expansion(ArgumentExpansionSpec::CellContents {
+            num_indices,
+            expand_all,
+        }) => *expand_all && *num_indices == expected_num_indices,
+        ArgumentSpec::Single
+        | ArgumentSpec::CapturedSequence { .. }
+        | ArgumentSpec::Expansion(
+            ArgumentExpansionSpec::ReturnedOutputs
+            | ArgumentExpansionSpec::Member(_)
+            | ArgumentExpansionSpec::DynamicMember,
+        ) => false,
+    }
 }
 
 fn matlab_single_quoted_path(path: &Path) -> String {
@@ -896,9 +916,7 @@ fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
             if name == "atan2"
                 && *out_count == 1
                 && specs.len() == 1
-                && specs[0].is_expand
-                && specs[0].expand_all
-                && specs[0].num_indices == 0)
+                && is_expand_all_cell_contents(&specs[0], 0))
     });
     assert!(
         has_output_list_expansion,
@@ -982,8 +1000,8 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
         bytecode
             .instructions
             .iter()
-            .any(|ins| matches!(ins, Instr::IndexSliceExpr { .. })),
-        "expected IndexSliceExpr in semantic bytecode, got {:?}",
+            .any(|ins| matches!(ins, Instr::LoadContextualIndexEnd { component: 0 })),
+        "expected a contextual end selector in semantic bytecode, got {:?}",
         bytecode.instructions
     );
     let vars = interpret(&bytecode).expect("fft end-range indexing should execute");
@@ -1370,27 +1388,14 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         ok = (r == 99);
     "#;
     let bytecode = compile_source(input).expect("compile object end-range assignment");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(
-                    range_end_exprs.as_slice(),
-                    [EndExpr::Sub(lhs, rhs)]
-                        if matches!(&**lhs, EndExpr::Mul(mul_lhs, mul_rhs)
-                            if matches!(&**mul_lhs, EndExpr::End)
-                                && matches!(&**mul_rhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12))
-                            && matches!(&**rhs, EndExpr::Div(div_lhs, div_rhs)
-                                if matches!(&**div_lhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12)
-                                    && matches!(&**div_rhs, EndExpr::Const(v) if (*v - 2.0).abs() < 1e-12))
-                )
-            )
-        }),
-        "expected StoreSliceExpr to preserve rich end arithmetic payload for object indexing"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::StoreSlice(2, ..))));
     let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
@@ -1413,30 +1418,10 @@ fn runtime_variable_range_bound_slice_uses_live_value() {
         ok = (numel(a) == 6) && (min(a) < 0.100001) && (max(a) > 0.599999);
     "#;
     let bytecode = compile_source(input).expect("compile runtime range-bound slice");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Var(_)])
-            )
-        }),
-        "expected range end metadata to read the live bound variable"
-    );
-    assert!(
-        !bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Const(v)] if *v == 0.0)
-            )
-        }),
-        "runtime range bound must not be frozen to its initial zero value"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(1, ..))));
     let vars = interpret(&bytecode).expect("execute runtime range-bound slice");
     assert!(
         vars.iter().any(|v| {
@@ -1455,18 +1440,10 @@ fn runtime_call_range_bound_slice_uses_live_value_when_static_analysis_is_unavai
         ok = (numel(b) == 4) && (b(4) == 40);
     "#;
     let bytecode = compile_source(input).expect("compile call-derived range-bound slice");
-    assert!(
-        bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexSliceExpr {
-                    range_end_exprs,
-                    ..
-                } if matches!(range_end_exprs.as_slice(), [EndExpr::Var(_)])
-            )
-        }),
-        "expected unresolved call-derived range bound to read the live variable"
-    );
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(1, ..))));
     let vars = interpret(&bytecode).expect("execute call-derived range-bound slice");
     assert!(
         vars.iter().any(|v| {

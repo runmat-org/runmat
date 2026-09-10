@@ -1,6 +1,6 @@
 # Indexing Subsystem
 
-The VM indexing subsystem executes MATLAB-style indexing after the compiler has already classified the operation. It handles scalar access, multidimensional slicing, `end` expressions, cell arrays, logical arrays, strings, GPU tensors, and object `subsref`/`subsasgn` dispatch.
+The VM indexing subsystem executes MATLAB-style indexing after the compiler has already classified the operation. It handles scalar access, multidimensional slicing, `end` expressions, cell arrays, structure arrays, logical arrays, strings, GPU tensors, and object `subsref`/`subsasgn` dispatch.
 
 The key design point is that indexing intent is made explicit before runtime. MIR carries a `MirIndexPlan`, the VM compiler emits a matching bytecode instruction, and the interpreter builds concrete selector plans only from the runtime shape and values it actually needs.
 
@@ -38,6 +38,7 @@ flowchart TD
 | Slice | Colon, vector, logical, or range-based access without dynamic `end` expressions. | `IndexSlice`, `StoreSlice` |
 | SliceExpr | Slice access whose selectors require runtime `EndExpr` evaluation. | `IndexSliceExpr`, `StoreSliceExpr` |
 | Cell | Cell container or cell contents access. | `IndexCell`, `StoreCellIndex`, cell-specific slice paths |
+| Structure array | Typed structure-element selection, growth, replacement, and whole-element deletion. | Shared slice/index instructions routed through the runtime structure-array planner |
 | Member | Dot/member access and object protocols. | `IndexMember`, object descriptors |
 
 The stack contract is part of the bytecode ABI. Read instructions pop their base value and selectors, then push the selected value. Write instructions also pop the right-hand side and then push the updated base value; a later store instruction commits that value back to the variable or local slot.
@@ -118,17 +119,25 @@ flowchart LR
 
 ### Read Operations
 
-Read paths support tensors, complex tensors, GPU tensors, string arrays, cells, logical arrays, objects, and simple scalar fallback through runtime indexing. Logical arrays are temporarily mapped to numeric tensors for slice planning, then converted back to logical results where appropriate.
+Read paths support tensors, complex tensors, GPU tensors, string arrays, cells, structure arrays, logical arrays, objects, and simple scalar fallback through runtime indexing. Logical arrays are temporarily mapped to numeric tensors for slice planning, then converted back to logical results where appropriate. Structure-array reads use the same `IndexPlan` as other arrays, including linear indexing and trailing-dimension collapse when fewer subscripts are supplied.
 
 Function handles can also be invoked through paren indexing syntax when the selector form is call-like. Colon and `end` selectors are rejected for that path because they are indexing syntax, not function-call arguments.
 
 ### Write Operations
 
-Write paths use the same selector planning but route to assignment or deletion helpers. Tensor, complex tensor, GPU tensor, string array, and cell writes each have specialized scatter behavior. Deletion is explicit in the bytecode through `StoreSliceDelete` or `StoreSliceExprDelete`.
+Write paths use the same selector planning but route to assignment or deletion helpers. Tensor, complex tensor, GPU tensor, string array, cell, and structure-array writes each have specialized scatter behavior. Structure-array whole-element assignment requires matching ordered fields; member growth fills other fields with empty values. Deletion is explicit in the bytecode through `StoreSliceDelete` or `StoreSliceExprDelete`.
 
 ### Cell Expansion
 
-Brace indexing can produce comma-separated-list behavior. Shared call helpers such as `expand_brace_values` are used by call expansion instructions so that cell contents can be expanded into argument lists or output lists.
+Brace indexing can produce comma-separated-list behavior. Shared call helpers such as `expand_brace_values` are used by call expansion instructions so that cell contents can be consumed by the enclosing output or argument context. The sequence is transient execution state, not a user-visible value that can be stored in another cell.
+
+### Structure Member Sequences
+
+Dot access on a structure array reads the selected field values in visible column-major structure-element order. MIR records the consuming context explicitly: an ordinary expression requires one value, a bracketed output list selects a fixed prefix, a call argument expands all values, and a suppressed expression discards them after evaluation. A nonscalar sequence used where one value is required is an error rather than an implicit choice of the first element.
+
+A bracketed structure-member destination has runtime cardinality. Its base, selectors, and dynamic field name are evaluated left to right and exactly once before the right-hand side. The prepared destination supplies the requested output count; after the right-hand side produces exactly that many values, the store distributes them in structure-element order and writes the updated root back through the prepared indexing/member chain.
+
+The prepared destination and produced values have a deliberately short lifetime. Bytecode keeps the prepared destination on its execution stack and the typed sequence in a transient register; native execution retains both in a rooted prepared-assignment record. In each executor, validation requires the producer and matching member-sequence consumer to be adjacent and forbids the state from crossing an unrelated instruction, control-flow edge, or function boundary. Errors consume or clear the transient state before execution continues.
 
 ## Object Indexing
 

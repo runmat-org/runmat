@@ -839,7 +839,7 @@ fn materialize_call(
         call,
         outputs,
         runmat_execution_artifact::ProgramTarget::portable(format!(
-            "{}-{}-interpreter-bytecode-v1",
+            "{}-{}-interpreter-bytecode-v2",
             std::env::consts::ARCH,
             std::env::consts::OS
         )),

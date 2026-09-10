@@ -112,6 +112,9 @@ fn classify(value: &runmat_value::Value) -> RunMatValueKind {
         Value::String(_) | Value::StringArray(_) => RunMatValueKind::String,
         Value::Cell(_) => RunMatValueKind::Cell,
         Value::Struct(_) => RunMatValueKind::Structure,
+        // The current extension ABI exposes scalar-structure identity only; it
+        // has no shape, schema, or element access for structure arrays.
+        Value::StructArray(_) => RunMatValueKind::Unknown,
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => {
             RunMatValueKind::Object
         }
@@ -122,5 +125,38 @@ fn classify(value: &runmat_value::Value) -> RunMatValueKind {
         | Value::Closure(_) => RunMatValueKind::Callable,
         Value::Foreign(_) => RunMatValueKind::Foreign,
         _ => RunMatValueKind::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{CellArray, StructArray, StructValue, Value};
+
+    #[test]
+    fn extension_value_kind_does_not_alias_structure_arrays_with_scalar_structures() {
+        let mut first = StructValue::new();
+        first.insert("payload", Value::Num(1.0));
+        let mut second = StructValue::new();
+        second.insert("payload", Value::Num(2.0));
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![first.clone(), second.clone()],
+            vec![2, 1],
+        )
+        .expect("structure array");
+
+        assert_eq!(
+            classify(&Value::Struct(first.clone())),
+            RunMatValueKind::Structure
+        );
+        assert_eq!(
+            classify(&Value::StructArray(array)),
+            RunMatValueKind::Unknown
+        );
+
+        let cell = CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 2, 1)
+            .expect("cell of structures");
+        assert_eq!(classify(&Value::Cell(cell)), RunMatValueKind::Cell);
     }
 }

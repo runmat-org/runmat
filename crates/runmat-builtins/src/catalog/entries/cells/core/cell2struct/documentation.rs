@@ -1,7 +1,7 @@
 use crate::*;
 
 const EXAMPLES: &[BuiltinExample] = &[
-    BuiltinExample { id: "row-to-scalar", title: "Create a scalar structure from a row", program: "S = cell2struct({1, 'Ada'}, {'id', 'name'}, 2);", display_output: Some("S has fields id and name"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(S.id == 1);\nassert(strcmp(S.name, 'Ada'));" } },
+    BuiltinExample { id: "row-to-scalar", title: "Create a scalar structure from a row", program: "S = cell2struct({1, 'entry'}, {'id', 'name'}, 2);", display_output: Some("S has fields id and name"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(S.id == 1);\nassert(strcmp(S.name, 'entry'));" } },
     BuiltinExample { id: "default-dimension", title: "Use the first dimension by default", program: "S = cell2struct({10; 20}, {'low'; 'high'});", display_output: Some("S.low = 10 and S.high = 20"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(S.low == 10);\nassert(S.high == 20);" } },
     BuiltinExample { id: "string-fields", title: "Supply field names as strings", program: "S = cell2struct({3, 4}, [\"left\", \"right\"], 2);", display_output: Some("S has fields left and right"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(S.left == 3);\nassert(S.right == 4);" } },
     BuiltinExample { id: "character-matrix-fields", title: "Read field names from character rows", program: "names = char('red', 'blu');\nS = cell2struct({1; 2}, names, 1);", display_output: Some("S.red = 1 and S.blu = 2"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, verification: BuiltinExampleVerification::Assertions { source: "assert(S.red == 1);\nassert(S.blu == 2);" } },
@@ -11,11 +11,11 @@ const EXAMPLES: &[BuiltinExample] = &[
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Conversion", paragraphs: &["`cell2struct(C, fields, dim)` assigns entries along dimension `dim` of `C` to the supplied field names. All remaining dimensions become the structure-array shape. The dimension defaults to 1.", "Field names may be a character vector, the rows of a character matrix, a string scalar or array, or a cell array of text scalars. The field count must equal the selected dimension extent."] },
-    BuiltinDocumentationSection { heading: "Values and structure arrays", paragraphs: &["A one-element output is returned as a scalar structure. Nonscalar results retain the remaining dimensions in RunMat's current cell-backed structure-array representation.", "Cell payloads move into their fields without numeric conversion. Fixed-width integers remain exact, and nested resident handles retain their provider ownership without a gather or kernel."] },
+    BuiltinDocumentationSection { heading: "Values and structure arrays", paragraphs: &["A one-element output is returned as a scalar structure. Nonscalar and empty results retain the remaining dimensions and ordered field schema as structure arrays.", "Cell payloads move into their fields without numeric conversion. Fixed-width integers remain exact, and nested resident handles retain their provider ownership without a gather or kernel."] },
 ];
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "What happens to the selected dimension?", answer: "It becomes a singleton dimension; the other dimensions define the structure-array shape." },
-    BuiltinDocumentationFaq { question: "Why can a nonscalar result appear as a cell container?", answer: "RunMat's current structure-array representation is a shaped cell container whose elements are scalar structures." },
+    BuiltinDocumentationFaq { question: "Does the result remain a cell array?", answer: "No. The selected cell values become fields of a scalar structure or typed structure array." },
     BuiltinDocumentationFaq { question: "Are integer or GPU-resident field values converted?", answer: "No. Values move into fields unchanged; nested resident handles are not gathered." },
 ];
 const LINKS: &[BuiltinDocumentationLink] = &[

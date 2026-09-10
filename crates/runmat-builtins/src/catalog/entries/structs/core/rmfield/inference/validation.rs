@@ -16,7 +16,7 @@ pub(super) fn diagnostics(request: &CallRequest) -> Vec<InferenceDiagnostic> {
         if !valid_target(&target.kind) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-RMFIELD-TARGET",
-                "rmfield expects a structure or represented structure array",
+                "rmfield expects a structure",
                 0,
             ));
         }
@@ -34,20 +34,6 @@ pub(super) fn diagnostics(request: &CallRequest) -> Vec<InferenceDiagnostic> {
 }
 
 fn valid_target(kind: &ValueKindFact) -> bool {
-    match kind {
-        ValueKindFact::Struct(_) | ValueKindFact::Unknown => true,
-        ValueKindFact::Cell(cell) => {
-            valid_struct_element(&cell.element.kind)
-                && cell
-                    .elements
-                    .iter()
-                    .all(|element| valid_struct_element(&element.kind))
-        }
-        _ => false,
-    }
-}
-
-fn valid_struct_element(kind: &ValueKindFact) -> bool {
     matches!(kind, ValueKindFact::Struct(_) | ValueKindFact::Unknown)
 }
 

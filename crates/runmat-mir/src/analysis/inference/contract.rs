@@ -30,7 +30,11 @@ pub(crate) fn statement_contract(
     match &statement.kind {
         MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => rvalue_contract(value, summaries),
+        MirStmtKind::CaptureSequence { source, .. } => {
+            expansion_source_contract(source, summaries, &[])
+        }
         MirStmtKind::PlaceMutation(mutation)
             if mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::Overloaded
                 || mutation.shape_policy == runmat_hir::AssignmentShapePolicy::Overloaded
@@ -77,15 +81,30 @@ pub(crate) fn rvalue_contract_with_facts(
                 summaries,
                 OutputSelection::new(call.requested_outputs),
             );
-            let mut effects = inference.effects;
+            effects = inference.effects;
             extend_declared_call_effects(&mut effects, &call.effects);
-            return (effects, inference.capabilities);
+            capabilities = inference.capabilities;
         }
         MirRvalue::Index { base, .. } => {
             if let runmat_types::ValueKindFact::Callable(callable) =
                 super::value::operand_fact_from_values(base, facts, summaries).kind
             {
                 capabilities.0.extend(callable.capabilities.0);
+            }
+        }
+        MirRvalue::SubscriptChain(chain) => {
+            let inferred = crate::analysis::dataflow::infer_subscript_chain_contract(chain, facts);
+            effects.0.extend(inferred.effects.0);
+            capabilities.0.extend(inferred.capabilities.0);
+            if let crate::analysis::dataflow::SubscriptPathDisposition::UnresolvedDynamic {
+                step: _step,
+            } = inferred.disposition
+            {
+                // Only an unresolved object-protocol boundary is effectful. Fully
+                // proven numeric/cell/struct paths retain ordinary default-index
+                // purity and placement eligibility.
+                effects.0.insert(EffectKind::Unknown);
+                effects.0.insert(EffectKind::MaySuspend);
             }
         }
         MirRvalue::Future { .. } | MirRvalue::Spawn(_) => {
@@ -108,6 +127,59 @@ pub(crate) fn rvalue_contract_with_facts(
             }
         }
         _ => {}
+    }
+    value.visit_direct_expression_regions_dyn(&mut |region| {
+        let (nested_effects, nested_capabilities) =
+            expression_region_contract(region, summaries, facts);
+        effects.0.extend(nested_effects.0);
+        capabilities.0.extend(nested_capabilities.0);
+    });
+    (effects, capabilities)
+}
+
+fn expansion_source_contract(
+    source: &crate::MirExpansionSource,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    facts: &[Option<ValueFact>],
+) -> (EffectSet, CapabilitySet) {
+    let mut effects = EffectSet([EffectKind::Unknown].into_iter().collect());
+    let mut capabilities = CapabilitySet::default();
+    source.visit_direct_expression_regions_dyn(&mut |region| {
+        let (nested_effects, nested_capabilities) =
+            expression_region_contract(region, summaries, facts);
+        effects.0.extend(nested_effects.0);
+        capabilities.0.extend(nested_capabilities.0);
+    });
+    (effects, capabilities)
+}
+
+fn expression_region_contract(
+    region: &crate::MirExpressionRegion,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    facts: &[Option<ValueFact>],
+) -> (EffectSet, CapabilitySet) {
+    let mut nested_facts = facts.to_vec();
+    let mut effects = EffectSet::default();
+    let mut capabilities = CapabilitySet::default();
+    for step in region.steps() {
+        match step {
+            crate::MirExpressionStep::Let { local, value, .. } => {
+                let (step_effects, step_capabilities) =
+                    rvalue_contract_with_facts(value, summaries, &nested_facts);
+                effects.0.extend(step_effects.0);
+                capabilities.0.extend(step_capabilities.0);
+                let fact = crate::analysis::dataflow::simple_rvalue_fact(value, &nested_facts);
+                if let Some(slot) = nested_facts.get_mut(local.0) {
+                    *slot = Some(fact);
+                }
+            }
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                let (step_effects, step_capabilities) =
+                    expansion_source_contract(source, summaries, &nested_facts);
+                effects.0.extend(step_effects.0);
+                capabilities.0.extend(step_capabilities.0);
+            }
+        }
     }
     (effects, capabilities)
 }
@@ -142,6 +214,9 @@ pub(crate) fn statement_contract_with_facts(
         MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::Expr(value) => rvalue_contract_with_facts(value, summaries, facts),
+        MirStmtKind::CaptureSequence { source, .. } => {
+            expansion_source_contract(source, summaries, facts)
+        }
         _ => statement_contract(statement, summaries),
     }
 }

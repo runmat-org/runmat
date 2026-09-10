@@ -115,6 +115,8 @@ fn compile_with_bound_analysis(
     };
     let async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
+    crate::bytecode::validate_sequence_register_flow(&c.instructions).map_err(CompileError::new)?;
+
     let source_id = entrypoint_target
         .and_then(|function_id| {
             hir.functions
@@ -125,6 +127,8 @@ fn compile_with_bound_analysis(
         .map(|module| module.source_id);
 
     Ok(Bytecode {
+        active_function: entrypoint_target,
+        active_class_method_owner: None,
         instructions: c.instructions,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
@@ -173,8 +177,10 @@ fn derive_semantic_async_metadata(
                 let value = match &stmt.kind {
                     MirStmtKind::Assign { value, .. }
                     | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::SequenceAssign { value, .. }
                     | MirStmtKind::Expr(value) => value,
                     MirStmtKind::PlaceMutation(_)
+                    | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::EnvironmentEffect(_) => continue,
                 };
@@ -243,8 +249,10 @@ fn derive_semantic_fusion_candidate_groups(
                 let value = match &stmt.kind {
                     MirStmtKind::Assign { value, .. }
                     | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::SequenceAssign { value, .. }
                     | MirStmtKind::Expr(value) => value,
                     MirStmtKind::PlaceMutation(_)
+                    | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::EnvironmentEffect(_) => {
                         if run_len >= 2 {
@@ -776,6 +784,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         | MirRvalue::StructLiteral { .. }
         | MirRvalue::ObjectLiteral { .. }
         | MirRvalue::Index { .. }
+        | MirRvalue::SubscriptChain(_)
         | MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
@@ -826,6 +835,8 @@ fn compile_semantic_functions(
         }
         let mut compiler = Compiler::new_for_function(hir, mir, layout.clone(), function.id)?;
         compiler.compile()?;
+        crate::bytecode::validate_sequence_register_flow(&compiler.instructions)
+            .map_err(CompileError::new)?;
         let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
             CompileError::new(format!("missing VM layout for function {:?}", function.id))
         })?;
@@ -844,6 +855,17 @@ fn compile_semantic_functions(
             FunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
+                class_method_owner: mir
+                    .functions
+                    .get(&function.id)
+                    .ok_or_else(|| {
+                        CompileError::new(format!(
+                            "missing MIR metadata for function {:?}",
+                            function.id
+                        ))
+                    })?
+                    .class_method_owner
+                    .clone(),
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
                 capabilities: u32::try_from(function.id.0)
@@ -3050,10 +3072,6 @@ mod tests {
                 } = &mut stmt.kind
                 {
                     indexing.plan = MirIndexPlan::Slice;
-                    indexing.components = vec![MirIndexComponent::End {
-                        dim: Some(0),
-                        offset: 1,
-                    }];
                     patched = true;
                     break;
                 }
@@ -3130,10 +3148,7 @@ mod tests {
                     indexing.plan = MirIndexPlan::Slice;
                     let seed = indexing.components.first().cloned().expect("seed selector");
                     let mut components = vec![seed; 33];
-                    components[32] = MirIndexComponent::End {
-                        dim: Some(32),
-                        offset: 0,
-                    };
+                    components[32] = MirIndexComponent::Colon;
                     indexing.components = components;
                     patched = true;
                     break;
@@ -3393,11 +3408,11 @@ mod tests {
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
                 if let MirStmtKind::Assign {
-                    value: MirRvalue::Aggregate { rows, cols: _, .. },
+                    value: MirRvalue::Aggregate { row_lengths, .. },
                     ..
                 } = &mut stmt.kind
                 {
-                    *rows = 2;
+                    *row_lengths = vec![2, 2];
                     patched = true;
                     break;
                 }
@@ -4479,11 +4494,10 @@ y = x^[1 2; 3 4];\n",
                     if matches!(place, MirPlace::Index(_, _)) {
                         *value = MirRvalue::Aggregate {
                             kind: MirAggregateKind::Tensor,
-                            rows: 1,
-                            cols: 1,
-                            elements: vec![MirOperand::Constant(MirConstant::Number(
-                                "1".to_string(),
-                            ))],
+                            row_lengths: vec![1],
+                            elements: vec![runmat_mir::MirAggregateElement::Single(
+                                MirOperand::Constant(MirConstant::Number("1".to_string())),
+                            )],
                         };
                         patched = true;
                         break;
@@ -6315,6 +6329,70 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
+    fn compile_preserves_dotted_invoke_origin_in_one_subscript_path() {
+        let ast = runmat_parser::parse("obj = 1; y = obj.method(2).field;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let bytecode =
+            compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect("compile");
+        let path = bytecode
+            .instructions
+            .iter()
+            .find_map(|instruction| match instruction {
+                Instr::ReadSubscriptPath {
+                    steps, selection, ..
+                } => Some((steps, selection)),
+                _ => None,
+            })
+            .expect("typed path instruction");
+        assert!(matches!(
+            path.0.as_slice(),
+            [
+                crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments },
+                crate::bytecode::BytecodeSubscriptStep::Member(field),
+            ] if member.0 == "method"
+                && arguments == &[crate::bytecode::BytecodeSubscriptSelector::Value]
+                && field.0 == "field"
+        ));
+        assert_eq!(*path.1, runmat_types::SequenceUse::RequireSingle);
+    }
+
+    #[test]
+    fn contextual_end_consumes_prepared_prefix_before_final_path() {
+        let ast = runmat_parser::parse("obj = 1; y = obj.field(end).next;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let bytecode =
+            compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect("compile");
+        let prefix = bytecode.instructions.iter().find_map(|instruction| {
+            if let Instr::BeginSubscriptEndReceiver { prefix } = instruction {
+                Some(prefix)
+            } else {
+                None
+            }
+        });
+        assert!(matches!(
+            prefix.map(Vec::as_slice),
+            Some([crate::bytecode::BytecodeSubscriptStep::Member(member)])
+                if member.0 == "field"
+        ));
+        let final_steps = bytecode.instructions.iter().find_map(|instruction| {
+            if let Instr::ReadSubscriptPath { steps, .. } = instruction {
+                Some(steps)
+            } else {
+                None
+            }
+        });
+        assert!(matches!(
+            final_steps.map(Vec::as_slice),
+            Some([
+                crate::bytecode::BytecodeSubscriptStep::Parentheses { .. },
+                crate::bytecode::BytecodeSubscriptStep::Member(member),
+            ]) if member.0 == "next"
+        ));
+    }
+
+    #[test]
     fn compile_interprets_simple_cell_indexed_assignment() {
         let ast = runmat_parser::parse("c = {1, 2}; c{2} = 9; x = c{2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6339,7 +6417,7 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_carries_cell_end_selector_metadata_for_reads() {
+    fn compile_uses_contextual_cell_end_selector_for_reads() {
         let ast = runmat_parser::parse("c = {1, 2, 3}; x = c{end};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6353,30 +6431,21 @@ y = x^[1 2; 3 4];\n",
             .find(|export| export.name == "x")
             .expect("x export");
 
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexCell {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } if end_offsets == &vec![(0, 0)]
-            ) || matches!(
-                instr,
-                Instr::IndexCellList {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } if end_offsets == &vec![(0, 0)]
-            )
-        }));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::IndexCell { num_indices: 1 } | Instr::IndexCellList { num_indices: 1 }
+        )));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[x_export.slot.0], Value::Num(3.0));
     }
 
     #[test]
-    fn compile_carries_cell_end_selector_metadata_for_stores() {
+    fn compile_uses_contextual_cell_end_selector_for_stores() {
         let ast = runmat_parser::parse("c = {1, 2, 3}; c{end} = 9; x = c{3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6390,21 +6459,21 @@ y = x^[1 2; 3 4];\n",
             .find(|export| export.name == "x")
             .expect("x export");
 
-        assert!(bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            Instr::StoreIndexCell {
-                num_indices: 1,
-                end_offsets,
-                ..
-            } if end_offsets == &vec![(0, 0)]
-        )));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreIndexCell { num_indices: 1 })));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
     }
 
     #[test]
-    fn compile_carries_cell_end_offset_selector_metadata_in_semantic_function_reads() {
+    fn compile_uses_contextual_cell_end_offset_in_semantic_function_reads() {
         let ast = runmat_parser::parse(
             "function y = tail_cell(c); y = c{end-1}; end; c = {1, 2, 3}; x = tail_cell(c);",
         )
@@ -6422,28 +6491,10 @@ y = x^[1 2; 3 4];\n",
             .function_registry
             .get(function_id)
             .expect("tail_cell semantic bytecode");
-        let read_offsets: Vec<Vec<(usize, isize)>> = function
+        assert!(function
             .instructions
             .iter()
-            .filter_map(|instr| match instr {
-                Instr::IndexCell {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                }
-                | Instr::IndexCellList {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } => Some(end_offsets.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            read_offsets.iter().any(|offsets| offsets == &vec![(0, -1)]),
-            "expected semantic function end-1 metadata offset; actual offsets: {read_offsets:?}; instructions: {:?}",
-            function.instructions
-        );
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
 
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
@@ -6456,7 +6507,7 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_carries_cell_end_offset_selector_metadata_in_semantic_function_stores() {
+    fn compile_uses_contextual_cell_end_offset_in_semantic_function_stores() {
         let ast = runmat_parser::parse(
             "function y = patch_cell(c, v); c{end-1} = v; y = c{2}; end; c = {1, 2, 3}; x = patch_cell(c, 9);",
         )
@@ -6474,24 +6525,10 @@ y = x^[1 2; 3 4];\n",
             .function_registry
             .get(function_id)
             .expect("patch_cell semantic bytecode");
-        let store_offsets: Vec<Vec<(usize, isize)>> = function
+        assert!(function
             .instructions
             .iter()
-            .filter_map(|instr| match instr {
-                Instr::StoreIndexCell {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } => Some(end_offsets.clone()),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            store_offsets
-                .iter()
-                .any(|offsets| offsets == &vec![(0, -1)]),
-            "expected semantic function end-1 metadata offset; actual offsets: {store_offsets:?}"
-        );
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
 
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
@@ -6511,39 +6548,10 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::IndexCell {
-                    num_indices: 1,
-                    end_exprs,
-                    ..
-                } if end_exprs.iter().any(|(pos, expr)| {
-                    *pos == 0
-                        && matches!(
-                            expr,
-                            runmat_runtime::indexing::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
-                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
-                        )
-                })
-            ) || matches!(
-                instr,
-                Instr::IndexCellList {
-                    num_indices: 1,
-                    end_exprs,
-                    ..
-                } if end_exprs.iter().any(|(pos, expr)| {
-                    *pos == 0
-                        && matches!(
-                            expr,
-                            runmat_runtime::indexing::EndExpr::Div(left, right)
-                                if matches!(left.as_ref(), runmat_runtime::indexing::EndExpr::End)
-                                    && matches!(right.as_ref(), runmat_runtime::indexing::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
-                        )
-                })
-            )
-        }));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6564,7 +6572,8 @@ y = x^[1 2; 3 4];\n",
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         let err = block_on(crate::interpret(&bytecode))
             .expect_err("fractional cell end expression selector should fail");
-        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+        assert!(err.to_string().contains("Unsupported cell index type"));
     }
 
     #[test]
@@ -6576,22 +6585,10 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreIndexCell {
-                    num_indices: 1,
-                    end_exprs,
-                    ..
-                } if end_exprs.iter().any(|(pos, expr)| {
-                    *pos == 0
-                        && matches!(
-                            expr,
-                            runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } if args.len() == 1
-                        )
-                })
-            )
-        }));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6610,16 +6607,10 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreIndexCell {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } if end_offsets == &vec![(0, 1)]
-            )
-        }));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6684,16 +6675,10 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreIndexCell {
-                    num_indices: 1,
-                    end_offsets,
-                    ..
-                } if end_offsets == &vec![(0, 3)]
-            )
-        }));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
         let layout = bytecode.layout.as_ref().expect("layout");
         let a_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6828,16 +6813,14 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                Instr::StoreIndexCell {
-                    num_indices: 2,
-                    end_offsets,
-                    ..
-                } if end_offsets.contains(&(1, 1))
-            )
-        }));
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .filter(|instr| matches!(instr, Instr::LoadContextualIndexEnd { .. }))
+                .count()
+                >= 2
+        );
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6877,7 +6860,7 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_3d_slice_roundtrip_uses_slice_expr_paths() {
+    fn compile_3d_slice_roundtrip_uses_contextual_slice_paths() {
         let ast = runmat_parser::parse(
             r#"
             A = reshape([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24], 3, 4, 2);
@@ -6891,48 +6874,22 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        let mut saw_index_expr = false;
-        let mut saw_store_expr = false;
-        for instr in &bytecode.instructions {
-            if let Instr::IndexSliceExpr {
-                dims,
-                end_mask,
-                end_numeric_exprs,
-                range_dims,
-                ..
-            } = instr
-            {
-                if *dims == 3 {
-                    saw_index_expr = true;
-                    assert_eq!(*end_mask, 0);
-                    assert_eq!(end_numeric_exprs.len(), 1);
-                    assert_eq!(range_dims, &vec![0, 1]);
-                }
-            }
-            if let Instr::StoreSliceExpr {
-                dims,
-                numeric_count,
-                colon_mask,
-                end_mask,
-                range_dims,
-                range_has_step,
-                end_numeric_exprs,
-                ..
-            } = instr
-            {
-                if *dims == 3 {
-                    saw_store_expr = true;
-                    assert_eq!(*numeric_count, 1);
-                    assert_eq!(*colon_mask, 0);
-                    assert_eq!(*end_mask, 0);
-                    assert_eq!(range_dims, &vec![0, 1]);
-                    assert_eq!(range_has_step, &vec![false, false]);
-                    assert_eq!(end_numeric_exprs.len(), 1);
-                }
-            }
-        }
-        assert!(saw_index_expr);
-        assert!(saw_store_expr);
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::IndexSlice(3, _, _, _))));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreSlice(3, _, _, _))));
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .filter(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 2 }))
+                .count()
+                >= 2
+        );
 
         let run = block_on(crate::interpret(&bytecode));
         assert!(

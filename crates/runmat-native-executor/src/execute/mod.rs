@@ -17,6 +17,7 @@ mod osr;
 mod region;
 mod site;
 mod state;
+mod subscript_path;
 mod sync;
 mod workspace;
 

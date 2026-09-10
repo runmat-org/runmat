@@ -21,51 +21,36 @@ pub(crate) fn externally_reachable_functions(assembly: &MirAssembly) -> BTreeSet
             }),
     );
     for body in assembly.bodies.values() {
-        for value in body.blocks.iter().flat_map(|block| {
-            block
-                .statements
-                .iter()
-                .filter_map(|statement| match &statement.kind {
-                    MirStmtKind::Assign { value, .. }
-                    | MirStmtKind::MultiAssign { value, .. }
-                    | MirStmtKind::Expr(value) => Some(value),
-                    _ => None,
-                })
-        }) {
-            collect_escaped_handles(value, &mut reachable);
+        for statement in body.blocks.iter().flat_map(|block| block.statements.iter()) {
+            collect_statement_handles(&statement.kind, &mut reachable);
         }
     }
     reachable
 }
 
 fn collect_escaped_handles(value: &MirRvalue, reachable: &mut BTreeSet<FunctionId>) {
-    fn operand(operand: &crate::MirOperand, reachable: &mut BTreeSet<FunctionId>) {
-        if let crate::MirOperand::FunctionHandle(
-            runmat_hir::CallableIdentity::BoundFunction(function)
-            | runmat_hir::CallableIdentity::AnonymousFunction(function)
-            | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
-        ) = operand
-        {
-            reachable.insert(*function);
-        }
+    if !matches!(value, MirRvalue::ShortCircuit { .. }) {
+        value.visit_direct_expression_regions_dyn(&mut |region| {
+            region.visit_operands(|value| operand_handle(value, reachable));
+        });
     }
     match value {
         MirRvalue::Use(value)
         | MirRvalue::Unary(_, value)
         | MirRvalue::Spawn(value)
-        | MirRvalue::Member { base: value, .. } => operand(value, reachable),
+        | MirRvalue::Member { base: value, .. } => operand_handle(value, reachable),
         MirRvalue::Binary(left, _, right) => {
-            operand(left, reachable);
-            operand(right, reachable);
+            operand_handle(left, reachable);
+            operand_handle(right, reachable);
         }
         MirRvalue::Call(call) => {
             for argument in &call.args {
-                operand(argument.operand(), reachable);
+                argument.visit_operands(|value| operand_handle(value, reachable));
             }
         }
         MirRvalue::Future { args, .. } => {
             for argument in args {
-                operand(argument.operand(), reachable);
+                argument.visit_operands(|value| operand_handle(value, reachable));
             }
         }
         MirRvalue::ShortCircuit {
@@ -74,18 +59,37 @@ fn collect_escaped_handles(value: &MirRvalue, reachable: &mut BTreeSet<FunctionI
             right,
             ..
         } => {
-            operand(left, reachable);
-            operand(right, reachable);
+            operand_handle(left, reachable);
+            operand_handle(right, reachable);
             for statement in right_temps {
-                match &statement.kind {
-                    MirStmtKind::Assign { value, .. }
-                    | MirStmtKind::MultiAssign { value, .. }
-                    | MirStmtKind::Expr(value) => collect_escaped_handles(value, reachable),
-                    _ => {}
-                }
+                collect_statement_handles(&statement.kind, reachable);
             }
         }
         _ => {}
+    }
+}
+
+fn collect_statement_handles(statement: &MirStmtKind, reachable: &mut BTreeSet<FunctionId>) {
+    match statement {
+        MirStmtKind::Assign { value, .. }
+        | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::SequenceAssign { value, .. }
+        | MirStmtKind::Expr(value) => collect_escaped_handles(value, reachable),
+        MirStmtKind::CaptureSequence { source, .. } => {
+            source.visit_operands(|value| operand_handle(value, reachable));
+        }
+        _ => {}
+    }
+}
+
+fn operand_handle(operand: &crate::MirOperand, reachable: &mut BTreeSet<FunctionId>) {
+    if let crate::MirOperand::FunctionHandle(
+        runmat_hir::CallableIdentity::BoundFunction(function)
+        | runmat_hir::CallableIdentity::AnonymousFunction(function)
+        | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
+    ) = operand
+    {
+        reachable.insert(*function);
     }
 }
 
@@ -95,25 +99,40 @@ pub(crate) fn call_graph(assembly: &MirAssembly) -> BTreeMap<FunctionId, BTreeSe
         .iter()
         .map(|(function, body)| {
             let mut callees = BTreeSet::new();
-            for value in body.blocks.iter().flat_map(|block| {
-                block
-                    .statements
-                    .iter()
-                    .filter_map(|statement| match &statement.kind {
-                        MirStmtKind::Assign { value, .. }
-                        | MirStmtKind::MultiAssign { value, .. }
-                        | MirStmtKind::Expr(value) => Some(value),
-                        _ => None,
-                    })
-            }) {
-                collect_calls(value, &mut callees);
+            for statement in body.blocks.iter().flat_map(|block| block.statements.iter()) {
+                collect_statement_calls(&statement.kind, &mut callees);
             }
             (*function, callees)
         })
         .collect()
 }
 
+fn collect_expansion_calls(source: &crate::MirExpansionSource, callees: &mut BTreeSet<FunctionId>) {
+    source.visit_direct_expression_regions_dyn(&mut |region| {
+        for step in region.steps() {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => collect_calls(value, callees),
+                crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                    collect_expansion_calls(source, callees)
+                }
+            }
+        }
+    });
+}
+
 fn collect_calls(value: &MirRvalue, callees: &mut BTreeSet<FunctionId>) {
+    if !matches!(value, MirRvalue::ShortCircuit { .. }) {
+        value.visit_direct_expression_regions_dyn(&mut |region| {
+            for step in region.steps() {
+                match step {
+                    crate::MirExpressionStep::Let { value, .. } => collect_calls(value, callees),
+                    crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                        collect_expansion_calls(source, callees)
+                    }
+                }
+            }
+        });
+    }
     match value {
         MirRvalue::Call(call) => {
             if let MirCallee::Static(
@@ -127,17 +146,23 @@ fn collect_calls(value: &MirRvalue, callees: &mut BTreeSet<FunctionId>) {
         }
         MirRvalue::ShortCircuit { right_temps, .. } => {
             for statement in right_temps {
-                match &statement.kind {
-                    MirStmtKind::Assign { value, .. }
-                    | MirStmtKind::MultiAssign { value, .. }
-                    | MirStmtKind::Expr(value) => collect_calls(value, callees),
-                    _ => {}
-                }
+                collect_statement_calls(&statement.kind, callees);
             }
         }
         MirRvalue::Future { function, .. } => {
             callees.insert(*function);
         }
+        _ => {}
+    }
+}
+
+fn collect_statement_calls(statement: &MirStmtKind, callees: &mut BTreeSet<FunctionId>) {
+    match statement {
+        MirStmtKind::Assign { value, .. }
+        | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::SequenceAssign { value, .. }
+        | MirStmtKind::Expr(value) => collect_calls(value, callees),
+        MirStmtKind::CaptureSequence { source, .. } => collect_expansion_calls(source, callees),
         _ => {}
     }
 }
@@ -206,4 +231,48 @@ pub(crate) fn strongly_connected_components(
         }
     }
     state.components
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calls_inside_top_level_sequence_capture_regions_enter_the_graph() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main(values)
+  out = consume(values{helper(end)});
+end
+function out = helper(index)
+  out = index;
+end
+function out = consume(varargin)
+  out = varargin;
+end
+"#,
+        )
+        .expect("parse fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower HIR fixture");
+        let mir = crate::lowering::lower_assembly(&hir.assembly).expect("lower MIR fixture");
+        assert!(mir.bodies.values().any(|body| {
+            body.blocks.iter().any(|block| {
+                block
+                    .statements
+                    .iter()
+                    .any(|statement| matches!(statement.kind, MirStmtKind::CaptureSequence { .. }))
+            })
+        }));
+
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let graph = call_graph(&mir);
+        let main = by_name["main"];
+        assert!(graph[&main].contains(&by_name["helper"]));
+        assert!(graph[&main].contains(&by_name["consume"]));
+    }
 }

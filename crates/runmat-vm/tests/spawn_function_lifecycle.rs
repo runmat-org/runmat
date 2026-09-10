@@ -100,6 +100,203 @@ mod tests {
         Ok((function_id, registry, input_slot))
     }
 
+    fn invoke_no_arg(source: &str, function_name: &str) -> Result<Value, RuntimeError> {
+        let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
+        let hir = lower(&ast, &LoweringContext::empty())
+            .map_err(|err| RuntimeError::new(err.to_string()))?;
+        let mir =
+            lower_assembly(&hir.assembly).map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+        let function_id = hir
+            .assembly
+            .functions
+            .iter()
+            .find(|function| function.name.0 == function_name)
+            .map(|function| function.id)
+            .ok_or_else(|| RuntimeError::new(format!("missing function `{function_name}`")))?;
+        let registry = runmat_vm::FunctionRegistry::new(
+            compile_semantic_function_registry(&hir.assembly, &mir).map_err(RuntimeError::from)?,
+        );
+        block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[],
+            1,
+            &registry,
+        ))
+    }
+
+    #[test]
+    fn short_circuit_await_starts_only_the_selected_future() {
+        let source = r#"
+            async function y = fail_if_started()
+                error("future was started");
+                y = true;
+            end
+
+            async function y = skip_and()
+                y = false && await(fail_if_started());
+            end
+
+            async function y = skip_or()
+                y = true || await(fail_if_started());
+            end
+
+            async function y = take_and()
+                y = true && await(fail_if_started());
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(source, "skip_and").expect("false && must skip its future"),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            invoke_no_arg(source, "skip_or").expect("true || must skip its future"),
+            Value::Bool(true)
+        );
+        assert!(
+            invoke_no_arg(source, "take_and").is_err(),
+            "true && must evaluate and await its right operand"
+        );
+    }
+
+    #[test]
+    fn while_await_restarts_each_iteration_and_skips_the_terminating_future() {
+        let source = r#"
+            async function ok = guard_iteration(v)
+                if v >= 2
+                    error("terminating guard future was started");
+                end
+                ok = true;
+            end
+
+            async function y = run_loop()
+                y = 0;
+                while y < 2 && await(guard_iteration(y))
+                    y = y + 1;
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(source, "run_loop")
+                .expect("loop futures should be evaluated per iteration"),
+            Value::Num(2.0)
+        );
+    }
+
+    #[test]
+    fn await_resume_does_not_replay_expression_or_target_prefixes() {
+        let expression = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_expression()
+                y = tick() + await(pass(1));
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(expression, "run_expression")
+                .expect("expression prefix must survive suspension"),
+            Value::Num(2.0)
+        );
+
+        let destination = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_destination()
+                matrix = zeros(2, 2);
+                matrix(tick(), await(pass(2))) = 9;
+                y = matrix(1, 2);
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(destination, "run_destination")
+                .expect("destination prefix must survive suspension"),
+            Value::Num(9.0)
+        );
+    }
+
+    #[test]
+    fn destination_await_failures_clear_prepared_prefix_state_before_catch() {
+        let failure_during_await = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = fail_future()
+                error("expected awaited failure");
+                y = 0;
+            end
+
+            async function y = run_failure_during_await()
+                matrix = zeros(2, 2);
+                try
+                    matrix(tick(), await(fail_future())) = 9;
+                catch
+                    y = tick();
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(failure_during_await, "run_failure_during_await")
+                .expect("caught awaited failure must clear prepared destination state"),
+            Value::Num(2.0)
+        );
+
+        let failure_after_resume = r#"
+            function value = tick()
+                persistent count;
+                if isempty(count)
+                    count = 0;
+                end
+                count = count + 1;
+                value = count;
+            end
+
+            async function y = pass(value)
+                y = value;
+            end
+
+            async function y = run_failure_after_resume()
+                matrix = zeros(2, 2);
+                try
+                    matrix(tick(), await(pass(1.5))) = 9;
+                catch
+                    y = tick();
+                end
+            end
+        "#;
+        assert_eq!(
+            invoke_no_arg(failure_after_resume, "run_failure_after_resume")
+                .expect("caught post-resume failure must clear prepared destination state"),
+            Value::Num(2.0)
+        );
+    }
+
     fn result_contains_handle(
         vars: &[Value],
         handle: &runmat_accelerate_api::GpuTensorHandle,

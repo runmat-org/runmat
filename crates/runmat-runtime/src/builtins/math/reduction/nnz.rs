@@ -836,7 +836,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::SparseTensor(_) => "sparse tensor".to_string(),
         Value::ComplexTensor(_) => "complex tensor".to_string(),
         Value::Cell(_) => "cell array".to_string(),
-        Value::Struct(_) => "struct".to_string(),
+        Value::Struct(_) | Value::StructArray(_) => "struct".to_string(),
         Value::GpuTensor(_) => "GPU tensor".to_string(),
         Value::ObjectArray(array) => format!("{} object array", array.class_name()),
         Value::Object(obj) => format!("{} object", obj.class_name),

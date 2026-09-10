@@ -377,6 +377,12 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
             .data
             .iter()
             .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::StructArray(array) => array
+            .any_value(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
         _ => false,
     }
 }

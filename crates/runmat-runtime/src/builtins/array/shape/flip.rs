@@ -319,13 +319,22 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             "flip: cell arrays are not yet supported",
             &FLIP_ERROR_UNSUPPORTED_INPUT,
         )),
+        Value::StructArray(mut array) => {
+            let dims = resolve_dims(&spec, array.shape());
+            for dimension in dims {
+                array = array
+                    .flip(dimension - 1)
+                    .map_err(|error| flip_error_for("flip", error))?;
+            }
+            Ok(Value::StructArray(array))
+        }
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -906,8 +915,29 @@ pub(crate) mod tests {
     };
     use runmat_value::{
         CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray,
-        StringArray, Tensor,
+        StringArray, StructArray, StructValue, Tensor,
     };
+
+    fn structure(value: f64) -> StructValue {
+        let mut structure = StructValue::new();
+        structure.insert("value", Value::Num(value));
+        structure
+    }
+
+    fn struct_values(value: Value) -> Vec<f64> {
+        let Value::StructArray(array) = value else {
+            panic!("expected structure array");
+        };
+        array
+            .field_values("value")
+            .expect("value field")
+            .iter()
+            .map(|value| match value {
+                Value::Num(value) => *value,
+                other => panic!("expected numeric value, got {other:?}"),
+            })
+            .collect()
+    }
 
     #[test]
     fn flip_type_preserves_logical_shape() {
@@ -1065,6 +1095,39 @@ pub(crate) mod tests {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flip_struct_array_uses_one_based_public_dimensions() {
+        let array = StructArray::new(
+            (1..=4).map(|value| structure(value as f64)).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array.clone()), vec![]).unwrap()),
+            vec![2.0, 1.0, 4.0, 3.0]
+        );
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array), vec![Value::Num(2.0)]).unwrap()),
+            vec![3.0, 4.0, 1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn flip_struct_array_handles_nd_and_empty_shapes() {
+        let array = StructArray::new(vec![structure(1.0), structure(2.0)], vec![1, 1, 2]).unwrap();
+        assert_eq!(
+            struct_values(flip_builtin(Value::StructArray(array), vec![Value::Num(3.0)]).unwrap()),
+            vec![2.0, 1.0]
+        );
+        let empty = StructArray::empty(vec!["value".into()], vec![0, 2]).unwrap();
+        let Value::StructArray(empty) =
+            flip_builtin(Value::StructArray(empty), vec![]).expect("empty flip")
+        else {
+            panic!("expected empty structure array");
+        };
+        assert_eq!(empty.shape(), &[0, 2]);
     }
 
     #[test]

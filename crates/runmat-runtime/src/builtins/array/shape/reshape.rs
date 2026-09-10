@@ -328,6 +328,15 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         }
         Value::CharArray(chars) => reshape_char_array(chars, dims),
         Value::Cell(cell) => reshape_cell_array(cell, dims),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => array
+            .reshape(if dims.len() == 1 {
+                vec![dims[0], 1]
+            } else {
+                dims.to_vec()
+            })
+            .map(Value::StructArray)
+            .map_err(|error| reshape_error(format!("reshape: {error}"))),
         Value::ObjectArray(array) => {
             let class_name = array.class_name().to_string();
             runmat_value::ObjectArray::new(class_name, array.into_data(), dims.to_vec())

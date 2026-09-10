@@ -1,4 +1,4 @@
-use runmat_value::{CellArray, StructValue, Value};
+use runmat_value::{CellArray, StructArray, StructValue, Value};
 
 pub(super) fn build(
     cells: CellArray,
@@ -40,16 +40,9 @@ pub(super) fn build(
                 .ok_or_else(|| super::error::invalid("cell storage does not match its shape"))?;
             structure.insert(field.clone(), value);
         }
-        structures.push(Value::Struct(structure));
+        structures.push(structure);
     }
-    if output_count == 1 {
-        return structures
-            .pop()
-            .ok_or_else(|| super::error::invalid("failed to assemble scalar structure"));
-    }
-    CellArray::new_with_shape(structures, output_shape)
-        .map(Value::Cell)
-        .map_err(super::error::invalid)
+    StructArray::normalize(fields, structures, output_shape).map_err(super::error::invalid)
 }
 
 fn checked_count(shape: &[usize]) -> crate::BuiltinResult<usize> {

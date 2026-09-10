@@ -1,4 +1,4 @@
-use super::{NativeBlock, NativeBlockId, NativeIndexExpression, NativeLocalId, NativeMirSite};
+use super::{NativeBlock, NativeBlockId, NativeLocalId, NativeMirSite};
 use runmat_types::{
     BindingId, CapabilitySet, FunctionArgDefaultValue, FunctionArgSizeSpec, FunctionArgValidator,
     ProgramFunctionId, ProgramSourceId,
@@ -73,6 +73,7 @@ pub struct NativeFunction {
     pub id: ProgramFunctionId,
     pub source: ProgramSourceId,
     pub name: String,
+    pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     /// Whole-function requirements derived by canonical MIR analysis. Native
     /// executors use this contract when a function becomes an async target;
     /// they do not reconstruct semantics from lowered instructions.
@@ -80,7 +81,6 @@ pub struct NativeFunction {
     pub abi: NativeFunctionAbi,
     pub argument_validations: Vec<NativeFunctionArgumentValidation>,
     pub locals: Vec<NativeLocalMetadata>,
-    pub index_expressions: Vec<NativeIndexExpression>,
     pub entry: NativeBlockId,
     pub blocks: Vec<NativeBlock>,
     pub expected_sites: Vec<NativeMirSite>,
@@ -93,12 +93,5 @@ impl NativeFunction {
 
     pub fn local(&self, local: NativeLocalId) -> Option<&NativeLocalMetadata> {
         self.locals.get(local.0 as usize)
-    }
-
-    pub fn index_expression(&self, local: NativeLocalId) -> Option<&NativeIndexExpression> {
-        self.index_expressions
-            .binary_search_by_key(&local, |expression| expression.local)
-            .ok()
-            .map(|index| &self.index_expressions[index])
     }
 }

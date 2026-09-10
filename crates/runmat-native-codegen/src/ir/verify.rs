@@ -8,7 +8,10 @@ impl NativeAssembly {
         if self.schema_version != NATIVE_IR_SCHEMA_VERSION {
             return Err(NativeCodegenError::new(
                 "native.ir.schema_version",
-                "unsupported Native IR schema version",
+                format!(
+                    "unsupported Native IR schema version {}; expected {}. Rebuild the program with this RunMat version",
+                    self.schema_version, NATIVE_IR_SCHEMA_VERSION
+                ),
             ));
         }
         if self.executable_identity.program != self.program {
@@ -123,22 +126,6 @@ fn verify_function(
             "native.ir.function_locals",
             "locals must be ordered and bound locals must retain non-empty canonical names",
         ));
-    }
-    ensure_sorted_unique_by(
-        "native.ir.index_expressions",
-        &function.index_expressions,
-        |expression| expression.local,
-    )
-    .map_err(|error| error.at_function(function.id))?;
-    for expression in &function.index_expressions {
-        if expression.local.0 as usize >= function.local_count()
-            || !verify_index_expression(function, &expression.kind)
-        {
-            return Err(error(
-                "native.ir.index_expressions",
-                "selector expressions must be valid, context-dependent, and local to the function",
-            ));
-        }
     }
     for local in function
         .abi
@@ -260,6 +247,11 @@ fn verify_function(
         let mut current_effect_epoch = block.side_effect_epoch;
         let mut boundary_states =
             BTreeMap::from([(0_u32, (available.clone(), current_effect_epoch))]);
+        // Validate the transient sequence channel before per-instruction output
+        // reconstruction. A missing consumer also removes the statement that
+        // gives its producer an output role; the channel invariant is the
+        // primary structural error in that hostile shape.
+        verify_sequence_register_flow(function.id, &block.instructions)?;
         for instruction in &block.instructions {
             let containing_statement = block.instructions.iter().find_map(|candidate| {
                 (candidate.site.point == instruction.site.point
@@ -401,6 +393,7 @@ fn verify_function(
             &blocks,
         )?;
     }
+    verify_sequence_capture_flow(function, &blocks)?;
 
     let expected = function
         .expected_sites
@@ -424,6 +417,203 @@ fn verify_function(
         ));
     }
     verify_region_boundaries(function, regions)?;
+    Ok(())
+}
+
+fn verify_sequence_capture_flow(
+    function: &NativeFunction,
+    blocks: &BTreeMap<NativeBlockId, &NativeBlock>,
+) -> NativeCodegenResult<()> {
+    let error = |message| {
+        NativeCodegenError::new("native.ir.sequence_capture_flow", message).at_function(function.id)
+    };
+    let mut entries = BTreeMap::<NativeBlockId, BTreeSet<runmat_mir::MirSequenceLocalId>>::new();
+    let mut pending = std::collections::VecDeque::from([(function.entry, BTreeSet::new())]);
+    while let Some((block_id, incoming)) = pending.pop_front() {
+        if let Some(existing) = entries.get(&block_id) {
+            if existing != &incoming {
+                return Err(error(format!(
+                    "captured sequence state disagrees at block {}: {existing:?} versus {incoming:?}",
+                    block_id.0
+                )));
+            }
+            continue;
+        }
+        entries.insert(block_id, incoming.clone());
+        let block = blocks.get(&block_id).ok_or_else(|| {
+            error(format!(
+                "captured sequence flow reaches missing block {}",
+                block_id.0
+            ))
+        })?;
+        let mut live = incoming;
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                NativeOperation::Statement(runmat_mir::MirStmtKind::CaptureSequence {
+                    destination,
+                    ..
+                }) => {
+                    if !live.insert(*destination) {
+                        return Err(error(format!(
+                            "captured sequence local {} is overwritten at instruction {}",
+                            destination.0, instruction.id.0
+                        )));
+                    }
+                }
+                NativeOperation::Rvalue { value, .. } => {
+                    consume_rvalue_sequence_locals(value, &mut live).map_err(|message| {
+                        error(format!("instruction {}: {message}", instruction.id.0))
+                    })?;
+                }
+                NativeOperation::Statement(_) => {}
+            }
+        }
+        match &block.terminator.kind {
+            NativeTerminatorKind::Return { .. } | NativeTerminatorKind::Unreachable
+                if !live.is_empty() =>
+            {
+                return Err(error(format!(
+                    "captured sequence locals {live:?} remain live at terminator in block {}",
+                    block_id.0
+                )));
+            }
+            NativeTerminatorKind::TryCatch {
+                try_edge,
+                catch_edge,
+                ..
+            } => {
+                pending.push_back((try_edge.target, live));
+                pending.push_back((catch_edge.target, BTreeSet::new()));
+                continue;
+            }
+            _ => {}
+        }
+        for edge in terminator_edges(&block.terminator.kind) {
+            pending.push_back((edge.target, live.clone()));
+        }
+    }
+    Ok(())
+}
+
+fn consume_rvalue_sequence_locals(
+    value: &runmat_mir::MirRvalue,
+    live: &mut BTreeSet<runmat_mir::MirSequenceLocalId>,
+) -> Result<(), String> {
+    let mut consumed = BTreeSet::new();
+    match value {
+        runmat_mir::MirRvalue::Call(call) => {
+            for sequence in call.args.iter().filter_map(|argument| match argument {
+                runmat_mir::MirCallArg::CapturedSequence(sequence) => Some(*sequence),
+                _ => None,
+            }) {
+                consume_sequence_local(sequence, live, &mut consumed)?;
+            }
+        }
+        runmat_mir::MirRvalue::Aggregate { elements, .. } => {
+            for sequence in elements.iter().filter_map(|element| match element {
+                runmat_mir::MirAggregateElement::CapturedSequence(sequence) => Some(*sequence),
+                runmat_mir::MirAggregateElement::Single(_) => None,
+            }) {
+                consume_sequence_local(sequence, live, &mut consumed)?;
+            }
+        }
+        runmat_mir::MirRvalue::ShortCircuit { right_temps, .. } => {
+            for statement in right_temps {
+                match &statement.kind {
+                    runmat_mir::MirStmtKind::CaptureSequence { destination, .. } => {
+                        if !live.insert(*destination) {
+                            return Err(format!(
+                                "captured sequence local {} is overwritten in a short-circuit expression",
+                                destination.0
+                            ));
+                        }
+                    }
+                    runmat_mir::MirStmtKind::Assign { value, .. }
+                    | runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                    | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
+                    | runmat_mir::MirStmtKind::Expr(value) => {
+                        consume_rvalue_sequence_locals(value, live)?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn consume_sequence_local(
+    sequence: runmat_mir::MirSequenceLocalId,
+    live: &mut BTreeSet<runmat_mir::MirSequenceLocalId>,
+    consumed: &mut BTreeSet<runmat_mir::MirSequenceLocalId>,
+) -> Result<(), String> {
+    if !consumed.insert(sequence) {
+        return Err(format!(
+            "captured sequence local {} is consumed more than once by one operation",
+            sequence.0
+        ));
+    }
+    if !live.remove(&sequence) {
+        return Err(format!(
+            "captured sequence local {} is consumed without a live capture",
+            sequence.0
+        ));
+    }
+    Ok(())
+}
+
+fn verify_sequence_register_flow(
+    function: runmat_types::ProgramFunctionId,
+    instructions: &[NativeInstruction],
+) -> NativeCodegenResult<()> {
+    let error = |message| {
+        NativeCodegenError::new("native.ir.sequence_register", message).at_function(function)
+    };
+    let mut producer: Option<(usize, &runmat_mir::MirSequenceTarget)> = None;
+    for (index, instruction) in instructions.iter().enumerate() {
+        match &instruction.operation {
+            NativeOperation::Rvalue {
+                result: NativeRvalueResult::SequenceAssignment(target),
+                ..
+            } => {
+                if producer.is_some() {
+                    return Err(error(
+                        "comma-separated sequence register is overwritten before consumption",
+                    ));
+                }
+                producer = Some((index, target));
+            }
+            NativeOperation::Statement(runmat_mir::MirStmtKind::SequenceAssign {
+                target, ..
+            }) => {
+                let Some((producer_index, produced_target)) = producer.take() else {
+                    return Err(error(
+                        "comma-separated sequence register is consumed without a producer",
+                    ));
+                };
+                if producer_index + 1 != index
+                    || produced_target != target
+                    || instructions[producer_index].site.point != instruction.site.point
+                {
+                    return Err(error(
+                        "comma-separated sequence producer and consumer must be adjacent and describe the same MIR statement",
+                    ));
+                }
+            }
+            _ if producer.is_some() => {
+                return Err(error(
+                    "comma-separated sequence register crosses an instruction boundary before consumption",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if producer.is_some() {
+        return Err(error(
+            "comma-separated sequence register remains live at a block boundary",
+        ));
+    }
     Ok(())
 }
 
@@ -455,96 +645,6 @@ fn argument_validator_is_valid(validator: &runmat_types::FunctionArgValidator) -
     }
 }
 
-fn verify_index_expression(
-    function: &NativeFunction,
-    expression: &NativeIndexExpressionKind,
-) -> bool {
-    match expression {
-        NativeIndexExpressionKind::Scalar(expression) => {
-            end_expression_valid(function, expression) && end_expression_contains_end(expression)
-        }
-        NativeIndexExpressionKind::Range(range) => {
-            let start_valid = index_bound_valid(function, &range.start);
-            let step_valid = range
-                .step
-                .as_ref()
-                .is_none_or(|step| index_bound_valid(function, step));
-            let contains_end = index_bound_contains_end(&range.start)
-                || range.step.as_ref().is_some_and(index_bound_contains_end)
-                || end_expression_contains_end(&range.end);
-            start_valid && step_valid && end_expression_valid(function, &range.end) && contains_end
-        }
-    }
-}
-
-fn index_bound_valid(function: &NativeFunction, bound: &NativeIndexBound) -> bool {
-    match bound {
-        NativeIndexBound::Operand(runmat_mir::MirOperand::Local(local)) => {
-            local.0 < function.local_count()
-        }
-        NativeIndexBound::Operand(
-            runmat_mir::MirOperand::Constant(_) | runmat_mir::MirOperand::FunctionHandle(_),
-        ) => true,
-        NativeIndexBound::Expression(expression) => end_expression_valid(function, expression),
-    }
-}
-
-fn index_bound_contains_end(bound: &NativeIndexBound) -> bool {
-    matches!(bound, NativeIndexBound::Expression(expression) if end_expression_contains_end(expression))
-}
-
-fn end_expression_valid(
-    function: &NativeFunction,
-    expression: &runmat_runtime::indexing::EndExpr,
-) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expression {
-        EndExpr::End => true,
-        EndExpr::Const(value) => value.is_finite(),
-        EndExpr::Var(local) => *local < function.local_count(),
-        EndExpr::ResolvedCall { args, .. } => {
-            args.iter().all(|arg| end_expression_valid(function, arg))
-        }
-        EndExpr::Add(left, right)
-        | EndExpr::Sub(left, right)
-        | EndExpr::Mul(left, right)
-        | EndExpr::Div(left, right)
-        | EndExpr::LeftDiv(left, right)
-        | EndExpr::Pow(left, right) => {
-            end_expression_valid(function, left) && end_expression_valid(function, right)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expression_valid(function, inner),
-    }
-}
-
-fn end_expression_contains_end(expression: &runmat_runtime::indexing::EndExpr) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expression {
-        EndExpr::End => true,
-        EndExpr::Const(_) | EndExpr::Var(_) => false,
-        EndExpr::ResolvedCall { args, .. } => args.iter().any(end_expression_contains_end),
-        EndExpr::Add(left, right)
-        | EndExpr::Sub(left, right)
-        | EndExpr::Mul(left, right)
-        | EndExpr::Div(left, right)
-        | EndExpr::LeftDiv(left, right)
-        | EndExpr::Pow(left, right) => {
-            end_expression_contains_end(left) || end_expression_contains_end(right)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expression_contains_end(inner),
-    }
-}
-
 fn verify_instruction(
     function: &NativeFunction,
     instruction: &NativeInstruction,
@@ -570,7 +670,12 @@ fn verify_instruction(
             "instruction source span end precedes its start",
         ));
     }
-    if instruction.class != instruction.site.construct.native_lowering_class() {
+    if instruction.class
+        != runmat_mir::effective_native_lowering_class(
+            instruction.site.construct,
+            &instruction.effects,
+        )
+    {
         return Err(error(
             "native.ir.instruction_class",
             "instruction class differs from canonical MIR classification",
@@ -628,19 +733,38 @@ fn verify_instruction(
             ));
         }
     } else if let NativeOperation::Statement(statement) = &instruction.operation {
-        if !instruction.embedded_constructs.is_empty() {
+        let expected_constructs = runmat_mir::statement_construct_inventory(statement)
+            .into_iter()
+            .skip(1)
+            .collect::<Vec<_>>();
+        if instruction.embedded_constructs != expected_constructs {
             return Err(error(
                 "native.ir.embedded_constructs",
-                "statement instruction cannot declare embedded constructs",
+                "statement embedded-construct inventory disagrees with canonical MIR",
             ));
         }
-        if !runmat_mir::statement_declared_effects(statement)
-            .0
-            .is_subset(&instruction.effects.0)
+        if runmat_mir::statement_construct_inventory(statement)
+            .iter()
+            .any(|construct| {
+                construct.native_lowering_class()
+                    == runmat_mir::NativeLoweringClass::CapabilityRejection
+            })
+        {
+            return Err(error(
+                "native.capability.distributed_core_pending",
+                "statement contains a construct requiring the R25 distributed core",
+            ));
+        }
+        let (declared_effects, declared_capabilities) =
+            runmat_mir::statement_declared_requirements(statement);
+        if !declared_effects.0.is_subset(&instruction.effects.0)
+            || !declared_capabilities
+                .0
+                .is_subset(&instruction.capabilities.0)
         {
             return Err(error(
                 "native.ir.declared_requirements",
-                "instruction omits effects declared by canonical MIR",
+                "instruction omits effects or capabilities declared by canonical MIR",
             ));
         }
         if !statement_selector_arity_valid(statement) {
@@ -756,6 +880,21 @@ fn verify_instruction(
 }
 
 fn rvalue_selector_arity_valid(value: &runmat_mir::MirRvalue) -> bool {
+    let mut nested_valid = true;
+    value.visit_expression_regions(|region| {
+        nested_valid &= region.steps().iter().all(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => {
+                rvalue_selector_arity_valid_without_regions(value)
+            }
+            runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                expansion_source_selector_arity_valid_without_regions(source)
+            }
+        });
+    });
+    nested_valid && rvalue_selector_arity_valid_without_regions(value)
+}
+
+fn rvalue_selector_arity_valid_without_regions(value: &runmat_mir::MirRvalue) -> bool {
     match value {
         runmat_mir::MirRvalue::Index { indexing, .. } => {
             indexing.components.len() <= u32::BITS as usize
@@ -768,8 +907,83 @@ fn rvalue_selector_arity_valid(value: &runmat_mir::MirRvalue) -> bool {
 }
 
 fn rvalue_contains_legacy_binding_place(value: &runmat_mir::MirRvalue) -> bool {
+    let mut nested_legacy = false;
+    value.visit_expression_regions(|region| {
+        nested_legacy |= region.steps().iter().any(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => {
+                rvalue_contains_legacy_binding_place_without_regions(value)
+            }
+            runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                expansion_source_contains_legacy_binding_place_without_regions(source)
+            }
+        });
+    });
+    nested_legacy || rvalue_contains_legacy_binding_place_without_regions(value)
+}
+
+fn rvalue_contains_legacy_binding_place_without_regions(value: &runmat_mir::MirRvalue) -> bool {
     matches!(value, runmat_mir::MirRvalue::ShortCircuit { right_temps, .. }
         if right_temps.iter().any(|statement| statement_contains_legacy_binding_place(&statement.kind)))
+}
+
+fn expansion_source_selector_arity_valid(source: &runmat_mir::MirExpansionSource) -> bool {
+    let own_valid = expansion_source_selector_arity_valid_without_regions(source);
+    let mut nested_valid = true;
+    source.visit_expression_regions(|region| {
+        nested_valid &= region.steps().iter().all(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => {
+                rvalue_selector_arity_valid_without_regions(value)
+            }
+            runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                expansion_source_selector_arity_valid_without_regions(source)
+            }
+        });
+    });
+    own_valid && nested_valid
+}
+
+fn expansion_source_selector_arity_valid_without_regions(
+    source: &runmat_mir::MirExpansionSource,
+) -> bool {
+    match source {
+        runmat_mir::MirExpansionSource::SubscriptChain(chain) => chain
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                runmat_mir::MirSubscriptStep::Index(indexing)
+                | runmat_mir::MirSubscriptStep::DottedInvoke { indexing, .. } => Some(indexing),
+                runmat_mir::MirSubscriptStep::Member(_)
+                | runmat_mir::MirSubscriptStep::DynamicMember(_) => None,
+            })
+            .all(|indexing| indexing.components.len() <= u32::BITS as usize),
+        runmat_mir::MirExpansionSource::CellContents { indexing, .. } => {
+            indexing.components.len() <= u32::BITS as usize
+        }
+        runmat_mir::MirExpansionSource::ReturnedOutputs(_)
+        | runmat_mir::MirExpansionSource::Member { .. }
+        | runmat_mir::MirExpansionSource::DynamicMember { .. } => true,
+    }
+}
+
+fn expansion_source_contains_legacy_binding_place(source: &runmat_mir::MirExpansionSource) -> bool {
+    let mut contains = false;
+    source.visit_expression_regions(|region| {
+        contains |= region.steps().iter().any(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => {
+                rvalue_contains_legacy_binding_place_without_regions(value)
+            }
+            runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                expansion_source_contains_legacy_binding_place_without_regions(source)
+            }
+        });
+    });
+    contains || expansion_source_contains_legacy_binding_place_without_regions(source)
+}
+
+fn expansion_source_contains_legacy_binding_place_without_regions(
+    _source: &runmat_mir::MirExpansionSource,
+) -> bool {
+    false
 }
 
 fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
@@ -780,8 +994,25 @@ fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
         runmat_mir::MirStmtKind::MultiAssign { targets, value } => {
             targets.targets.iter().all(|target| match target {
                 runmat_mir::MirOutputTarget::Place(place) => place_selector_arity_valid(place),
+                runmat_mir::MirOutputTarget::Sequence(target) => {
+                    place_selector_arity_valid(target.base())
+                        && sequence_target_selector_arity_valid(target)
+                }
                 runmat_mir::MirOutputTarget::Discard => true,
             }) && rvalue_selector_arity_valid(value)
+        }
+        runmat_mir::MirStmtKind::SequenceAssign { target, value } => {
+            let base_valid = match target {
+                runmat_mir::MirSequenceTarget::Member { base, .. }
+                | runmat_mir::MirSequenceTarget::DynamicMember { base, .. }
+                | runmat_mir::MirSequenceTarget::CellContents { base, .. } => {
+                    place_selector_arity_valid(base)
+                }
+            };
+            base_valid && rvalue_selector_arity_valid(value)
+        }
+        runmat_mir::MirStmtKind::CaptureSequence { source, .. } => {
+            expansion_source_selector_arity_valid(source)
         }
         runmat_mir::MirStmtKind::Expr(value) => rvalue_selector_arity_valid(value),
         runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
@@ -800,8 +1031,22 @@ fn statement_contains_legacy_binding_place(statement: &runmat_mir::MirStmtKind) 
         runmat_mir::MirStmtKind::MultiAssign { targets, value } => {
             targets.targets.iter().any(|target| match target {
                 runmat_mir::MirOutputTarget::Place(place) => place_contains_legacy_binding(place),
+                runmat_mir::MirOutputTarget::Sequence(target) => {
+                    place_contains_legacy_binding(target.base())
+                }
                 runmat_mir::MirOutputTarget::Discard => false,
             }) || rvalue_contains_legacy_binding_place(value)
+        }
+        runmat_mir::MirStmtKind::SequenceAssign { target, value } => {
+            let base = match target {
+                runmat_mir::MirSequenceTarget::Member { base, .. }
+                | runmat_mir::MirSequenceTarget::DynamicMember { base, .. }
+                | runmat_mir::MirSequenceTarget::CellContents { base, .. } => base,
+            };
+            place_contains_legacy_binding(base) || rvalue_contains_legacy_binding_place(value)
+        }
+        runmat_mir::MirStmtKind::CaptureSequence { source, .. } => {
+            expansion_source_contains_legacy_binding_place(source)
         }
         runmat_mir::MirStmtKind::Expr(value) => rvalue_contains_legacy_binding_place(value),
         runmat_mir::MirStmtKind::PlaceMutation(mutation) => {
@@ -829,6 +1074,16 @@ fn place_selector_arity_valid(place: &runmat_mir::MirPlace) -> bool {
         runmat_mir::MirPlace::DynamicMember(base, _) => place_selector_arity_valid(base),
         runmat_mir::MirPlace::Index(base, indexing) => {
             place_selector_arity_valid(base) && indexing.components.len() <= u32::BITS as usize
+        }
+    }
+}
+
+fn sequence_target_selector_arity_valid(target: &runmat_mir::MirSequenceTarget) -> bool {
+    match target {
+        runmat_mir::MirSequenceTarget::Member { .. }
+        | runmat_mir::MirSequenceTarget::DynamicMember { .. } => true,
+        runmat_mir::MirSequenceTarget::CellContents { indexing, .. } => {
+            indexing.components.len() <= u32::BITS as usize
         }
     }
 }
@@ -876,12 +1131,25 @@ fn rvalue_output_locals(
                 MirOutputTarget::Place(place) => {
                     root_local(place).map(checked_native_local).transpose()
                 }
+                MirOutputTarget::Sequence(_) => Ok(None),
                 MirOutputTarget::Discard => Ok(None),
             })
             .collect(),
+        MirStmtKind::SequenceAssign { .. } => Ok(Vec::new()),
+        MirStmtKind::CaptureSequence { .. } => Ok(Vec::new()),
         MirStmtKind::Expr(value) => Ok((!matches!(
             value,
-            runmat_mir::MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0
+            runmat_mir::MirRvalue::Call(call)
+                if call.requested_outputs.known_count() == Some(0)
+        ) && !matches!(
+            value,
+            runmat_mir::MirRvalue::Member {
+                sequence_use: runmat_types::SequenceUse::Discard,
+                ..
+            } | runmat_mir::MirRvalue::DynamicMember {
+                sequence_use: runmat_types::SequenceUse::Discard,
+                ..
+            }
         ))
         .then_some(None)
         .into_iter()
@@ -906,9 +1174,14 @@ fn statement_output_locals(
             .iter()
             .filter_map(|target| match target {
                 MirOutputTarget::Place(place) => root_local(place),
+                MirOutputTarget::Sequence(target) => root_local(target.base()),
                 MirOutputTarget::Discard => None,
             })
             .collect(),
+        MirStmtKind::SequenceAssign { target, .. } => {
+            root_local(target.base()).into_iter().collect()
+        }
+        MirStmtKind::CaptureSequence { .. } => Vec::new(),
         MirStmtKind::PlaceMutation(mutation) => root_local(&mutation.place).into_iter().collect(),
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
         MirStmtKind::Expr(_) | MirStmtKind::EnvironmentEffect(_) => Vec::new(),
@@ -943,6 +1216,7 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
             let arity = match result {
                 NativeRvalueResult::Assignment => 1,
                 NativeRvalueResult::MultiAssignment(arity) => *arity as usize,
+                NativeRvalueResult::SequenceAssignment(_) => 0,
                 NativeRvalueResult::Expression => 1,
                 NativeRvalueResult::Discard => 0,
                 NativeRvalueResult::Terminator => {
@@ -952,12 +1226,20 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
                     ))
                 }
             };
-            if let runmat_mir::MirRvalue::Call(call) = value {
-                if call.requested_outputs.fixed_count() != arity {
-                    return Err(NativeCodegenError::new(
-                        "native.ir.call_output_arity",
-                        "call result role differs from requested output arity",
-                    ));
+            if !matches!(result, NativeRvalueResult::SequenceAssignment(_)) {
+                if let runmat_mir::MirRvalue::Call(call) = value {
+                    let Some(requested) = call.requested_outputs.known_count() else {
+                        return Err(NativeCodegenError::new(
+                            "native.ir.call_output_arity",
+                            "runtime-determined call output count requires a dynamic native result role",
+                        ));
+                    };
+                    if requested != arity {
+                        return Err(NativeCodegenError::new(
+                            "native.ir.call_output_arity",
+                            "call result role differs from requested output arity",
+                        ));
+                    }
                 }
             }
             Ok(arity)
@@ -972,11 +1254,20 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
                 }
                 runmat_mir::MirStmtKind::MultiAssign { targets, .. } => {
                     for target in &targets.targets {
-                        if let runmat_mir::MirOutputTarget::Place(place) = target {
-                            if let Some(local) = root_local(place) {
-                                roots.insert(local);
-                            }
+                        let place = match target {
+                            runmat_mir::MirOutputTarget::Place(place) => Some(place),
+                            runmat_mir::MirOutputTarget::Sequence(target) => Some(target.base()),
+                            runmat_mir::MirOutputTarget::Discard => None,
+                        };
+                        if let Some(local) = place.and_then(root_local) {
+                            roots.insert(local);
                         }
+                    }
+                }
+                runmat_mir::MirStmtKind::CaptureSequence { .. } => {}
+                runmat_mir::MirStmtKind::SequenceAssign { target, .. } => {
+                    if let Some(local) = root_local(target.base()) {
+                        roots.insert(local);
                     }
                 }
                 runmat_mir::MirStmtKind::PlaceMutation(mutation) => {

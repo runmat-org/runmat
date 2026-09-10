@@ -762,6 +762,10 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
         Value::Cell(c) => (c.rows, c.cols),
         Value::CharArray(c) => (c.rows, c.cols),
         Value::StringArray(s) => (s.rows, s.cols),
+        Value::StructArray(array) => (
+            array.shape().first().copied().unwrap_or(0),
+            array.shape().get(1).copied().unwrap_or(1),
+        ),
         Value::GpuTensor(handle) => {
             let rows = handle.shape.first().copied().unwrap_or(1);
             let cols = handle.shape.get(1).copied().unwrap_or(1);
@@ -780,6 +784,7 @@ pub fn value_is_empty(value: &Value) -> bool {
         Value::StringArray(s) => s.data.is_empty(),
         Value::CharArray(c) => c.rows == 0 || c.cols == 0,
         Value::Cell(c) => c.data.is_empty(),
+        Value::StructArray(array) => array.is_empty(),
         Value::GpuTensor(handle) => handle.shape.contains(&0),
         _ => false,
     }
@@ -1535,6 +1540,7 @@ pub fn value_is_column(value: &Value) -> bool {
         Value::LogicalArray(value) => &value.shape,
         Value::StringArray(value) => &value.shape,
         Value::Cell(value) => &value.shape,
+        Value::StructArray(value) => value.shape(),
         Value::CharArray(value) => &value.shape,
         Value::GpuTensor(handle) => &handle.shape,
         _ => {
@@ -1565,6 +1571,7 @@ pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
         Value::LogicalArray(value) => shape_is_vector(&value.shape),
         Value::StringArray(value) => shape_is_vector(&value.shape),
         Value::Cell(value) => shape_is_vector(&value.shape),
+        Value::StructArray(value) => shape_is_vector(value.shape()),
         Value::CharArray(value) => shape_is_vector(&value.shape),
         Value::GpuTensor(handle) => shape_is_vector(&handle.shape),
         Value::SparseTensor(value) => value.rows == 1 || value.cols == 1,
@@ -1596,7 +1603,7 @@ pub fn value_matches_class(value: &Value, class_name: &str) -> bool {
         "char" => matches!(value, Value::CharArray(_)),
         "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
         "cell" => matches!(value, Value::Cell(_)),
-        "struct" => matches!(value, Value::Struct(_)),
+        "struct" => matches!(value, Value::Struct(_) | Value::StructArray(_)),
         "sparse" => matches!(value, Value::SparseTensor(_)),
         "double" => {
             matches!(value, Value::Num(_) | Value::Complex(_, _))
@@ -2618,7 +2625,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        StructValue, Tensor,
+        StructArray, StructValue, Tensor,
     };
 
     fn ok(builtin: &str, args: Vec<Value>) {
@@ -2906,6 +2913,41 @@ mod tests {
         )
         .expect("empty complex integer tensor");
         assert!(value_is_empty(&Value::ComplexTensor(empty_complex)));
+    }
+
+    fn structure_array(shape: Vec<usize>) -> Value {
+        let mut element = StructValue::new();
+        element.insert("value", Value::Num(1.0));
+        Value::StructArray(
+            StructArray::new(vec![element; shape.iter().product()], shape)
+                .expect("structure array"),
+        )
+    }
+
+    #[test]
+    fn structural_predicates_use_structure_array_shape() {
+        let matrix = structure_array(vec![2, 2]);
+        assert_eq!(value_shape_2d(&matrix), (2, 2));
+        assert!(!value_is_empty(&matrix));
+        assert!(!value_is_column(&matrix));
+        assert!(!value_is_vector(&matrix).unwrap());
+        assert!(value_matches_class(&matrix, "struct"));
+
+        let column = structure_array(vec![3, 1]);
+        assert!(value_is_column(&column));
+        assert!(value_is_vector(&column).unwrap());
+
+        let nd = structure_array(vec![1, 2, 2]);
+        assert_eq!(value_shape_2d(&nd), (1, 2));
+        assert!(!value_is_column(&nd));
+        assert!(!value_is_vector(&nd).unwrap());
+
+        let empty = Value::StructArray(
+            StructArray::empty(vec!["value".into()], vec![0, 4]).expect("empty structure array"),
+        );
+        assert_eq!(value_shape_2d(&empty), (0, 4));
+        assert!(value_is_empty(&empty));
+        assert!(!value_is_vector(&empty).unwrap());
     }
 
     #[test]
@@ -3314,7 +3356,7 @@ mod tests {
     #[test]
     fn namedargs2cell_preserves_field_order() {
         let mut st = StructValue::new();
-        st.insert("Name", Value::String("Ada".into()));
+        st.insert("Name", Value::String("entry-a".into()));
         st.insert("Value", Value::Num(7.0));
         let out = namedargs2cell_value(Value::Struct(st)).expect("namedargs2cell");
         let Value::Cell(cell) = out else {

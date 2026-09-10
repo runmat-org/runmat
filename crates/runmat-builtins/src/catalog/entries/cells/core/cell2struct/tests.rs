@@ -49,7 +49,10 @@ fn selected_dimension_becomes_singleton() {
             dims: vec![DimensionFact::Known(1), DimensionFact::Known(3)]
         }
     );
-    assert!(matches!(inference.outputs[0].kind, ValueKindFact::Cell(_)));
+    assert!(matches!(
+        inference.outputs[0].kind,
+        ValueKindFact::Struct(_)
+    ));
 }
 
 #[test]

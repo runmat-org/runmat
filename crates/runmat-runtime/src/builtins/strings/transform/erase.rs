@@ -217,6 +217,8 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(contains_numeric_or_resident),
+        Value::Struct(value) => value.fields.values().any(contains_numeric_or_resident),
+        Value::StructArray(array) => array.any_value(contains_numeric_or_resident),
         _ => false,
     }
 }

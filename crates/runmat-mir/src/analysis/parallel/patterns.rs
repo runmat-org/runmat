@@ -116,9 +116,12 @@ fn statement_preserves_slice_pattern(
                 MirOutputTarget::Place(place) => {
                     place_preserves_slice_pattern(place, context, access, writes)
                 }
+                MirOutputTarget::Sequence(_) => false,
                 MirOutputTarget::Discard => true,
             }) && rvalue_preserves_slice_pattern(value, context, access)
         }
+        MirStmtKind::SequenceAssign { .. } => false,
+        MirStmtKind::CaptureSequence { .. } => false,
         MirStmtKind::Expr(value) => rvalue_preserves_slice_pattern(value, context, access),
         MirStmtKind::PlaceMutation(mutation) => {
             place_preserves_slice_pattern(&mutation.place, context, access, writes)
@@ -199,9 +202,10 @@ fn rvalue_preserves_slice_pattern(
                     .iter()
                     .all(|argument| !call_argument_mentions_local(argument, local))
         }
-        MirRvalue::Aggregate { elements, .. } => {
-            elements.iter().all(|value| !operand_is_local(value, local))
-        }
+        MirRvalue::Aggregate { elements, .. } => elements
+            .iter()
+            .filter_map(crate::MirAggregateElement::operand)
+            .all(|value| !operand_is_local(value, local)),
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => fields
             .iter()
             .all(|(_, value)| !operand_is_local(value, local)),
@@ -216,8 +220,13 @@ fn rvalue_preserves_slice_pattern(
             }
         }
         MirRvalue::Member { base, .. } => !operand_is_local(base, local),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             !operand_is_local(base, local) && !operand_is_local(member, local)
+        }
+        MirRvalue::SubscriptChain(chain) => {
+            let mut mentions = false;
+            chain.visit_operands(|operand| mentions |= operand_is_local(operand, local));
+            !mentions
         }
         MirRvalue::Future { args, .. } => args
             .iter()
@@ -492,10 +501,12 @@ fn indexing_mentions_local(indexing: &MirIndexing, local: MirLocalId) -> bool {
 fn call_argument_mentions_local(argument: &MirCallArg, local: MirLocalId) -> bool {
     match argument {
         MirCallArg::Single(value) => operand_is_local(value, local),
-        MirCallArg::Expansion { base, indices, .. } => {
-            operand_is_local(base, local)
-                || indices.iter().any(|value| operand_is_local(value, local))
+        MirCallArg::Expansion(source) => {
+            let mut mentions = false;
+            source.visit_operands(|operand| mentions |= operand_is_local(operand, local));
+            mentions
         }
+        MirCallArg::CapturedSequence(_) => false,
     }
 }
 

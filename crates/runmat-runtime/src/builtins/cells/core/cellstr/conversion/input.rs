@@ -27,6 +27,7 @@ pub(super) fn classify(value: Value) -> Input {
         | Value::SparseTensor(_)
         | Value::ComplexTensor(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::GpuTensor(_)
         | Value::Object(_)
         | Value::ObjectArray(_)

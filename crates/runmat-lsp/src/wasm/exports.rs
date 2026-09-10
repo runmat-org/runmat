@@ -524,10 +524,7 @@ mod tests {
                 elements: vec![unknown()],
                 elements_complete: true,
             }),
-            ValueKindFact::Struct(runmat_types::StructFact {
-                fields: BTreeMap::new(),
-                fields_complete: true,
-            }),
+            ValueKindFact::Struct(runmat_types::StructFact::scalar(BTreeMap::new(), true)),
             ValueKindFact::Object(runmat_types::ObjectFact {
                 class: None,
                 runtime_class: None,

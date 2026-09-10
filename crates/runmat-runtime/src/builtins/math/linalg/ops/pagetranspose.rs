@@ -221,6 +221,14 @@ async fn pagetranspose_value(value: Value) -> BuiltinResult<Value> {
         }
         Value::Cell(ca) => Ok(Value::Cell(pagetranspose_cell_array(ca)?)),
         Value::Struct(s) => Ok(Value::Struct(s)),
+        Value::StructArray(array) => {
+            let mut order = (0..array.shape().len()).collect::<Vec<_>>();
+            order.swap(0, 1);
+            array
+                .permute(&order)
+                .map(Value::StructArray)
+                .map_err(|error| internal_error(format!("{NAME}: {error}")))
+        }
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),

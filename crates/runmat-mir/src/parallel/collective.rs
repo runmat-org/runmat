@@ -171,6 +171,83 @@ impl MirCollectiveOp {
         }
     }
 
+    pub fn for_each_operand(&self, mut operation: impl FnMut(&MirOperand)) {
+        match self {
+            Self::Barrier { .. } => {}
+            Self::Broadcast { input, root, .. } => {
+                if let Some(input) = input {
+                    operation(input);
+                }
+                operation(root);
+            }
+            Self::Gather { input, root, .. }
+            | Self::Scatter { input, root, .. }
+            | Self::Reduce { input, root, .. } => {
+                operation(input);
+                operation(root);
+            }
+            Self::AllGather { input, .. } | Self::AllReduce { input, .. } => operation(input),
+            Self::Cat {
+                input,
+                dimension,
+                root,
+                ..
+            } => {
+                operation(input);
+                operation(dimension);
+                if let Some(root) = root {
+                    operation(root);
+                }
+            }
+            Self::FunctionalReduce {
+                reducer,
+                input,
+                root,
+                ..
+            } => {
+                operation(reducer);
+                operation(input);
+                if let Some(root) = root {
+                    operation(root);
+                }
+            }
+            Self::Send {
+                input,
+                destination,
+                tag,
+                ..
+            } => {
+                operation(input);
+                operation(destination);
+                if let Some(tag) = tag {
+                    operation(tag);
+                }
+            }
+            Self::Receive { source, tag, .. } | Self::Probe { source, tag, .. } => {
+                if let Some(source) = source {
+                    operation(source);
+                }
+                if let Some(tag) = tag {
+                    operation(tag);
+                }
+            }
+            Self::SendReceive {
+                destination,
+                source,
+                input,
+                tag,
+                ..
+            } => {
+                operation(destination);
+                operation(source);
+                operation(input);
+                if let Some(tag) = tag {
+                    operation(tag);
+                }
+            }
+        }
+    }
+
     pub fn input(&self) -> Option<&MirOperand> {
         match self {
             Self::Broadcast { input, .. } => input.as_ref(),

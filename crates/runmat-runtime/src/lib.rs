@@ -24,6 +24,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+pub mod aggregate;
 pub mod analysis;
 pub mod builtin;
 pub mod dispatcher;
@@ -60,10 +61,14 @@ pub mod comparison;
 pub mod plotting_hooks;
 pub mod replay;
 pub mod runtime_error;
+pub mod sequence;
 pub mod user_functions;
 pub mod warning_store;
 pub(crate) mod warnings;
 pub mod workspace;
+
+#[cfg(test)]
+mod architecture_tests;
 
 /// Standard result type for runtime builtins.
 pub type BuiltinResult<T> = Result<T, RuntimeError>;
@@ -77,6 +82,10 @@ pub const OBJECT_SUBSREF_METHOD: runmat_types::StaticMethodName =
     runmat_types::StaticMethodName::new("subsref");
 pub const OBJECT_SUBSASGN_METHOD: runmat_types::StaticMethodName =
     runmat_types::StaticMethodName::new("subsasgn");
+pub const OBJECT_NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: runmat_types::StaticMethodName =
+    runmat_types::StaticMethodName::new("numArgumentsFromSubscript");
+pub const OBJECT_END_METHOD: runmat_types::StaticMethodName =
+    runmat_types::StaticMethodName::new("end");
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 pub(crate) const HANDLE_VALID_FLAG_PROPERTY: &str = "__runmat_handle_valid__";
 
@@ -225,6 +234,7 @@ pub(crate) fn is_undefined_function_error(err: &RuntimeError) -> bool {
     err.identifier() == Some(IDENT_UNDEFINED_FUNCTION)
 }
 
+#[cfg(test)]
 fn build_shape_checked_cell(
     values: Vec<Value>,
     rows: usize,
@@ -280,6 +290,7 @@ pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<runmat_type
             .unwrap_or_else(|_| handle.class_name.clone());
             Some(class_name)
         }
+        Value::ObjectArray(array) => Some(array.class_name().clone()),
         _ => None,
     }
 }
@@ -1700,18 +1711,16 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let payload = Value::Cell(build_shape_checked_cell(
-                rest.clone(),
-                1,
-                rest.len(),
-                "feval object index payload",
-            )?);
-            crate::builtins::introspection::object_indexing::dispatch_subsref(
-                receiver,
-                OBJECT_INDEX_PAREN.to_string(),
-                payload,
+            let subscript = crate::object::indexing::ObjectSubscriptPath::single(
+                crate::object::indexing::ObjectSubscript::parentheses(
+                    crate::object::indexing::ObjectIndexSelector::IndexValues {
+                        components: rest.into_iter().map(Into::into).collect(),
+                    },
+                ),
             )
-            .await
+            .to_standard_substruct_value()?;
+            crate::builtins::introspection::object_indexing::dispatch_subsref(receiver, subscript)
+                .await
         }
         other => Err(runtime_descriptor_error_with_detail(
             "feval",
@@ -1739,6 +1748,11 @@ mod tests {
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
         format!("{}_{}", prefix, id)
+    }
+
+    fn standard_subscript(kind: &str, payload: Value) -> Value {
+        crate::object::indexing::standard_substruct_fixture_from_parts(kind, payload)
+            .expect("valid standard substruct fixture")
     }
 
     fn listener_gc_test(test: impl FnOnce()) {
@@ -1778,10 +1792,7 @@ mod tests {
             ("Ctor.Ctor", "obj = Ctor.Ctor(x)"),
             ("PkgF.foo", "value = PkgF.foo()"),
             ("OverIdx.plus", "out = OverIdx.plus(obj, rhs)"),
-            (
-                "OverIdx.subsref",
-                "out = OverIdx.subsref(obj, kind, payload)",
-            ),
+            ("OverIdx.subsref", "out = OverIdx.subsref(obj, S)"),
             ("feval", "[varargout] = feval(f, varargin)"),
             ("str2func", "fh = str2func(name)"),
             ("func2str", "name = func2str(fh)"),
@@ -3082,8 +3093,10 @@ mod tests {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsref(
                 Value::Num(1.0),
-                OBJECT_INDEX_PAREN.to_string(),
-                Value::Num(2.0),
+                standard_subscript(
+                    OBJECT_INDEX_PAREN,
+                    Value::Cell(runmat_value::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()),
+                ),
             ),
         )
         .expect_err("non-object subsref receiver should fail");
@@ -3095,8 +3108,10 @@ mod tests {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsasgn(
                 Value::Num(1.0),
-                OBJECT_INDEX_PAREN.to_string(),
-                Value::Num(2.0),
+                standard_subscript(
+                    OBJECT_INDEX_PAREN,
+                    Value::Cell(runmat_value::CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()),
+                ),
                 Value::Num(3.0),
             ),
         )
@@ -3111,8 +3126,10 @@ mod tests {
                 Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsrefProtocolClass".to_string(),
                 )),
-                OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                standard_subscript(
+                    OBJECT_INDEX_PAREN,
+                    Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                ),
             ),
         )
         .expect_err("missing subsref protocol should fail");
@@ -3126,8 +3143,10 @@ mod tests {
                 Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsasgnProtocolClass".to_string(),
                 )),
-                OBJECT_INDEX_PAREN.to_string(),
-                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                standard_subscript(
+                    OBJECT_INDEX_PAREN,
+                    Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                ),
                 Value::Num(3.0),
             ),
         )
@@ -3174,8 +3193,10 @@ mod tests {
     fn overidx_subsref_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsref(
             Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Num(1.0),
+            standard_subscript(
+                OBJECT_INDEX_PAREN,
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+            ),
         ))
         .expect_err("OverIdx.subsref unsupported payload should fail");
         assert_eq!(
@@ -3188,8 +3209,10 @@ mod tests {
     fn overidx_subsasgn_unsupported_payload_errors_with_identifier() {
         let err = block_on(overidx_subsasgn(
             Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Num(1.0),
+            standard_subscript(
+                OBJECT_INDEX_PAREN,
+                Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+            ),
             Value::Num(2.0),
         ))
         .expect_err("OverIdx.subsasgn unsupported payload should fail");

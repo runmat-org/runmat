@@ -1361,29 +1361,6 @@ fn remap_semantic_function_instr(
                 *function = new_id;
             }
         }
-        runmat_vm::Instr::IndexSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | runmat_vm::Instr::StoreSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        } => {
-            remap_optional_end_exprs(range_start_exprs, remap);
-            remap_optional_end_exprs(range_step_exprs, remap);
-            for expr in range_end_exprs {
-                remap_semantic_function_end_expr(expr, remap);
-            }
-            for (_, expr) in end_numeric_exprs {
-                remap_semantic_function_end_expr(expr, remap);
-            }
-        }
         _ => {}
     }
 }
@@ -1392,36 +1369,10 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     let registry = bytecode.function_registry.clone();
     bind_semantic_callback_literals(bytecode, &registry);
     for instr in &mut bytecode.instructions {
-        match instr {
-            runmat_vm::Instr::CreateFunctionHandle(name) => {
-                if let Some(function) = registry.resolve_name(name) {
-                    *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
-                }
+        if let runmat_vm::Instr::CreateFunctionHandle(name) = instr {
+            if let Some(function) = registry.resolve_name(name) {
+                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
             }
-            runmat_vm::Instr::IndexSliceExpr {
-                range_start_exprs,
-                range_step_exprs,
-                range_end_exprs,
-                end_numeric_exprs,
-                ..
-            }
-            | runmat_vm::Instr::StoreSliceExpr {
-                range_start_exprs,
-                range_step_exprs,
-                range_end_exprs,
-                end_numeric_exprs,
-                ..
-            } => {
-                bind_optional_end_exprs(range_start_exprs, &registry);
-                bind_optional_end_exprs(range_step_exprs, &registry);
-                for expr in range_end_exprs {
-                    bind_semantic_function_end_expr(expr, &registry);
-                }
-                for (_, expr) in end_numeric_exprs {
-                    bind_semantic_function_end_expr(expr, &registry);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -1533,105 +1484,6 @@ fn callback_literal(
     registry
         .resolve_name(name)
         .map(|function| (function, name.to_string()))
-}
-
-fn bind_optional_end_exprs(
-    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
-    registry: &runmat_vm::FunctionRegistry,
-) {
-    for expr in exprs.iter_mut().flatten() {
-        bind_semantic_function_end_expr(expr, registry);
-    }
-}
-
-fn bind_semantic_function_end_expr(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    registry: &runmat_vm::FunctionRegistry,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
-            if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
-                let dynamic_name = name.0.clone();
-                if let Some(function) = registry.resolve_name(&dynamic_name) {
-                    *identity = runmat_hir::CallableIdentity::BoundFunction(function);
-                }
-            }
-            for arg in args {
-                bind_semantic_function_end_expr(arg, registry);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
-            bind_semantic_function_end_expr(lhs, registry);
-            bind_semantic_function_end_expr(rhs, registry);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => {
-            bind_semantic_function_end_expr(inner, registry)
-        }
-        runmat_runtime::indexing::EndExpr::End
-        | runmat_runtime::indexing::EndExpr::Const(_)
-        | runmat_runtime::indexing::EndExpr::Var(_) => {}
-    }
-}
-
-fn remap_optional_end_exprs(
-    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    for expr in exprs.iter_mut().flatten() {
-        remap_semantic_function_end_expr(expr, remap);
-    }
-}
-
-fn remap_semantic_function_end_expr(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
-            match identity {
-                runmat_hir::CallableIdentity::BoundFunction(function)
-                | runmat_hir::CallableIdentity::AnonymousFunction(function) => {
-                    if let Some(new_id) = remap.get(function).copied() {
-                        *function = new_id;
-                    }
-                }
-                _ => {}
-            }
-            for arg in args {
-                remap_semantic_function_end_expr(arg, remap);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
-            remap_semantic_function_end_expr(lhs, remap);
-            remap_semantic_function_end_expr(rhs, remap);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => {
-            remap_semantic_function_end_expr(inner, remap)
-        }
-        runmat_runtime::indexing::EndExpr::End
-        | runmat_runtime::indexing::EndExpr::Const(_)
-        | runmat_runtime::indexing::EndExpr::Var(_) => {}
-    }
 }
 
 #[cfg(test)]

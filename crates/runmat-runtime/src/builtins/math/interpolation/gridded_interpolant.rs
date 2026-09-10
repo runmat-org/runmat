@@ -27,10 +27,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::{
-    build_runtime_error, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
-    OBJECT_SUBSREF_METHOD,
-};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_SUBSREF_METHOD};
 
 use super::pp::{
     build_pchip_pp, build_spline_pp, eval_pp_scalar, Extrapolation, NumericSeries,
@@ -155,7 +152,7 @@ const INPUTS_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
         "Grid vectors or full grids, values, interpolation method, and extrapolation method.",
 }];
 
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -164,18 +161,11 @@ const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "griddedInterpolant object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Indexing payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
 ];
 
@@ -218,7 +208,7 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
 ];
 
 const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = griddedInterpolant.subsref(obj, kind, payload)",
+    label: "out = griddedInterpolant.subsref(obj, S)",
     inputs: &SUBSREF_INPUTS,
     outputs: &SUBSREF_OUTPUT,
 }];
@@ -482,21 +472,29 @@ async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ),
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
-async fn gridded_interpolant_subsref(
+async fn gridded_interpolant_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(obj, path, gridded_interpolant_read_step, None)
+        .await
+}
+
+async fn gridded_interpolant_read_step(
     obj: Value,
-    kind: String,
-    payload: Value,
+    step: crate::object::indexing::ObjectSubscript,
 ) -> BuiltinResult<Value> {
-    match kind.as_str() {
-        OBJECT_INDEX_MEMBER => gridded_member(obj, payload),
-        OBJECT_INDEX_PAREN => {
+    let payload = step.selector_value()?;
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Member => gridded_member(obj, payload),
+        crate::object::indexing::ObjectIndexKind::Paren => {
             let spec = object_to_spec(&obj)?;
             let query_args = payload_to_args(payload)?;
             ensure_query_integer_extensions(&query_args)?;
             let query_args = gather_values(query_args).await?;
             evaluate_interpolant(&spec, query_args)
         }
-        other => Err(invalid(format!("unsupported indexing kind '{other}'"))),
+        crate::object::indexing::ObjectIndexKind::Brace => {
+            Err(invalid("brace indexing is not supported"))
+        }
     }
 }
 
@@ -1646,8 +1644,19 @@ fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN};
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, NumericStorage};
+
+    async fn gridded_interpolant_subsref(
+        obj: Value,
+        kind: String,
+        payload: Value,
+    ) -> BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::gridded_interpolant_subsref(obj, subscript).await
+    }
 
     fn row(values: &[f64]) -> Value {
         Value::Tensor(Tensor::new(values.to_vec(), vec![1, values.len()]).unwrap())

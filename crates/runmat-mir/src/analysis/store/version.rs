@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 2;
+pub const ANALYSIS_STORE_SCHEMA_VERSION: u16 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,6 +137,21 @@ mod tests {
         assert_eq!(
             other_catalog.validate_current(),
             Err(AnalysisRevisionMismatch::CatalogFingerprint)
+        );
+    }
+
+    #[test]
+    fn frozen_analysis_store_two_is_rejected_by_current_admission() {
+        let store: crate::analysis::AnalysisStore = serde_json::from_slice(include_bytes!(
+            "../../../tests/fixtures/analysis-store-2.json"
+        ))
+        .expect("frozen schema-2 AnalysisStore remains decodable");
+        assert_eq!(
+            store.revision.validate_current(),
+            Err(AnalysisRevisionMismatch::StoreSchema {
+                expected: ANALYSIS_STORE_SCHEMA_VERSION,
+                actual: 2,
+            })
         );
     }
 }

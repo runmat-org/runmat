@@ -37,9 +37,14 @@ impl Compiler {
                         .with_identifier("RunMat:fetchOutputs:InvalidInput"));
                 }
                 self.compile_parallel_arguments(&call.args)?;
+                let requested_outputs = call.requested_outputs.known_count().ok_or_else(|| {
+                    self.compile_error(
+                        "fetchOutputs output count cannot be derived from an assignment destination",
+                    )
+                })?;
                 self.emit(Instr::FetchOutputs {
                     arg_count: call.args.len(),
-                    requested_outputs: call.requested_outputs.fixed_count(),
+                    requested_outputs,
                 });
             }
             "fetchNext" => {
@@ -53,9 +58,14 @@ impl Compiler {
                     }
                 };
                 self.compile_parallel_arguments(&call.args)?;
+                let requested_outputs = call.requested_outputs.known_count().ok_or_else(|| {
+                    self.compile_error(
+                        "fetchNext output count cannot be derived from an assignment destination",
+                    )
+                })?;
                 self.emit(Instr::FetchNext {
                     has_timeout,
-                    requested_outputs: call.requested_outputs.fixed_count(),
+                    requested_outputs,
                 });
             }
             _ => return Ok(false),

@@ -46,13 +46,6 @@ pub fn print_native_ir(assembly: &NativeAssembly) -> String {
                 validation.default_value
             );
         }
-        for expression in &function.index_expressions {
-            let _ = writeln!(
-                output,
-                "  index-expression l{} {:?}",
-                expression.local.0, expression.kind
-            );
-        }
         for block in &function.blocks {
             let _ = write!(output, "  b{}(", block.id.0);
             for (index, parameter) in block.parameters.iter().enumerate() {

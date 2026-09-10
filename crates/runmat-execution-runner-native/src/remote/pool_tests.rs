@@ -1439,10 +1439,10 @@ end
         source_objects: Vec::new(),
         expected_artifact_id: None,
     };
-    let executable_bytes = serde_json::to_vec(&bytecode).unwrap();
+    let executable_bytes = runmat_vm::encode_interpreter_script_v2(&bytecode).unwrap();
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterScriptV2,
         executable_bytes,
     )
     .unwrap();
@@ -1450,7 +1450,7 @@ end
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterScriptV2,
             artifact.executable_bytes.clone(),
         )
         .build()
@@ -1593,15 +1593,15 @@ async fn compile_spmd_region_bundle(
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&bytecode).unwrap(),
+        ExecutableForm::InterpreterScriptV2,
+        runmat_vm::encode_interpreter_script_v2(&bytecode).unwrap(),
     )
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterScriptV2,
             artifact.executable_bytes.clone(),
         )
         .build()

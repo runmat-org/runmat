@@ -5,6 +5,30 @@ use crate::{ContractError, Digest};
 
 pub const EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES: usize = 256 * 1024 * 1024;
 
+/// Revision fields admitted before any executable component is decoded.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutableUnitAdmission {
+    pub schema_version: u16,
+    pub identity: super::ExecutableIdentity,
+    pub revisions: super::ExecutableComponentRevisions,
+    pub capabilities: runmat_types::CapabilitySet,
+    pub interop: runmat_types::InteropManifest,
+}
+
+#[derive(Deserialize)]
+struct AdmissionEnvelope {
+    schema_version: u16,
+    manifest: AdmissionManifest,
+}
+
+#[derive(Deserialize)]
+struct AdmissionManifest {
+    identity: super::ExecutableIdentity,
+    revisions: super::ExecutableComponentRevisions,
+    capabilities: runmat_types::CapabilitySet,
+    interop: runmat_types::InteropManifest,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutableUnitEnvelope {
@@ -14,6 +38,33 @@ pub struct ExecutableUnitEnvelope {
 }
 
 impl ExecutableUnitEnvelope {
+    /// Read only the bounded transport envelope's revision header. Component
+    /// payloads remain opaque and are not decoded into MIR, analysis, or
+    /// bytecode types until the caller admits these revisions.
+    pub fn admission(bytes: &[u8]) -> Result<ExecutableUnitAdmission, ContractError> {
+        if bytes.len() > EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES {
+            return Err(ContractError::Limit {
+                field: "executable.envelope",
+                limit: EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES as u64,
+            });
+        }
+        let header = serde_json::from_slice::<AdmissionEnvelope>(bytes)
+            .map_err(|error| ContractError::invalid("executable.envelope", error.to_string()))?;
+        if header.schema_version != super::EXECUTABLE_UNIT_SCHEMA_VERSION {
+            return Err(ContractError::UnsupportedSchema {
+                actual: header.schema_version,
+                supported: super::EXECUTABLE_UNIT_SCHEMA_VERSION,
+            });
+        }
+        Ok(ExecutableUnitAdmission {
+            schema_version: header.schema_version,
+            identity: header.manifest.identity,
+            revisions: header.manifest.revisions,
+            capabilities: header.manifest.capabilities,
+            interop: header.manifest.interop,
+        })
+    }
+
     pub fn new(
         manifest: ExecutableUnitManifest,
         payloads: Vec<ExecutableComponentPayload>,

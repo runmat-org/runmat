@@ -19,6 +19,11 @@ pub use bytecode::{
     compile_with_analysis,
 };
 pub use bytecode::{
+    decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,
+    encode_interpreter_script_v2, InterpreterPayloadError, InterpreterPayloadForm,
+    InterpreterRevisionField,
+};
+pub use bytecode::{
     AsyncMetadata, AwaitSite, Bytecode, BytecodeCodistributedOverload, BytecodeCollectiveOp,
     BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeParallelVariable,
     BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSpmdHeader,

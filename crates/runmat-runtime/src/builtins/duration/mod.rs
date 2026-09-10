@@ -13,8 +13,8 @@ use runmat_value::{CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
-    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
-    OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
+    OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
 const BUILTIN_NAME: &str = "duration";
@@ -196,7 +196,7 @@ const DURATION_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Right duration/datetime operand.",
     },
 ];
-const DURATION_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const DURATION_SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -205,21 +205,14 @@ const DURATION_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Duration receiver object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index/member payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
 ];
-const DURATION_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+const DURATION_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -228,18 +221,11 @@ const DURATION_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Duration receiver object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index/member payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
     BuiltinParamDescriptor {
         name: "rhs",
@@ -326,13 +312,13 @@ const DURATION_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
     },
 ];
 const DURATION_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = duration.subsref(obj, kind, payload)",
+    label: "out = duration.subsref(obj, S)",
     inputs: &DURATION_SUBSREF_INPUTS,
     outputs: &OUT_ANY,
 }];
 const DURATION_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
     [BuiltinSignatureDescriptor {
-        label: "out = duration.subsasgn(obj, kind, payload, rhs)",
+        label: "out = duration.subsasgn(obj, S, rhs)",
         inputs: &DURATION_SUBSASGN_INPUTS,
         outputs: &OUT_ANY,
     }];
@@ -1084,10 +1070,19 @@ fn isduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::duration::DURATION_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
 )]
-async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
-    match kind.as_str() {
-        OBJECT_INDEX_PAREN => duration_indexing(obj, payload).await,
-        OBJECT_INDEX_MEMBER => {
+async fn duration_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(obj, path, duration_read_step, None).await
+}
+
+async fn duration_read_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> crate::BuiltinResult<Value> {
+    let payload = step.selector_value()?;
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Paren => duration_indexing(obj, payload).await,
+        crate::object::indexing::ObjectIndexKind::Member => {
             let Value::Object(object) = obj else {
                 return Err(duration_error(
                     "duration.subsref: receiver must be a duration object",
@@ -1101,9 +1096,9 @@ async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
                 ))),
             }
         }
-        other => Err(duration_error(format!(
-            "duration.subsref: unsupported indexing kind '{other}'"
-        ))),
+        crate::object::indexing::ObjectIndexKind::Brace => Err(duration_error(
+            "duration.subsref: brace indexing is not supported",
+        )),
     }
 }
 
@@ -1114,17 +1109,39 @@ async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
 )]
 async fn duration_subsasgn(
     obj: Value,
-    kind: String,
-    payload: Value,
+    subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsasgn(
+        obj,
+        path,
+        vec![rhs],
+        duration_read_step,
+        |obj, step, mut values| async move {
+            let rhs = values
+                .pop()
+                .ok_or_else(|| duration_error("duration.subsasgn: assignment value is missing"))?;
+            duration_write_step(obj, step, rhs).await
+        },
+        None,
+    )
+    .await
+}
+
+async fn duration_write_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
+    let payload = step.selector_value()?;
     let Value::Object(mut object) = obj else {
         return Err(duration_error(
             "duration.subsasgn: receiver must be a duration object",
         ));
     };
-    match kind.as_str() {
-        OBJECT_INDEX_MEMBER => {
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Member => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
@@ -1139,9 +1156,9 @@ async fn duration_subsasgn(
                 ))),
             }
         }
-        _ => Err(duration_error(format!(
-            "duration.subsasgn: unsupported indexing kind '{kind}'"
-        ))),
+        _ => Err(duration_error(
+            "duration.subsasgn: only member assignment is supported",
+        )),
     }
 }
 
@@ -1256,6 +1273,27 @@ async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 mod tests {
     use super::*;
 
+    async fn duration_subsref(
+        obj: Value,
+        kind: String,
+        payload: Value,
+    ) -> crate::BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::duration_subsref(obj, subscript).await
+    }
+
+    async fn duration_subsasgn(
+        obj: Value,
+        kind: String,
+        payload: Value,
+        rhs: Value,
+    ) -> crate::BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::duration_subsasgn(obj, subscript, rhs).await
+    }
+
     fn run_duration(args: Vec<Value>) -> Value {
         futures::executor::block_on(duration_builtin(args)).expect("duration")
     }
@@ -1298,7 +1336,7 @@ mod tests {
 
         assert_eq!(
             DURATION_SUBSREF_DESCRIPTOR.signatures[0].label,
-            "out = duration.subsref(obj, kind, payload)"
+            "out = duration.subsref(obj, S)"
         );
         assert_eq!(
             DURATION_BINARY_DESCRIPTOR.signatures[0].label,

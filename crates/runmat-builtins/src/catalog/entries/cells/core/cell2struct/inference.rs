@@ -1,8 +1,8 @@
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    CallInference, CallRequest, CellFact, DimensionFact, DynamicReason, ShapeFact, StorageFact,
-    StructFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DimensionFact, DynamicReason, ShapeFact, StorageFact, StructFact,
+    ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -43,23 +43,14 @@ fn output_fact(request: &CallRequest) -> Option<ValueFact> {
     }
     dims[index] = DimensionFact::Known(1);
     let shape = ShapeFact::Shaped { dims };
-    let structure = ValueKindFact::Struct(StructFact {
-        fields: BTreeMap::new(),
-        fields_complete: false,
-    });
-    if shape.element_count() == Some(1) {
-        return Some(ValueFact::scalar(structure));
-    }
+    let structure =
+        ValueKindFact::Struct(StructFact::array(BTreeMap::new(), false, Vec::new(), false));
     let element = ValueFact::scalar(structure);
-    Some(ValueFact::proven(
-        ValueKindFact::Cell(CellFact {
-            element: Box::new(element),
-            elements: Vec::new(),
-            elements_complete: false,
-        }),
-        shape,
-        StorageFact::Dense,
-    ))
+    if shape.element_count() == Some(1) {
+        Some(element)
+    } else {
+        Some(ValueFact::proven(element.kind, shape, StorageFact::Dense))
+    }
 }
 
 fn diagnostics(request: &CallRequest) -> Vec<runmat_types::InferenceDiagnostic> {

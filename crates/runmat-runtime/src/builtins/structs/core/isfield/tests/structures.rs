@@ -1,10 +1,10 @@
 use super::run;
-use runmat_value::{CellArray, StructValue, Value};
+use runmat_value::{CellArray, StructArray, StructValue, Value};
 
 #[test]
 fn scalar_structure_queries_are_exact_and_case_sensitive() {
     let mut structure = StructValue::new();
-    structure.fields.insert("name".into(), Value::from("Ada"));
+    structure.fields.insert("name".into(), Value::from("entry"));
     assert_eq!(
         run(Value::Struct(structure.clone()), Value::from("name")).unwrap(),
         Value::Bool(true)
@@ -16,24 +16,21 @@ fn scalar_structure_queries_are_exact_and_case_sensitive() {
 }
 
 #[test]
-fn represented_array_uses_the_common_field_intersection() {
+fn typed_array_uses_its_homogeneous_schema() {
     let mut first = StructValue::new();
-    first.fields.insert("name".into(), Value::from("Ada"));
+    first.fields.insert("name".into(), Value::from("first"));
     first.fields.insert("id".into(), Value::Num(1.0));
     let mut second = StructValue::new();
-    second.fields.insert("name".into(), Value::from("Grace"));
-    let array = CellArray::new_with_shape(
-        vec![Value::Struct(first), Value::Struct(second)],
-        vec![1, 2],
-    )
-    .expect("structure array");
+    second.fields.insert("name".into(), Value::from("second"));
+    second.fields.insert("id".into(), Value::Num(2.0));
+    let array = StructArray::new(vec![first, second], vec![1, 2]).expect("structure array");
     assert_eq!(
-        run(Value::Cell(array.clone()), Value::from("name")).unwrap(),
+        run(Value::StructArray(array.clone()), Value::from("name")).unwrap(),
         Value::Bool(true)
     );
     assert_eq!(
-        run(Value::Cell(array), Value::from("id")).unwrap(),
-        Value::Bool(false)
+        run(Value::StructArray(array), Value::from("missing")).unwrap(),
+        Value::Bool(false),
     );
 }
 

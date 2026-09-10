@@ -49,7 +49,7 @@ pub fn who_type(_args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 pub fn whos_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell_of(Type::Struct {
+    Type::Struct {
         known_fields: Some(vec![
             "name".to_string(),
             "size".to_string(),
@@ -61,7 +61,7 @@ pub fn whos_type(_args: &[Type], _context: &ResolveContext) -> Type {
             "nesting".to_string(),
             "persistent".to_string(),
         ]),
-    })
+    }
 }
 
 pub fn clearvars_type(_args: &[Type], _context: &ResolveContext) -> Type {
@@ -160,10 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn whos_type_reports_cell_of_structs() {
+    fn whos_type_reports_structure_array() {
         assert_eq!(
             whos_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::Struct {
+            Type::Struct {
                 known_fields: Some(vec![
                     "name".to_string(),
                     "size".to_string(),
@@ -175,7 +175,7 @@ mod tests {
                     "nesting".to_string(),
                     "persistent".to_string(),
                 ])
-            })
+            }
         );
     }
 

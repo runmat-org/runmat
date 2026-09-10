@@ -45,10 +45,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         runtime_class: Some(standard::TABLE.owned()),
         properties: BTreeMap::from([(
             "Variables".into(),
-            ValueFact::scalar(ValueKindFact::Struct(StructFact {
-                fields: variables,
-                fields_complete: true,
-            })),
+            ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(variables, true))),
         )]),
         properties_complete: false,
         handle_semantics: Some(false),

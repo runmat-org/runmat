@@ -181,6 +181,9 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
                 .map(|(name, value)| Ok((PythonValue::String(name), value_to_python(value)?)))
                 .collect::<Result<_, RuntimeError>>()?,
         )),
+        Value::StructArray(_) => Err(invalid_conversion(
+            "structure arrays require a shape-preserving Python conversion",
+        )),
         Value::Object(value) if value.is_class(runmat_types::standard::DATETIME) => {
             datetime_to_python(&value)
         }
@@ -599,6 +602,36 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_conversion_rejects_typed_structure_arrays_without_reclassifying_cells() {
+        let mut first = runmat_value::StructValue::new();
+        first.insert("payload", Value::Num(1.0));
+        let mut second = runmat_value::StructValue::new();
+        second.insert("payload", Value::Num(2.0));
+        let array = runmat_value::StructArray::with_fields(
+            vec!["payload".into()],
+            vec![first.clone(), second.clone()],
+            vec![1, 2],
+        )
+        .expect("structure array");
+        let error = value_to_python(Value::StructArray(array))
+            .expect_err("unshaped Python tuples must not represent structure arrays");
+        assert!(error
+            .message()
+            .contains("shape-preserving Python conversion"));
+
+        let cell =
+            runmat_value::CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 1, 2)
+                .expect("cell of structures");
+        let PythonValue::Tuple(values) = value_to_python(Value::Cell(cell)).expect("cell") else {
+            panic!("expected Python tuple");
+        };
+        assert_eq!(values.len(), 2);
+        assert!(values
+            .iter()
+            .all(|value| matches!(value, PythonValue::Dict(_))));
+    }
 
     #[test]
     fn datetime_scalar_uses_python_datetime_components() {

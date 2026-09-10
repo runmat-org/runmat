@@ -24,6 +24,7 @@ pub(super) async fn dispatch(
     stack: &mut Vec<Value>,
     vars: &mut [Value],
     pc: &mut usize,
+    sequence_state: &mut super::SequenceState,
     context: ParallelDispatchContext<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let ParallelDispatchContext {
@@ -42,8 +43,13 @@ pub(super) async fn dispatch(
             )?));
         }
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
-            let arguments =
-                build_user_function_expand_multi_args(stack, specs, &execution.runtime).await?;
+            let arguments = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_state,
+                &execution.runtime,
+            )
+            .await?;
             stack.push(Value::Future(tasks::create_future(
                 execution,
                 tasks::semantic_descriptor(*function, *out_count, arguments),

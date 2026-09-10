@@ -6,6 +6,7 @@ mod exceptions;
 mod indexing;
 mod object;
 mod parallel;
+mod prepared_outputs;
 pub(crate) use parallel::encode_spmd_output;
 mod stack;
 
@@ -16,7 +17,7 @@ use crate::runtime::workspace::{
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -64,6 +65,7 @@ pub struct DispatchMeta<'a> {
 pub struct DispatchState<'a> {
     pub stack: &'a mut Vec<Value>,
     pub vars: &'a mut Vec<Value>,
+    pub sequence_register: &'a mut SequenceState,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub last_exception: &'a mut Option<runmat_value::MException>,
@@ -72,6 +74,373 @@ pub struct DispatchState<'a> {
     pub persistent_aliases: &'a mut HashMap<usize, String>,
     pub missing_input_slots: &'a mut HashSet<usize>,
     pub pc: &'a mut usize,
+}
+
+/// A verified transient window in the operand stack.
+///
+/// Sequence-producing bytecode must be followed immediately by its consuming
+/// store. Keeping only the stack window here makes its values ordinary VM GC
+/// roots while preventing a comma-separated sequence from becoming a language
+/// `Value` that can escape into a variable or workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SequenceRegister {
+    pub start: usize,
+    pub len: usize,
+}
+
+#[derive(Default)]
+pub struct SequenceState {
+    pub assignment: Option<SequenceRegister>,
+    captures: BTreeMap<usize, SequenceRegister>,
+    output_targets: Vec<PreparedOutputTarget>,
+    expected_output_targets: Option<usize>,
+    destination_builder: Option<(usize, runmat_runtime::sequence::SequenceDestinationBuilder)>,
+    prepared_index_component_count: Option<usize>,
+    contextual_indices: Vec<(usize, Vec<usize>)>,
+    subscript_receivers: Vec<(
+        runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+        usize,
+        usize,
+    )>,
+}
+
+pub(super) enum PreparedOutputTarget {
+    Fixed,
+    Discard,
+    Sequence {
+        root_slot: usize,
+        endpoint: runmat_runtime::sequence::PreparedSequenceDestination,
+    },
+}
+
+impl SequenceState {
+    pub(super) fn begin_output_assignment(
+        &mut self,
+        target_count: usize,
+    ) -> Result<(), RuntimeError> {
+        if self.expected_output_targets.is_some() || !self.output_targets.is_empty() {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "output-assignment destination state was overwritten before consumption",
+            ));
+        }
+        self.output_targets.clear();
+        self.destination_builder = None;
+        self.prepared_index_component_count = None;
+        self.expected_output_targets = Some(target_count);
+        Ok(())
+    }
+
+    pub(super) fn push_output_target(&mut self, target: PreparedOutputTarget) {
+        self.output_targets.push(target);
+    }
+
+    pub(super) fn begin_destination(
+        &mut self,
+        root_slot: usize,
+        root: &Value,
+    ) -> Result<(), RuntimeError> {
+        if self.destination_builder.is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "a prepared destination path is already live",
+            ));
+        }
+        self.destination_builder = Some((
+            root_slot,
+            runmat_runtime::sequence::SequenceDestinationBuilder::new(root),
+        ));
+        Ok(())
+    }
+
+    pub(super) fn destination_builder_mut(
+        &mut self,
+    ) -> Result<&mut runmat_runtime::sequence::SequenceDestinationBuilder, RuntimeError> {
+        self.destination_builder
+            .as_mut()
+            .map(|(_, builder)| builder)
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "no prepared destination path is live",
+                )
+            })
+    }
+
+    pub(super) fn begin_index_selectors(&mut self, count: usize) -> Result<(), RuntimeError> {
+        if self.prepared_index_component_count.replace(count).is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "prepared index-selector context was overwritten",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish_index_selectors(&mut self, count: usize) -> Result<(), RuntimeError> {
+        if self.prepared_index_component_count.take() != Some(count) {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "prepared index-selector context is incomplete or inconsistent",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn index_selector_count(&self) -> Result<usize, RuntimeError> {
+        self.prepared_index_component_count.ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "no prepared index-selector context is live",
+            )
+        })
+    }
+
+    pub(super) fn begin_contextual_index(
+        &mut self,
+        component_count: usize,
+        shape: Vec<usize>,
+    ) -> Result<(), RuntimeError> {
+        self.contextual_indices.push((component_count, shape));
+        Ok(())
+    }
+
+    pub(super) fn contextual_index_extent(&self, component: usize) -> Result<usize, RuntimeError> {
+        let (count, shape) = self.contextual_indices.last().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "RunMat:ContextualIndexState",
+                "contextual end was evaluated without an index context",
+            )
+        })?;
+        runmat_runtime::indexing::shape::selector_extent(shape, *count, component)
+    }
+
+    pub(super) fn finish_contextual_index(
+        &mut self,
+        component_count: usize,
+    ) -> Result<(), RuntimeError> {
+        let Some((count, _)) = self.contextual_indices.pop() else {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:ContextualIndexState",
+                "contextual index state is not live",
+            ));
+        };
+        if count != component_count {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:ContextualIndexState",
+                "contextual index component count changed during evaluation",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn push_subscript_receiver(
+        &mut self,
+        receiver: runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+        prefix_start: usize,
+        stack_index: usize,
+    ) {
+        self.subscript_receivers
+            .push((receiver, prefix_start, stack_index));
+    }
+
+    pub(super) fn subscript_receiver(
+        &self,
+    ) -> Result<&runmat_runtime::object::protocol::PreparedSubscriptReceiver, RuntimeError> {
+        self.subscript_receivers
+            .last()
+            .map(|entry| &entry.0)
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "RunMat:SubscriptPathState",
+                    "contextual subscript end has no prepared receiver",
+                )
+            })
+    }
+
+    pub(super) fn pop_subscript_receiver(
+        &mut self,
+    ) -> Result<
+        (
+            runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+            usize,
+            usize,
+        ),
+        RuntimeError,
+    > {
+        self.subscript_receivers.pop().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "RunMat:SubscriptPathState",
+                "contextual subscript receiver was already consumed",
+            )
+        })
+    }
+
+    pub(super) fn take_destination_builder(
+        &mut self,
+    ) -> Result<(usize, runmat_runtime::sequence::SequenceDestinationBuilder), RuntimeError> {
+        if self.prepared_index_component_count.is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "prepared index-selector context remains live",
+            ));
+        }
+        self.destination_builder.take().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "no prepared destination path is live",
+            )
+        })
+    }
+
+    pub(super) fn output_layout(
+        &self,
+    ) -> Result<runmat_runtime::sequence::DestinationLayout, RuntimeError> {
+        if self.expected_output_targets != Some(self.output_targets.len()) {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "output-assignment destination plan is incomplete",
+            ));
+        }
+        runmat_runtime::sequence::DestinationLayout::new(self.output_targets.iter().map(|target| {
+            match target {
+                PreparedOutputTarget::Fixed => {
+                    runmat_runtime::sequence::DestinationCardinality::Fixed
+                }
+                PreparedOutputTarget::Discard => {
+                    runmat_runtime::sequence::DestinationCardinality::Discard
+                }
+                PreparedOutputTarget::Sequence { endpoint, .. } => {
+                    runmat_runtime::sequence::DestinationCardinality::Sequence(
+                        endpoint.cardinality(),
+                    )
+                }
+            }
+        }))
+    }
+
+    pub(super) fn take_output_targets(&mut self) -> Vec<PreparedOutputTarget> {
+        self.expected_output_targets = None;
+        std::mem::take(&mut self.output_targets)
+    }
+
+    pub fn capture(
+        &mut self,
+        slot: usize,
+        stack: &mut Vec<Value>,
+        values: Vec<Value>,
+    ) -> Result<(), RuntimeError> {
+        if self.captures.contains_key(&slot) {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "captured sequence slot was overwritten before consumption",
+            ));
+        }
+        let window = SequenceRegister {
+            start: stack.len(),
+            len: values.len(),
+        };
+        stack.extend(values);
+        self.captures.insert(slot, window);
+        Ok(())
+    }
+
+    pub fn take_captures(
+        &mut self,
+        stack: &mut Vec<Value>,
+        slots: &[usize],
+    ) -> Result<HashMap<usize, Vec<Value>>, RuntimeError> {
+        let mut seen = BTreeSet::new();
+        let mut windows = Vec::with_capacity(slots.len());
+        for slot in slots {
+            if !seen.insert(*slot) {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "call references the same captured sequence more than once",
+                ));
+            }
+            let window = self.captures.get(slot).copied().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "call references an unavailable captured sequence",
+                )
+            })?;
+            let end = window.start.checked_add(window.len).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "captured sequence bounds overflowed",
+                )
+            })?;
+            if end > stack.len() {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "captured sequence is outside the operand stack",
+                ));
+            }
+            windows.push((*slot, window));
+        }
+        windows.sort_by_key(|(_, window)| std::cmp::Reverse(window.start));
+        for pair in windows.windows(2) {
+            let later = pair[0].1;
+            let earlier = pair[1].1;
+            let earlier_end = earlier.start + earlier.len;
+            if earlier_end > later.start {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "captured sequence stack windows overlap",
+                ));
+            }
+        }
+        let mut values = HashMap::with_capacity(windows.len());
+        for (slot, window) in windows {
+            self.captures.remove(&slot);
+            let end = window.start + window.len;
+            values.insert(slot, stack.drain(window.start..end).collect());
+            for remaining in self.captures.values_mut() {
+                if remaining.start >= end {
+                    remaining.start -= window.len;
+                }
+            }
+            if let Some(assignment) = self.assignment.as_mut() {
+                if assignment.start >= end {
+                    assignment.start -= window.len;
+                }
+            }
+        }
+        Ok(values)
+    }
+
+    pub fn clear(&mut self, stack: &mut Vec<Value>) {
+        let mut windows = self.captures.values().copied().collect::<Vec<_>>();
+        if let Some(window) = self.assignment.take() {
+            windows.push(window);
+        }
+        windows.sort_by_key(|window| std::cmp::Reverse(window.start));
+        for window in windows {
+            if let Some(end) = window.start.checked_add(window.len) {
+                if end <= stack.len() {
+                    stack.drain(window.start..end);
+                }
+            }
+        }
+        self.captures.clear();
+        self.output_targets.clear();
+        self.expected_output_targets = None;
+        self.destination_builder = None;
+        self.prepared_index_component_count = None;
+        self.contextual_indices.clear();
+        let mut receiver_roots = self
+            .subscript_receivers
+            .drain(..)
+            .map(|(_, _, index)| index)
+            .collect::<Vec<_>>();
+        receiver_roots.sort_unstable_by(|left, right| right.cmp(left));
+        for index in receiver_roots {
+            if index < stack.len() {
+                stack.remove(index);
+            }
+        }
+    }
 }
 
 pub struct DispatchHooks<'a> {
@@ -84,7 +453,79 @@ pub struct DispatchHooks<'a> {
     pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize, &Value),
 }
 
-fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, RuntimeError> {
+fn materialize_aggregate_rows(
+    stack: &mut Vec<Value>,
+    sequence_state: &mut SequenceState,
+    row_lengths: &[usize],
+    elements: &[crate::bytecode::AggregateElementSpec],
+) -> Result<Vec<Vec<Value>>, RuntimeError> {
+    let expected_elements = row_lengths
+        .iter()
+        .try_fold(0usize, |total, length| total.checked_add(*length));
+    if expected_elements != Some(elements.len()) {
+        return Err(crate::interpreter::errors::mex(
+            "AggregateShapeMismatch",
+            "aggregate row boundaries do not match the element plan",
+        ));
+    }
+    let capture_slots = elements
+        .iter()
+        .filter_map(|element| match element {
+            crate::bytecode::AggregateElementSpec::CapturedSequence { slot } => Some(*slot),
+            crate::bytecode::AggregateElementSpec::Single => None,
+        })
+        .collect::<Vec<_>>();
+    let mut captures = sequence_state.take_captures(stack, &capture_slots)?;
+    let single_count = elements
+        .iter()
+        .filter(|element| matches!(element, crate::bytecode::AggregateElementSpec::Single))
+        .count();
+    let split = stack.len().checked_sub(single_count).ok_or_else(|| {
+        crate::interpreter::errors::mex("StackUnderflow", "aggregate operand stack underflow")
+    })?;
+    let mut singles = stack
+        .drain(split..)
+        .collect::<std::collections::VecDeque<_>>();
+    let mut rows = Vec::with_capacity(row_lengths.len());
+    let mut element_offset = 0usize;
+    for &row_length in row_lengths {
+        let row_end = element_offset.checked_add(row_length).ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "AggregateShapeMismatch",
+                "aggregate row boundary overflow",
+            )
+        })?;
+        let mut row = Vec::new();
+        for element in &elements[element_offset..row_end] {
+            match element {
+                crate::bytecode::AggregateElementSpec::Single => {
+                    row.push(singles.pop_front().ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "StackUnderflow",
+                            "aggregate operand stack underflow",
+                        )
+                    })?);
+                }
+                crate::bytecode::AggregateElementSpec::CapturedSequence { slot } => {
+                    row.extend(captures.remove(slot).ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "CommaSeparatedListState",
+                            "aggregate sequence was consumed more than once",
+                        )
+                    })?);
+                }
+            }
+        }
+        rows.push(row);
+        element_offset = row_end;
+    }
+    Ok(rows)
+}
+
+pub(super) fn requested_outputs_from_slot(
+    vars: &[Value],
+    slot: usize,
+) -> Result<usize, RuntimeError> {
     let value = vars.get(slot).ok_or_else(|| {
         crate::interpreter::errors::mex(
             "OutputCountSlotOutOfBounds",
@@ -266,6 +707,7 @@ pub async fn dispatch_instruction(
     let DispatchState {
         stack,
         vars,
+        sequence_register,
         context,
         try_stack,
         last_exception,
@@ -289,6 +731,7 @@ pub async fn dispatch_instruction(
         stack,
         vars,
         pc,
+        sequence_register,
         parallel::ParallelDispatchContext {
             bytecode,
             execution: context,
@@ -299,6 +742,21 @@ pub async fn dispatch_instruction(
     .await?
     {
         return Ok(Some(handled));
+    }
+    if prepared_outputs::dispatch(
+        instr,
+        stack,
+        vars,
+        sequence_register,
+        current_function_name,
+        store_var_before_overwrite,
+        store_var_after_store,
+    )
+    .await?
+    {
+        return Ok(Some(DispatchHandled::Generic(
+            DispatchDecision::FallThrough,
+        )));
     }
     match instr {
         _ if indexing::dispatch_indexing(
@@ -316,8 +774,19 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        _ if object::dispatch_object(instr, stack, &context.runtime, current_function_name)
-            .await? =>
+        _ if object::dispatch_object(
+            instr,
+            stack,
+            sequence_register,
+            object::ObjectDispatchContext {
+                vars,
+                runtime: &context.runtime,
+                current_function_name,
+                bytecode,
+                call_counts,
+            },
+        )
+        .await? =>
         {
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -716,6 +1185,17 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CreateMatrixFromSequences {
+            row_lengths,
+            elements,
+            ..
+        } => {
+            let rows = materialize_aggregate_rows(stack, sequence_register, row_lengths, elements)?;
+            stack.push(runmat_runtime::create_matrix_from_values(&rows).await?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CreateMatrixDynamic(num_rows) => {
             create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
                 runmat_runtime::create_matrix_from_values(&rows_data).await
@@ -745,6 +1225,28 @@ pub async fn dispatch_instruction(
             elems.reverse();
             stack.push(runmat_runtime::object::cell::create_cell_2d(
                 elems, *rows, *cols,
+            )?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateCellFromSequences {
+            row_lengths,
+            elements,
+            ..
+        } => {
+            let rows = materialize_aggregate_rows(stack, sequence_register, row_lengths, elements)?;
+            let columns = rows.first().map_or(0, Vec::len);
+            if rows.iter().any(|row| row.len() != columns) {
+                return Err(crate::interpreter::errors::mex(
+                    "CellLiteralShapeMismatch",
+                    "cell literal rows realize different widths after comma-separated-list expansion",
+                ));
+            }
+            let row_count = rows.len();
+            let values = rows.into_iter().flatten().collect();
+            stack.push(runmat_runtime::object::cell::create_cell_2d(
+                values, row_count, columns,
             )?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -925,7 +1427,9 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
-            let args = build_feval_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args =
+                build_feval_expand_multi_args(stack, specs, sequence_register, &context.runtime)
+                    .await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
@@ -945,7 +1449,9 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, out_count_slot) => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            let args = build_feval_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args =
+                build_feval_expand_multi_args(stack, specs, sequence_register, &context.runtime)
+                    .await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             let _function_input_callsite_guard =
                 runmat_runtime::callsite::push_function_input_callsite(
@@ -1294,7 +1800,9 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
-            let args = build_builtin_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args =
+                build_builtin_expand_multi_args(stack, specs, sequence_register, &context.runtime)
+                    .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result =
                 runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
@@ -1309,8 +1817,13 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = runmat_runtime::call_super_constructor(
                 current_class.clone(),
@@ -1330,8 +1843,13 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = runmat_runtime::call_super_method(
                 current_class.clone(),
@@ -1351,8 +1869,13 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
@@ -1395,8 +1918,13 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
@@ -1443,8 +1971,13 @@ pub async fn dispatch_instruction(
             out_count_slot,
         } => {
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
@@ -1483,8 +2016,13 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
@@ -1525,8 +2063,13 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            let args =
-                build_user_function_expand_multi_args(stack, specs, &context.runtime).await?;
+            let args = build_user_function_expand_multi_args(
+                stack,
+                specs,
+                sequence_register,
+                &context.runtime,
+            )
+            .await?;
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
                 call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
@@ -1584,12 +2127,15 @@ pub async fn dispatch_instruction(
         } => {
             handle_method_or_member_index_expand_multi_call(
                 stack,
-                identity.clone(),
-                *fallback_policy,
-                specs,
-                *out_count,
-                current_function_name,
-                &context.runtime,
+                sequence_register,
+                calls::MethodExpandCallContext {
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    specs,
+                    requested_outputs: *out_count,
+                    current_function_name,
+                    runtime: &context.runtime,
+                },
             )
             .await?;
             Ok(Some(DispatchHandled::Generic(

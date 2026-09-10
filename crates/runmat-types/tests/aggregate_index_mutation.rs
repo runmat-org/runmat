@@ -3,7 +3,7 @@ use runmat_types::{
     infer_member_write, infer_mutation, infer_struct, infer_tensor_aggregate,
     AssignmentCreationPolicy, AssignmentShapePolicy, IndexKind, IndexResultContext,
     IndexSelectorFact, MemberName, MutationContract, NumericClass, NumericDomain, NumericFact,
-    PlaceMutationKind, ShapeFact, ValueFact, ValueKindFact,
+    PlaceMutationKind, SequenceUse, ShapeFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -183,9 +183,13 @@ fn structs_and_concatenation_preserve_payload_and_shape() {
     assert!(structure.fields_complete);
     assert!(structure.fields.contains_key("count"));
     assert_eq!(
-        infer_member_read(&structure_fact, &MemberName("count".into()))
-            .fact
-            .kind,
+        infer_member_read(
+            &structure_fact,
+            &MemberName("count".into()),
+            SequenceUse::RequireSingle,
+        )
+        .fact
+        .kind,
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::UInt64,
             domain: NumericDomain::Real
@@ -204,7 +208,8 @@ fn structs_and_concatenation_preserve_payload_and_shape() {
     assert_eq!(
         infer_member_read(
             &numeric(NumericClass::Double, ShapeFact::Scalar),
-            &MemberName("field".into())
+            &MemberName("field".into()),
+            SequenceUse::RequireSingle,
         )
         .diagnostics[0]
             .code,

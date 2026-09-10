@@ -71,6 +71,12 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
             fields.sort_by(|left, right| left.name.cmp(&right.name));
             InlineValue::Struct(fields)
         }
+        Value::StructArray(_) => {
+            return Err(ValueCodecError::unsupported(
+                path,
+                "structure arrays require the versioned aggregate-value transport",
+            ))
+        }
         Value::GpuTensor(_) => {
             return Err(ValueCodecError::unsupported(
                 path,

@@ -19,6 +19,7 @@ function read(relativePath) {
 
 function rustSources(relativeDirectory) {
   const root = path.join(repo, relativeDirectory);
+  if (!fs.existsSync(root)) return [];
   const sources = [];
   const visit = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -83,6 +84,35 @@ function enforceMigratedBuiltinFamily({
       ) {
         fail(`${sourcePath} duplicates catalog-owned ${name} metadata`);
       }
+    }
+  }
+}
+
+function enforceBoundedModulePackage({
+  name,
+  rootFile,
+  leafDirectory,
+  rootLineCeiling = 64,
+  leafLineCeiling = 224,
+  testLineCeiling = 384,
+  byteCeiling = 24 * 1024,
+}) {
+  const rootText = read(rootFile);
+  const rootLines = rootText.split("\n").length;
+  if (rootLines > rootLineCeiling || Buffer.byteLength(rootText, "utf8") > byteCeiling) {
+    fail(
+      `${rootFile} exceeds its ${name} root boundary ` +
+      `(found ${rootLines} lines; maximum ${rootLineCeiling} and ${byteCeiling} bytes)`,
+    );
+  }
+  for (const { path: sourcePath, text } of rustSources(leafDirectory)) {
+    const lines = text.split("\n").length;
+    const ceiling = sourcePath.endsWith("/tests.rs") ? testLineCeiling : leafLineCeiling;
+    if (lines > ceiling || Buffer.byteLength(text, "utf8") > byteCeiling) {
+      fail(
+        `${sourcePath} exceeds its ${name} leaf boundary ` +
+        `(found ${lines} lines; maximum ${ceiling} and ${byteCeiling} bytes)`,
+      );
     }
   }
 }
@@ -3010,6 +3040,26 @@ const legacyCatalogTestsPath = "crates/runmat-builtins/src/catalog/tests.rs";
 const legacyCatalogTestLines = read(legacyCatalogTestsPath).split("\n").length;
 if (legacyCatalogTestLines > 4561) {
   fail(`${legacyCatalogTestsPath} is a legacy centralized test boundary and must only shrink (found ${legacyCatalogTestLines} lines; ceiling 4561); put new tests beside their owning catalog, inference, or validation module`);
+}
+
+for (const modulePackage of [
+  {
+    name: "interpreter artifact codec",
+    rootFile: "crates/runmat-vm/src/bytecode/artifact.rs",
+    leafDirectory: "crates/runmat-vm/src/bytecode/artifact",
+  },
+  {
+    name: "MIR expression region",
+    rootFile: "crates/runmat-mir/src/expression_region.rs",
+    leafDirectory: "crates/runmat-mir/src/expression_region",
+  },
+  {
+    name: "VM sequence-register verifier",
+    rootFile: "crates/runmat-vm/src/bytecode/sequence_register.rs",
+    leafDirectory: "crates/runmat-vm/src/bytecode/sequence_register",
+  },
+]) {
+  enforceBoundedModulePackage(modulePackage);
 }
 
 if (failed) process.exit(1);

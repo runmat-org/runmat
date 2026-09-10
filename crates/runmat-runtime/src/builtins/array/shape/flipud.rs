@@ -212,6 +212,11 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
             .map_err(remap_flipud_error)?),
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Cell(cell) => flip_cell_array_rows(cell).map_err(remap_flipud_error),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => array
+            .flip(0)
+            .map(Value::StructArray)
+            .map_err(|error| flipud_error(format!("flipud: {error}"))),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))
                 .map_err(|e| flipud_error(e))?;
@@ -242,7 +247,6 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -532,11 +536,11 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn flipud_rejects_struct_inputs() {
+    fn flipud_preserves_scalar_structure() {
         let mut st = StructValue::new();
         st.fields.insert("field".into(), Value::Num(1.0));
-        let err = flipud_builtin(Value::Struct(st)).expect_err("struct unsupported");
-        assert!(err.to_string().contains("unsupported input type"));
+        let result = flipud_builtin(Value::Struct(st.clone())).expect("scalar structure");
+        assert_eq!(result, Value::Struct(st));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

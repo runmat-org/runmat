@@ -3,7 +3,9 @@ use runmat_accelerate_api::{
     ProviderAdamUpdateResult,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{
+    CellArray, NumericDType, ObjectInstance, StructArray, StructValue, Tensor, Value,
+};
 
 use crate::BuiltinResult;
 
@@ -287,6 +289,9 @@ async fn dlupdate_node(
         Value::Cell(reference) => {
             dlupdate_cell(function, reference, values, requested_outputs, depth + 1).await
         }
+        Value::StructArray(reference) => {
+            dlupdate_struct_array(function, reference, values, requested_outputs, depth + 1).await
+        }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
             dlupdate_table(function, object, values, requested_outputs, depth + 1).await
         }
@@ -319,6 +324,76 @@ async fn dlupdate_node(
             dlupdate_leaf(function, values, requested_outputs).await
         }
     }
+}
+
+async fn dlupdate_struct_array(
+    function: &Value,
+    reference: &StructArray,
+    values: &[Value],
+    requested_outputs: usize,
+    depth: usize,
+) -> BuiltinResult<Vec<Value>> {
+    let arrays = values
+        .iter()
+        .map(|value| match value {
+            Value::StructArray(array)
+                if array.shape() == reference.shape()
+                    && array.field_names().eq(reference.field_names()) =>
+            {
+                Ok(array)
+            }
+            Value::StructArray(_) => Err(deep_learning_error(
+                "dlupdate",
+                "dlupdate: structure-array parameter trees must have matching shapes and ordered fields",
+            )),
+            other => Err(deep_learning_error(
+                "dlupdate",
+                format!("dlupdate: expected matching structure-array tree, got {other:?}"),
+            )),
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let field_names = reference.field_names().cloned().collect::<Vec<_>>();
+    let capacity = field_names
+        .len()
+        .checked_mul(reference.len())
+        .ok_or_else(|| deep_learning_error("dlupdate", "dlupdate: structure array is too large"))?;
+    let mut outputs = (0..requested_outputs)
+        .map(|_| Vec::with_capacity(capacity))
+        .collect::<Vec<_>>();
+    for name in &field_names {
+        for index in 0..reference.len() {
+            let fields = arrays
+                .iter()
+                .map(|array| {
+                    array
+                        .field_values(name)
+                        .and_then(|column| column.get(index))
+                        .cloned()
+                        .ok_or_else(|| {
+                            deep_learning_error(
+                                "dlupdate",
+                                "dlupdate: structure-array field storage is incomplete",
+                            )
+                        })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let updated = dlupdate_node(function, &fields, requested_outputs, depth).await?;
+            for (output, value) in outputs.iter_mut().zip(updated) {
+                output.push(value);
+            }
+        }
+    }
+    outputs
+        .into_iter()
+        .map(|values| {
+            StructArray::normalize_field_major(
+                field_names.clone(),
+                values,
+                reference.shape().to_vec(),
+            )
+            .map_err(|error| deep_learning_error("dlupdate", error))
+        })
+        .collect()
 }
 
 async fn dlupdate_struct(
@@ -753,7 +828,7 @@ fn is_leaf_object(object: &ObjectInstance) -> bool {
 
 fn is_tree_container(value: &Value) -> bool {
     match value {
-        Value::Struct(_) | Value::Cell(_) => true,
+        Value::Struct(_) | Value::StructArray(_) | Value::Cell(_) => true,
         Value::Object(object) => crate::builtins::table::is_tabular_object(object),
         _ => false,
     }

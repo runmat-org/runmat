@@ -220,60 +220,6 @@ fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
     }
 }
 
-fn end_expr_contains_display_name(expr: &runmat_runtime::indexing::EndExpr, name: &str) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expr {
-        EndExpr::ResolvedCall { identity, args, .. } => {
-            identity.display_name().as_deref() == Some(name)
-                || args
-                    .iter()
-                    .any(|arg| end_expr_contains_display_name(arg, name))
-        }
-        EndExpr::Add(lhs, rhs)
-        | EndExpr::Sub(lhs, rhs)
-        | EndExpr::Mul(lhs, rhs)
-        | EndExpr::Div(lhs, rhs)
-        | EndExpr::LeftDiv(lhs, rhs)
-        | EndExpr::Pow(lhs, rhs) => {
-            end_expr_contains_display_name(lhs, name) || end_expr_contains_display_name(rhs, name)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expr_contains_display_name(inner, name),
-        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
-    }
-}
-
-fn end_expr_contains_external_function(expr: &runmat_runtime::indexing::EndExpr) -> bool {
-    use runmat_runtime::indexing::EndExpr;
-    match expr {
-        EndExpr::ResolvedCall { identity, args, .. } => {
-            matches!(
-                identity,
-                runmat_hir::CallableIdentity::ExternalFunction { .. }
-            ) || args.iter().any(end_expr_contains_external_function)
-        }
-        EndExpr::Add(lhs, rhs)
-        | EndExpr::Sub(lhs, rhs)
-        | EndExpr::Mul(lhs, rhs)
-        | EndExpr::Div(lhs, rhs)
-        | EndExpr::LeftDiv(lhs, rhs)
-        | EndExpr::Pow(lhs, rhs) => {
-            end_expr_contains_external_function(lhs) || end_expr_contains_external_function(rhs)
-        }
-        EndExpr::Neg(inner)
-        | EndExpr::Pos(inner)
-        | EndExpr::Floor(inner)
-        | EndExpr::Ceil(inner)
-        | EndExpr::Round(inner)
-        | EndExpr::Fix(inner) => end_expr_contains_external_function(inner),
-        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
-    }
-}
-
 fn execute_text_request(
     session: &mut RunMatSession,
     source_text: &str,
@@ -9465,12 +9411,11 @@ fn range_slice_uses_semantic_vm() {
         "range slice should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::IndexSlice(..) | runmat_vm::Instr::IndexSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::IndexSlice(..)) }),
         "range indexing should lower to slice bytecode"
     );
 
@@ -9491,12 +9436,10 @@ fn end_expression_user_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile end-expression function call");
-    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+    let saw_contextual_end = prepared.bytecode.instructions.iter().any(|instr| {
         matches!(
             instr,
-            runmat_vm::Instr::IndexSliceExpr {
-                end_numeric_exprs, ..
-            } if !end_numeric_exprs.is_empty()
+            runmat_vm::Instr::LoadContextualIndexEnd { component: 0 }
         )
     });
     let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
@@ -9515,13 +9458,7 @@ fn end_expression_user_function_call_uses_semantic_identity() {
         )
     });
     assert!(
-        (prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs
-                    .iter()
-                    .any(|(_, expr)| end_expr_contains_display_name(expr, "pick"))
-        ))) || (saw_end_numeric_expr && saw_semantic_call),
+        saw_contextual_end && saw_semantic_call,
         "end-expression user calls should carry semantic function identity"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -9543,12 +9480,10 @@ fn end_expression_session_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile session end-expression function call");
-    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+    let saw_contextual_end = prepared.bytecode.instructions.iter().any(|instr| {
         matches!(
             instr,
-            runmat_vm::Instr::IndexSliceExpr {
-                end_numeric_exprs, ..
-            } if !end_numeric_exprs.is_empty()
+            runmat_vm::Instr::LoadContextualIndexEnd { component: 0 }
         )
     });
     let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
@@ -9567,16 +9502,7 @@ fn end_expression_session_function_call_uses_semantic_identity() {
         )
     });
     assert!(
-        (prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs
-                    .iter()
-                    .any(|(_, expr)| {
-                        end_expr_contains_display_name(expr, "pick")
-                            || end_expr_contains_external_function(expr)
-                    })
-        ))) || (saw_end_numeric_expr && saw_semantic_call),
+        saw_contextual_end && saw_semantic_call,
         "session end-expression user calls should carry semantic function identity"
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
@@ -9710,12 +9636,11 @@ fn range_assignment_uses_semantic_vm() {
         "range assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "range assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9748,12 +9673,11 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
         "range vector assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "range vector assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9786,13 +9710,11 @@ fn range_deletion_uses_semantic_vm() {
         "range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSliceDelete(..)
-                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSliceDelete(..)) }),
         "range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -9959,12 +9881,11 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
         "cell range paren assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "cell range paren assignment should lower to slice store bytecode"
     );
     assert!(
@@ -9997,13 +9918,11 @@ fn cell_range_deletion_uses_semantic_vm() {
         "cell range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSliceDelete(..)
-                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSliceDelete(..)) }),
         "cell range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -12428,8 +12347,8 @@ fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExpr { .. })),
-        "cell end-offset range paren assignment should lower to expression slice store bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+        "cell end-offset range paren assignment should lower to slice store bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12457,8 +12376,8 @@ fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
-        "cell end-offset range paren deletion should lower to expression slice deletion bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+        "cell end-offset range paren deletion should lower to slice deletion bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12486,8 +12405,8 @@ fn end_offset_range_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
-        "end-offset range deletion should lower to expression slice deletion bytecode"
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+        "end-offset range deletion should lower to slice deletion bytecode"
     );
 
     execute_text_request(&mut session, source).expect("exec succeeds");
@@ -12829,12 +12748,11 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
         "indexed member slice assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| {
-            matches!(
-                instr,
-                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-            )
-        }),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| { matches!(instr, runmat_vm::Instr::StoreSlice(..)) }),
         "indexed member slice assignment should lower to typed slice store bytecode"
     );
 

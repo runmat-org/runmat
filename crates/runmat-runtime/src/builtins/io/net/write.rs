@@ -851,6 +851,7 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<WriteElement>> {
         )),
         Value::Cell(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)

@@ -15,7 +15,7 @@ fn target_must_be_a_structure_even_when_the_name_collection_is_empty() {
 }
 
 #[test]
-fn mixed_cell_target_is_not_a_represented_structure_array() {
+fn mixed_cell_target_is_not_a_structure_array() {
     let target = CellArray::new(
         vec![structure(&[("a", Value::Num(1.0))]), Value::Num(2.0)],
         1,

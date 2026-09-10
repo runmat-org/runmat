@@ -1,8 +1,8 @@
 use super::*;
 use crate::infer_catalog_call;
 use runmat_types::{
-    CallRequest, CellFact, DynamicReason, LiteralContext, OutputSelection, RequestedOutputCount,
-    ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
+    CallRequest, DynamicReason, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact,
+    StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 
 fn infer(arguments: Vec<ValueFact>) -> runmat_types::CallInference {
@@ -21,13 +21,13 @@ fn unknown() -> ValueFact {
 }
 
 fn structure(fields: &[&str]) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: fields
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        fields
             .iter()
             .map(|name| ((*name).to_string(), unknown()))
             .collect(),
-        fields_complete: true,
-    }))
+        true,
+    )))
 }
 
 #[test]
@@ -46,24 +46,21 @@ fn scalar_structure_retains_its_container_but_not_an_unproven_schema() {
 }
 
 #[test]
-fn represented_array_preserves_shape_and_erases_element_schema() {
+fn typed_array_preserves_shape_and_erases_schema() {
     let shape = ShapeFact::from(vec![Some(2), Some(3)]);
     let target = ValueFact::proven(
-        ValueKindFact::Cell(CellFact {
-            element: Box::new(structure(&["a", "b"])),
-            elements: Vec::new(),
-            elements_complete: false,
-        }),
+        structure(&["a", "b"]).kind,
         shape.clone(),
         StorageFact::Dense,
     );
     let result = infer(vec![target, ValueFact::scalar(ValueKindFact::Character)]);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs[0].shape, shape);
-    let ValueKindFact::Cell(output) = &result.outputs[0].kind else {
-        panic!("expected represented structure-array fact");
+    let ValueKindFact::Struct(output) = &result.outputs[0].kind else {
+        panic!("expected structure-array fact");
     };
-    assert!(matches!(output.element.kind, ValueKindFact::Struct(_)));
+    assert!(output.fields.is_empty());
+    assert!(!output.fields_complete);
 }
 
 #[test]

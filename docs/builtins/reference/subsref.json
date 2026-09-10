@@ -7,7 +7,7 @@
     "overloaded indexing",
     "dot indexing"
   ],
-  "summary": "Dispatch overloaded object indexing operations to class-specific `Class.subsref` implementations.",
+  "summary": "Apply a standard substruct indexing path to an indexable value.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -25,25 +25,24 @@
   "tested": {
     "integration": "runmat-ignition/tests/functions.rs"
   },
-  "description": "`subsref(obj, kind, payload)` is the internal dispatch builtin for overloaded object indexing. MATLAB-style field, paren, and brace indexing lowers to this mechanism, which resolves class-specific `Class.subsref` handlers.",
+  "description": "`subsref(A, S)` applies the nonempty structure-array path `S`, conventionally produced by `substruct`. Ordinary arrays, cells, strings, structures, and other indexable values use canonical default indexing; class objects may resolve a class-specific `subsref` implementation. Field, parenthesis, and brace steps remain ordered, and each overload receives the complete remaining path.",
   "behaviors": [
-    "The receiver must be an object or handle object.",
-    "The `kind` argument selects the indexing form: `'.'`, `'()'`, or `'{}'`.",
-    "For dot indexing, `payload` is typically a field/property name string.",
-    "For `()` and `{}` indexing, `payload` is typically a cell array of indices.",
-    "The builtin forwards the call to the receiver's class-specific `Class.subsref` implementation.",
-    "Integer selectors inside the payload retain their native class, exact value, shape, and resident handle. The class method determines output class, conversion, and overflow behavior.",
+    "The receiver may be any value that supports the requested default or overloaded indexing path.",
+    "Each element of `S` has a `type` field (`'.'`, `'()'`, or `'{}'`) and a corresponding `subs` field.",
+    "A multi-element `S` preserves the complete chained indexing path in source order.",
+    "Class objects with a `subsref` method receive the complete remaining path; values without an overload use canonical default indexing.",
+    "Integer selectors inside `S.subs` retain their native class, exact value, shape, and resident handle. Default indexing or the class method determines output class, conversion, and overflow behavior.",
     "Prefer normal indexing syntax in user code; direct calls to `subsref` are mainly useful for advanced dispatch or testing."
   ],
   "examples": [
     {
       "description": "Index a datetime array explicitly",
-      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nitem = subsref(t, \"()\", {2})",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nS = substruct('()', {2});\nitem = subsref(t, S)",
       "output": "item =\n  20-Jun-2025 00:00:00"
     },
     {
       "description": "Read a datetime property explicitly",
-      "input": "t = datetime(2024, 4, 9);\nfmt = subsref(t, \".\", \"Format\")",
+      "input": "t = datetime(2024, 4, 9);\nS = substruct('.', 'Format');\nfmt = subsref(t, S)",
       "output": "fmt =\n    'dd-MMM-yyyy HH:mm:ss'"
     }
   ],
@@ -53,8 +52,8 @@
       "answer": "Usually no. Prefer ordinary syntax like `obj.field` or `obj(2)`. Direct calls are mainly for advanced dispatch and testing."
     },
     {
-      "question": "What values can `kind` take?",
-      "answer": "RunMat's object-dispatch path expects `'.'`, `'()'`, or `'{}'`."
+      "question": "How is the indexing path represented?",
+      "answer": "Use `substruct` to build `S`. Each ordered element contains a `type` and `subs` field, and chained indexing uses multiple elements."
     },
     {
       "question": "What does the global `subsref` actually do?",

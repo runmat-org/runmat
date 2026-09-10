@@ -56,15 +56,15 @@ pub(super) fn reject_predeclared_capabilities(
             })?;
         for block in &body.blocks {
             for (position, statement) in block.statements.iter().enumerate() {
-                let value = match &statement.kind {
-                    runmat_mir::MirStmtKind::Assign { value, .. }
-                    | runmat_mir::MirStmtKind::MultiAssign { value, .. }
-                    | runmat_mir::MirStmtKind::Expr(value) => Some(value),
-                    _ => None,
-                };
-                if let Some(value) = value {
+                if let Some(value) = statement_value(&statement.kind) {
                     reject_rvalue(function, block.id, position, value)?;
                 }
+                reject_inventory(
+                    function,
+                    block.id,
+                    position,
+                    runmat_mir::statement_construct_inventory(&statement.kind),
+                )?;
             }
             match &block.terminator.kind {
                 runmat_mir::MirTerminatorKind::For { iterable, .. }
@@ -93,14 +93,42 @@ pub(super) fn reject_predeclared_capabilities(
     Ok(())
 }
 
+fn statement_value(statement: &runmat_mir::MirStmtKind) -> Option<&runmat_mir::MirRvalue> {
+    match statement {
+        runmat_mir::MirStmtKind::Assign { value, .. }
+        | runmat_mir::MirStmtKind::MultiAssign { value, .. }
+        | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
+        | runmat_mir::MirStmtKind::Expr(value) => Some(value),
+        runmat_mir::MirStmtKind::PlaceMutation(_)
+        | runmat_mir::MirStmtKind::CaptureSequence { .. }
+        | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,
+    }
+}
+
 fn reject_rvalue(
     function: runmat_types::ProgramFunctionId,
     block: runmat_mir::BasicBlockId,
     position: usize,
     value: &runmat_mir::MirRvalue,
 ) -> NativeCodegenResult<()> {
-    let construct = runmat_mir::rvalue_construct_kind(value);
-    if construct.native_lowering_class() == runmat_mir::NativeLoweringClass::CapabilityRejection {
+    reject_inventory(
+        function,
+        block,
+        position,
+        runmat_mir::rvalue_construct_inventory(value),
+    )
+}
+
+fn reject_inventory(
+    function: runmat_types::ProgramFunctionId,
+    block: runmat_mir::BasicBlockId,
+    position: usize,
+    inventory: impl IntoIterator<Item = runmat_mir::MirConstructKind>,
+) -> NativeCodegenResult<()> {
+    if let Some(construct) = inventory.into_iter().find(|construct| {
+        construct.native_lowering_class() == runmat_mir::NativeLoweringClass::CapabilityRejection
+    }) {
         let block = u32::try_from(block.0).unwrap_or(u32::MAX);
         let position = u32::try_from(position).unwrap_or(u32::MAX);
         return Err(NativeCodegenError::new(
@@ -113,19 +141,6 @@ fn reject_rvalue(
             position,
         })
         .for_construct(construct));
-    }
-    if let runmat_mir::MirRvalue::ShortCircuit { right_temps, .. } = value {
-        for statement in right_temps {
-            let nested = match &statement.kind {
-                runmat_mir::MirStmtKind::Assign { value, .. }
-                | runmat_mir::MirStmtKind::MultiAssign { value, .. }
-                | runmat_mir::MirStmtKind::Expr(value) => Some(value),
-                _ => None,
-            };
-            if let Some(nested) = nested {
-                reject_rvalue(function, block, position, nested)?;
-            }
-        }
     }
     Ok(())
 }

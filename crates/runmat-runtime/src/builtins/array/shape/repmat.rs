@@ -409,6 +409,22 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             let tiled = repmat_cell_array(&ca, &raw_reps)?;
             Ok(Value::Cell(tiled))
         }
+        Value::Struct(structure) => {
+            let mut shape = raw_reps.clone();
+            shape.resize(shape.len().max(2), 1);
+            let count = shape.iter().try_fold(1usize, |total, extent| {
+                total.checked_mul(*extent).ok_or_else(|| {
+                    repmat_internal("repmat: structure array replication exceeds platform limits")
+                })
+            })?;
+            let fields = structure.field_names().cloned().collect();
+            runmat_value::StructArray::normalize(fields, vec![structure; count], shape)
+                .map_err(repmat_internal)
+        }
+        Value::StructArray(array) => array
+            .tile(&raw_reps)
+            .map(Value::StructArray)
+            .map_err(repmat_internal),
         Value::GpuTensor(handle) => Ok(repmat_gpu_tensor(handle, &raw_reps).await?),
         other => Err(repmat_unsupported(format!(
             "repmat: unsupported input type {:?}",

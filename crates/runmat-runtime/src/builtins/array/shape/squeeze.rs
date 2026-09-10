@@ -176,6 +176,13 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::StringArray(strings) => squeeze_string_array(strings).map(Value::StringArray),
         Value::CharArray(chars) => squeeze_char_array(chars).map(Value::CharArray),
         Value::Cell(cell) => squeeze_cell_array(cell).map(Value::Cell),
+        Value::StructArray(array) => {
+            let shape = squeeze_shape(array.shape());
+            array
+                .reshape(shape)
+                .map(Value::StructArray)
+                .map_err(squeeze_error)
+        }
         Value::GpuTensor(handle) => squeeze_gpu(handle).await,
         Value::String(_) | Value::Struct(_) => Ok(value),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(value),
@@ -206,7 +213,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
-        Value::Struct(_) => "struct",
+        Value::Struct(_) | Value::StructArray(_) => "struct",
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

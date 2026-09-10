@@ -174,8 +174,8 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         Digest::sha256(b"graph"),
         Digest::sha256(b"source"),
         ProgramEnvironment::new(
-            1,
-            1,
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
             Digest::sha256(b"runtime"),
             Digest::sha256(b"catalog"),
             "matlab",
@@ -191,7 +191,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v1"),
+        target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v2"),
         interop: runmat_types::InteropManifest::empty(),
         accelerators: Vec::new(),
         features: Default::default(),
@@ -201,7 +201,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterBytecodeV2,
         b"exact-program".to_vec(),
     )
     .unwrap();

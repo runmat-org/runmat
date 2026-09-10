@@ -29,7 +29,8 @@ pub(crate) fn infer_mir_call(
         arguments: call
             .args
             .iter()
-            .map(|argument| operand_fact(argument.operand(), facts, summaries))
+            .filter_map(|argument| argument.operand())
+            .map(|operand| operand_fact(operand, facts, summaries))
             .collect(),
         literals: LiteralContext::new(literals.to_vec()),
         outputs: selection,

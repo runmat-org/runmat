@@ -125,7 +125,7 @@ const CLEAR_ALL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &STATUS_OUTPUTS,
 }];
 
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -134,18 +134,11 @@ const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "MemoizedFunction receiver.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Indexing payload.",
+        description: "Standard substruct indexing path.",
     },
 ];
 const SUBSREF_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -156,7 +149,7 @@ const SUBSREF_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Result of function invocation or property access.",
 }];
 const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "varargout = subsref(obj, kind, payload)",
+    label: "varargout = subsref(obj, S)",
     inputs: &SUBSREF_INPUTS,
     outputs: &SUBSREF_OUTPUTS,
 }];
@@ -328,16 +321,24 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
 )]
 pub(crate) async fn memoized_subsref_builtin(
     receiver: Value,
-    kind: String,
-    payload: Value,
+    subscript: Value,
 ) -> BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(receiver, path, memoized_read_step, None).await
+}
+
+async fn memoized_read_step(
+    receiver: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> BuiltinResult<Value> {
+    let payload = step.selector_value()?;
     let handle = memoized_handle(&receiver)?;
-    match kind.as_str() {
-        OBJECT_INDEX_PAREN => call_memoized(handle, payload).await,
-        OBJECT_INDEX_MEMBER => memoized_member(handle, payload),
-        _ => Err(memoize_error(
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Paren => call_memoized(handle, payload).await,
+        crate::object::indexing::ObjectIndexKind::Member => memoized_member(handle, payload),
+        crate::object::indexing::ObjectIndexKind::Brace => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
-            format!("memoize: unsupported MemoizedFunction indexing kind {kind}"),
+            "memoize: brace indexing is not supported",
         )),
     }
 }
@@ -989,6 +990,21 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
         (Value::LogicalArray(a), Value::LogicalArray(b)) => logical_arrays_equal(a, b),
         (Value::Cell(a), Value::Cell(b)) => cells_equal(a, b),
         (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b),
+        (Value::StructArray(a), Value::StructArray(b)) => {
+            a.shape() == b.shape()
+                && a.field_names().eq(b.field_names())
+                && a.field_names().all(|name| {
+                    a.field_values(name)
+                        .zip(b.field_values(name))
+                        .is_some_and(|(left, right)| {
+                            left.len() == right.len()
+                                && left
+                                    .iter()
+                                    .zip(right)
+                                    .all(|(left, right)| value_equal_for_cache(left, right))
+                        })
+                })
+        }
         (Value::Object(a), Value::Object(b)) => objects_equal(a, b),
         (Value::HandleObject(a), Value::HandleObject(b)) => a == b,
         (Value::Listener(a), Value::Listener(b)) => a == b,
@@ -1116,12 +1132,12 @@ fn cells_equal(a: &CellArray, b: &CellArray) -> bool {
 
 fn structs_equal(a: &StructValue, b: &StructValue) -> bool {
     a.fields.len() == b.fields.len()
-        && a.fields.iter().all(|(name, value)| {
-            b.fields
-                .get(name)
-                .map(|other| value_equal_for_cache(value, other))
-                .unwrap_or(false)
-        })
+        && a.fields
+            .iter()
+            .zip(&b.fields)
+            .all(|((left_name, left), (right_name, right))| {
+                left_name == right_name && value_equal_for_cache(left, right)
+            })
 }
 
 fn objects_equal(a: &ObjectInstance, b: &ObjectInstance) -> bool {
@@ -1223,6 +1239,22 @@ fn value_fingerprint(value: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Value::StructArray(array) => format!(
+            "struct-array:{:?}:{}:{}",
+            array.shape(),
+            array.field_names().cloned().collect::<Vec<_>>().join(","),
+            (0..array.len())
+                .map(|index| array
+                    .field_names()
+                    .filter_map(|name| array
+                        .field_values(name)
+                        .and_then(|values| values.get(index)))
+                    .map(value_fingerprint)
+                    .collect::<Vec<_>>()
+                    .join(","))
+                .collect::<Vec<_>>()
+                .join(";")
+        ),
         Value::Closure(closure) => format!(
             "closure:{}:{:?}:{}",
             closure.function_name,
@@ -1254,6 +1286,16 @@ pub(crate) fn reset_memoize_registry_for_test() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn memoized_subsref_builtin(
+        receiver: Value,
+        kind: String,
+        payload: Value,
+    ) -> crate::BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::memoized_subsref_builtin(receiver, subscript).await
+    }
     use futures::executor::block_on;
     use runmat_value::IntValue;
     use std::sync::{Arc, Mutex};

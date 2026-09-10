@@ -34,10 +34,10 @@ fn structure(fields: &FieldOutputs, slot: usize) -> ValueFact {
             )
         })
         .collect::<BTreeMap<_, _>>();
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: mapped,
-        fields_complete: fields.iter().all(|(name, _)| !name.is_empty()),
-    }))
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        mapped,
+        fields.iter().all(|(name, _)| !name.is_empty()),
+    )))
 }
 
 fn uniform_column(fields: &FieldOutputs, slot: usize) -> ValueFact {

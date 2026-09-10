@@ -49,6 +49,9 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
                 .map(value_to_java)
                 .collect::<Result<_, _>>()?,
         }),
+        Value::StructArray(_) => Err(invalid_conversion(
+            "structure arrays require an explicit Java conversion",
+        )),
         other => Err(invalid_conversion(format!(
             "RunMat value {} is not yet convertible to Java",
             value_kind(&other)
@@ -287,6 +290,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::CharArray(_) => "character array",
         Value::Cell(_) => "cell array",
         Value::Struct(_) => "structure",
+        Value::StructArray(_) => "structure array",
         Value::Foreign(_) => "foreign object",
         _ => "value",
     }

@@ -1,8 +1,8 @@
 use super::*;
 use crate::infer_catalog_call;
 use runmat_types::{
-    CallRequest, CellFact, DimensionFact, DynamicReason, LiteralContext, ObjectFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StructFact, ValueFact, ValueKindFact,
+    CallRequest, DimensionFact, DynamicReason, LiteralContext, ObjectFact, OutputSelection,
+    RequestedOutputCount, ShapeFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -18,8 +18,8 @@ fn infer(arguments: Vec<ValueFact>) -> runmat_types::CallInference {
 }
 
 fn structure(names: &[&str], complete: bool) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: names
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        names
             .iter()
             .map(|name| {
                 (
@@ -28,8 +28,8 @@ fn structure(names: &[&str], complete: bool) -> ValueFact {
                 )
             })
             .collect::<BTreeMap<_, _>>(),
-        fields_complete: complete,
-    }))
+        complete,
+    )))
 }
 
 #[test]
@@ -55,23 +55,16 @@ fn scalar_structure_produces_an_exact_column_of_character_rows() {
 }
 
 #[test]
-fn represented_array_union_and_incomplete_schema_are_conservative() {
-    let cells = ValueFact::proven(
-        ValueKindFact::Cell(CellFact {
-            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
-            elements: vec![
-                structure(&["a", "shared"], true),
-                structure(&["b", "shared"], true),
-            ],
-            elements_complete: true,
-        }),
+fn typed_array_schema_and_incomplete_schema_are_typed() {
+    let array = ValueFact::proven(
+        structure(&["a", "shared"], true).kind,
         ShapeFact::from(vec![Some(1), Some(2)]),
         runmat_types::StorageFact::Dense,
     );
     assert_eq!(
-        infer(vec![cells]).outputs[0].shape,
+        infer(vec![array]).outputs[0].shape,
         ShapeFact::Shaped {
-            dims: vec![DimensionFact::Known(3), DimensionFact::Known(1)]
+            dims: vec![DimensionFact::Known(2), DimensionFact::Known(1)]
         }
     );
     assert_eq!(

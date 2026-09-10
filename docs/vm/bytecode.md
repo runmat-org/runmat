@@ -56,6 +56,8 @@ Call lowering depends on the resolved callee shape:
 - `CallFevalMulti` keeps the callable value on the stack and resolves it at runtime.
 - `*ExpandMultiOutput` variants evaluate comma-separated-list expansion before dispatch.
 
+Call arguments retain their source order. An argument marked as a member or brace expansion is evaluated once and contributes its values at that exact argument position; the sequence does not become an ordinary stack value or workspace binding.
+
 ### Indexing
 
 The compiler preserves the indexing plan established by MIR. Scalar indexing emits `Index` or `StoreIndex`; plain slices emit `IndexSlice` or `StoreSlice`; selectors involving runtime `end` arithmetic emit `IndexSliceExpr` or `StoreSliceExpr`.
@@ -120,16 +122,29 @@ The table below lists every current `Instr` variant, grouped by runtime behavior
 | `Index`, `StoreIndex`, `StoreIndexDelete` | Scalar or linear paren indexing and assignment. |
 | `IndexSlice`, `StoreSlice`, `StoreSliceDelete` | Slice indexing with compiler-encoded colon and plain `end` masks. |
 | `IndexSliceExpr`, `StoreSliceExpr`, `StoreSliceExprDelete` | General slice indexing with dynamic ranges and `EndExpr` arithmetic. |
-| `IndexCell`, `IndexCellExpand`, `IndexCellList` | Brace/cell indexing, fixed-arity expansion, and first-class comma-separated-list creation. |
+| `IndexCell`, `IndexCellExpand`, `IndexCellList` | Brace/cell indexing and context-bound comma-separated-list expansion. |
 | `StoreIndexCell`, `StoreIndexCellDelete` | Brace/cell indexed assignment and deletion form. |
 
 Indexed assignment instructions push the updated base value. A later `StoreVar` or `StoreLocal` commits that updated base to its destination slot.
+
+### Comma-Separated Sequence Assignment
+
+MIR distinguishes a structure-member sequence destination from an ordinary single-place assignment. Lowering evaluates its base, selectors, and dynamic member name from left to right and exactly once, prepares the complete writeback path, and obtains the destination cardinality before invoking the right-hand side. That cardinality is the right-hand side's requested output count.
+
+The resulting values do not travel as a user `Value`. Bytecode uses a private sequence register between a producer such as `LoadMemberSequenceUsingOutputSlot`, `CaptureCallOutputSequence`, or `CaptureScalarSequence` and the immediately following `StoreMemberSequence` or `StoreMemberDynamicSequence`. The prepared destination remains executor state until the consumer distributes the values and commits the updated root.
+
+The bytecode verifier treats this as a linear lifetime. It rejects a consumer without a producer, a second producer before consumption, any unrelated instruction between the pair, a dynamic call-output capture not attached to its output-slot call, and a sequence left live at a function boundary. Exception handling clears the transient register rather than exposing it to a catch block.
+
+Native IR carries the same contract. Its producer owns a rooted prepared destination plus the produced value references; the adjacent consumer must name the same MIR target and statement site. Native verification rejects missing, overwritten, mismatched, non-adjacent, or block-live sequence state. This state belongs to execution and continuation bookkeeping only, never to the MATLAB value model.
 
 ### Struct, Object, Class, and Member Operations
 
 | Instructions | Purpose |
 | --- | --- |
 | `LoadMember`, `LoadMemberOrInit`, `LoadMemberDynamic`, `LoadMemberDynamicOrInit` | Read static or dynamic members, with optional initialization semantics. |
+| `LoadMemberSequence`, `LoadMemberDynamicSequence` | Read a member value sequence and apply its explicit scalar, prefix, dynamic-output, expansion, or discard context. |
+| `MemberSequenceCardinality`, `LoadMemberSequenceUsingOutputSlot`, `LoadMemberDynamicSequenceUsingOutputSlot` | Determine a prepared sequence destination's cardinality and produce the matching number of right-hand-side values. |
+| `CaptureCallOutputSequence`, `CaptureScalarSequence`, `StoreMemberSequence`, `StoreMemberDynamicSequence` | Move right-hand-side results through the transient sequence-assignment channel and consume them in a static or dynamic member store. |
 | `StoreMember`, `StoreMemberOrInit`, `StoreMemberDynamic`, `StoreMemberDynamicOrInit` | Write static or dynamic members, with optional initialization semantics. |
 | `LoadMethod` | Load a method reference from an object-like value. |
 | `CallMethodOrMemberIndexMulti`, `CallMethodOrMemberIndexExpandMultiOutput` | Resolve ambiguous method/member indexing calls at runtime. |
@@ -251,5 +266,7 @@ The compiler validates MIR and HIR contracts before emitting bytecode. Stable er
 - `RunMat:MirCellIndexPlanInvalid`: A cell indexing plan is malformed.
 - `RunMat:MirFunctionHandleNameMissing`: A function handle target lacks a usable name.
 - `RunMat:ImportAmbiguous`: Import resolution produced conflicting candidates.
+
+Bytecode, MIR, analysis, compiler, and Native IR schemas are versioned with these contracts. Artifacts produced before the typed sequence instructions and verifier rules are not reinterpreted under the new semantics: execution admission rejects the stale form or component revisions and asks the caller to rebuild with the current RunMat version. This guarantee currently covers compiler, VM, and native executable admission; it does not by itself claim closure of browser, foreign-runtime, or general value-transport versioning.
 
 From here, bytecode execution continues in [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter).

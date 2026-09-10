@@ -40,7 +40,7 @@
     "Returns a 1×N character array containing UTF-8 encoded JSON text.",
     "Numeric and logical arrays become JSON arrays, preserving MATLAB column-major ordering.",
     "Scalars encode as bare numbers/strings rather than single-element arrays.",
-    "Struct scalars become JSON objects; struct arrays become JSON arrays of objects.",
+    "Struct scalars become JSON objects; struct arrays become JSON arrays of objects. Object keys use deterministic canonical lexical order rather than runtime field insertion order. An empty struct array encodes as an empty JSON array, which cannot retain the empty structure's field schema.",
     "Cell arrays map to JSON arrays, with nested arrays when the cell is 2-D.",
     "String arrays and char arrays become JSON strings (1 element) or arrays of strings (multiple rows).",
     "By default, `NaN`, `Inf`, and `-Inf` values encode as `null`. Set `'ConvertInfAndNaN'` to `false` to raise an error instead.",
@@ -52,8 +52,8 @@
   "examples": [
     {
       "description": "Converting a MATLAB struct to JSON",
-      "input": "person = struct('name', 'Ada', 'age', 37);\nencoded = jsonencode(person)",
-      "output": "encoded = '{\"age\":37,\"name\":\"Ada\"}'"
+      "input": "record = struct('name', 'entry', 'age', 37);\nencoded = jsonencode(record)",
+      "output": "encoded = '{\"age\":37,\"name\":\"entry\"}'"
     },
     {
       "description": "Serialising a matrix with pretty printing",

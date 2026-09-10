@@ -46,6 +46,13 @@ pub enum NativeInvocationStep {
 }
 
 impl NativeInvocation {
+    /// Arms one deterministic deoptimization fault for executor validation.
+    /// The fault remains pending while non-materializable transient execution
+    /// state is live.
+    pub fn inject_deoptimization_fault(&mut self, fault: crate::deopt::FaultInjection) {
+        self.state.arm_deoptimization_fault(fault);
+    }
+
     pub(super) fn new(
         state: HostState,
         entrypoint: NativeEntryPoint,

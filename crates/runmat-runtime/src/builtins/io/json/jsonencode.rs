@@ -571,6 +571,7 @@ fn value_contains_complex(value: &Value) -> bool {
         }
         Value::Cell(cell) => cell.data.iter().any(value_contains_complex),
         Value::Struct(struct_value) => struct_value.fields.values().any(value_contains_complex),
+        Value::StructArray(array) => array.any_value(value_contains_complex),
         Value::Object(object) => object.properties.values().any(value_contains_complex),
         _ => false,
     }
@@ -581,6 +582,7 @@ fn value_contains_sparse(value: &Value) -> bool {
         Value::SparseTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(value_contains_sparse),
         Value::Struct(value) => value.fields.values().any(value_contains_sparse),
+        Value::StructArray(array) => array.any_value(value_contains_sparse),
         Value::Object(value) => value.properties.values().any(value_contains_sparse),
         _ => false,
     }
@@ -591,6 +593,7 @@ fn value_contains_explicit_gpu(value: &Value) -> bool {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
         Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::StructArray(array) => array.any_value(value_contains_explicit_gpu),
         Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
         _ => false,
     }
@@ -749,6 +752,18 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
         Value::Struct(sv) => struct_to_json(sv, options),
+        Value::StructArray(array) => {
+            let dimensions = (0..array.shape().len()).collect::<Vec<_>>();
+            build_strided_array(array.shape(), &dimensions, |offset| {
+                let element = array.get_linear(offset).ok_or_else(|| {
+                    jsonencode_error_with(
+                        &JSONENCODE_ERROR_INTERNAL,
+                        "jsonencode: structure-array offset is out of bounds",
+                    )
+                })?;
+                struct_fields_to_json(element.fields.iter(), options)
+            })
+        }
         Value::Cell(ca) => cell_array_to_json(ca, options),
         Value::ObjectArray(array) => array
             .data()
@@ -981,11 +996,15 @@ fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> BuiltinRe
 }
 
 fn struct_to_json(sv: &StructValue, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
-    if sv.fields.is_empty() {
-        return Ok(JsonValue::Object(Vec::new()));
-    }
+    struct_fields_to_json(sv.fields.iter(), options)
+}
+
+fn struct_fields_to_json<'a>(
+    fields: impl Iterator<Item = (&'a String, &'a Value)>,
+    options: &JsonEncodeOptions,
+) -> BuiltinResult<JsonValue> {
     let mut map = BTreeMap::new();
-    for (key, value) in &sv.fields {
+    for (key, value) in fields {
         map.insert(key.clone(), value_to_json(value, options)?);
     }
     Ok(JsonValue::Object(map.into_iter().collect()))
@@ -1069,14 +1088,19 @@ fn compute_keep_dims(shape: &[usize], drop_singletons: bool) -> Vec<usize> {
     keep
 }
 
-fn compute_strides(shape: &[usize]) -> Vec<usize> {
+fn compute_strides(shape: &[usize]) -> BuiltinResult<Vec<usize>> {
     let mut strides = Vec::with_capacity(shape.len());
     let mut acc = 1usize;
     for &size in shape {
         strides.push(acc);
-        acc = acc.saturating_mul(size.max(1));
+        acc = acc.checked_mul(size.max(1)).ok_or_else(|| {
+            jsonencode_error_with(
+                &JSONENCODE_ERROR_INTERNAL,
+                "jsonencode: array shape exceeds platform limits",
+            )
+        })?;
     }
-    strides
+    Ok(strides)
 }
 
 fn build_strided_array<F>(
@@ -1090,15 +1114,36 @@ where
     if keep_dims.is_empty() {
         return fetch(0);
     }
-    if keep_dims.iter().any(|&idx| shape[idx] == 0) {
+    if keep_dims
+        .iter()
+        .any(|&idx| shape.get(idx).copied() == Some(0))
+    {
         return Ok(JsonValue::Array(Vec::new()));
     }
-    let strides = compute_strides(shape);
-    let dims: Vec<usize> = keep_dims.iter().map(|&idx| shape[idx]).collect();
+    let strides = compute_strides(shape)?;
+    let dims = keep_dims
+        .iter()
+        .map(|&idx| {
+            shape.get(idx).copied().ok_or_else(|| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    "jsonencode: array dimension is out of bounds",
+                )
+            })
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     build_nd_array(&dims, |indices| {
         let mut offset = 0usize;
         for (value, dim_idx) in indices.iter().zip(keep_dims.iter()) {
-            offset += value * strides[*dim_idx];
+            offset = value
+                .checked_mul(strides[*dim_idx])
+                .and_then(|component| offset.checked_add(component))
+                .ok_or_else(|| {
+                    jsonencode_error_with(
+                        &JSONENCODE_ERROR_INTERNAL,
+                        "jsonencode: array offset exceeds platform limits",
+                    )
+                })?;
         }
         fetch(offset)
     })
@@ -1502,6 +1547,30 @@ pub(crate) mod tests {
         let encoded =
             block_on(jsonencode_builtin(Value::Struct(fields), Vec::new())).expect("jsonencode");
         assert_eq!(as_string(encoded), "{\"name\":\"RunMat\",\"year\":2025}");
+    }
+
+    #[test]
+    fn jsonencode_struct_array_canonicalizes_keys_and_erases_empty_schema() {
+        let mut first = StructValue::new();
+        first.insert("ä", Value::Num(2.0));
+        first.insert("zeta", Value::Num(1.0));
+        first.insert("alpha", Value::Num(3.0));
+        let mut second = StructValue::new();
+        second.insert("ä", Value::Num(5.0));
+        second.insert("zeta", Value::Num(4.0));
+        second.insert("alpha", Value::Num(6.0));
+        let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1, 1]).unwrap();
+        let encoded = block_on(jsonencode_builtin(Value::StructArray(array), Vec::new())).unwrap();
+        assert_eq!(
+            as_string(encoded),
+            "[[[{\"alpha\":3,\"zeta\":1,\"ä\":2}]],[[{\"alpha\":6,\"zeta\":4,\"ä\":5}]]]"
+        );
+
+        let empty =
+            runmat_value::StructArray::empty(vec!["alpha".into(), "zeta".into()], vec![0, 2, 1])
+                .unwrap();
+        let encoded = block_on(jsonencode_builtin(Value::StructArray(empty), Vec::new())).unwrap();
+        assert_eq!(as_string(encoded), "[]");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

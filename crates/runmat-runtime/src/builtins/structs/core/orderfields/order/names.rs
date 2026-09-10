@@ -3,7 +3,7 @@ use runmat_value::{CharArray, Value};
 
 pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Option<Vec<String>>> {
     match value {
-        Value::Cell(array) if !starts_with_structure(array) => array
+        Value::Cell(array) => array
             .iter_column_major()
             .enumerate()
             .map(|(index, value)| scalar(value, format!("cell element {}", index + 1)))
@@ -20,10 +20,6 @@ pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Option<Vec<String>>> 
         Value::CharArray(array) => character_rows(array).map(Some),
         _ => Ok(None),
     }
-}
-
-fn starts_with_structure(array: &runmat_value::CellArray) -> bool {
-    matches!(array.iter_column_major().next(), Some(Value::Struct(_)))
 }
 
 fn character_rows(array: &CharArray) -> crate::BuiltinResult<Vec<String>> {

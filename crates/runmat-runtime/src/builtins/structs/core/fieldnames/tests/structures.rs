@@ -1,5 +1,5 @@
 use super::{run, strings};
-use runmat_value::{CellArray, StructValue, Value};
+use runmat_value::{CellArray, StructArray, StructValue, Value};
 
 #[test]
 fn preserves_scalar_insertion_order_and_case() {
@@ -13,31 +13,31 @@ fn preserves_scalar_insertion_order_and_case() {
 }
 
 #[test]
-fn collects_sorted_union_from_represented_struct_array() {
+fn reads_ordered_schema_from_typed_struct_array() {
     let mut first = StructValue::new();
-    first.fields.insert("name".into(), Value::from("Ada"));
+    first.fields.insert("name".into(), Value::from("first"));
     first.fields.insert("id".into(), Value::Num(101.0));
     let mut second = StructValue::new();
-    second.fields.insert("name".into(), Value::from("Grace"));
-    second
-        .fields
-        .insert("department".into(), Value::from("Research"));
-    let array = CellArray::new_with_shape(
-        vec![Value::Struct(first), Value::Struct(second)],
-        vec![1, 2],
-    )
-    .expect("struct array");
-    let (names, shape) = strings(run(Value::Cell(array)).expect("fieldnames"));
-    assert_eq!(names, ["department", "id", "name"]);
-    assert_eq!(shape, [3, 1]);
+    second.fields.insert("name".into(), Value::from("second"));
+    second.fields.insert("id".into(), Value::Num(102.0));
+    let array = StructArray::new(vec![first, second], vec![1, 2]).expect("struct array");
+    let (names, shape) = strings(run(Value::StructArray(array)).expect("fieldnames"));
+    assert_eq!(names, ["name", "id"]);
+    assert_eq!(shape, [2, 1]);
 }
 
 #[test]
-fn returns_empty_column_for_empty_represented_struct_array() {
-    let array = CellArray::new(Vec::new(), 0, 0).expect("empty struct array");
-    let (names, shape) = strings(run(Value::Cell(array)).expect("fieldnames"));
-    assert!(names.is_empty());
-    assert_eq!(shape, [0, 1]);
+fn empty_typed_array_retains_its_schema() {
+    let array = StructArray::empty(vec!["name".into(), "id".into()], vec![0, 3]).unwrap();
+    let (names, shape) = strings(run(Value::StructArray(array)).expect("fieldnames"));
+    assert_eq!(names, ["name", "id"]);
+    assert_eq!(shape, [2, 1]);
+}
+
+#[test]
+fn ordinary_cell_of_structs_is_not_a_structure_array() {
+    let cell = CellArray::new(vec![Value::Struct(StructValue::new())], 1, 1).unwrap();
+    assert!(run(Value::Cell(cell)).is_err());
 }
 
 #[test]

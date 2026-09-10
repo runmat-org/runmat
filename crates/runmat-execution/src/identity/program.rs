@@ -161,6 +161,27 @@ impl ProgramEnvironment {
         }
         Ok(())
     }
+
+    /// Reject executable products compiled for a different source-language or
+    /// compiler contract before any nested program payload is decoded.
+    pub fn validate_current_compiler(&self) -> Result<(), ContractError> {
+        self.validate()?;
+        let expected_semantic = crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2;
+        let expected_compiler = crate::schema::PROGRAM_COMPILER_SCHEMA_V2;
+        if self.semantic_schema != expected_semantic || self.compiler_schema != expected_compiler {
+            return Err(ContractError::invalid(
+                "program environment compiler compatibility",
+                format!(
+                    "semantic schema actual {} expected {}; compiler schema actual {} expected {}",
+                    self.semantic_schema,
+                    expected_semantic,
+                    self.compiler_schema,
+                    expected_compiler
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -246,6 +267,10 @@ impl ProgramRevision {
             catalog_fingerprint: self.catalog_fingerprint,
             compatibility_mode: self.compatibility_mode,
         }
+    }
+
+    pub fn validate_current_compiler(&self) -> Result<(), ContractError> {
+        self.environment().validate_current_compiler()
     }
 
     pub fn semantic_schema(&self) -> u32 {
@@ -516,4 +541,36 @@ fn validate_token(field: &'static str, value: &str, max_bytes: usize) -> Result<
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    fn environment(semantic: u32, compiler: u32) -> ProgramEnvironment {
+        ProgramEnvironment::new(
+            semantic,
+            compiler,
+            Digest::sha256(b"runtime"),
+            Digest::sha256(b"catalog"),
+            "runmat",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn current_compiler_admission_rejects_each_stale_axis() {
+        assert!(environment(
+            crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            crate::schema::PROGRAM_COMPILER_SCHEMA_V2,
+        )
+        .validate_current_compiler()
+        .is_ok());
+        assert!(environment(1, crate::schema::PROGRAM_COMPILER_SCHEMA_V2)
+            .validate_current_compiler()
+            .is_err());
+        assert!(environment(crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2, 1)
+            .validate_current_compiler()
+            .is_err());
+    }
 }

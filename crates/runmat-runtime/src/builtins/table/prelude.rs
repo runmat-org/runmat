@@ -15,10 +15,7 @@ pub(in crate::builtins::table) use runmat_value::{
 };
 
 pub(in crate::builtins::table) use crate::builtins::common::fs::expand_user_path;
-pub(in crate::builtins::table) use crate::{
-    gather_if_needed_async, BuiltinResult, OBJECT_INDEX_BRACE, OBJECT_INDEX_MEMBER,
-    OBJECT_INDEX_PAREN,
-};
+pub(in crate::builtins::table) use crate::{gather_if_needed_async, BuiltinResult};
 
 pub const TABLE_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::TABLE;
 pub const TIMETABLE_CLASS: runmat_types::StaticClassIdentity = runmat_types::standard::TIMETABLE;

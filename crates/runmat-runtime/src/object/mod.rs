@@ -3,4 +3,5 @@
 pub mod cell;
 pub mod dispatch;
 pub mod indexing;
+pub mod protocol;
 pub mod resolve;

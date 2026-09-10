@@ -11,12 +11,12 @@ fn rejects_non_struct_input() {
 }
 
 #[test]
-fn rejects_non_struct_represented_array_contents() {
+fn rejects_ordinary_cell_input() {
     let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell");
     let error = run(Value::Cell(cell)).expect_err("invalid array contents");
     assert_eq!(
         error.identifier(),
-        runmat_builtins::FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS.identifier
+        runmat_builtins::FIELDNAMES_ERROR_INVALID_TARGET.identifier
     );
 }
 
