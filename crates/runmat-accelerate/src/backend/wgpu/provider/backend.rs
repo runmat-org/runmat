@@ -136,19 +136,23 @@ use crate::telemetry::AccelTelemetry;
 pub(crate) mod backend_shared;
 #[path = "backend_types.rs"]
 pub(crate) mod backend_types;
+#[path = "health.rs"]
+mod health;
 #[path = "trait_impl.rs"]
 mod trait_impl;
 
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;
+pub(super) use health::WgpuDeviceHealth;
 #[cfg(not(target_arch = "wasm32"))]
-fn install_device_error_handlers(device: &wgpu::Device) {
+fn install_device_error_handlers(device: &wgpu::Device, health: Arc<WgpuDeviceHealth>) {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
         #[cfg(test)]
         eprintln!("WGPU uncaptured error: {error:?}");
     }));
-    device.set_device_lost_callback(|reason, message| {
+    device.set_device_lost_callback(move |reason, message| {
+        health.mark_lost(health::loss_reason(reason));
         error!("WGPU device lost: reason={:?}, message={}", reason, message);
         #[cfg(test)]
         eprintln!("WGPU device lost: reason={reason:?}, message={message}");
@@ -156,7 +160,7 @@ fn install_device_error_handlers(device: &wgpu::Device) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn install_device_error_handlers(device: &wgpu::Device) {
+fn install_device_error_handlers(device: &wgpu::Device, _health: Arc<WgpuDeviceHealth>) {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error (wasm): {:?}", error);
     }));

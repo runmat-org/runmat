@@ -199,9 +199,13 @@ impl SparseKrylovResult {
             }),
             "provider capability does not admit the sparse Krylov result"
         );
+        let terminal_without_solution = matches!(
+            self.termination,
+            SparseKrylovTermination::Cancelled | SparseKrylovTermination::ProviderLost
+        );
         ensure!(
-            (self.termination == SparseKrylovTermination::Cancelled) == self.solution.is_none(),
-            "cancelled sparse Krylov execution must not publish a partial solution"
+            terminal_without_solution == self.solution.is_none(),
+            "interrupted sparse Krylov execution must not publish a partial solution"
         );
         if let Some(solution) = &self.solution {
             validate_dense_owner(solution, provider_device_id)?;
@@ -223,7 +227,7 @@ impl SparseKrylovResult {
             "sparse Krylov result contains an invalid residual norm"
         );
         ensure!(
-            self.termination == SparseKrylovTermination::Cancelled
+            terminal_without_solution
                 || (self.initial_residual_norm.is_some() && self.final_residual_norm.is_some()),
             "completed sparse Krylov result requires residual norms"
         );
@@ -270,6 +274,11 @@ impl SparseKrylovResult {
             (self.termination == SparseKrylovTermination::Cancelled)
                 == self.evidence.cancellation_observed,
             "sparse cancellation evidence does not match termination"
+        );
+        ensure!(
+            (self.termination == SparseKrylovTermination::ProviderLost)
+                == self.evidence.provider_loss.is_some(),
+            "sparse provider-loss evidence does not match termination"
         );
         ensure!(
             (self.solution.is_none()) == (self.evidence.resident_solution_bytes == 0),

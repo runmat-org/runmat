@@ -184,6 +184,7 @@ pub(in crate::simple_provider) fn krylov_solve<'a>(
                 scratch_bytes: workspace_bytes,
                 cancellation_checks: outcome.cancellation_checks,
                 cancellation_observed: cancelled,
+                provider_loss: None,
                 used_host_fallback: false,
             },
         };

@@ -209,6 +209,7 @@ pub fn initialize_acceleration_provider_with(options: &AccelerateInitOptions) {
                         AccelPowerPreference::LowPower => PowerPreference::LowPower,
                     },
                     force_fallback_adapter: options.wgpu_force_fallback_adapter,
+                    precision: backend::wgpu::provider::WgpuPrecisionPolicy::Automatic,
                 };
 
                 match backend::wgpu::provider::register_wgpu_provider(wgpu_options) {
@@ -323,6 +324,7 @@ pub async fn initialize_wgpu_provider_async(options: &AccelerateInitOptions) -> 
                 AccelPowerPreference::LowPower => PowerPreference::LowPower,
             },
             force_fallback_adapter: options.wgpu_force_fallback_adapter,
+            precision: backend::wgpu::provider::WgpuPrecisionPolicy::Automatic,
         };
 
         match backend::wgpu::provider::register_wgpu_provider_async(wgpu_options).await {

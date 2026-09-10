@@ -113,6 +113,19 @@ pub fn solve_prepared_accelerator_system(
             evidence,
         ));
     }
+    if result.termination == SparseKrylovTermination::ProviderLost {
+        let evidence = AcceleratorSolveEvidence::ProviderLost {
+            schema_version: ACCELERATOR_SOLVE_EVIDENCE_SCHEMA_VERSION,
+            operator_identity: prepared.operator_identity,
+            right_hand_side_identity: numeric_identity(b"right-hand-side", right_hand_side),
+            provider: result.evidence,
+        };
+        evidence.validate()?;
+        return Err(AcceleratorAdapterError::provider_loss(
+            "native sparse provider was lost during execution",
+            evidence,
+        ));
+    }
     let solution_handle = result.solution.as_ref().ok_or_else(|| {
         AcceleratorAdapterError::execution("provider omitted a non-cancelled solution")
     })?;

@@ -7,7 +7,7 @@ mod backend;
 
 #[cfg(test)]
 pub(crate) use backend::backend_shared::host_tensor_from_value;
-pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
+pub use backend::backend_types::{WgpuPrecisionPolicy, WgpuProvider, WgpuProviderOptions};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {

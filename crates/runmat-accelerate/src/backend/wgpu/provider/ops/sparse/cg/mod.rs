@@ -1,4 +1,5 @@
 mod encoding;
+mod evidence;
 pub(super) mod pipelines;
 mod shaders;
 mod workspace;
@@ -74,6 +75,28 @@ pub(crate) fn execute<'a>(
             super::feasibility(provider, &query).is_supported(),
             "WGPU sparse CG exceeds the advertised provider envelope"
         );
+        if let Some(reason) = provider.device_health.loss_reason() {
+            return evidence::interrupted_before_dispatch(
+                provider,
+                request,
+                &capability,
+                &matrix,
+                &preconditioner,
+                SparseKrylovTermination::ProviderLost,
+                Some(reason),
+            );
+        }
+        if request.execution.cancellation.is_cancelled() {
+            return evidence::interrupted_before_dispatch(
+                provider,
+                request,
+                &capability,
+                &matrix,
+                &preconditioner,
+                SparseKrylovTermination::Cancelled,
+                None,
+            );
+        }
         let preparation_started = Instant::now();
         let dimension = usize::try_from(matrix.pattern.descriptor.rows)
             .map_err(|_| anyhow!("sparse CG dimension exceeds host address space"))?;
@@ -97,31 +120,47 @@ pub(crate) fn execute<'a>(
         let mut cancellation_checks = 1_u64;
         let mut submitted_iterations = 0_u32;
         let mut synchronization_ns = 0_u64;
-        let mut state = if request.execution.cancellation.is_cancelled() {
-            cancelled_state()
-        } else {
-            let mut encoder = encoder(provider, "runmat-sparse-cg-initialization");
-            encoding::encode_initialization(
-                provider,
-                &mut encoder,
-                &pipelines,
-                CgInputs {
-                    matrix: &matrix,
-                    preconditioner: &preconditioner,
-                    rhs: &rhs,
-                    initial_guess: initial_guess.as_ref(),
-                },
-                &workspace,
-                vector_groups,
-            );
-            let (snapshot, elapsed) = submit_checkpoint(provider, encoder, &workspace).await?;
-            checkpoints += 1;
-            cancellation_checks += 1;
-            synchronization_ns = synchronization_ns.saturating_add(elapsed);
-            snapshot
+        let mut provider_loss = None;
+        let mut initial_encoder = encoder(provider, "runmat-sparse-cg-initialization");
+        encoding::encode_initialization(
+            provider,
+            &mut initial_encoder,
+            &pipelines,
+            CgInputs {
+                matrix: &matrix,
+                preconditioner: &preconditioner,
+                rhs: &rhs,
+                initial_guess: initial_guess.as_ref(),
+            },
+            &workspace,
+            vector_groups,
+        );
+        let mut state = match submit_checkpoint(provider, initial_encoder, &workspace).await {
+            Ok((snapshot, elapsed)) => {
+                checkpoints += 1;
+                cancellation_checks += 1;
+                synchronization_ns = synchronization_ns.saturating_add(elapsed);
+                snapshot
+            }
+            Err(failure) => {
+                checkpoints += 1;
+                cancellation_checks += 1;
+                synchronization_ns = synchronization_ns.saturating_add(failure.elapsed_ns);
+                if let Some(reason) = provider.device_health.loss_reason() {
+                    provider_loss = Some(reason);
+                    provider_lost_state()
+                } else {
+                    return Err(failure.error);
+                }
+            }
         };
 
         while state.termination.is_none() {
+            if let Some(reason) = provider.device_health.loss_reason() {
+                provider_loss = Some(reason);
+                state.termination = Some(SparseKrylovTermination::ProviderLost);
+                break;
+            }
             if request.execution.cancellation.is_cancelled() {
                 state.termination = Some(SparseKrylovTermination::Cancelled);
                 break;
@@ -145,23 +184,39 @@ pub(crate) fn execute<'a>(
                 );
             }
             submitted_iterations = submitted_iterations.saturating_add(batch);
-            let (snapshot, elapsed) = submit_checkpoint(provider, encoder, &workspace).await?;
-            checkpoints += 1;
-            cancellation_checks += 1;
-            synchronization_ns = synchronization_ns.saturating_add(elapsed);
-            state = snapshot;
+            match submit_checkpoint(provider, encoder, &workspace).await {
+                Ok((snapshot, elapsed)) => {
+                    checkpoints += 1;
+                    cancellation_checks += 1;
+                    synchronization_ns = synchronization_ns.saturating_add(elapsed);
+                    state = snapshot;
+                }
+                Err(failure) => {
+                    checkpoints += 1;
+                    cancellation_checks += 1;
+                    synchronization_ns = synchronization_ns.saturating_add(failure.elapsed_ns);
+                    if let Some(reason) = provider.device_health.loss_reason() {
+                        provider_loss = Some(reason);
+                        state.termination = Some(SparseKrylovTermination::ProviderLost);
+                    } else {
+                        return Err(failure.error);
+                    }
+                }
+            }
         }
         let execution_ns = elapsed_ns(execution_started);
         let termination = state
             .termination
             .ok_or_else(|| anyhow!("sparse CG completed without terminal state"))?;
         let cancelled = termination == SparseKrylovTermination::Cancelled;
-        let solution_bytes = if cancelled {
+        let provider_lost = termination == SparseKrylovTermination::ProviderLost;
+        let interrupted = cancelled || provider_lost;
+        let solution_bytes = if interrupted {
             0
         } else {
             workspace.solution.size()
         };
-        let unpublished_solution_bytes = if cancelled {
+        let unpublished_solution_bytes = if interrupted {
             workspace.solution.size()
         } else {
             0
@@ -175,19 +230,14 @@ pub(crate) fn execute<'a>(
             .scratch_bytes()
             .saturating_add(unpublished_solution_bytes)
             .saturating_add(checkpoint_staging_bytes);
-        let pattern_bytes = matrix
-            .pattern
-            .row_offsets
-            .size()
-            .saturating_add(matrix.pattern.column_indices.size());
-        let matrix_bytes = matrix.values.size();
-        let preconditioner_bytes = preconditioner.inverse_diagonal.size();
+        let (pattern_bytes, matrix_bytes, preconditioner_bytes) =
+            evidence::resident_input_bytes(&matrix, &preconditioner);
         let peak_resident_bytes = pattern_bytes
             .saturating_add(matrix_bytes)
             .saturating_add(preconditioner_bytes)
             .saturating_add(solution_bytes)
             .saturating_add(scratch_bytes);
-        let solution = if cancelled {
+        let solution = if interrupted {
             None
         } else {
             Some(provider.register_numeric_buffer(
@@ -206,8 +256,8 @@ pub(crate) fn execute<'a>(
             solution,
             termination,
             iterations: state.iterations,
-            initial_residual_norm: (!cancelled).then_some(state.initial_residual_norm),
-            final_residual_norm: (!cancelled).then_some(state.final_residual_norm),
+            initial_residual_norm: (!interrupted).then_some(state.initial_residual_norm),
+            final_residual_norm: (!interrupted).then_some(state.final_residual_norm),
             evidence: SparseOperationEvidence {
                 schema_version: SPARSE_EVIDENCE_SCHEMA_VERSION,
                 binding: SparseExecutionBinding {
@@ -241,6 +291,7 @@ pub(crate) fn execute<'a>(
                 scratch_bytes,
                 cancellation_checks,
                 cancellation_observed: cancelled,
+                provider_loss,
                 used_host_fallback: false,
             },
         };
@@ -254,8 +305,15 @@ async fn submit_checkpoint(
     provider: &WgpuProvider,
     mut encoder: wgpu::CommandEncoder,
     workspace: &CgWorkspace,
-) -> anyhow::Result<(CgTerminalState, u64)> {
-    let _readback_reservation = provider.sparse.reserve_transient(workspace.state_size)?;
+) -> Result<(CgTerminalState, u64), CheckpointFailure> {
+    let started = Instant::now();
+    let _readback_reservation = provider
+        .sparse
+        .reserve_transient(workspace.state_size)
+        .map_err(|error| CheckpointFailure {
+            error,
+            elapsed_ns: elapsed_ns(started),
+        })?;
     let staging =
         provider.create_readback_buffer(workspace.state_size, "runmat-sparse-cg-checkpoint");
     encoder.copy_buffer_to_buffer(
@@ -265,23 +323,32 @@ async fn submit_checkpoint(
         0,
         workspace.state_size,
     );
-    let started = Instant::now();
     provider.submit(encoder);
     let bytes = provider
         .map_readback_bytes(staging, workspace.state_size, "sparse CG checkpoint")
-        .await?;
-    Ok((
-        decode_state(provider.precision, &bytes)?,
-        elapsed_ns(started),
-    ))
+        .await
+        .map_err(|error| CheckpointFailure {
+            error,
+            elapsed_ns: elapsed_ns(started),
+        })?;
+    let state = decode_state(provider.precision, &bytes).map_err(|error| CheckpointFailure {
+        error,
+        elapsed_ns: elapsed_ns(started),
+    })?;
+    Ok((state, elapsed_ns(started)))
 }
 
-fn cancelled_state() -> CgTerminalState {
+struct CheckpointFailure {
+    error: anyhow::Error,
+    elapsed_ns: u64,
+}
+
+fn provider_lost_state() -> CgTerminalState {
     CgTerminalState {
         initial_residual_norm: 0.0,
         final_residual_norm: 0.0,
         iterations: 0,
-        termination: Some(SparseKrylovTermination::Cancelled),
+        termination: Some(SparseKrylovTermination::ProviderLost),
     }
 }
 

@@ -429,6 +429,7 @@ fn setup_wgpu_provider() -> Result<()> {
     let high_perf = WgpuProviderOptions {
         power_preference: PowerPreference::HighPerformance,
         force_fallback_adapter: false,
+        precision: provider::WgpuPrecisionPolicy::Automatic,
     };
 
     match provider::register_wgpu_provider(high_perf) {
@@ -437,6 +438,7 @@ fn setup_wgpu_provider() -> Result<()> {
             let fallback_opts = WgpuProviderOptions {
                 power_preference: PowerPreference::LowPower,
                 force_fallback_adapter: true,
+                precision: provider::WgpuPrecisionPolicy::Automatic,
             };
             match provider::register_wgpu_provider(fallback_opts) {
                 Ok(_) => {

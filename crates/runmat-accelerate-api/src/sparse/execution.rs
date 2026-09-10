@@ -6,7 +6,7 @@ use std::sync::{
 use runmat_execution::identity::{AttemptId, Digest};
 use serde::{Deserialize, Serialize};
 
-pub const SPARSE_EVIDENCE_SCHEMA_VERSION: u16 = 1;
+pub const SPARSE_EVIDENCE_SCHEMA_VERSION: u16 = 2;
 
 /// A cheap, shareable cancellation flag for one numerical attempt.
 ///
@@ -101,5 +101,6 @@ pub struct SparseOperationEvidence {
     pub scratch_bytes: u64,
     pub cancellation_checks: u64,
     pub cancellation_observed: bool,
+    pub provider_loss: Option<super::SparseProviderLossReason>,
     pub used_host_fallback: bool,
 }

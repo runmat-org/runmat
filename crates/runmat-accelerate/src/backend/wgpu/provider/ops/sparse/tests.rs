@@ -5,13 +5,13 @@ use runmat_accelerate_api::{
     SparseCancellationToken, SparseExecutionContext, SparseFeasibility, SparseFeasibilityQuery,
     SparseIndexWidth, SparseKrylovMethod, SparseKrylovRequest, SparseKrylovTermination,
     SparseOperation, SparsePreconditionerApplyRequest, SparsePreconditionerKind,
-    SparsePreconditionerRequest, SparseSpmvRequest, SparseTranspose,
+    SparsePreconditionerRequest, SparseProviderLossReason, SparseSpmvRequest, SparseTranspose,
 };
 use runmat_execution::{identity::AttemptId, Digest};
 
 use super::super::super::WgpuProvider;
 use crate::backend::wgpu::provider::{
-    register_test_wgpu_provider, WgpuProviderOptions, WgpuTestSession,
+    register_test_wgpu_provider, WgpuPrecisionPolicy, WgpuProviderOptions, WgpuTestSession,
 };
 use crate::backend::wgpu::types::NumericPrecision;
 
@@ -604,6 +604,91 @@ fn sparse_cg_keeps_iteration_work_resident_and_returns_bound_evidence() {
 }
 
 #[test]
+fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
+    let provider = match WgpuProvider::new(WgpuProviderOptions {
+        precision: WgpuPrecisionPolicy::RequireF64,
+        ..WgpuProviderOptions::default()
+    }) {
+        Ok(provider) => provider,
+        Err(error)
+            if error
+                .to_string()
+                .contains("selected adapter does not expose SHADER_F64") =>
+        {
+            eprintln!("exact-f64 WGPU qualification: {error}");
+            return;
+        }
+        Err(error) if std::env::var_os("RUNMAT_REQUIRE_WGPU_SPARSE").is_some() => {
+            panic!("required exact-f64 WGPU qualification could not inspect an adapter: {error}")
+        }
+        Err(_) => return,
+    };
+    assert_eq!(provider.precision, NumericPrecision::F64);
+    let pattern = upload_pattern(&provider);
+    let matrix = bind_matrix(&provider, &pattern);
+    let preconditioner = block_on(provider.prepare_sparse_preconditioner(
+        &SparsePreconditionerRequest {
+            matrix: &matrix,
+            kind: SparsePreconditionerKind::Jacobi,
+        },
+    ))
+    .expect("prepare exact-f64 Jacobi");
+    let rhs = upload_vector(&provider, [1.0, 2.0]);
+    let capability = provider.capability_snapshot();
+    assert_eq!(
+        capability
+            .sparse
+            .as_ref()
+            .expect("exact-f64 sparse capability")
+            .element_types,
+        vec![NumericElementType::F64]
+    );
+    let cancellation = SparseCancellationToken::new();
+    let request = SparseKrylovRequest {
+        matrix: &matrix,
+        rhs: &rhs,
+        initial_guess: None,
+        preconditioner: Some(&preconditioner),
+        method: SparseKrylovMethod::ConjugateGradient,
+        relative_tolerance: 1.0e-12,
+        absolute_tolerance: 0.0,
+        max_iterations: 64,
+        execution: SparseExecutionContext {
+            attempt_id: AttemptId::derive(&[b"wgpu-exact-f64-sparse-cg"]),
+            operator_identity: Digest::sha256(b"wgpu-exact-f64-sparse-cg-operator"),
+            provider_capability_schema_version: capability.schema_version,
+            provider_capability_revision: capability.revision,
+            cancellation: &cancellation,
+        },
+    };
+    let result = block_on(provider.sparse_krylov_solve(&request)).expect("solve exact-f64 CG");
+    result
+        .validate(request, &capability)
+        .expect("validate exact-f64 CG evidence");
+    assert_eq!(result.termination, SparseKrylovTermination::Converged);
+    let solution = result.solution.as_ref().expect("exact-f64 solution");
+    let downloaded = block_on(provider.download_numeric(solution)).expect("download f64 solution");
+    let HostNumericDataOwned::F64(values) = downloaded.data else {
+        panic!("exact-f64 provider returned a narrowed solution")
+    };
+    assert!((values[0] - 1.0 / 11.0).abs() < 1.0e-12);
+    assert!((values[1] - 7.0 / 11.0).abs() < 1.0e-12);
+
+    provider.free(solution).expect("release exact-f64 solution");
+    provider.free(&rhs).expect("release exact-f64 RHS");
+    provider
+        .free_sparse_preconditioner(&preconditioner)
+        .expect("release exact-f64 preconditioner");
+    provider
+        .free_sparse_matrix(&matrix)
+        .expect("release exact-f64 matrix");
+    provider
+        .free_sparse_pattern(&pattern)
+        .expect("release exact-f64 pattern");
+    assert_eq!(provider.sparse.resident_bytes(), 0);
+}
+
+#[test]
 fn sparse_cg_matches_a_representative_multi_workgroup_reference() {
     let Some(session) = test_session() else {
         return;
@@ -873,5 +958,95 @@ fn sparse_cg_observes_cancellation_after_resident_work_begins() {
     provider
         .free_sparse_pattern(&pattern)
         .expect("release cancellation pattern");
+    assert_eq!(provider.sparse.resident_bytes(), 0);
+}
+
+#[test]
+fn sparse_cg_reports_provider_loss_after_resident_work_begins() {
+    let Some(session) = test_session() else {
+        return;
+    };
+    let provider = session.provider();
+    let rows = 131_072;
+    let (row_offsets, columns, values) = tridiagonal_system(rows, 2.0);
+    let (pattern, matrix) = upload_csr(provider, rows, &row_offsets, &columns, &values);
+    let preconditioner = block_on(provider.prepare_sparse_preconditioner(
+        &SparsePreconditionerRequest {
+            matrix: &matrix,
+            kind: SparsePreconditionerKind::Jacobi,
+        },
+    ))
+    .expect("prepare provider-loss Jacobi");
+    let rhs = upload_numeric_vector(provider, &vec![1.0; rows]);
+    let capability = provider.capability_snapshot();
+    let cancellation = SparseCancellationToken::new();
+    let request = SparseKrylovRequest {
+        matrix: &matrix,
+        rhs: &rhs,
+        initial_guess: None,
+        preconditioner: Some(&preconditioner),
+        method: SparseKrylovMethod::ConjugateGradient,
+        relative_tolerance: 1.0e-12,
+        absolute_tolerance: 0.0,
+        max_iterations: super::cg::MAXIMUM_ITERATIONS,
+        execution: SparseExecutionContext {
+            attempt_id: AttemptId::derive(&[b"wgpu-sparse-cg-running-provider-loss"]),
+            operator_identity: Digest::sha256(b"wgpu-sparse-cg-running-provider-loss-operator"),
+            provider_capability_schema_version: capability.schema_version,
+            provider_capability_revision: capability.revision,
+            cancellation: &cancellation,
+        },
+    };
+    let persistent_bytes = provider.sparse.resident_bytes();
+    let result = std::thread::scope(|scope| {
+        let (marked_tx, marked_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let loss_observer = scope.spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while provider.sparse.resident_bytes() == persistent_bytes
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::yield_now();
+            }
+            assert!(
+                provider.sparse.resident_bytes() > persistent_bytes,
+                "CG workspace never became visible to placement accounting"
+            );
+            let _loss = provider
+                .device_health
+                .inject_loss(SparseProviderLossReason::Destroyed);
+            marked_tx.send(()).expect("publish injected provider loss");
+            release_rx.recv().expect("release injected provider loss");
+        });
+        let result = block_on(provider.sparse_krylov_solve(&request));
+        marked_rx.recv().expect("observe injected provider loss");
+        assert!(provider.placement_resources().lost);
+        release_tx.send(()).expect("release loss observer");
+        loss_observer.join().expect("provider-loss observer");
+        result
+    })
+    .expect("execute provider-loss resident CG");
+    assert_eq!(result.termination, SparseKrylovTermination::ProviderLost);
+    assert!(result.solution.is_none());
+    assert!(!result.evidence.cancellation_observed);
+    assert_eq!(
+        result.evidence.provider_loss,
+        Some(SparseProviderLossReason::Destroyed)
+    );
+    assert!(result.evidence.host_synchronizations >= 1);
+    assert!(result.evidence.host_synchronizations < 257);
+    assert_eq!(provider.sparse.resident_bytes(), persistent_bytes);
+    assert!(!provider.placement_resources().lost);
+
+    provider.free(&rhs).expect("release provider-loss RHS");
+    provider
+        .free_sparse_preconditioner(&preconditioner)
+        .expect("release provider-loss preconditioner");
+    provider
+        .free_sparse_matrix(&matrix)
+        .expect("release provider-loss matrix");
+    provider
+        .free_sparse_pattern(&pattern)
+        .expect("release provider-loss pattern");
     assert_eq!(provider.sparse.resident_bytes(), 0);
 }

@@ -4,6 +4,15 @@ use super::*;
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
     pub force_fallback_adapter: bool,
+    pub precision: WgpuPrecisionPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WgpuPrecisionPolicy {
+    #[default]
+    Automatic,
+    RequireF32,
+    RequireF64,
 }
 
 impl Default for WgpuProviderOptions {
@@ -11,6 +20,7 @@ impl Default for WgpuProviderOptions {
         Self {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
+            precision: WgpuPrecisionPolicy::Automatic,
         }
     }
 }
@@ -51,6 +61,7 @@ impl Default for WgpuDeviceCaches {
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
     pub(super) device: Arc<wgpu::Device>,
+    pub(super) device_health: Arc<WgpuDeviceHealth>,
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,

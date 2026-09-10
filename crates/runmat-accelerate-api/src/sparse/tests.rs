@@ -232,6 +232,100 @@ fn krylov_validation_rejects_cross_device_and_preconditioner_substitution() {
 }
 
 #[test]
+fn krylov_validation_requires_typed_provider_loss_to_match_the_terminal() {
+    let provider = TransferCountingProvider {
+        uploads: AtomicUsize::new(0),
+    };
+    let mut capability = crate::ProviderCapabilitySnapshot::conservative(&provider);
+    capability.revision = 1;
+    capability.sparse = Some(ProviderSparseCapabilities {
+        formats: vec![SparseFormat::Csr],
+        index_widths: vec![SparseIndexWidth::U32],
+        element_types: vec![NumericElementType::F64],
+        storage: vec![GpuTensorStorage::Real],
+        transpose_modes: vec![SparseTranspose::None],
+        preconditioners: vec![],
+        krylov: vec![SparseKrylovCapability {
+            method: SparseKrylovMethod::ConjugateGradient,
+            preconditioner: None,
+        }],
+        max_host_synchronizations_per_solve: Some(1),
+        cancellation: SparseCancellationCapability::Cooperative {
+            maximum_work_units_between_checks: 1_024,
+        },
+        transactional_results: true,
+        max_rows: Some(2),
+        max_columns: Some(2),
+        max_nnz: Some(2),
+    });
+    let matrix = matrix_handle(0, 13);
+    let rhs = numeric_handle(0, 21, 2);
+    let cancellation = SparseCancellationToken::new();
+    let request = SparseKrylovRequest {
+        matrix: &matrix,
+        rhs: &rhs,
+        initial_guess: None,
+        preconditioner: None,
+        method: SparseKrylovMethod::ConjugateGradient,
+        relative_tolerance: 1.0e-8,
+        absolute_tolerance: 0.0,
+        max_iterations: 20,
+        execution: execution_context(&cancellation, capability.revision),
+    };
+    let evidence = SparseOperationEvidence {
+        schema_version: SPARSE_EVIDENCE_SCHEMA_VERSION,
+        binding: SparseExecutionBinding {
+            attempt_id: request.execution.attempt_id,
+            operator_identity: request.execution.operator_identity,
+            provider_device_id: 0,
+            provider_capability_schema_version: capability.schema_version,
+            provider_capability_revision: capability.revision,
+            pattern_id: matrix.descriptor.pattern_id,
+            matrix_id: matrix.matrix_id,
+            preconditioner_id: None,
+        },
+        timings: SparseOperationTimings::default(),
+        resident_pattern_bytes: 0,
+        resident_matrix_bytes: 0,
+        resident_preconditioner_bytes: 0,
+        resident_solution_bytes: 0,
+        host_upload_bytes: 0,
+        host_download_bytes: 0,
+        setup_dispatches: 0,
+        spmv_dispatches: 0,
+        preconditioner_dispatches: 0,
+        vector_dispatches: 0,
+        host_synchronizations: 1,
+        device_readbacks: 1,
+        peak_resident_bytes: 0,
+        scratch_bytes: 0,
+        cancellation_checks: 1,
+        cancellation_observed: false,
+        provider_loss: Some(SparseProviderLossReason::Destroyed),
+        used_host_fallback: false,
+    };
+    let lost = SparseKrylovResult {
+        solution: None,
+        termination: SparseKrylovTermination::ProviderLost,
+        iterations: 3,
+        initial_residual_norm: None,
+        final_residual_norm: None,
+        evidence,
+    };
+    lost.validate(request, &capability)
+        .expect("typed provider loss is a valid transactional terminal");
+
+    let mut missing_reason = lost.clone();
+    missing_reason.evidence.provider_loss = None;
+    assert!(missing_reason.validate(request, &capability).is_err());
+
+    let mut forged_completed = lost;
+    forged_completed.termination = SparseKrylovTermination::Cancelled;
+    forged_completed.evidence.cancellation_observed = true;
+    assert!(forged_completed.validate(request, &capability).is_err());
+}
+
+#[test]
 fn default_sparse_contract_rejects_without_dense_transfer() {
     let provider = TransferCountingProvider {
         uploads: AtomicUsize::new(0),

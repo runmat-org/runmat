@@ -157,7 +157,7 @@ impl AccelProvider for WgpuProvider {
             scratch_available_bytes: None,
             queue_depth: None,
             queue_limit: None,
-            lost: false,
+            lost: self.device_health.loss_reason().is_some(),
             epoch: allocated_bytes
                 ^ reclaimable_bytes.rotate_left(32)
                 ^ sparse_bytes.rotate_left(17),

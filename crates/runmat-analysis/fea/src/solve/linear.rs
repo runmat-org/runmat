@@ -402,7 +402,7 @@ pub(crate) fn linear_result_from_accelerator_error(
     preconditioner_kind: SpdPreconditionerKind,
     error: crate::solve::accelerator::AcceleratorAdapterError,
 ) -> LinearSolveResult {
-    let cancelled = error.phase == crate::solve::accelerator::AcceleratorAdapterPhase::Cancellation;
+    let terminal = error.phase;
     LinearSolveResult {
         iterations: 0,
         residual_norm: right_hand_side
@@ -423,15 +423,21 @@ pub(crate) fn linear_result_from_accelerator_error(
         solver_method: SolverMethod::AssembledPcg,
         preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
         diagnostics: vec![FeaDiagnostic {
-            code: if cancelled {
-                "FEA_SOLVER_CANCELLED".to_string()
-            } else {
-                "FEA_ACCELERATOR_SOLVE_FAILED".to_string()
-            },
-            severity: if cancelled {
-                FeaDiagnosticSeverity::Warning
-            } else {
-                FeaDiagnosticSeverity::Error
+            code: match terminal {
+                crate::solve::accelerator::AcceleratorAdapterPhase::Cancellation => {
+                    "FEA_SOLVER_CANCELLED"
+                }
+                crate::solve::accelerator::AcceleratorAdapterPhase::ProviderLoss => {
+                    "FEA_ACCELERATOR_PROVIDER_LOST"
+                }
+                _ => "FEA_ACCELERATOR_SOLVE_FAILED",
+            }
+            .to_string(),
+            severity: match terminal {
+                crate::solve::accelerator::AcceleratorAdapterPhase::Cancellation => {
+                    FeaDiagnosticSeverity::Warning
+                }
+                _ => FeaDiagnosticSeverity::Error,
             },
             message: error.message,
         }],
