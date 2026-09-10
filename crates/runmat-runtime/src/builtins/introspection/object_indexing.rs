@@ -13,7 +13,7 @@ use runmat_value::{NumericScalar, Value};
 use std::sync::OnceLock;
 
 pub(crate) const NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD: runmat_types::StaticMethodName =
-    runmat_types::StaticMethodName::new("numArgumentsFromSubscript");
+    crate::OBJECT_NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD;
 pub(crate) const INDEXING_CONTEXT_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("matlab.indexing.IndexingContext");
 pub(crate) const LEGACY_INDEXING_CONTEXT_CLASS: runmat_types::StaticClassIdentity =
@@ -33,7 +33,7 @@ const SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Indexed value.",
 }];
 
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -42,23 +42,16 @@ const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Object receiver.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token ('()', '{}', '.').",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Indexing payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
 ];
 
 const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = subsref(obj, kind, payload)",
+    label: "out = subsref(obj, S)",
     inputs: &SUBSREF_INPUTS,
     outputs: &SUBSREF_OUTPUT,
 }];
@@ -97,7 +90,7 @@ const SUBSREF_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
     }];
 pub const SUBSREF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "out = subsref(obj, kind, integer_payload)",
+        form: "out = subsref(obj, S_with_integer_subscripts)",
         inputs: &SUBSREF_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
@@ -115,7 +108,7 @@ const SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Updated object value.",
 }];
 
-const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -124,18 +117,11 @@ const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Object receiver.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token ('()', '{}', '.').",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Indexing payload.",
+        description: "Standard substruct-compatible assignment path.",
     },
     BuiltinParamDescriptor {
         name: "rhs",
@@ -147,7 +133,7 @@ const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
 ];
 
 const SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = subsasgn(obj, kind, payload, rhs)",
+    label: "obj = subsasgn(obj, S, rhs)",
     inputs: &SUBSASGN_INPUTS,
     outputs: &SUBSASGN_OUTPUT,
 }];
@@ -196,7 +182,7 @@ const SUBSASGN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
 ];
 pub const SUBSASGN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
-        form: "obj = subsasgn(obj, kind, integer_payload, integer_rhs)",
+        form: "obj = subsasgn(obj, S_with_integer_subscripts, integer_rhs)",
         inputs: &SUBSASGN_INTEGER_INPUTS,
         computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
@@ -315,12 +301,7 @@ pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_INTEGER_CAPABILITIES:
     notes: "Metadata-decidable target extents do not gather resident payloads. The structural count crosses to double only after exact-range validation.",
 }];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum IndexingContext {
-    Statement,
-    Expression,
-    Assignment,
-}
+use runmat_types::ObjectIndexingContext as IndexingContext;
 
 #[derive(Clone)]
 struct SubscriptLevel {
@@ -405,19 +386,27 @@ fn parse_indexing_context(value: &Value) -> crate::BuiltinResult<IndexingContext
     }
 }
 
+fn indexing_context_value(context: IndexingContext) -> Value {
+    let member = match context {
+        IndexingContext::Statement => INDEXING_CONTEXT_STATEMENT,
+        IndexingContext::Expression => INDEXING_CONTEXT_EXPRESSION,
+        IndexingContext::Assignment => INDEXING_CONTEXT_ASSIGNMENT,
+    };
+    let mut value = runmat_value::ObjectInstance::new(INDEXING_CONTEXT_CLASS.to_string());
+    value.properties.insert(
+        ENUM_MEMBER_PROPERTY.to_string(),
+        Value::String(member.to_string()),
+    );
+    Value::Object(value)
+}
+
 fn parse_subscript_levels(value: &Value) -> crate::BuiltinResult<Vec<SubscriptLevel>> {
     match value {
         Value::Struct(struct_value) => Ok(vec![parse_subscript_level(struct_value)?]),
-        Value::Cell(cell) => {
-            let mut levels = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
-                let Value::Struct(struct_value) = item else {
-                    return Err(num_args_error(
-                        &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
-                        "struct array elements must be scalar structs",
-                    ));
-                };
-                levels.push(parse_subscript_level(struct_value)?);
+        Value::StructArray(array) => {
+            let mut levels = Vec::with_capacity(array.len());
+            for struct_value in array.elements() {
+                levels.push(parse_subscript_level(&struct_value.to_owned())?);
             }
             if levels.is_empty() {
                 return Err(num_args_error(
@@ -429,7 +418,7 @@ fn parse_subscript_levels(value: &Value) -> crate::BuiltinResult<Vec<SubscriptLe
         }
         other => Err(num_args_error(
             &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
-            format!("S must be a struct or struct-array cell, got {other:?}"),
+            format!("S must be a struct or structure array, got {other:?}"),
         )),
     }
 }
@@ -626,6 +615,8 @@ fn target_colon_extent(
 fn target_shape(target: &Value) -> Option<Vec<usize>> {
     match target {
         Value::Cell(cell) => Some(cell.shape.clone()),
+        Value::StructArray(array) => Some(array.shape().to_vec()),
+        Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Tensor(tensor) => Some(tensor.shape.clone()),
         Value::ComplexTensor(tensor) => Some(tensor.shape.clone()),
         Value::LogicalArray(array) => Some(array.shape.clone()),
@@ -663,175 +654,40 @@ fn default_num_arguments(
 }
 
 async fn dispatch_num_arguments_overload(
-    class_name: runmat_types::ClassIdentity,
     target: Value,
     subscript: Value,
     indexing_context: Value,
 ) -> crate::BuiltinResult<Option<Value>> {
-    let args = vec![target, subscript, indexing_context];
-    if let Some((method, owner)) = crate::class_registry::lookup_method(
-        &class_name,
-        &NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.owned(),
-    ) {
-        let owner_member = format!("{owner}.{NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD}");
-        let mut candidates = vec![method.function_name];
-        if !candidates
-            .iter()
-            .any(|candidate| candidate == &owner_member)
-        {
-            candidates.push(owner_member);
-        }
-        let mut undefined = None;
-        for candidate in candidates {
-            let (identity, fallback_policy) = crate::callable_identity_for_handle_name(&candidate);
-            match crate::dispatch_callable_with_policy(identity, fallback_policy, args.clone(), 1)
-                .await
-            {
-                Ok(value) => return Ok(Some(value)),
-                Err(err) if crate::is_undefined_function_error(&err) => {
-                    undefined = Some(err);
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        return Err(undefined.unwrap_or_else(|| {
-            crate::runtime_descriptor_error_with_detail(
-                NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.display_name(),
-                &NUM_ARGUMENTS_ERROR_ARGUMENT,
-                "registered method did not resolve to a callable implementation",
+    match crate::object::protocol::resolve_object_protocol(
+        &target,
+        crate::object::protocol::ObjectProtocol::NumArgumentsFromSubscript,
+        &crate::object::protocol::ObjectAccessContext::default(),
+    )? {
+        crate::object::protocol::ProtocolResolution::DefaultIndexing => Ok(None),
+        crate::object::protocol::ProtocolResolution::Method(method) => {
+            crate::object::protocol::invoke_resolved_object_method(
+                &method,
+                vec![target, subscript, indexing_context],
+                1,
             )
-        }));
-    }
-
-    match crate::dispatch_object_external_member(
-        class_name,
-        NUM_ARGUMENTS_FROM_SUBSCRIPT_METHOD.display_name(),
-        args,
-        1,
-    )
-    .await
-    {
-        Ok(value) => Ok(Some(value)),
-        Err(err) if crate::is_undefined_function_error(&err) => Ok(None),
-        Err(err) => Err(err),
+            .await
+            .map(Some)
+        }
     }
 }
 
-pub(crate) async fn dispatch_subsref(
-    obj: Value,
-    kind: String,
-    payload: Value,
-) -> crate::BuiltinResult<Value> {
-    match obj {
-        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
-                crate::runtime_descriptor_error("subsref", &SUBSREF_ERROR_RECEIVER_INVALID)
-            })?;
-            let dispatch_receiver = receiver.clone();
-            let dispatch_kind = kind.clone();
-            let dispatch_payload = payload.clone();
-            match crate::dispatch_object_external_member(
-                class_name,
-                crate::OBJECT_SUBSREF_METHOD.display_name(),
-                vec![
-                    dispatch_receiver,
-                    Value::String(dispatch_kind),
-                    dispatch_payload,
-                ],
-                crate::current_requested_outputs(),
-            )
-            .await
-            {
-                Ok(value) => Ok(value),
-                Err(err) if crate::is_undefined_function_error(&err) => {
-                    if kind == crate::OBJECT_INDEX_MEMBER {
-                        let field = match payload {
-                            Value::String(field) => Some(field),
-                            Value::CharArray(ca) => Some(ca.data.iter().collect::<String>()),
-                            _ => None,
-                        };
-                        if let Some(field) = field {
-                            return crate::builtins::structs::core::getfield::get_member_value(
-                                receiver, &field,
-                            )
-                            .await;
-                        }
-                    }
-                    Err(crate::runtime_descriptor_error(
-                        "subsref",
-                        &SUBSREF_ERROR_METHOD_MISSING,
-                    ))
-                }
-                Err(err) => Err(err),
-            }
-        }
-        other => Err(crate::runtime_descriptor_error_with_detail(
-            "subsref",
-            &SUBSREF_ERROR_RECEIVER_INVALID,
-            format!("receiver must be object, got {other:?}"),
-        )),
-    }
+pub(crate) async fn dispatch_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::read_subscript_path(obj, path, None).await
 }
 
 pub(crate) async fn dispatch_subsasgn(
     obj: Value,
-    kind: String,
-    payload: Value,
+    subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
-    match obj {
-        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
-                crate::runtime_descriptor_error("subsasgn", &SUBSASGN_ERROR_RECEIVER_INVALID)
-            })?;
-            let dispatch_receiver = receiver.clone();
-            let dispatch_kind = kind.clone();
-            let dispatch_payload = payload.clone();
-            let dispatch_rhs = rhs.clone();
-            match crate::dispatch_object_external_member(
-                class_name,
-                crate::OBJECT_SUBSASGN_METHOD.display_name(),
-                vec![
-                    dispatch_receiver,
-                    Value::String(dispatch_kind),
-                    dispatch_payload,
-                    dispatch_rhs,
-                ],
-                crate::current_requested_outputs(),
-            )
-            .await
-            {
-                Ok(value) => Ok(value),
-                Err(err) if crate::is_undefined_function_error(&err) => {
-                    if kind == crate::OBJECT_INDEX_MEMBER {
-                        let field = match payload {
-                            Value::String(field) => Some(field),
-                            Value::CharArray(ca) => Some(ca.data.iter().collect::<String>()),
-                            _ => None,
-                        };
-                        if let Some(field) = field {
-                            return crate::call_builtin_async_with_outputs(
-                                "setfield",
-                                &[receiver, Value::String(field), rhs],
-                                crate::current_requested_outputs(),
-                            )
-                            .await;
-                        }
-                    }
-                    Err(crate::runtime_descriptor_error(
-                        "subsasgn",
-                        &SUBSASGN_ERROR_METHOD_MISSING,
-                    ))
-                }
-                Err(err) => Err(err),
-            }
-        }
-        other => Err(crate::runtime_descriptor_error_with_detail(
-            "subsasgn",
-            &SUBSASGN_ERROR_RECEIVER_INVALID,
-            format!("receiver must be object, got {other:?}"),
-        )),
-    }
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::assign_subscript_path(obj, path, vec![rhs], None).await
 }
 
 #[runtime_builtin(
@@ -846,12 +702,8 @@ pub(crate) async fn dispatch_subsasgn(
     ),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
-pub async fn subsref_builtin(
-    obj: Value,
-    kind: String,
-    payload: Value,
-) -> crate::BuiltinResult<Value> {
-    dispatch_subsref(obj, kind, payload).await
+pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    dispatch_subsref(obj, subscript).await
 }
 
 #[runtime_builtin(
@@ -868,11 +720,10 @@ pub async fn subsref_builtin(
 )]
 pub async fn subsasgn_builtin(
     obj: Value,
-    kind: String,
-    payload: Value,
+    subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_subsasgn(obj, kind, payload, rhs).await
+    dispatch_subsasgn(obj, subscript, rhs).await
 }
 
 #[runtime_builtin(
@@ -895,9 +746,8 @@ pub async fn num_arguments_from_subscript_builtin(
 ) -> crate::BuiltinResult<Value> {
     ensure_indexing_context_classes_registered();
     let context = parse_indexing_context(&indexing_context)?;
-    if let Some(class_name) = crate::object_receiver_class_name(&target) {
+    if crate::object_receiver_class_name(&target).is_some() {
         if let Some(value) = dispatch_num_arguments_overload(
-            class_name,
             target.clone(),
             subscript.clone(),
             indexing_context.clone(),
@@ -911,6 +761,150 @@ pub async fn num_arguments_from_subscript_builtin(
     Ok(Value::Num(exact_count_as_f64(default_num_arguments(
         &target, &levels, context,
     )?)?))
+}
+
+/// Resolve the number of brace-assignment destinations using the same
+/// `numArgumentsFromSubscript` protocol as public object indexing.
+pub async fn brace_assignment_cardinality(
+    target: &Value,
+    subscripts: Vec<Value>,
+) -> crate::BuiltinResult<usize> {
+    let subscript_count = subscripts.len();
+    let subscript_values = Value::Cell(
+        runmat_value::CellArray::new(subscripts, 1, subscript_count)
+            .map_err(|error| num_args_error(&NUM_ARGUMENTS_ERROR_SUBSTRUCT, error))?,
+    );
+    assignment_cardinality_for_level(target, crate::OBJECT_INDEX_BRACE, subscript_values).await
+}
+
+/// Resolve the number of member-assignment destinations through the public
+/// object indexing protocol. Plain structures use their aggregate cardinality;
+/// class-defined objects may override it with `numArgumentsFromSubscript`.
+pub async fn member_assignment_cardinality(
+    target: &Value,
+    member: String,
+) -> crate::BuiltinResult<usize> {
+    assignment_cardinality_for_level(target, crate::OBJECT_INDEX_MEMBER, Value::String(member))
+        .await
+}
+
+pub struct PreparedObjectAssignmentCardinality {
+    pub count: usize,
+    pub method: Option<crate::object::protocol::ResolvedObjectMethod>,
+}
+
+pub async fn object_path_assignment_cardinality(
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    object_path_cardinality(
+        target,
+        path,
+        IndexingContext::Assignment,
+        &crate::object::protocol::ObjectAccessContext::default(),
+    )
+    .await
+}
+
+pub async fn object_path_cardinality(
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+    indexing_context: IndexingContext,
+    access: &crate::object::protocol::ObjectAccessContext,
+) -> crate::BuiltinResult<PreparedObjectAssignmentCardinality> {
+    ensure_indexing_context_classes_registered();
+    let descriptor = path.to_standard_substruct_value()?;
+    let context = indexing_context_value(indexing_context);
+    let resolution = crate::object::protocol::resolve_object_protocol(
+        target,
+        crate::object::protocol::ObjectProtocol::NumArgumentsFromSubscript,
+        access,
+    )?;
+    if let crate::object::protocol::ProtocolResolution::Method(method) = resolution {
+        let value = crate::object::protocol::invoke_resolved_object_method(
+            &method,
+            vec![target.clone(), descriptor.clone(), context],
+            1,
+        )
+        .await?;
+        return Ok(PreparedObjectAssignmentCardinality {
+            count: exact_output_count(&value)?,
+            method: Some(method),
+        });
+    }
+    let levels = parse_subscript_levels(&descriptor)?;
+    Ok(PreparedObjectAssignmentCardinality {
+        count: default_num_arguments(target, &levels, indexing_context)?,
+        method: None,
+    })
+}
+
+async fn assignment_cardinality_for_level(
+    target: &Value,
+    kind: &str,
+    subs: Value,
+) -> crate::BuiltinResult<usize> {
+    ensure_indexing_context_classes_registered();
+    let mut level = runmat_value::StructValue::new();
+    level.insert("type", Value::String(kind.to_string()));
+    level.insert("subs", subs.clone());
+    let descriptor = Value::Struct(level);
+    let context = indexing_context_value(IndexingContext::Assignment);
+    if crate::object_receiver_class_name(target).is_some() {
+        if let Some(value) =
+            dispatch_num_arguments_overload(target.clone(), descriptor, context).await?
+        {
+            return exact_output_count(&value);
+        }
+    }
+    if kind == crate::OBJECT_INDEX_MEMBER {
+        return crate::object::resolve::member_sequence_cardinality(target);
+    }
+    let level = SubscriptLevel {
+        kind: kind.to_string(),
+        subs,
+    };
+    default_num_arguments(target, &[level], IndexingContext::Assignment)
+}
+
+fn exact_output_count(value: &Value) -> crate::BuiltinResult<usize> {
+    let numeric = match value {
+        Value::Num(value) => *value,
+        Value::Int(value) => {
+            return value
+                .try_to_u64()
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| {
+                    num_args_error(
+                        &NUM_ARGUMENTS_ERROR_COUNT,
+                        "output count must be a nonnegative exact integer",
+                    )
+                });
+        }
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .numeric_value_at(0)
+            .expect("validated scalar numeric tensor")
+            .materialize_f64(),
+        _ => {
+            return Err(num_args_error(
+                &NUM_ARGUMENTS_ERROR_COUNT,
+                "output count must be a nonnegative exact numeric scalar",
+            ));
+        }
+    };
+    if !numeric.is_finite() || numeric < 0.0 || numeric.fract() != 0.0 {
+        return Err(num_args_error(
+            &NUM_ARGUMENTS_ERROR_COUNT,
+            "output count must be a nonnegative exact integer",
+        ));
+    }
+    if numeric > usize::MAX as f64 {
+        return Err(num_args_error(
+            &NUM_ARGUMENTS_ERROR_COUNT,
+            "output count exceeds the supported limit",
+        ));
+    }
+    Ok(numeric as usize)
 }
 
 fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
@@ -931,7 +925,7 @@ fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{CellArray, IntValue, ObjectInstance, StructValue, Tensor};
+    use runmat_value::{CellArray, IntValue, ObjectInstance, StructArray, StructValue, Tensor};
     use std::collections::HashMap;
 
     fn substruct(kind: &str, subs: Value) -> Value {
@@ -958,6 +952,62 @@ mod tests {
             target, subscript, context,
         ))
         .expect_err("numArgumentsFromSubscript should fail")
+    }
+
+    #[test]
+    fn public_subsref_and_subsasgn_use_default_numeric_indexing() {
+        let source =
+            Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).expect("tensor"));
+        let descriptor = substruct(
+            crate::OBJECT_INDEX_PAREN,
+            cell(vec![Value::Num(2.0), Value::Num(1.0)]),
+        );
+        assert_eq!(
+            block_on(subsref_builtin(source.clone(), descriptor.clone())).expect("subsref"),
+            Value::Num(20.0)
+        );
+
+        let updated =
+            block_on(subsasgn_builtin(source, descriptor, Value::Num(99.0))).expect("subsasgn");
+        let Value::Tensor(updated) = updated else {
+            panic!("numeric parentheses assignment must preserve tensor storage");
+        };
+        assert_eq!(
+            (0..updated.len())
+                .map(|index| updated.numeric_value_at(index).unwrap().materialize_f64())
+                .collect::<Vec<_>>(),
+            vec![10.0, 99.0, 30.0, 40.0]
+        );
+    }
+
+    #[test]
+    fn typed_structure_array_carries_multiple_subscript_levels() {
+        let level = |kind: &str, subs: Value| {
+            let mut value = StructValue::new();
+            value.insert("type", Value::String(kind.to_string()));
+            value.insert("subs", subs);
+            value
+        };
+        let descriptor = Value::StructArray(
+            StructArray::new(
+                vec![
+                    level(crate::OBJECT_INDEX_MEMBER, Value::String("field".into())),
+                    level(crate::OBJECT_INDEX_PAREN, cell(vec![Value::Num(1.0)])),
+                ],
+                vec![1, 2],
+            )
+            .expect("subscript structure array"),
+        );
+        let levels = parse_subscript_levels(&descriptor).expect("parse subscript levels");
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0].kind, crate::OBJECT_INDEX_MEMBER);
+        assert_eq!(levels[1].kind, crate::OBJECT_INDEX_PAREN);
+
+        let legacy_cell = cell(vec![substruct(
+            crate::OBJECT_INDEX_MEMBER,
+            Value::String("field".into()),
+        )]);
+        assert!(parse_subscript_levels(&legacy_cell).is_err());
     }
 
     #[test]

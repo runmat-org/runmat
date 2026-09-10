@@ -45,10 +45,9 @@ pub fn infer_cell_aggregate(rows: &[Vec<ValueFact>]) -> FactInference {
 }
 
 pub fn infer_struct(fields: BTreeMap<String, ValueFact>) -> FactInference {
-    FactInference::exact(ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields,
-        fields_complete: true,
-    })))
+    FactInference::exact(ValueFact::scalar(ValueKindFact::Struct(
+        StructFact::scalar(fields, true),
+    )))
 }
 
 pub fn infer_concatenate(dimension: usize, values: &[ValueFact]) -> FactInference {

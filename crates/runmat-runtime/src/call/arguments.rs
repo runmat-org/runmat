@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::context::RuntimeContext;
-use crate::object::dispatch::call_object_index_descriptor_method_with_outputs;
-use crate::object::indexing::{ObjectIndexDescriptor, ObjectIndexSelector};
+use crate::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
 use crate::{runtime_error::semantic_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, Value};
 
@@ -12,23 +11,64 @@ use runmat_value::{CellArray, IntValue, Value};
 /// language-level expansion semantics and deliberately contains no operand-stack
 /// or instruction-decoding state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArgumentSpec {
-    pub is_expand: bool,
-    pub num_indices: usize,
-    pub expand_all: bool,
+pub enum ArgumentSpec {
+    Single,
+    Expansion(ArgumentExpansionSpec),
+    CapturedSequence { slot: usize },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ArgumentExpansionSpec {
+    CellContents {
+        num_indices: usize,
+        expand_all: bool,
+    },
+    ReturnedOutputs,
+    Member(runmat_types::MemberName),
+    DynamicMember,
+}
+
+impl ArgumentSpec {
+    pub const fn stack_operand_count(&self) -> usize {
+        match self {
+            Self::Single => 1,
+            Self::Expansion(ArgumentExpansionSpec::CellContents { num_indices, .. }) => {
+                1 + *num_indices
+            }
+            Self::Expansion(ArgumentExpansionSpec::ReturnedOutputs)
+            | Self::Expansion(ArgumentExpansionSpec::Member(_)) => 1,
+            Self::Expansion(ArgumentExpansionSpec::DynamicMember) => 2,
+            Self::CapturedSequence { .. } => 0,
+        }
+    }
 }
 
 /// One source-level argument after an executor has materialized its operands.
 ///
 /// VM stack order and Native IR value identities stay in their executors; the
 /// expansion rules themselves are shared Runtime language semantics.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum MaterializedArgument {
     Single(Value),
-    Expansion {
+    Expansion(MaterializedExpansionSource),
+    Sequence(crate::sequence::ValueSequence),
+}
+
+#[derive(Debug, Clone)]
+pub enum MaterializedExpansionSource {
+    CellContents {
         base: Value,
         indices: Vec<Value>,
         expand_all: bool,
+    },
+    ReturnedOutputs(Value),
+    Member {
+        base: Value,
+        member: runmat_types::MemberName,
+    },
+    DynamicMember {
+        base: Value,
+        member: Value,
     },
 }
 
@@ -40,64 +80,103 @@ pub async fn expand_arguments(
     for argument in arguments {
         match argument {
             MaterializedArgument::Single(value) => expanded_arguments.push(value),
-            MaterializedArgument::Expansion {
-                base,
-                indices,
-                expand_all,
-            } => {
-                let values = if expand_all {
-                    match base {
-                        Value::OutputList(outputs) => outputs,
-                        Value::Cell(cell) => crate::object::cell::expand_all_cell_values(&cell)?,
-                        Value::Composite(handle) => {
-                            expand_composite_values(runtime, *handle, &[], true).await?
-                        }
-                        base @ (Value::Object(_) | Value::HandleObject(_)) => {
-                            expand_brace_values(base, &[], None).await?
-                        }
-                        _ => {
-                            return Err(semantic_error(
-                                "InvalidExpandAllTarget",
-                                "Comma-separated-list expansion requires a cell array, output list, or object",
-                            ));
-                        }
-                    }
-                } else {
-                    match (base, indices.len()) {
-                        (Value::Cell(cell), 1 | 2) => {
-                            crate::object::cell::expand_cell_indices(&cell, &indices)?
-                        }
-                        (Value::OutputList(outputs), 1 | 2) => {
-                            let cols = outputs.len();
-                            let cell = runmat_value::CellArray::new(outputs, 1, cols).map_err(
-                                |error| {
-                                    semantic_error(
-                                        "ShapeMismatch",
-                                        format!("output-list expansion: {error}"),
-                                    )
-                                },
-                            )?;
-                            crate::object::cell::expand_cell_indices(&cell, &indices)?
-                        }
-                        (Value::Composite(handle), _) => {
-                            expand_composite_values(runtime, *handle, &indices, false).await?
-                        }
-                        (base @ (Value::Object(_) | Value::HandleObject(_)), _) => {
-                            expand_brace_values(base, &indices, None).await?
-                        }
-                        _ => {
-                            return Err(semantic_error(
-                                "InvalidExpandTarget",
-                                "Indexed comma-separated-list expansion requires a cell array, output list, or object",
-                            ));
-                        }
-                    }
-                };
+            MaterializedArgument::Expansion(source) => {
+                let values = materialize_expansion(runtime, source).await?.resolve(
+                    runmat_types::SequenceUse::ExpandAll,
+                    crate::sequence::SequenceResolutionContext::default(),
+                )?;
                 expanded_arguments.extend(values);
+            }
+            MaterializedArgument::Sequence(sequence) => {
+                expanded_arguments.extend(sequence.resolve(
+                    runmat_types::SequenceUse::ExpandAll,
+                    crate::sequence::SequenceResolutionContext::default(),
+                )?);
             }
         }
     }
     Ok(expanded_arguments)
+}
+
+pub async fn materialize_expansion(
+    runtime: &RuntimeContext,
+    source: MaterializedExpansionSource,
+) -> Result<crate::sequence::ValueSequence, RuntimeError> {
+    let values = match source {
+        MaterializedExpansionSource::CellContents {
+            base,
+            indices,
+            expand_all,
+        } => {
+            if expand_all {
+                match base {
+                    Value::Cell(cell) => crate::object::cell::expand_all_cell_values(&cell)?,
+                    Value::Composite(handle) => {
+                        expand_composite_values(runtime, *handle, &[], true).await?
+                    }
+                    base @ (Value::Object(_) | Value::HandleObject(_)) => {
+                        expand_brace_values(base, &[], None).await?
+                    }
+                    _ => {
+                        return Err(semantic_error(
+                            "InvalidExpandAllTarget",
+                            "Comma-separated-list expansion requires a cell array or object",
+                        ));
+                    }
+                }
+            } else {
+                match (base, indices.len()) {
+                    (Value::Cell(cell), 1 | 2) => {
+                        crate::object::cell::expand_cell_indices(&cell, &indices)?
+                    }
+                    (Value::Composite(handle), _) => {
+                        expand_composite_values(runtime, *handle, &indices, false).await?
+                    }
+                    (base @ (Value::Object(_) | Value::HandleObject(_)), _) => {
+                        expand_brace_values(base, &indices, None).await?
+                    }
+                    _ => {
+                        return Err(semantic_error(
+                            "InvalidExpandTarget",
+                            "Indexed comma-separated-list expansion requires a cell array or object",
+                        ));
+                    }
+                }
+            }
+        }
+        MaterializedExpansionSource::ReturnedOutputs(value) => match value {
+            Value::OutputList(values) => values,
+            _ => {
+                return Err(semantic_error(
+                    "InvalidReturnedOutputExpansion",
+                    "call-result expansion requires a multiple-output result",
+                ));
+            }
+        },
+        MaterializedExpansionSource::Member { base, member } => {
+            return crate::object::resolve::read_member_sequence_with_context(
+                Some(runtime),
+                base,
+                member.0,
+                false,
+                None,
+            )
+            .await;
+        }
+        MaterializedExpansionSource::DynamicMember { base, member } => {
+            let member = String::try_from(&member)
+                .map_err(|error| semantic_error("DynamicFieldName", error))?;
+            return crate::object::resolve::read_member_sequence_with_context(
+                Some(runtime),
+                base,
+                member,
+                false,
+                None,
+            )
+            .await;
+        }
+    };
+    Ok(crate::sequence::ValueSequence::comma_separated(values))
 }
 
 async fn expand_composite_values(
@@ -174,13 +253,20 @@ pub async fn expand_brace_values(
             }
         }
         base @ (Value::Object(_) | Value::HandleObject(_)) => {
-            let value = call_object_index_descriptor_method_with_outputs(
-                ObjectIndexDescriptor::subsref_brace(
-                    base,
-                    ObjectIndexSelector::IndexValues {
-                        values: indices.to_vec(),
-                    },
-                ),
+            let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
+                ObjectIndexSelector::IndexValues {
+                    components: indices.iter().cloned().map(Into::into).collect(),
+                },
+            ));
+            let resolution = crate::object::dispatch::resolve_object_index_protocol(
+                &base,
+                crate::object::indexing::ObjectIndexOp::Subsref,
+                None,
+            )?;
+            let value = crate::object::dispatch::invoke_resolved_object_index_path_method(
+                &resolution,
+                base,
+                path,
                 pad_to_outputs.unwrap_or(1),
             )
             .await?;
@@ -209,9 +295,9 @@ pub async fn expand_brace_values(
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_value::{CellArray, Tensor, Value};
+    use runmat_value::{CellArray, Value};
 
-    use super::{expand_arguments, MaterializedArgument};
+    use super::{expand_arguments, MaterializedArgument, MaterializedExpansionSource};
 
     fn runtime() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(std::rc::Rc::new(
@@ -226,11 +312,11 @@ mod tests {
             &runtime(),
             vec![
                 MaterializedArgument::Single(Value::Num(1.0)),
-                MaterializedArgument::Expansion {
+                MaterializedArgument::Expansion(MaterializedExpansionSource::CellContents {
                     base: Value::Cell(cell),
                     indices: Vec::new(),
                     expand_all: true,
-                },
+                }),
                 MaterializedArgument::Single(Value::Num(4.0)),
             ],
         ))
@@ -250,13 +336,12 @@ mod tests {
     fn output_list_index_expansion_uses_cell_index_semantics() {
         let values = block_on(expand_arguments(
             &runtime(),
-            vec![MaterializedArgument::Expansion {
-                base: Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
-                indices: vec![Value::Tensor(
-                    Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
-                )],
-                expand_all: false,
-            }],
+            vec![MaterializedArgument::Expansion(
+                MaterializedExpansionSource::ReturnedOutputs(Value::OutputList(vec![
+                    Value::Num(9.0),
+                    Value::Num(2.0),
+                ])),
+            )],
         ))
         .expect("expand output list");
         assert_eq!(values, vec![Value::Num(9.0), Value::Num(2.0)]);
@@ -266,11 +351,13 @@ mod tests {
     fn invalid_expansion_retains_stable_identifier() {
         let error = block_on(expand_arguments(
             &runtime(),
-            vec![MaterializedArgument::Expansion {
-                base: Value::Num(1.0),
-                indices: Vec::new(),
-                expand_all: true,
-            }],
+            vec![MaterializedArgument::Expansion(
+                MaterializedExpansionSource::CellContents {
+                    base: Value::Num(1.0),
+                    indices: Vec::new(),
+                    expand_all: true,
+                },
+            )],
         ))
         .expect_err("numeric expansion must fail");
         assert_eq!(error.identifier(), Some("RunMat:InvalidExpandAllTarget"));

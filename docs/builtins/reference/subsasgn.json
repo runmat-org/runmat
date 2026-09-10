@@ -7,7 +7,7 @@
     "overloaded indexing",
     "dot assignment"
   ],
-  "summary": "Dispatch overloaded object assignment operations to class-specific `Class.subsasgn` implementations.",
+  "summary": "Assign through a standard substruct path on a mutable value.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -25,25 +25,24 @@
   "tested": {
     "integration": "runmat-ignition/tests/functions.rs"
   },
-  "description": "`subsasgn(obj, kind, payload, rhs)` is the internal dispatch builtin for overloaded indexed assignment on objects. MATLAB-style assignment syntax lowers to this mechanism, which resolves class-specific `Class.subsasgn` handlers.",
+  "description": "`subsasgn(A, S, rhs)` assigns through the nonempty structure-array path `S`, conventionally produced by `substruct`. Ordinary arrays, cells, strings, and structures use canonical default assignment; class objects may resolve a class-specific `subsasgn` implementation. Field, parenthesis, and brace steps remain ordered, and each overload receives the complete remaining path.",
   "behaviors": [
-    "The receiver must be an object or handle object.",
-    "The `kind` argument selects the assignment form: `'.'`, `'()'`, or `'{}'`.",
-    "For dot assignment, `payload` is typically a field/property name string.",
-    "For `()` and `{}` assignment, `payload` is typically a cell array of indices.",
-    "The builtin forwards the assignment to the receiver's class-specific `Class.subsasgn` implementation and returns the updated object value.",
+    "The receiver may be any value that supports the requested default or overloaded assignment path.",
+    "Each element of `S` has a `type` field (`'.'`, `'()'`, or `'{}'`) and a corresponding `subs` field.",
+    "A multi-element `S` preserves the complete chained assignment path in source order.",
+    "Class objects with a `subsasgn` method receive the complete remaining path; values without an overload use canonical default assignment.",
     "Integer selectors and assigned values retain their native class, exact value, shape, and resident handle during dispatch. The class method owns assignment conversion, overflow, and returned-receiver semantics.",
     "Prefer normal assignment syntax in user code; direct calls to `subsasgn` are mainly useful for advanced dispatch or testing."
   ],
   "examples": [
     {
       "description": "Change a datetime display format explicitly",
-      "input": "t = datetime(2024, 4, 9);\nt = subsasgn(t, \".\", \"Format\", \"yyyy-MM-dd\");\ndisp(t)",
+      "input": "t = datetime(2024, 4, 9);\nS = substruct('.', 'Format');\nt = subsasgn(t, S, \"yyyy-MM-dd\");\ndisp(t)",
       "output": "2024-04-09"
     },
     {
       "description": "Replace one element of a datetime array explicitly",
-      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nt = subsasgn(t, \"()\", {2}, datetime(2030, 1, 1));\ndisp(t)",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nS = substruct('()', {2});\nt = subsasgn(t, S, datetime(2030, 1, 1));\ndisp(t)",
       "output": "15-Jan-2024 00:00:00\n01-Jan-2030 00:00:00"
     }
   ],
@@ -53,8 +52,8 @@
       "answer": "Usually no. Prefer ordinary assignment syntax like `obj.field = value` or `obj(2) = value`. Direct calls are mainly for advanced dispatch and testing."
     },
     {
-      "question": "What values can `kind` take?",
-      "answer": "RunMat's object-dispatch path expects `'.'`, `'()'`, or `'{}'`."
+      "question": "How is the assignment path represented?",
+      "answer": "Use `substruct` to build `S`. Each ordered element contains a `type` and `subs` field, and chained assignment uses multiple elements."
     },
     {
       "question": "What does the global `subsasgn` actually do?",

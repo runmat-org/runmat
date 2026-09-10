@@ -10,7 +10,9 @@ pub mod symbolic;
 mod trace;
 mod value;
 
-pub use aggregate::{CellArray, StructValue};
+pub use aggregate::{
+    CellArray, StructArray, StructArrayOperand, StructElementRef, StructFieldsRef, StructValue,
+};
 pub use array::{
     host_copy_metrics, record_host_copy, AdoptedHostAllocation, CharArray, ComplexElement,
     ComplexStorage, ComplexTensor, HostAllocationProvenance, HostAllocationRelease,

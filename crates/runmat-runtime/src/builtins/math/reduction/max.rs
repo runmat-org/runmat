@@ -1305,6 +1305,7 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::Listener(_) => Err(max_invalid_input(format!("{name}: unsupported input type"))),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)

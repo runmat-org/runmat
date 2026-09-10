@@ -887,7 +887,7 @@ fn type_name(value: &Value) -> &'static str {
         Value::SparseTensor(_) => "sparse array",
         Value::ComplexTensor(_) => "complex array",
         Value::Cell(_) => "cell array",
-        Value::Struct(_) => "struct",
+        Value::Struct(_) | Value::StructArray(_) => "struct",
         Value::GpuTensor(_) => "gpuArray",
         Value::ObjectArray(_) | Value::Object(_) => "object",
         Value::HandleObject(_) => "handle object",

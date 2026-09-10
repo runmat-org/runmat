@@ -220,7 +220,7 @@ async fn execute_parfor_tasks(
         workers = graph.worker_limit,
         "scheduled compiler-bound parfor task graph"
     );
-    let program = serde_json::to_vec(execution.bytecode).map_err(|error| {
+    let program = crate::encode_interpreter_script_v2(execution.bytecode).map_err(|error| {
         crate::interpreter::errors::mex(
             "ExecutionProgram",
             &format!("failed to encode the exact parallel program: {error}"),

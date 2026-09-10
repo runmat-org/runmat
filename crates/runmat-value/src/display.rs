@@ -289,6 +289,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::StructArray(array) => array.fmt(f),
             Value::OutputList(values) => {
                 write!(f, "[")?;
                 for (i, value) in values.iter().enumerate() {

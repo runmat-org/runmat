@@ -19,10 +19,7 @@ pub(super) fn result() -> ValueFact {
         ("packages".into(), names),
         ("path".into(), character_row()),
     ]);
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields,
-        fields_complete: true,
-    }))
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, true)))
 }
 
 fn character_row() -> ValueFact {

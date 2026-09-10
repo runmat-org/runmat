@@ -149,15 +149,15 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
     let recipe = recipe(revision.clone());
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
-        serde_json::to_vec(&registry).unwrap(),
+        ExecutableForm::InterpreterBytecodeV2,
+        runmat_vm::encode_interpreter_program_v2(&registry).unwrap(),
     )
     .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, revision)
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             artifact.executable_bytes.clone(),
         )
         .build()

@@ -119,7 +119,7 @@ fn every_source_kind_converges_into_one_portable_credential_free_closure() {
         .unwrap()
         .with_materialized_program(
             recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"portable-bytecode".to_vec(),
         )
         .build()

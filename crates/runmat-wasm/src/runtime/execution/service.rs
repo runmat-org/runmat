@@ -457,7 +457,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 &call,
                 future.outputs.clone(),
                 runmat_execution_artifact::ProgramTarget::portable(
-                    "wasm32-browser-interpreter-bytecode-v1",
+                    "wasm32-browser-interpreter-bytecode-v2",
                 ),
             )?;
         let sequence = state.next_task;

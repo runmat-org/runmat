@@ -28,7 +28,10 @@ pub(crate) fn infer_rvalue(
             let output = summaries
                 .get(function)
                 .map_or_else(dynamic_value, |summary| {
-                    if requested_outputs.fixed_count() <= 1 {
+                    if requested_outputs
+                        .known_count()
+                        .is_none_or(|count| count <= 1)
+                    {
                         summary
                             .outputs
                             .first()
@@ -132,13 +135,20 @@ pub(crate) fn infer_rvalue_outputs(
             operand_fact_with_summaries(base, state, summaries).kind
         {
             let requested = targets.map_or(runmat_types::RequestedOutputCount::One, |targets| {
-                runmat_types::RequestedOutputCount::Exactly(targets.targets.len())
+                targets.requested_outputs
             });
             let mut selection = runmat_types::OutputSelection::new(requested);
             if let Some(targets) = targets {
+                // A sequence destination has runtime width, so later target
+                // offsets are not statically known. Keep discard facts only
+                // across the proven fixed-width prefix.
                 for (index, target) in targets.targets.iter().enumerate() {
-                    if matches!(target, MirOutputTarget::Discard) {
-                        selection.discarded.insert(index);
+                    match target {
+                        MirOutputTarget::Discard => {
+                            selection.discarded.insert(index);
+                        }
+                        MirOutputTarget::Sequence(_) => break,
+                        MirOutputTarget::Place(_) => {}
                     }
                 }
             }
@@ -176,7 +186,8 @@ pub(crate) fn infer_rvalue_outputs(
     let literals = call
         .args
         .iter()
-        .map(|argument| operand_literal(argument.operand(), state))
+        .filter_map(|argument| argument.operand())
+        .map(|operand| operand_literal(operand, state))
         .collect::<Vec<_>>();
     let inference = infer_mir_call(call, &state.value_facts(), &literals, summaries, selection);
     append_inference_diagnostics(&inference.diagnostics, span, "call-contract", diagnostics);
@@ -278,25 +289,31 @@ pub(crate) fn rvalue_literal(value: &MirRvalue, state: &FlowState) -> LiteralVal
         }
         MirRvalue::Aggregate {
             kind: crate::MirAggregateKind::Tensor,
-            rows,
-            cols,
+            row_lengths,
             elements,
         } => {
             let values = elements
                 .iter()
-                .map(|operand| operand_literal(operand, state))
+                .map(|element| {
+                    element
+                        .operand()
+                        .map(|operand| operand_literal(operand, state))
+                        .unwrap_or(LiteralValue::Unknown)
+                })
                 .collect::<Vec<_>>();
             if values
                 .iter()
                 .any(|value| matches!(value, LiteralValue::Unknown))
             {
                 LiteralValue::Unknown
-            } else if *rows <= 1 {
+            } else if row_lengths.len() <= 1 {
                 LiteralValue::Vector(values)
+            } else if row_lengths.windows(2).any(|pair| pair[0] != pair[1]) {
+                LiteralValue::Unknown
             } else {
                 LiteralValue::Matrix(
                     values
-                        .chunks((*cols).max(1))
+                        .chunks(row_lengths.first().copied().unwrap_or(0).max(1))
                         .map(<[LiteralValue]>::to_vec)
                         .collect(),
                 )

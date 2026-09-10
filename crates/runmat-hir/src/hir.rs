@@ -233,6 +233,11 @@ pub enum HirStmtKind {
     ExprStmt(HirExpr, bool),
     Assign(HirPlace, HirExpr, bool),
     MultiAssign(OutputTargetList, HirExpr, bool),
+    SequenceAssign {
+        target: HirSequenceTarget,
+        value: HirExpr,
+        suppressed: bool,
+    },
     If {
         cond: HirExpr,
         then_body: HirBlock,
@@ -311,8 +316,19 @@ pub enum HirExprKind {
     Colon,
     End,
     Index(Box<HirExpr>, IndexingSemantics),
-    Member(Box<HirExpr>, MemberName),
-    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    /// One syntactic indexing chain retained as a unit so object dispatch can
+    /// give the authoritative receiver the complete ordered subscript path.
+    SubscriptChain(HirSubscriptChain),
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+        sequence_use: runmat_types::SequenceUse,
+    },
+    MemberDynamic {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+        sequence_use: runmat_types::SequenceUse,
+    },
     WorkspaceFirstStaticProperty {
         workspace_name: SymbolName,
         class_name: ClassIdentity,
@@ -334,6 +350,24 @@ pub enum HirPlace {
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
     Index(Box<HirExpr>, IndexingSemantics),
     IndexCell(Box<HirExpr>, IndexingSemantics),
+}
+
+/// A bracketed destination whose cardinality is determined by its evaluated
+/// aggregate rather than by the number of syntactic targets.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSequenceTarget {
+    Member {
+        base: Box<HirExpr>,
+        member: MemberName,
+    },
+    DynamicMember {
+        base: Box<HirExpr>,
+        member: Box<HirExpr>,
+    },
+    CellContents {
+        base: Box<HirExpr>,
+        indexing: IndexingSemantics,
+    },
 }
 
 /// Call expression with a semantic callee reference and source syntax marker.
@@ -479,6 +513,7 @@ pub struct OutputTargetList {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum OutputTarget {
     Place(HirPlace),
+    Sequence(HirSequenceTarget),
     Discard,
 }
 
@@ -488,6 +523,41 @@ pub enum IndexComponent {
     End { dim: Option<usize>, offset: isize },
     Expr(HirExpr),
     Logical(HirExpr),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct HirSubscriptChain {
+    pub root: Box<HirExpr>,
+    pub steps: Vec<HirSubscriptStep>,
+    pub sequence_use: runmat_types::SequenceUse,
+    pub context: runmat_types::ObjectIndexingContext,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirSubscriptStep {
+    Index(IndexingSemantics),
+    Member(MemberName),
+    DynamicMember(HirExpr),
+    DottedInvoke {
+        member: MemberName,
+        indexing: IndexingSemantics,
+    },
+}
+
+impl HirSubscriptChain {
+    pub fn terminal_expands_sequence(&self) -> bool {
+        matches!(
+            self.steps.last(),
+            Some(
+                HirSubscriptStep::Member(_)
+                    | HirSubscriptStep::DynamicMember(_)
+                    | HirSubscriptStep::Index(IndexingSemantics {
+                        kind: IndexKind::Brace,
+                        ..
+                    })
+            )
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

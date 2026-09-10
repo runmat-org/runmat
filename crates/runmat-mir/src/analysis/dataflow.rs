@@ -14,6 +14,9 @@ use runmat_types::{
 };
 use std::collections::{HashMap, VecDeque};
 
+mod subscript_chain;
+pub(crate) use subscript_chain::{SubscriptChainInference, SubscriptPathDisposition};
+
 use super::{
     spawn_safety::{analyze_assembly_spawn_boundaries, diagnose_spawn_safety},
     InitFact,
@@ -89,7 +92,14 @@ fn place_fact(place: &MirPlace, facts: &[Option<ValueFact>]) -> ValueFact {
             .get(local.0)
             .and_then(Clone::clone)
             .unwrap_or_else(dynamic_value),
-        MirPlace::Member(base, member) => infer_member_read(&place_fact(base, facts), member).fact,
+        MirPlace::Member(base, member) => {
+            infer_member_read(
+                &place_fact(base, facts),
+                member,
+                runmat_types::SequenceUse::RequireSingle,
+            )
+            .fact
+        }
         MirPlace::Index(base, indexing) => {
             infer_index(
                 &place_fact(base, facts),
@@ -129,10 +139,9 @@ pub(crate) fn simple_rvalue_inference(
         )),
         MirRvalue::Aggregate {
             kind,
-            rows,
-            cols,
+            row_lengths,
             elements,
-        } => aggregate_inference(kind, *rows, *cols, elements, facts),
+        } => aggregate_inference(kind, row_lengths, elements, facts),
         MirRvalue::StructLiteral { fields } => infer_struct(
             fields
                 .iter()
@@ -183,15 +192,18 @@ pub(crate) fn simple_rvalue_inference(
             &index_selectors(indexing, facts),
             indexing.result_context,
         ),
-        MirRvalue::Member { base, member } => {
-            infer_member_read(&simple_operand_fact(base, facts), member)
-        }
+        MirRvalue::Member {
+            base,
+            member,
+            sequence_use,
+        } => infer_member_read(&simple_operand_fact(base, facts), member, *sequence_use),
+        MirRvalue::SubscriptChain(chain) => infer_subscript_chain(chain, facts),
         MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
         | MirRvalue::MetaClass(_)
         | MirRvalue::Colon
         | MirRvalue::End => runmat_types::FactInference::exact(dynamic_value()),
-        MirRvalue::Call(call) if call.requested_outputs.fixed_count() == 0 => {
+        MirRvalue::Call(call) if call.requested_outputs.known_count() == Some(0) => {
             runmat_types::FactInference::exact(scalar_fact(ValueKindFact::Void))
         }
         MirRvalue::Call(_) => runmat_types::FactInference::exact(dynamic_value()),
@@ -201,25 +213,50 @@ pub(crate) fn simple_rvalue_inference(
     }
 }
 
-fn aggregate_inference(
-    kind: &MirAggregateKind,
-    rows: usize,
-    cols: usize,
-    elements: &[MirOperand],
+pub(crate) fn infer_subscript_chain(
+    chain: &crate::MirSubscriptChain,
     facts: &[Option<ValueFact>],
 ) -> runmat_types::FactInference {
-    let rows = if rows == 0 {
-        Vec::new()
-    } else {
-        elements
-            .chunks(cols.max(1))
-            .map(|row| {
-                row.iter()
-                    .map(|operand| simple_operand_fact(operand, facts))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>()
-    };
+    subscript_chain::infer(chain, facts).inference
+}
+
+pub(crate) fn infer_subscript_chain_contract(
+    chain: &crate::MirSubscriptChain,
+    facts: &[Option<ValueFact>],
+) -> SubscriptChainInference {
+    subscript_chain::infer(chain, facts)
+}
+
+fn aggregate_inference(
+    kind: &MirAggregateKind,
+    row_lengths: &[usize],
+    elements: &[crate::MirAggregateElement],
+    facts: &[Option<ValueFact>],
+) -> runmat_types::FactInference {
+    let mut offset = 0usize;
+    let mut rows = Vec::with_capacity(row_lengths.len());
+    for &length in row_lengths {
+        let Some(end) = offset.checked_add(length) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        let Some(row) = elements.get(offset..end) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        rows.push(
+            row.iter()
+                .map(|element| {
+                    element
+                        .operand()
+                        .map(|operand| simple_operand_fact(operand, facts))
+                        .unwrap_or_else(dynamic_value)
+                })
+                .collect::<Vec<_>>(),
+        );
+        offset = end;
+    }
+    if offset != elements.len() {
+        return runmat_types::FactInference::exact(dynamic_value());
+    }
     match kind {
         MirAggregateKind::Tensor => infer_tensor_aggregate(&rows),
         MirAggregateKind::Cell => infer_cell_aggregate(&rows),
@@ -328,7 +365,6 @@ fn index_selectors(indexing: &MirIndexing, facts: &[Option<ValueFact>]) -> Vec<I
         .iter()
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
-            MirIndexComponent::End { offset, .. } => IndexSelectorFact::End { offset: *offset },
             MirIndexComponent::Expr(operand) => {
                 if let Some(index) =
                     numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
@@ -342,6 +378,9 @@ fn index_selectors(indexing: &MirIndexing, facts: &[Option<ValueFact>]) -> Vec<I
                         IndexSelectorFact::Numeric(fact)
                     }
                 }
+            }
+            MirIndexComponent::ContextualExpr(_) => {
+                IndexSelectorFact::Numeric(ValueFact::unknown(DynamicReason::Unspecified))
             }
         })
         .collect()
@@ -405,6 +444,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
             match &stmt.kind {
                 MirStmtKind::Assign { value, .. }
                 | MirStmtKind::MultiAssign { value, .. }
+                | MirStmtKind::SequenceAssign { value, .. }
                 | MirStmtKind::Expr(value) => {
                     diagnose_rvalue_semantics(value, stmt.span, &mut diagnostics)
                 }
@@ -423,6 +463,11 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                             "assignment-semantics",
                         ));
                     }
+                }
+                MirStmtKind::CaptureSequence { source, .. } => {
+                    source.visit_direct_expression_regions_dyn(&mut |region| {
+                        diagnose_region_semantics(region, &mut diagnostics)
+                    });
                 }
                 MirStmtKind::WorkspaceEffect { effect, .. } => {
                     if matches!(effect, runmat_hir::WorkspaceEffect::DynamicEval) {
@@ -471,7 +516,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
             ) && call
                 .args
                 .iter()
-                .any(|arg| matches!(arg, MirCallArg::Expansion { .. }))
+                .any(|arg| matches!(arg, MirCallArg::Expansion(_)))
             {
                 diagnostics.push(hir_diagnostic(
                     "RM-MIR0004",
@@ -482,22 +527,29 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                 ));
             }
         }
-        MirRvalue::Index { indexing, .. } => {
-            if indexing
-                .components
-                .iter()
-                .any(|component| matches!(component, MirIndexComponent::End { dim: None, .. }))
-            {
-                diagnostics.push(hir_diagnostic(
-                    "RM-MIR0006",
-                    "symbolic end requires an index dimension context",
-                    "resolve end against the indexed value and dimension before runtime lowering",
-                    span,
-                    "indexing-semantics",
-                ));
+        MirRvalue::Index { .. } => {}
+        _ => {}
+    }
+    value.visit_direct_expression_regions_dyn(&mut |region| {
+        diagnose_region_semantics(region, diagnostics)
+    });
+}
+
+fn diagnose_region_semantics(
+    region: &crate::MirExpressionRegion,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    for step in region.steps() {
+        match step {
+            crate::MirExpressionStep::Let { value, span, .. } => {
+                diagnose_rvalue_semantics(value, *span, diagnostics)
+            }
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_direct_expression_regions_dyn(&mut |nested| {
+                    diagnose_region_semantics(nested, diagnostics)
+                });
             }
         }
-        _ => {}
     }
 }
 
@@ -576,11 +628,26 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
             MirStmtKind::Assign { place, .. } => mark_place_assigned(place, &mut state),
             MirStmtKind::MultiAssign { targets, .. } => {
                 for target in &targets.targets {
-                    if let crate::MirOutputTarget::Place(place) = target {
-                        mark_place_assigned(place, &mut state);
+                    match target {
+                        crate::MirOutputTarget::Place(place) => {
+                            mark_place_assigned(place, &mut state)
+                        }
+                        crate::MirOutputTarget::Sequence(target) => {
+                            mark_place_assigned(target.base(), &mut state)
+                        }
+                        crate::MirOutputTarget::Discard => {}
                     }
                 }
             }
+            MirStmtKind::SequenceAssign { target, .. } => {
+                let base = match target {
+                    crate::MirSequenceTarget::Member { base, .. }
+                    | crate::MirSequenceTarget::DynamicMember { base, .. }
+                    | crate::MirSequenceTarget::CellContents { base, .. } => base,
+                };
+                mark_place_assigned(base, &mut state);
+            }
+            MirStmtKind::CaptureSequence { .. } => {}
             MirStmtKind::Expr(_)
             | MirStmtKind::PlaceMutation(_)
             | MirStmtKind::WorkspaceEffect { .. }
@@ -684,16 +751,60 @@ fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<M
         MirStmtKind::MultiAssign { targets, value } => {
             diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
             for target in &targets.targets {
-                if let crate::MirOutputTarget::Place(place) = target {
-                    diagnose_place_reads(place, state, stmt.span, diagnostics);
-                    mark_place_assigned(place, state);
+                match target {
+                    crate::MirOutputTarget::Place(place) => {
+                        diagnose_place_reads(place, state, stmt.span, diagnostics);
+                        mark_place_assigned(place, state);
+                    }
+                    crate::MirOutputTarget::Sequence(target) => {
+                        diagnose_sequence_target_reads(target, state, stmt.span, diagnostics);
+                        mark_place_assigned(target.base(), state);
+                    }
+                    crate::MirOutputTarget::Discard => {}
                 }
             }
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            let (base, member) = match target {
+                crate::MirSequenceTarget::Member { base, .. } => (base, None),
+                crate::MirSequenceTarget::DynamicMember { base, member } => (base, Some(member)),
+                crate::MirSequenceTarget::CellContents { base, indexing } => {
+                    diagnose_indexing_reads(indexing, state, stmt.span, diagnostics);
+                    (base, None)
+                }
+            };
+            diagnose_place_reads(base, state, stmt.span, diagnostics);
+            if let Some(member) = member {
+                diagnose_operand_read(member, state, stmt.span, diagnostics);
+            }
+            mark_place_assigned(base, state);
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            diagnose_expansion_source_reads(source, state, stmt.span, diagnostics);
         }
         MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
         MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+}
+
+fn diagnose_sequence_target_reads(
+    target: &crate::MirSequenceTarget,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    diagnose_place_reads(target.base(), state, span, diagnostics);
+    match target {
+        crate::MirSequenceTarget::Member { .. } => {}
+        crate::MirSequenceTarget::DynamicMember { member, .. } => {
+            diagnose_operand_read(member, state, span, diagnostics)
+        }
+        crate::MirSequenceTarget::CellContents { indexing, .. } => {
+            diagnose_indexing_reads(indexing, state, span, diagnostics)
+        }
     }
 }
 
@@ -732,12 +843,14 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                diagnose_operand_read(arg.operand(), state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, span, diagnostics);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                diagnose_operand_read(element, state, span, diagnostics);
+                if let Some(operand) = element.operand() {
+                    diagnose_operand_read(operand, state, span, diagnostics);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -749,15 +862,18 @@ fn diagnose_rvalue_reads(
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_indexing_reads(indexing, state, span, diagnostics);
         }
+        MirRvalue::SubscriptChain(chain) => {
+            chain.visit_operands(|operand| diagnose_operand_read(operand, state, span, diagnostics))
+        }
         MirRvalue::Member { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
         MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
         MirRvalue::Future { args, .. } => {
             for arg in args {
-                diagnose_operand_read(arg.operand(), state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, span, diagnostics);
             }
         }
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
@@ -771,6 +887,23 @@ fn diagnose_rvalue_reads(
                 diagnose_operand_read(operand, state, span, diagnostics);
             }
         }
+    }
+}
+
+fn diagnose_call_argument_reads(
+    argument: &crate::MirCallArg,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match argument {
+        crate::MirCallArg::Single(operand) => {
+            diagnose_operand_read(operand, state, span, diagnostics)
+        }
+        crate::MirCallArg::Expansion(source) => {
+            diagnose_expansion_source_reads(source, state, span, diagnostics)
+        }
+        crate::MirCallArg::CapturedSequence(_) => {}
     }
 }
 
@@ -805,7 +938,52 @@ fn diagnose_indexing_reads(
             MirIndexComponent::Expr(operand) => {
                 diagnose_operand_read(operand, state, span, diagnostics);
             }
-            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+            MirIndexComponent::ContextualExpr(region) => {
+                let mut nested_state = state.to_vec();
+                for step in region.steps() {
+                    match step {
+                        crate::MirExpressionStep::Let { local, value, span } => {
+                            diagnose_rvalue_reads(value, &mut nested_state, *span, diagnostics);
+                            nested_state[local.0] = InitFact::DefinitelyAssigned;
+                        }
+                        crate::MirExpressionStep::CaptureSequence { source, span, .. } => {
+                            diagnose_expansion_source_reads(
+                                source,
+                                &nested_state,
+                                *span,
+                                diagnostics,
+                            );
+                        }
+                    }
+                }
+                diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+            }
+            MirIndexComponent::Colon => {}
+        }
+    }
+}
+
+fn diagnose_expansion_source_reads(
+    source: &crate::MirExpansionSource,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match source {
+        crate::MirExpansionSource::SubscriptChain(chain) => {
+            chain.visit_operands(|operand| diagnose_operand_read(operand, state, span, diagnostics))
+        }
+        crate::MirExpansionSource::CellContents { base, indexing } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, span, diagnostics);
+        }
+        crate::MirExpansionSource::ReturnedOutputs(base)
+        | crate::MirExpansionSource::Member { base, .. } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+        }
+        crate::MirExpansionSource::DynamicMember { base, member } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_operand_read(member, state, span, diagnostics);
         }
     }
 }

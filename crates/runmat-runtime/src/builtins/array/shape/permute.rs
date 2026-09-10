@@ -234,6 +234,22 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
             validate_rank("permute", &order_vec, ca.shape.len())?;
             Ok(permute_char_array("permute", ca, &order_vec).map(Value::CharArray)?)
         }
+        Value::Struct(structure) => {
+            validate_rank("permute", &order_vec, 2)?;
+            Ok(Value::Struct(structure))
+        }
+        Value::StructArray(array) => {
+            validate_rank(
+                "permute",
+                &order_vec,
+                crate::builtins::common::shape::effective_rank(array.shape()),
+            )?;
+            let zero_based = order_vec.iter().map(|dimension| dimension - 1).collect::<Vec<_>>();
+            array
+                .permute(&zero_based)
+                .map(Value::StructArray)
+                .map_err(|error| permute_error("permute", error))
+        }
         Value::GpuTensor(handle) => {
             validate_rank("permute", &order_vec, handle.shape.len())?;
             Ok(permute_gpu("permute", handle, &order_vec).await?)
@@ -696,7 +712,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_value::{IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::permute_builtin(value, order))
@@ -752,6 +768,24 @@ pub(crate) mod tests {
             }
             _ => panic!("expected tensor result"),
         }
+    }
+
+    #[test]
+    fn permute_structure_array_adds_trailing_dimension() {
+        let element = |value| {
+            let mut structure = StructValue::new();
+            structure.insert("payload", Value::Num(value));
+            structure
+        };
+        let array = StructArray::new(vec![element(1.0), element(2.0)], vec![1, 2])
+            .expect("structure array");
+        let order = tensor(&[2.0, 1.0, 3.0], &[1, 3]);
+        let value = permute_builtin(Value::StructArray(array), Value::Tensor(order))
+            .expect("permute structure array");
+        let Value::StructArray(array) = value else {
+            panic!("expected structure array");
+        };
+        assert_eq!(array.shape(), [2, 1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

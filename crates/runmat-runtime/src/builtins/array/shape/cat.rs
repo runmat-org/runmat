@@ -647,6 +647,36 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
     let dim_zero = dim_index - 1;
 
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::Struct(_) | Value::StructArray(_)))
+    {
+        let has_nonempty_structure = inputs.iter().any(|value| {
+            matches!(value, Value::Struct(_))
+                || matches!(value, Value::StructArray(array) if !array.is_empty())
+        });
+        let inputs = if has_nonempty_structure {
+            inputs
+                .into_iter()
+                .filter(|value| !crate::builtins::common::validation::value_is_empty(value))
+                .collect()
+        } else {
+            inputs
+        };
+        let operands = inputs
+            .into_iter()
+            .map(|value| match value {
+                Value::Struct(structure) => Ok(runmat_value::StructArrayOperand::Scalar(structure)),
+                Value::StructArray(array) => Ok(runmat_value::StructArrayOperand::Array(array)),
+                _ => Err(cat_err(
+                    "cat: structure arrays can concatenate only with structures",
+                )),
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        return runmat_value::StructArray::concatenate(dim_zero, operands)
+            .map_err(|error| cat_err(format!("cat: {error}")));
+    }
+
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
         let category = determine_category(&inputs, &like)?;
         debug_assert_eq!(category, CatCategory::Cell);
@@ -1706,7 +1736,39 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_value::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, StructArray, StructValue, Tensor};
+
+    fn test_structure(value: f64) -> StructValue {
+        let mut structure = StructValue::new();
+        structure.insert("payload", Value::Num(value));
+        structure
+    }
+
+    #[test]
+    fn struct_cat_omits_empty_operands_when_nonempty_structure_remains() {
+        let array = StructArray::new(vec![test_structure(1.0), test_structure(2.0)], vec![2, 1])
+            .expect("structure array");
+        let unrelated_empty =
+            StructArray::empty(vec!["other".into()], vec![0, 4]).expect("empty structure array");
+        let numeric_empty = Tensor::new(Vec::new(), vec![0, 0]).expect("numeric empty");
+        let result = cat_builtin(
+            Value::Num(1.0),
+            vec![
+                Value::StructArray(unrelated_empty),
+                Value::Tensor(numeric_empty),
+                Value::StructArray(array),
+            ],
+        )
+        .expect("empty operands are neutral");
+        let Value::StructArray(result) = result else {
+            panic!("expected structure array");
+        };
+        assert_eq!(result.shape(), [2, 1]);
+        assert_eq!(
+            result.field_names().cloned().collect::<Vec<_>>(),
+            ["payload"]
+        );
+    }
 
     #[test]
     fn cat_type_prefers_cell() {

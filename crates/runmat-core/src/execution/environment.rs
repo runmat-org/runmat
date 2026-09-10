@@ -2,8 +2,8 @@ use runmat_execution::{Digest, ProgramEnvironment};
 
 use crate::CompatMode;
 
-pub const PROGRAM_SEMANTIC_SCHEMA: u32 = 2;
-pub const PROGRAM_COMPILER_SCHEMA: u32 = 1;
+pub const PROGRAM_SEMANTIC_SCHEMA: u32 = runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2;
+pub const PROGRAM_COMPILER_SCHEMA: u32 = runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2;
 pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
 
 /// Describe the portable execution compatibility of this RunMat runtime.

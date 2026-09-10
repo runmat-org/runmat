@@ -2,6 +2,21 @@ use runmat_mir::{MirConstant, MirOperand, MirRvalue};
 use runmat_runtime::native::NativeValueRef;
 use runmat_value::Value;
 
+fn sequence_resolution_context(
+    sequence_use: runmat_types::SequenceUse,
+    count: usize,
+) -> runmat_runtime::sequence::SequenceResolutionContext {
+    match sequence_use {
+        runmat_types::SequenceUse::SelectDestinationCardinality => {
+            runmat_runtime::sequence::SequenceResolutionContext::destination_cardinality(count)
+        }
+        runmat_types::SequenceUse::SelectCurrentFunctionOutputs => {
+            runmat_runtime::sequence::SequenceResolutionContext::current_function_outputs(count)
+        }
+        _ => Default::default(),
+    }
+}
+
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
@@ -10,14 +25,8 @@ pub(super) fn evaluate_rvalue(
     state: &mut HostState,
     value: &MirRvalue,
     requested_outputs: usize,
-    output_local: Option<runmat_native_codegen::NativeLocalId>,
+    _output_local: Option<runmat_native_codegen::NativeLocalId>,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    if output_local.is_some_and(|local| state.function.index_expression(local).is_some()) {
-        // Context-dependent selector temporaries are recipes, not ordinary
-        // eager values. Evaluating them here would execute `end` calls with no
-        // base shape and replay their effects during the actual index site.
-        return Ok(vec![state.arena.insert(Value::Num(0.0))]);
-    }
     match value {
         MirRvalue::Use(operand) => evaluate_operand(state, operand).map(|value| vec![value]),
         MirRvalue::Unary(operator, operand) => {
@@ -65,18 +74,19 @@ pub(super) fn evaluate_rvalue(
                     .collect()
             })
         }
-        MirRvalue::Call(call) => super::call::evaluate(state, call).map(|values| {
-            values
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect()
-        }),
+        MirRvalue::Call(call) => {
+            super::call::evaluate(state, call, requested_outputs).map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect()
+            })
+        }
         MirRvalue::Aggregate {
             kind,
-            rows,
-            cols,
+            row_lengths,
             elements,
-        } => super::aggregate::evaluate(state, kind, *rows, *cols, elements)
+        } => super::aggregate::evaluate(state, kind, row_lengths, elements)
             .map(|value| vec![state.arena.insert(value)]),
         MirRvalue::StructLiteral { fields } => {
             super::aggregate::structure(state, fields).map(|value| vec![state.arena.insert(value)])
@@ -93,22 +103,48 @@ pub(super) fn evaluate_rvalue(
                     .collect()
             })
         }
-        MirRvalue::Member { base, member } => {
+        MirRvalue::SubscriptChain(chain) => {
+            super::subscript_path::read(state, chain, requested_outputs).map(|values| {
+                values
+                    .into_iter()
+                    .map(|value| state.arena.insert(value))
+                    .collect()
+            })
+        }
+        MirRvalue::Member {
+            base,
+            member,
+            sequence_use,
+        } => {
             let base = materialize_operand(state, base)?;
-            let value = super::sync::complete(
+            let values = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::object::resolve::load_member_with_context(
-                    Some(&state.runtime),
-                    base,
-                    member.0.clone(),
-                    false,
-                    Some(&state.function.name),
-                ),
+                async {
+                    runmat_runtime::object::resolve::read_member_sequence_with_context(
+                        Some(&state.runtime),
+                        base,
+                        member.0.clone(),
+                        false,
+                        Some(&state.function.name),
+                    )
+                    .await?
+                    .resolve(
+                        *sequence_use,
+                        sequence_resolution_context(*sequence_use, requested_outputs),
+                    )
+                },
                 "member read",
             )?;
-            Ok(vec![state.arena.insert(value)])
+            Ok(values
+                .into_iter()
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember {
+            base,
+            member,
+            sequence_use,
+        } => {
             let base = materialize_operand(state, base)?;
             let member = materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -117,18 +153,28 @@ pub(super) fn evaluate_rvalue(
                     error,
                 ))
             })?;
-            let value = super::sync::complete(
+            let values = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::object::resolve::load_member_dynamic_with_context(
-                    Some(&state.runtime),
-                    base,
-                    member,
-                    false,
-                    Some(&state.function.name),
-                ),
+                async {
+                    runmat_runtime::object::resolve::read_member_sequence_with_context(
+                        Some(&state.runtime),
+                        base,
+                        member,
+                        false,
+                        Some(&state.function.name),
+                    )
+                    .await?
+                    .resolve(
+                        *sequence_use,
+                        sequence_resolution_context(*sequence_use, requested_outputs),
+                    )
+                },
                 "dynamic member read",
             )?;
-            Ok(vec![state.arena.insert(value)])
+            Ok(values
+                .into_iter()
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -166,7 +212,32 @@ pub(super) fn evaluate_rvalue(
                 .join("."),
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
-        MirRvalue::End => Ok(vec![state.arena.insert(Value::Num(-0.0))]),
+        MirRvalue::End => {
+            if let Some((prepared, component, component_count)) =
+                state.subscript_end_receivers.last()
+            {
+                let prepared = prepared.clone();
+                let component = *component;
+                let component_count = *component_count;
+                let value = super::subscript_path::resolve_end(
+                    state,
+                    prepared,
+                    component,
+                    component_count,
+                )?;
+                return Ok(vec![state.arena.insert(value)]);
+            }
+            let extent = state
+                .contextual_index_extents
+                .last()
+                .copied()
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "verified Native IR evaluated end without an indexing context".into(),
+                    )
+                })?;
+            Ok(vec![state.arena.insert(Value::Num(extent as f64))])
+        }
         MirRvalue::Future {
             function,
             args,
@@ -194,7 +265,12 @@ pub(super) fn evaluate_rvalue(
                         runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                             runmat_hir::CallableIdentity::BoundFunction(*function),
                             arguments,
-                            requested_outputs.fixed_count(),
+                            requested_outputs.executor_carrier_count().ok_or_else(|| {
+                                NativeExecutorError::Host(
+                                    "future output cardinality cannot be derived from an assignment destination"
+                                        .into(),
+                                )
+                            })?,
                             runmat_hir::CallableFallbackPolicy::None,
                             runmat_runtime::call::descriptor::CallableCallKind::Direct,
                         ),

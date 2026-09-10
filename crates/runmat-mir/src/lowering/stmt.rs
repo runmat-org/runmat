@@ -3,12 +3,16 @@ use crate::{
 };
 use runmat_hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr,
-    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount, Span,
-    WorkspaceEffect,
+    HirExprKind, HirSequenceTarget, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind,
+    RequestedOutputCount, Span, WorkspaceEffect,
 };
 use std::collections::HashMap;
 
-use super::{expr::lower_expr_with_replacements, place::lower_place, MirLoweringContext};
+use super::{
+    expr::lower_expr_with_replacements,
+    place::{lower_expr_place_with_replacements, lower_place},
+    MirLoweringContext,
+};
 
 pub(crate) fn lower_stmt_with_replacements(
     ctx: &MirLoweringContext,
@@ -18,9 +22,9 @@ pub(crate) fn lower_stmt_with_replacements(
     Ok(match &stmt.kind {
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
+            let place = lower_place_with_replacements(ctx, place, &mut stmts, await_replacements)?;
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
-            let place = lower_place(ctx, place, &mut stmts)?;
             let deletion = is_empty_array_deletion_place(&place, expr);
             if !matches!(place, crate::MirPlace::Local(_)) || deletion {
                 stmts.push(MirStmt {
@@ -36,30 +40,66 @@ pub(crate) fn lower_stmt_with_replacements(
         }
         HirStmtKind::MultiAssign(targets, expr, _) => {
             let mut stmts = Vec::new();
+            let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
-            let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             let lowered_target_list = MirOutputTargetList {
                 requested_outputs: targets.requested_outputs,
                 targets: lowered_targets,
             };
-            let requested_outputs = lowered_target_list
-                .validate_fixed_arity("MIR multi-assign")
-                .map_err(HirError::new)?;
+            let requested_outputs = if lowered_target_list
+                .targets
+                .iter()
+                .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
+            {
+                if lowered_target_list.requested_outputs
+                    != RequestedOutputCount::DestinationSequenceCardinality
+                {
+                    return Err(HirError::new(
+                        "MIR sequence-target assignment is missing destination cardinality",
+                    ));
+                }
+                None
+            } else {
+                Some(
+                    lowered_target_list
+                        .validate_fixed_arity("MIR multi-assign")
+                        .map_err(HirError::new)?,
+                )
+            };
             if let MirRvalue::Call(call) = &value {
-                let call_outputs = fixed_requested_output_count(
-                    &call.requested_outputs,
-                    "MIR call requested output count",
-                );
-                if call_outputs != requested_outputs {
+                if let Some(requested_outputs) = requested_outputs {
+                    let call_outputs = fixed_requested_output_count(
+                        &call.requested_outputs,
+                        "MIR call requested output count",
+                    )?;
+                    if call_outputs != requested_outputs {
                     return Err(HirError::new(format!(
                         "MIR call requested outputs ({call_outputs}) must match multi-assign targets ({requested_outputs})"
                     )));
+                    }
                 }
             }
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
                     targets: lowered_target_list,
+                    value,
+                },
+                span: stmt.span,
+            });
+            stmts
+        }
+        HirStmtKind::SequenceAssign { target, value, .. } => {
+            let mut stmts = Vec::new();
+            let target = lower_sequence_target(ctx, target, &mut stmts, await_replacements)?;
+            let value = lower_expr_with_replacements(ctx, value, &mut stmts, await_replacements)?;
+            stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
+            stmts.push(MirStmt {
+                kind: MirStmtKind::MultiAssign {
+                    targets: MirOutputTargetList {
+                        targets: vec![MirOutputTarget::Sequence(target)],
+                        requested_outputs: RequestedOutputCount::DestinationSequenceCardinality,
+                    },
                     value,
                 },
                 span: stmt.span,
@@ -106,7 +146,86 @@ pub(crate) fn lower_stmt_with_replacements(
     })
 }
 
-fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
+fn lower_place_with_replacements(
+    ctx: &MirLoweringContext,
+    place: &runmat_hir::HirPlace,
+    stmts: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, crate::MirOperand>,
+) -> Result<crate::MirPlace, HirError> {
+    use runmat_hir::HirPlace;
+    Ok(match place {
+        HirPlace::Binding(binding) => crate::MirPlace::Local(ctx.local_for_binding(*binding)?),
+        HirPlace::Member(base, member) => crate::MirPlace::Member(
+            Box::new(lower_expr_place_with_replacements(
+                ctx,
+                base,
+                stmts,
+                await_replacements,
+            )?),
+            member.clone(),
+        ),
+        HirPlace::MemberDynamic(base, member) => crate::MirPlace::DynamicMember(
+            Box::new(lower_expr_place_with_replacements(
+                ctx,
+                base,
+                stmts,
+                await_replacements,
+            )?),
+            super::expr::lower_operand_with_replacements(ctx, member, stmts, await_replacements)?,
+        ),
+        HirPlace::Index(base, indexing) | HirPlace::IndexCell(base, indexing) => {
+            crate::MirPlace::Index(
+                Box::new(lower_expr_place_with_replacements(
+                    ctx,
+                    base,
+                    stmts,
+                    await_replacements,
+                )?),
+                super::expr::lower_indexing_with_replacements(
+                    ctx,
+                    indexing,
+                    stmts,
+                    await_replacements,
+                )?,
+            )
+        }
+    })
+}
+
+fn lower_sequence_target(
+    ctx: &MirLoweringContext,
+    target: &HirSequenceTarget,
+    stmts: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, crate::MirOperand>,
+) -> Result<crate::MirSequenceTarget, HirError> {
+    use super::expr::lower_operand_with_replacements;
+    use super::place::lower_expr_place_with_replacements;
+    Ok(match target {
+        HirSequenceTarget::Member { base, member } => crate::MirSequenceTarget::Member {
+            base: lower_expr_place_with_replacements(ctx, base, stmts, await_replacements)?,
+            member: member.clone(),
+        },
+        HirSequenceTarget::DynamicMember { base, member } => {
+            crate::MirSequenceTarget::DynamicMember {
+                base: lower_expr_place_with_replacements(ctx, base, stmts, await_replacements)?,
+                member: lower_operand_with_replacements(ctx, member, stmts, await_replacements)?,
+            }
+        }
+        HirSequenceTarget::CellContents { base, indexing } => {
+            crate::MirSequenceTarget::CellContents {
+                base: lower_expr_place_with_replacements(ctx, base, stmts, await_replacements)?,
+                indexing: super::expr::lower_indexing_with_replacements(
+                    ctx,
+                    indexing,
+                    stmts,
+                    await_replacements,
+                )?,
+            }
+        }
+    })
+}
+
+pub(super) fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
     let MirRvalue::Call(call) = value else {
         return Vec::new();
     };
@@ -243,10 +362,18 @@ fn lower_output_target(
             stmts.extend(temps);
             MirOutputTarget::Place(place)
         }
+        OutputTarget::Sequence(target) => {
+            MirOutputTarget::Sequence(lower_sequence_target(ctx, target, stmts, &HashMap::new())?)
+        }
         OutputTarget::Discard => MirOutputTarget::Discard,
     })
 }
 
-fn fixed_requested_output_count(requested_outputs: &RequestedOutputCount, _context: &str) -> usize {
-    requested_outputs.fixed_count()
+fn fixed_requested_output_count(
+    requested_outputs: &RequestedOutputCount,
+    context: &str,
+) -> Result<usize, HirError> {
+    requested_outputs
+        .known_count()
+        .ok_or_else(|| HirError::new(format!("{context} is runtime-determined")))
 }

@@ -153,6 +153,7 @@ pub(super) fn annotate_tree(value: Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Struct(st))
         }
+        Value::StructArray(array) => array.try_map_values(annotate_tree).map(Value::StructArray),
         Value::Cell(cell) => {
             let data = cell
                 .data
@@ -863,6 +864,10 @@ fn gradient_tree_for_target(
             }
             Ok(Value::Struct(out))
         }
+        Value::StructArray(array) => array
+            .clone()
+            .try_map_values(|value| gradient_tree_for_target(&value, gradients))
+            .map(Value::StructArray),
         Value::Cell(cell) => {
             let data = cell
                 .data
@@ -1488,4 +1493,55 @@ fn matmul_grad_rhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<T
         }
     }
     floating_tensor_from_f64(data, rhs.shape.clone(), rhs.numeric_dtype(), "dlgradient")
+}
+
+#[cfg(test)]
+mod struct_array_tests {
+    use super::*;
+    use runmat_value::StructArray;
+
+    fn dlarray(value: f64) -> Value {
+        let mut object = ObjectInstance::new(DLARRAY_CLASS.to_string());
+        object.properties.insert("Data".into(), Value::Num(value));
+        Value::Object(object)
+    }
+
+    fn element(value: f64) -> StructValue {
+        let mut structure = StructValue::new();
+        structure.insert("payload", dlarray(value));
+        structure
+    }
+
+    #[test]
+    fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
+        ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = Some(Tape { nodes: Vec::new() }));
+        let input = Value::StructArray(
+            StructArray::new(vec![element(1.0), element(2.0)], vec![2, 1]).unwrap(),
+        );
+        let annotated = annotate_tree(input).expect("annotate structure array");
+        let gradient = gradient_tree_for_target(&annotated, &HashMap::new())
+            .expect("gradient structure array");
+        ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
+
+        let Value::StructArray(gradient) = gradient else {
+            panic!("expected typed structure array");
+        };
+        assert_eq!(gradient.shape(), &[2, 1]);
+        assert_eq!(
+            gradient
+                .field_names()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["payload"]
+        );
+        for value in gradient.field_values("payload").unwrap() {
+            let Value::Object(object) = value else {
+                panic!("expected gradient dlarray");
+            };
+            let Value::Tensor(data) = object.properties.get("Data").unwrap() else {
+                panic!("expected gradient tensor");
+            };
+            assert_eq!(data.materialize_f64(), [0.0]);
+        }
+    }
 }

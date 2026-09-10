@@ -224,6 +224,15 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::CharArray(ca) => Ok(Value::CharArray(transpose_char_array(ca)?)),
         Value::StringArray(sa) => Ok(Value::StringArray(transpose_string_array(sa)?)),
         Value::Cell(ca) => Ok(Value::Cell(transpose_cell_array(ca)?)),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => {
+            ensure_vector_or_matrix_shape(array.shape())?;
+            let order = transpose_order(array.shape().len());
+            array
+                .permute(&order)
+                .map(Value::StructArray)
+                .map_err(invalid_input)
+        }
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),

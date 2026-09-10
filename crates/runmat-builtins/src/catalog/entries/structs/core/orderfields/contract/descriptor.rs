@@ -10,7 +10,7 @@ const ORDERED: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Structure or represented structure array with reordered top-level fields.",
+    description: "Structure with reordered top-level fields.",
 };
 const PERMUTATION: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Pout",
@@ -24,7 +24,7 @@ const TARGET: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Input structure or represented structure array.",
+    description: "Input structure.",
 };
 const ORDER: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "order",

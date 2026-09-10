@@ -22,14 +22,14 @@ error!(
     ORDERFIELDS_ERROR_INVALID_TARGET,
     "RM.ORDERFIELDS.INVALID_INPUT",
     "orderfields:InvalidInput",
-    "The first input is not a structure or represented structure array.",
+    "The first input is not a structure.",
     "orderfields: first argument must be a struct or struct array"
 );
 error!(
     ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY,
     "RM.ORDERFIELDS.EMPTY_STRUCT_ARRAY",
     "orderfields:EmptyStructArray",
-    "An empty represented structure array is given a nonempty reference structure.",
+    "An empty structure array is given a nonempty reference structure.",
     "orderfields: empty struct arrays cannot adopt a non-empty reference order"
 );
 error!(
@@ -92,7 +92,7 @@ error!(
     ORDERFIELDS_ERROR_FIELD_MISMATCH,
     "RM.ORDERFIELDS.FIELD_MISMATCH",
     "orderfields:FieldMismatch",
-    "A reference or represented array has a different field set.",
+    "A reference structure has a different field set.",
     "orderfields: field names must match the struct exactly"
 );
 error!(
@@ -120,7 +120,7 @@ error!(
     ORDERFIELDS_ERROR_REBUILD_FAILED,
     "RM.ORDERFIELDS.REBUILD_FAILED",
     "orderfields:RebuildFailed",
-    "The represented structure array cannot retain its original shape.",
+    "The structure array cannot retain its original shape.",
     "orderfields: failed to rebuild struct array"
 );
 

@@ -11,17 +11,16 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 fn names(value: Value) -> Vec<String> {
-    let Value::Cell(cell) = value else {
-        panic!("expected cell-backed struct array");
+    let elements = match value {
+        Value::Struct(value) => vec![value],
+        Value::StructArray(array) => array.into_elements(),
+        other => panic!("expected structure value, got {other:?}"),
     };
-    cell.data
+    elements
         .into_iter()
-        .map(|entry| match entry {
-            Value::Struct(value) => match value.fields.get("name") {
-                Some(Value::CharArray(name)) if name.rows == 1 => name.data.iter().collect(),
-                other => panic!("expected character-row name, got {other:?}"),
-            },
-            other => panic!("expected struct entry, got {other:?}"),
+        .map(|entry| match entry.fields.get("name") {
+            Some(Value::CharArray(name)) if name.rows == 1 => name.data.iter().collect(),
+            other => panic!("expected character-row name, got {other:?}"),
         })
         .collect()
 }

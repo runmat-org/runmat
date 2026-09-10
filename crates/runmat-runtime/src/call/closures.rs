@@ -25,22 +25,9 @@ pub fn semantic_closure_value(
 }
 
 pub fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
-    let caller_function_name = caller_function_name?;
-    if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
-        if !class_name.is_empty() && !method_name.is_empty() {
-            return ClassIdentity::new(class_name).ok();
-        }
-    }
-    crate::class_registry::class_names()
-        .into_iter()
-        .find(|class_name| {
-            crate::class_registry::get_class(class_name).is_some_and(|class_def| {
-                class_def
-                    .methods
-                    .values()
-                    .any(|method| method.function_name == caller_function_name)
-            })
-        })
+    caller_function_name
+        .and_then(crate::class_registry::caller_method_for_function)
+        .map(|(class, _)| class)
 }
 
 pub fn method_access_permitted(
@@ -58,6 +45,19 @@ pub fn method_access_permitted(
                 crate::class_registry::is_class_or_subclass(&caller_class, owner)
             })
         }
+    }
+}
+
+pub fn method_access_permitted_for_class(
+    owner: &ClassIdentity,
+    access: &MemberAccess,
+    caller_class: Option<&ClassIdentity>,
+) -> bool {
+    match access {
+        MemberAccess::Public => true,
+        MemberAccess::Private => caller_class == Some(owner),
+        MemberAccess::Protected => caller_class
+            .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, owner)),
     }
 }
 

@@ -241,6 +241,15 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             })
         }
         Value::Struct(st) => struct_to_json(st, depth + 1),
+        // The existing product-value JSON contract has no typed structure-array
+        // form. Keep its established display fallback until that boundary has
+        // an explicit versioned aggregate-value schema.
+        Value::StructArray(array) => json!({
+            "kind": "display",
+            "className": "struct",
+            "shape": array.shape(),
+            "value": array.to_string(),
+        }),
         Value::GpuTensor(handle) => {
             let (rows, cols) = rows_cols_from_shape(&handle.shape);
             json!({
@@ -511,7 +520,7 @@ mod tests {
     use super::*;
     use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, ObjectArray, ObjectInstance,
-        SparseTensor, Tensor,
+        SparseTensor, StructArray, StructValue, Tensor,
     };
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -536,6 +545,21 @@ mod tests {
         assert_eq!(json["dtype"], "single");
         assert_eq!(json["preview"], json!([1.25, -3.5]));
         assert_eq!(json["length"], 2);
+    }
+
+    #[test]
+    fn structure_array_uses_the_v1_display_fallback() {
+        let mut element = StructValue::new();
+        element.insert("name", Value::from("entry"));
+        let array = StructArray::new(vec![element.clone(), element], vec![1, 2]).unwrap();
+        let json = value_to_json(&Value::StructArray(array), 0);
+
+        assert_eq!(json["kind"], "display");
+        assert_eq!(json["className"], "struct");
+        assert_eq!(json["shape"], json!([1, 2]));
+        assert_eq!(json["value"], "1x2 struct array with fields:\n    name");
+        assert!(json.get("fields").is_none());
+        assert!(json.get("items").is_none());
     }
 
     #[test]

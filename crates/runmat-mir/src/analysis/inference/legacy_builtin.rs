@@ -434,8 +434,8 @@ fn type_to_fact(value: &Type) -> ValueFact {
             .map(type_to_fact)
             .reduce(|left, right| left.join(&right))
             .unwrap_or_else(dynamic_value),
-        Type::Struct { known_fields } => ValueFact::scalar(ValueKindFact::Struct(StructFact {
-            fields: known_fields
+        Type::Struct { known_fields } => {
+            let fields = known_fields
                 .as_ref()
                 .map(|fields| {
                     fields
@@ -444,9 +444,12 @@ fn type_to_fact(value: &Type) -> ValueFact {
                         .map(|field| (field, dynamic_value()))
                         .collect::<BTreeMap<_, _>>()
                 })
-                .unwrap_or_default(),
-            fields_complete: known_fields.is_some(),
-        })),
+                .unwrap_or_default();
+            ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                fields,
+                known_fields.is_some(),
+            )))
+        }
         Type::Object { class_name, shape } => ValueFact::proven(
             ValueKindFact::Object(ObjectFact {
                 class: None,

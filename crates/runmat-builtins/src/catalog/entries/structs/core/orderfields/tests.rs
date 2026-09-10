@@ -1,14 +1,14 @@
 use super::*;
 use crate::infer_catalog_call;
 use runmat_types::{
-    CallRequest, CellFact, DimensionFact, DynamicReason, LiteralContext, OutputSelection,
+    CallRequest, DimensionFact, DynamicReason, LiteralContext, OutputSelection,
     RequestedOutputCount, ShapeFact, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
 fn structure(names: &[&str]) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: names
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        names
             .iter()
             .map(|name| {
                 (
@@ -17,8 +17,8 @@ fn structure(names: &[&str]) -> ValueFact {
                 )
             })
             .collect::<BTreeMap<_, _>>(),
-        fields_complete: true,
-    }))
+        true,
+    )))
 }
 
 fn infer(arguments: Vec<ValueFact>, outputs: RequestedOutputCount) -> runmat_types::CallInference {
@@ -47,13 +47,9 @@ fn preserves_structure_fact_and_types_permutation_column() {
 }
 
 #[test]
-fn represented_array_retains_shape_and_uniform_field_count() {
+fn typed_array_retains_shape_and_uniform_field_count() {
     let array = ValueFact::proven(
-        ValueKindFact::Cell(CellFact {
-            element: Box::new(structure(&["a", "b"])),
-            elements: vec![structure(&["a", "b"]), structure(&["a", "b"])],
-            elements_complete: true,
-        }),
+        structure(&["a", "b"]).kind,
         ShapeFact::from(vec![Some(1), Some(2)]),
         StorageFact::Dense,
     );
@@ -69,10 +65,10 @@ fn represented_array_retains_shape_and_uniform_field_count() {
 
 #[test]
 fn incomplete_schema_keeps_permutation_length_dynamic() {
-    let input = ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields: BTreeMap::new(),
-        fields_complete: false,
-    }));
+    let input = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::new(),
+        false,
+    )));
     let result = infer(vec![input], RequestedOutputCount::Exactly(2));
     assert_eq!(
         result.outputs[1].shape,

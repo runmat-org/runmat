@@ -41,6 +41,60 @@ pub enum SliceSelector {
     },
 }
 
+pub async fn build_component_selectors(
+    components: &[crate::object::indexing::ObjectIndexComponent],
+    base_shape: &[usize],
+    assignment: bool,
+) -> VmResult<Vec<SliceSelector>> {
+    use crate::object::indexing::ObjectIndexComponent;
+    let dims = components.len();
+    if dims == 1 {
+        let total_len = checked_total_len_from_shape(base_shape)?;
+        return match &components[0] {
+            ObjectIndexComponent::Colon => Ok(vec![SliceSelector::Colon]),
+            ObjectIndexComponent::Value(value) => {
+                if assignment {
+                    let bounded = matches!(value, Value::Bool(_) | Value::LogicalArray(_));
+                    return selector_from_value_dim_with_bounds(value, total_len, bounded)
+                        .await
+                        .map(|selector| vec![selector]);
+                }
+                let materialized = materialize_index_value(value).await?;
+                let selector = match &materialized {
+                    Value::Tensor(tensor) => SliceSelector::LinearIndices {
+                        values: numeric_tensor_indices(tensor, Some(total_len))?,
+                        output_shape: tensor.shape.clone(),
+                    },
+                    Value::LogicalArray(_) => {
+                        let values = indices_from_value_linear(&materialized, total_len).await?;
+                        SliceSelector::LinearIndices {
+                            output_shape: vec![values.len(), 1],
+                            values,
+                        }
+                    }
+                    _ => SliceSelector::Indices(
+                        indices_from_value_linear(&materialized, total_len).await?,
+                    ),
+                };
+                Ok(vec![selector])
+            }
+        };
+    }
+    let shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
+    let mut selectors = Vec::with_capacity(dims);
+    for (dimension, component) in components.iter().enumerate() {
+        selectors.push(match component {
+            ObjectIndexComponent::Colon => SliceSelector::Colon,
+            ObjectIndexComponent::Value(value) => {
+                let bounded =
+                    !assignment || matches!(value, Value::Bool(_) | Value::LogicalArray(_));
+                selector_from_value_dim_with_bounds(value, shape[dimension], bounded).await?
+            }
+        });
+    }
+    Ok(selectors)
+}
+
 fn exact_index_from_f64(value: f64) -> Option<i64> {
     if !value.is_finite() {
         return None;
@@ -321,6 +375,7 @@ pub async fn build_slice_selectors(
         return Ok(selectors);
     }
 
+    let effective_shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
     let mut numeric_iter = 0usize;
     for d in 0..dims {
         let is_colon = selector_mask_has_dim(colon_mask, d);
@@ -328,7 +383,7 @@ pub async fn build_slice_selectors(
             selectors.push(SliceSelector::Colon);
             continue;
         }
-        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        let dim_len = effective_shape[d];
         let is_end = selector_mask_has_dim(end_mask, d);
         if is_end {
             selectors.push(SliceSelector::Scalar(dim_len));
@@ -343,20 +398,17 @@ pub async fn build_slice_selectors(
     Ok(selectors)
 }
 
-/// Builds selectors for sparse two-subscript assignment. Numeric selectors may
-/// grow their addressed dimension; colon and logical selectors remain tied to
-/// the existing shape, matching MATLAB indexed-assignment rules.
-pub async fn build_sparse_assignment_selectors(
+/// Builds selectors for indexed assignment. Numeric selectors may grow their
+/// addressed dimension; colon and logical selectors remain tied to the
+/// existing shape.
+pub async fn build_assignment_selectors(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
     base_shape: &[usize],
 ) -> VmResult<Vec<SliceSelector>> {
-    if dims != 2 {
-        return build_slice_selectors(dims, colon_mask, end_mask, numeric, base_shape).await;
-    }
-
+    let effective_shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
     let mut selectors = Vec::with_capacity(dims);
     let mut numeric_iter = 0usize;
     for d in 0..dims {
@@ -364,7 +416,7 @@ pub async fn build_sparse_assignment_selectors(
             selectors.push(SliceSelector::Colon);
             continue;
         }
-        let dim_len = base_shape.get(d).copied().unwrap_or(1);
+        let dim_len = effective_shape[d];
         if selector_mask_has_dim(end_mask, d) {
             selectors.push(SliceSelector::Scalar(dim_len));
             continue;
@@ -385,13 +437,26 @@ pub async fn build_sparse_assignment_selectors(
     Ok(selectors)
 }
 
-pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<SliceSelector>> {
+pub async fn build_sparse_assignment_selectors(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Vec<SliceSelector>> {
+    build_assignment_selectors(dims, colon_mask, end_mask, numeric, base_shape).await
+}
+
+/// Parse one-based scalar subscripts for aggregate indexing paths whose caller
+/// deliberately supports scalar selectors only. The selector syntax itself is
+/// independent of the aggregate representation.
+pub async fn build_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<SliceSelector>> {
     let mut selectors = Vec::with_capacity(raw_indices.len());
     for value in raw_indices {
         let idx_val = index_scalar_from_value(value).await?.ok_or_else(|| {
             mex(
                 "ScalarIndexRequired",
-                "Cell indexing requires scalar numeric indices",
+                "Indexing requires scalar numeric indices",
             )
         })?;
         if idx_val.is_below_one() {
@@ -408,7 +473,7 @@ pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<
 #[cfg(test)]
 mod tests {
     use super::{
-        build_cell_scalar_selectors, build_slice_selectors, indices_from_value_linear,
+        build_scalar_selectors, build_slice_selectors, indices_from_value_linear,
         selector_from_value_dim, SliceSelector,
     };
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
@@ -466,15 +531,15 @@ mod tests {
     }
 
     #[test]
-    fn build_cell_scalar_selectors_rejects_zero_index() {
-        let err = futures::executor::block_on(build_cell_scalar_selectors(&[Value::Num(0.0)]))
+    fn build_scalar_selectors_rejects_zero_index() {
+        let err = futures::executor::block_on(build_scalar_selectors(&[Value::Num(0.0)]))
             .expect_err("zero cell scalar index should fail");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]
-    fn build_cell_scalar_selectors_rejects_negative_index() {
-        let err = futures::executor::block_on(build_cell_scalar_selectors(&[Value::Num(-2.0)]))
+    fn build_scalar_selectors_rejects_negative_index() {
+        let err = futures::executor::block_on(build_scalar_selectors(&[Value::Num(-2.0)]))
             .expect_err("negative cell scalar index should fail");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }

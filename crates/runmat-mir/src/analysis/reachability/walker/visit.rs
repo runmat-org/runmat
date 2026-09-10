@@ -17,19 +17,33 @@ impl Walker<'_> {
     fn call_arg(&mut self, from: &str, argument: &MirCallArg) {
         match argument {
             MirCallArg::Single(operand) => self.operand(from, operand, Reason::FunctionHandle),
-            MirCallArg::Expansion { base, indices, .. } => {
-                self.operand(from, base, Reason::FunctionHandle);
-                for index in indices {
-                    self.operand(from, index, Reason::FunctionHandle);
-                }
+            MirCallArg::Expansion(source) => {
+                source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle));
             }
+            MirCallArg::CapturedSequence(_) => {}
         }
     }
 
     fn indexing(&mut self, from: &str, indexing: &MirIndexing) {
         for component in &indexing.components {
-            if let MirIndexComponent::Expr(operand) = component {
-                self.operand(from, operand, Reason::FunctionHandle);
+            match component {
+                MirIndexComponent::Expr(operand) => {
+                    self.operand(from, operand, Reason::FunctionHandle)
+                }
+                MirIndexComponent::ContextualExpr(region) => {
+                    for step in region.steps() {
+                        match step {
+                            crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
+                            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                                source.visit_operands(|operand| {
+                                    self.operand(from, operand, Reason::FunctionHandle)
+                                });
+                            }
+                        }
+                    }
+                }
+                MirIndexComponent::Colon => {}
             }
         }
     }
@@ -134,7 +148,14 @@ impl Walker<'_> {
                 }
                 if let Some(name) = dynamic_target_builtin {
                     if let Some(target) = call.args.first() {
-                        self.dynamic_target(from, target.operand(), &format!("{name} target"));
+                        if let Some(operand) = target.operand() {
+                            self.dynamic_target(from, operand, &format!("{name} target"));
+                        } else {
+                            self.unknown_dynamic(
+                                from,
+                                &format!("{name} target is a value sequence"),
+                            );
+                        }
                     } else {
                         self.unknown_dynamic(from, &format!("{name} target is absent"));
                     }
@@ -145,7 +166,9 @@ impl Walker<'_> {
             }
             MirRvalue::Aggregate { elements, .. } => {
                 for element in elements {
-                    self.operand(from, element, Reason::FunctionHandle);
+                    if let Some(operand) = element.operand() {
+                        self.operand(from, operand, Reason::FunctionHandle);
+                    }
                 }
             }
             MirRvalue::StructLiteral { fields } => {
@@ -167,8 +190,23 @@ impl Walker<'_> {
                 self.operand(from, base, Reason::FunctionHandle);
                 self.indexing(from, indexing);
             }
+            MirRvalue::SubscriptChain(chain) => {
+                self.operand(from, &chain.root, Reason::FunctionHandle);
+                for step in &chain.steps {
+                    match step {
+                        crate::MirSubscriptStep::Index(indexing) => self.indexing(from, indexing),
+                        crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                            self.indexing(from, indexing)
+                        }
+                        crate::MirSubscriptStep::DynamicMember(member) => {
+                            self.operand(from, member, Reason::FunctionHandle)
+                        }
+                        crate::MirSubscriptStep::Member(_) => {}
+                    }
+                }
+            }
             MirRvalue::Member { base, .. } => self.operand(from, base, Reason::FunctionHandle),
-            MirRvalue::DynamicMember { base, member } => {
+            MirRvalue::DynamicMember { base, member, .. } => {
                 self.operand(from, base, Reason::FunctionHandle);
                 self.operand(from, member, Reason::FunctionHandle);
             }
@@ -219,11 +257,33 @@ impl Walker<'_> {
             }
             MirStmtKind::MultiAssign { targets, value } => {
                 for target in &targets.targets {
-                    if let crate::MirOutputTarget::Place(place) = target {
-                        self.place(from, place);
+                    match target {
+                        crate::MirOutputTarget::Place(place) => self.place(from, place),
+                        crate::MirOutputTarget::Sequence(target) => {
+                            self.sequence_target(from, target)
+                        }
+                        crate::MirOutputTarget::Discard => {}
                     }
                 }
                 self.rvalue(from, value);
+            }
+            MirStmtKind::SequenceAssign { target, value } => {
+                match target {
+                    crate::MirSequenceTarget::Member { base, .. } => self.place(from, base),
+                    crate::MirSequenceTarget::DynamicMember { base, member } => {
+                        self.place(from, base);
+                        self.operand(from, member, Reason::FunctionHandle);
+                    }
+                    crate::MirSequenceTarget::CellContents { base, indexing } => {
+                        self.place(from, base);
+                        self.indexing(from, indexing);
+                    }
+                }
+                self.rvalue(from, value);
+            }
+            MirStmtKind::CaptureSequence { source, .. } => {
+                source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle));
             }
             MirStmtKind::Expr(value) => self.rvalue(from, value),
             MirStmtKind::PlaceMutation(mutation) => self.place(from, &mutation.place),
@@ -262,6 +322,20 @@ impl Walker<'_> {
                 }
             }
             MirStmtKind::EnvironmentEffect(_) => {}
+        }
+    }
+
+    fn sequence_target(&mut self, from: &str, target: &crate::MirSequenceTarget) {
+        match target {
+            crate::MirSequenceTarget::Member { base, .. } => self.place(from, base),
+            crate::MirSequenceTarget::DynamicMember { base, member } => {
+                self.place(from, base);
+                self.operand(from, member, Reason::FunctionHandle);
+            }
+            crate::MirSequenceTarget::CellContents { base, indexing } => {
+                self.place(from, base);
+                self.indexing(from, indexing);
+            }
         }
     }
 

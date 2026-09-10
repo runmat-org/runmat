@@ -1,18 +1,22 @@
-use runmat_value::{CharArray, StructValue, Value};
+use runmat_value::{CharArray, StructArray, StructValue, Value};
 
 use crate::console::{record_console_line, ConsoleStream};
 use crate::output_context::requested_output_count;
-use crate::{make_cell, BuiltinResult};
+use crate::BuiltinResult;
 
 use super::record::Record;
 
 pub(super) fn value(records: Vec<Record>) -> BuiltinResult<Value> {
     let rows = records.len();
+    let field_names = ["name", "folder", "date", "bytes", "isdir", "datenum"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
     let values = records.into_iter().map(struct_value).collect();
-    make_cell(values, rows, 1).map_err(super::error::operation)
+    StructArray::normalize(field_names, values, vec![rows, 1]).map_err(super::error::operation)
 }
 
-fn struct_value(record: Record) -> Value {
+fn struct_value(record: Record) -> StructValue {
     let mut value = StructValue::new();
     value.insert("name", character_row(&record.name));
     value.insert("folder", character_row(&record.folder));
@@ -20,7 +24,7 @@ fn struct_value(record: Record) -> Value {
     value.insert("bytes", Value::Num(record.bytes));
     value.insert("isdir", Value::Bool(record.is_dir));
     value.insert("datenum", Value::Num(record.datenum));
-    Value::Struct(value)
+    value
 }
 
 fn character_row(text: &str) -> Value {

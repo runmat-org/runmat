@@ -324,6 +324,23 @@ async fn circshift_builtin(
         Value::GpuTensor(handle) => circshift_gpu(handle, dims, shifts)
             .await
             .map_err(Into::into),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => {
+            let rank = array.shape().len().max(
+                dims.iter()
+                    .copied()
+                    .max()
+                    .map_or(0, |dimension| dimension + 1),
+            );
+            let mut axis_shifts = vec![0isize; rank];
+            for (&dimension, &shift) in dims.iter().zip(shifts) {
+                axis_shifts[dimension] = shift;
+            }
+            array
+                .circular_shift(&axis_shifts)
+                .map(Value::StructArray)
+                .map_err(circshift_internal)
+        }
         Value::Cell(_) => Err(circshift_unsupported_input(
             "circshift: cell arrays are not yet supported",
         )),
@@ -333,7 +350,6 @@ async fn circshift_builtin(
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -523,6 +539,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -645,6 +662,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)

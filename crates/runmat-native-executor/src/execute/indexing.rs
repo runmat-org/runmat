@@ -1,13 +1,16 @@
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
-use runmat_native_codegen::{NativeIndexBound, NativeIndexExpressionKind, NativeRangeExpression};
-use runmat_runtime::indexing::plan::{build_index_plan, IndexPlan};
+use runmat_runtime::indexing::plan::{build_assignment_plan, build_index_plan, IndexPlan};
 use runmat_runtime::indexing::read_slice;
-use runmat_runtime::indexing::selectors::{build_slice_selectors, index_scalar_from_value};
+use runmat_runtime::indexing::selectors::{
+    build_assignment_selectors, build_slice_selectors, index_scalar_from_value,
+};
 use runmat_runtime::indexing::write_slice;
 use runmat_runtime::object::dispatch::{
-    call_object_index_descriptor_method, value_defines_index_overload,
+    invoke_resolved_object_index_path_method, resolve_object_index_protocol,
 };
-use runmat_runtime::object::indexing::{ObjectIndexDescriptor, ObjectIndexOp};
+use runmat_runtime::object::indexing::{
+    ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
+};
 use runmat_runtime::RuntimeError;
 use runmat_types::{IndexKind, IndexResultContext};
 use runmat_value::{CharArray, LogicalArray, SymbolicArray, Value};
@@ -16,6 +19,33 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::operand::materialize_operand;
 use super::state::HostState;
+
+fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<ObjectIndexSelector> {
+    if selectors.end_mask != 0 {
+        return Err(NativeExecutorError::from(semantic_error(
+            "ContextualEndRequiresSubscriptPath",
+            "object end must be evaluated through the contextual subscript path",
+        )));
+    }
+    let mut values = selectors.numeric.iter();
+    let mut components = Vec::with_capacity(selectors.dims);
+    for dimension in 0..selectors.dims {
+        if selectors.colon_mask & (1_u32 << dimension) != 0 {
+            components.push(ObjectIndexComponent::Colon);
+        } else {
+            let value = values.next().ok_or_else(|| {
+                NativeExecutorError::Host("object selector is missing a component".into())
+            })?;
+            components.push(ObjectIndexComponent::Value(value.clone()));
+        }
+    }
+    if values.next().is_some() {
+        return Err(NativeExecutorError::Host(
+            "object selector contains excess components".into(),
+        ));
+    }
+    Ok(ObjectIndexSelector::IndexValues { components })
+}
 
 pub(super) fn read(
     state: &mut HostState,
@@ -54,26 +84,23 @@ pub(super) fn assign(
     if matches!(
         base,
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
-    ) && value_defines_index_overload(&base, ObjectIndexOp::Subsasgn)
-    {
-        let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
-            base,
-            selectors.dims,
-            selectors.colon_mask,
-            selectors.end_mask,
-            &selectors.numeric,
-            rhs,
-        )?;
-        return super::sync::complete(
-            &state.runtime,
-            call_object_index_descriptor_method(descriptor),
-            "object indexed assignment",
-        );
-    }
-    if matches!(
-        base,
-        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
     ) {
+        let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
+        if let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution {
+            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
+                &selectors,
+            )?));
+            return super::sync::complete(
+                &state.runtime,
+                runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+                    &method,
+                    base,
+                    path,
+                    vec![rhs],
+                ),
+                "object indexed assignment",
+            );
+        }
         if let Some(indices) = object_scalar_indices(state, &selectors)? {
             return runmat_runtime::indexing::object::assign_scalar_indices(
                 base, &indices, rhs, delete,
@@ -149,6 +176,10 @@ pub(super) fn assign(
             )
             .map_err(NativeExecutorError::from)
         }
+        value @ (Value::Struct(_) | Value::StructArray(_)) => {
+            runmat_runtime::indexing::structure::assign_with_plan(value, &plan, rhs, delete)
+                .map_err(NativeExecutorError::from)
+        }
         value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
             runmat_runtime::indexing::object::assign_with_plan(value, &plan, rhs, delete)
                 .map_err(NativeExecutorError::from)
@@ -220,7 +251,7 @@ fn materialize_selectors(
     let shape = value_shape(base);
     let dims = indexing.components.len();
     let mut colon_mask = 0_u32;
-    let mut end_mask = 0_u32;
+    let end_mask = 0_u32;
     let mut numeric = Vec::new();
     let mut positional = Vec::with_capacity(dims);
     for (dimension, component) in indexing.components.iter().enumerate() {
@@ -229,26 +260,14 @@ fn materialize_selectors(
                 colon_mask |= 1_u32 << dimension;
                 positional.push(Value::String(":".into()));
             }
-            MirIndexComponent::End { dim, offset } => {
-                let resolved_dimension = dim.unwrap_or(dimension);
-                let extent = selector_dimension_length(&shape, dims, resolved_dimension)?;
-                let resolved = extent.checked_add_signed(*offset).ok_or_else(|| {
-                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                        "IndexOutOfBounds",
-                        "Index out of bounds",
-                    ))
-                })?;
-                let value = Value::Num(resolved as f64);
-                if *offset == 0 {
-                    end_mask |= 1_u32 << dimension;
-                } else {
-                    numeric.push(value.clone());
-                }
+            MirIndexComponent::Expr(operand) => {
+                let value = materialize_operand(state, operand)?;
+                numeric.push(value.clone());
                 positional.push(value);
             }
-            MirIndexComponent::Expr(operand) => {
-                let value =
-                    materialize_selector_expression(state, operand, &shape, dims, dimension)?;
+            MirIndexComponent::ContextualExpr(region) => {
+                let extent = selector_dimension_length(&shape, dims, dimension)?;
+                let value = materialize_expression_region(state, region, extent)?;
                 numeric.push(value.clone());
                 positional.push(value);
             }
@@ -263,107 +282,78 @@ fn materialize_selectors(
     })
 }
 
-fn materialize_selector_expression(
+pub(super) fn materialize_cell_expansion_source(
     state: &mut HostState,
-    operand: &MirOperand,
-    shape: &[usize],
-    dims: usize,
-    dimension: usize,
-) -> NativeExecutorResult<Value> {
-    let MirOperand::Local(local) = operand else {
-        return materialize_operand(state, operand);
-    };
-    let local = u32::try_from(local.0)
-        .map(runmat_native_codegen::NativeLocalId)
-        .map_err(|_| NativeExecutorError::Host("selector local exceeds native schema".into()))?;
-    let Some(expression) = state.function.index_expression(local).cloned() else {
-        return materialize_operand(state, operand);
-    };
-    let dimension_length = selector_dimension_length(shape, dims, dimension)?;
-    match expression.kind {
-        NativeIndexExpressionKind::Scalar(expression) => {
-            resolve_end_expression(state, dimension_length, &expression).map(Value::Num)
-        }
-        NativeIndexExpressionKind::Range(range) => {
-            materialize_range_expression(state, dimension_length, &range)
-        }
-    }
-}
-
-fn materialize_range_expression(
-    state: &mut HostState,
-    dimension_length: usize,
-    range: &NativeRangeExpression,
-) -> NativeExecutorResult<Value> {
-    let start = materialize_index_bound(state, dimension_length, &range.start)?;
-    let step = range
-        .step
-        .as_ref()
-        .map(|step| materialize_index_bound(state, dimension_length, step))
-        .transpose()?;
-    let end = resolve_end_expression(state, dimension_length, &range.end)?;
-    let mut arguments = vec![Value::Num(start)];
-    if let Some(step) = step {
-        arguments.push(Value::Num(step));
-    }
-    arguments.push(Value::Num(end));
-    let mut values = super::call::builtin(state, "colon", arguments, 1)?;
-    if values.len() != 1 {
-        return Err(NativeExecutorError::Host(
-            "context-dependent range did not produce one selector".into(),
-        ));
-    }
-    Ok(values.remove(0))
-}
-
-fn materialize_index_bound(
-    state: &mut HostState,
-    dimension_length: usize,
-    bound: &NativeIndexBound,
-) -> NativeExecutorResult<f64> {
-    match bound {
-        NativeIndexBound::Expression(expression) => {
-            resolve_end_expression(state, dimension_length, expression)
-        }
-        NativeIndexBound::Operand(MirOperand::Constant(runmat_mir::MirConstant::Number(value))) => {
-            value.parse().map_err(|error| {
-                NativeExecutorError::Host(format!("invalid range bound {value:?}: {error}"))
-            })
-        }
-        NativeIndexBound::Operand(MirOperand::Local(local)) => resolve_end_expression(
-            state,
-            dimension_length,
-            &runmat_runtime::indexing::EndExpr::Var(local.0),
-        ),
-        NativeIndexBound::Operand(operand) => {
-            let value = materialize_operand(state, operand)?;
-            runmat_runtime::indexing::value_to_f64(&value).map_err(|_| {
-                NativeExecutorError::from(semantic_error(
-                    "UnsupportedIndexType",
-                    "range bound must be numeric",
-                ))
-            })
-        }
-    }
-}
-
-fn resolve_end_expression(
-    state: &HostState,
-    dimension_length: usize,
-    expression: &runmat_runtime::indexing::EndExpr,
-) -> NativeExecutorResult<f64> {
-    super::sync::complete(
-        &state.runtime,
-        runmat_runtime::indexing::resolve_end_expr_value(dimension_length, expression, |local| {
-            state
-                .locals
-                .get(local)
-                .copied()
-                .filter(|value| !value.is_null())
-                .and_then(|value| state.arena.get(value).ok().cloned())
-        }),
-        "end expression resolution",
+    base: Value,
+    indexing: &MirIndexing,
+) -> NativeExecutorResult<runmat_runtime::call::arguments::MaterializedExpansionSource> {
+    let selectors = materialize_selectors(state, &base, indexing)?;
+    Ok(
+        runmat_runtime::call::arguments::MaterializedExpansionSource::CellContents {
+            base,
+            indices: if indexing.cell_expand_all {
+                Vec::new()
+            } else {
+                selectors.positional
+            },
+            expand_all: indexing.cell_expand_all,
+        },
     )
+}
+
+pub(super) fn materialize_expression_region(
+    state: &mut HostState,
+    region: &runmat_mir::MirExpressionRegion,
+    extent: usize,
+) -> NativeExecutorResult<Value> {
+    region.validate().map_err(|error| {
+        NativeExecutorError::Host(format!("invalid contextual selector: {error}"))
+    })?;
+    let (ordinal, next_step, completed) = state.enter_contextual_region();
+    if let Some(result) = completed {
+        return state.arena.get(result).cloned();
+    }
+    state.contextual_index_extents.push(extent);
+    let result = (|| {
+        for (step_index, step) in region.steps().iter().enumerate().skip(next_step) {
+            state.enter_contextual_step(ordinal, step_index);
+            match step {
+                runmat_mir::MirExpressionStep::Let { local, value, .. } => {
+                    let native_local = u32::try_from(local.0)
+                        .map(runmat_native_codegen::NativeLocalId)
+                        .map_err(|_| {
+                            NativeExecutorError::Host(
+                                "contextual selector local exceeds native schema".into(),
+                            )
+                        })?;
+                    let mut values =
+                        super::operand::evaluate_rvalue(state, value, 1, Some(native_local))?;
+                    if values.len() != 1 {
+                        return Err(NativeExecutorError::Host(
+                            "contextual selector definition did not produce one value".into(),
+                        ));
+                    }
+                    state.set_local(local.0, values.remove(0))?;
+                }
+                runmat_mir::MirExpressionStep::CaptureSequence {
+                    destination,
+                    source,
+                    ..
+                } => {
+                    super::call::capture_sequence(state, *destination, source)?;
+                }
+            }
+            state.finish_contextual_step(ordinal, step_index, step_index + 1)?;
+        }
+        let result = super::operand::evaluate_operand(state, region.result())?;
+        state.finish_contextual_region(ordinal, result);
+        state.arena.get(result).cloned()
+    })();
+    state.contextual_index_extents.pop();
+    if result.is_err() && !matches!(&result, Err(NativeExecutorError::CallSuspended)) {
+        state.abandon_contextual_region(region.defined_sequences());
+    }
+    result
 }
 
 fn selector_dimension_length(
@@ -371,14 +361,8 @@ fn selector_dimension_length(
     dims: usize,
     dimension: usize,
 ) -> NativeExecutorResult<usize> {
-    if dims == 1 {
-        shape
-            .iter()
-            .try_fold(1_usize, |total, extent| total.checked_mul(*extent))
-            .ok_or_else(|| NativeExecutorError::Host("index shape exceeds platform limits".into()))
-    } else {
-        Ok(*shape.get(dimension).unwrap_or(&1))
-    }
+    runmat_runtime::indexing::shape::selector_extent(shape, dims, dimension)
+        .map_err(NativeExecutorError::from)
 }
 
 fn read_paren(
@@ -408,21 +392,27 @@ fn read_paren(
     if matches!(
         base,
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
-    ) && value_defines_index_overload(&base, ObjectIndexOp::Subsref)
-    {
-        let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
-            base,
-            selectors.dims,
-            selectors.colon_mask,
-            selectors.end_mask,
-            &selectors.numeric,
-        )?;
-        let value = super::sync::complete(
-            &state.runtime,
-            call_object_index_descriptor_method(descriptor),
-            "object indexed read",
-        )?;
-        return normalize_outputs(value, requested_outputs);
+    ) {
+        let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+        if matches!(
+            resolution,
+            runmat_runtime::object::protocol::ProtocolResolution::Method(_)
+        ) {
+            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
+                &selectors,
+            )?));
+            let value = super::sync::complete(
+                &state.runtime,
+                invoke_resolved_object_index_path_method(
+                    &resolution,
+                    base,
+                    path,
+                    requested_outputs,
+                ),
+                "object indexed read",
+            )?;
+            return normalize_outputs(value, requested_outputs);
+        }
     }
     let plan = super::sync::complete(
         &state.runtime,
@@ -486,11 +476,16 @@ async fn plan_for(
 async fn plan_for_assignment(
     base: &Value,
     selectors: &MaterializedSelectors,
-    allow_sparse_growth: bool,
+    allow_growth: bool,
 ) -> NativeExecutorResult<IndexPlan> {
     let shape = value_shape(base);
-    if matches!(base, Value::SparseTensor(_)) && allow_sparse_growth {
-        let built = runmat_runtime::indexing::selectors::build_sparse_assignment_selectors(
+    if allow_growth
+        && matches!(
+            base,
+            Value::SparseTensor(_) | Value::Struct(_) | Value::StructArray(_)
+        )
+    {
+        let built = build_assignment_selectors(
             selectors.dims,
             selectors.colon_mask,
             selectors.end_mask,
@@ -498,12 +493,8 @@ async fn plan_for_assignment(
             &shape,
         )
         .await?;
-        return runmat_runtime::indexing::plan::build_sparse_assignment_plan(
-            &built,
-            selectors.dims,
-            &shape,
-        )
-        .map_err(NativeExecutorError::from);
+        return build_assignment_plan(&built, selectors.dims, &shape)
+            .map_err(NativeExecutorError::from);
     }
     plan_for(base, selectors).await
 }
@@ -612,6 +603,10 @@ fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> 
             )
             .map_err(NativeExecutorError::from)
         }
+        Value::StructArray(value) => {
+            runmat_runtime::indexing::structure::read_with_plan(&value, plan)
+                .map_err(NativeExecutorError::from)
+        }
         value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
             runmat_runtime::indexing::object::read_with_plan(&value, plan)
                 .map_err(NativeExecutorError::from)
@@ -696,6 +691,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::LogicalArray(value) => value.shape.clone(),
         Value::CharArray(value) => value.shape().to_vec(),
         Value::Cell(value) => value.shape.clone(),
+        Value::StructArray(value) => value.shape().to_vec(),
         Value::ObjectArray(value) => value.shape().to_vec(),
         Value::SymbolicArray(value) => value.shape.clone(),
         _ => vec![1, 1],
@@ -719,4 +715,18 @@ fn semantic_error(identifier: &str, message: impl Into<String>) -> RuntimeError 
 
 fn shape_error(error: impl std::fmt::Display) -> RuntimeError {
     semantic_error("ShapeMismatch", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selector_dimension_length;
+
+    #[test]
+    fn native_end_extent_collapses_trailing_dimensions() {
+        let shape = [2, 3, 4];
+        assert_eq!(selector_dimension_length(&shape, 1, 0).unwrap(), 24);
+        assert_eq!(selector_dimension_length(&shape, 2, 0).unwrap(), 2);
+        assert_eq!(selector_dimension_length(&shape, 2, 1).unwrap(), 12);
+        assert_eq!(selector_dimension_length(&shape, 3, 2).unwrap(), 4);
+    }
 }

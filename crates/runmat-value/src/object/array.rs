@@ -39,16 +39,25 @@ impl ObjectArray {
                 data.len()
             ));
         }
+        let mut storage_kind = None;
         for value in &data {
-            let element_class = match value {
-                Value::Object(object) => &object.class_name,
-                Value::HandleObject(handle) => &handle.class_name,
+            let (element_class, element_kind) = match value {
+                Value::Object(object) => (&object.class_name, false),
+                Value::HandleObject(handle) => (&handle.class_name, true),
                 _ => return Err("object array elements must be value or handle objects".into()),
             };
             if element_class != &class_name {
                 return Err(format!(
                     "object array element class '{element_class}' does not match '{class_name}'"
                 ));
+            }
+            if storage_kind
+                .replace(element_kind)
+                .is_some_and(|kind| kind != element_kind)
+            {
+                return Err(
+                    "object array cannot mix value-object and handle-object storage".into(),
+                );
             }
         }
         Ok(Self {

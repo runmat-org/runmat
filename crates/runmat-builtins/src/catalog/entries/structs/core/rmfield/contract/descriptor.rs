@@ -10,7 +10,7 @@ const OUTPUT: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Structure or represented structure array with the selected fields removed.",
+    description: "Structure or structure array with the selected fields removed.",
 }];
 const INPUTS: &[BuiltinParamDescriptor] = &[
     BuiltinParamDescriptor {
@@ -18,7 +18,7 @@ const INPUTS: &[BuiltinParamDescriptor] = &[
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Input structure or represented structure array.",
+        description: "Input structure or structure array.",
     },
     BuiltinParamDescriptor {
         name: "fields",
@@ -35,7 +35,7 @@ const VARIADIC_INPUTS: &[BuiltinParamDescriptor] = &[
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Input structure or represented structure array.",
+        description: "Input structure or structure array.",
     },
     BuiltinParamDescriptor {
         name: "fields",

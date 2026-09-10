@@ -77,6 +77,13 @@ struct_error!(
     "struct: expected name/value pairs"
 );
 struct_error!(
+    STRUCT_ERROR_DUPLICATE_FIELD,
+    "RM.STRUCT.DUPLICATE_FIELD",
+    "RunMat:struct:DuplicateField",
+    "A field name appears more than once.",
+    "struct: field names must be unique"
+);
+struct_error!(
     STRUCT_ERROR_CELL_SIZE_MISMATCH,
     "RM.STRUCT.CELL_SIZE_MISMATCH",
     "RunMat:struct:CellSizeMismatch",
@@ -153,9 +160,10 @@ struct_error!(
     "Field name is not a valid identifier.",
     "struct: field names must be valid MATLAB identifiers"
 );
-const ERRORS: [BuiltinErrorDescriptor; 13] = [
+const ERRORS: [BuiltinErrorDescriptor; 14] = [
     STRUCT_ERROR_INVALID_SINGLE_INPUT,
     STRUCT_ERROR_NAME_VALUE_PAIRS,
+    STRUCT_ERROR_DUPLICATE_FIELD,
     STRUCT_ERROR_CELL_SIZE_MISMATCH,
     STRUCT_ERROR_SIZE_OVERFLOW,
     STRUCT_ERROR_ASSEMBLE_FAILED,

@@ -64,6 +64,7 @@ pub(crate) fn contains_numeric_or_resident_text_input(value: &Value) -> bool {
         | Value::Symbolic(_)
         | Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
+        Value::StructArray(array) => array.any_value(contains_resident_text_input),
         _ => false,
     }
 }
@@ -74,6 +75,7 @@ pub(crate) fn contains_resident_text_input(value: &Value) -> bool {
         Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
         Value::Struct(value) => value.fields.values().any(contains_resident_text_input),
+        Value::StructArray(array) => array.any_value(contains_resident_text_input),
         Value::Object(value) => value.properties.values().any(contains_resident_text_input),
         Value::Closure(value) => value.captures.iter().any(contains_resident_text_input),
         Value::OutputList(values) => values.iter().any(contains_resident_text_input),
@@ -133,5 +135,23 @@ pub(crate) mod tests {
         assert!(!contains_numeric_or_resident_text_input(&Value::String(
             "text".into()
         )));
+    }
+
+    #[test]
+    fn text_admission_detects_residency_nested_in_typed_struct_arrays() {
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 41,
+            descriptor: Default::default(),
+        });
+        let mut first = runmat_value::StructValue::new();
+        first.insert("payload", resident);
+        let mut second = runmat_value::StructValue::new();
+        second.insert("payload", Value::String("host".into()));
+        let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1]).unwrap();
+        let value = Value::StructArray(array);
+        assert!(contains_resident_text_input(&value));
+        assert!(contains_numeric_or_resident_text_input(&value));
     }
 }

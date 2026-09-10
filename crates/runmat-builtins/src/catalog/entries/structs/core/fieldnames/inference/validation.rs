@@ -13,7 +13,7 @@ pub(super) fn diagnostics(request: &CallRequest) -> Vec<InferenceDiagnostic> {
             if !valid_target(&input.kind) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FIELDNAMES-TARGET",
-                    "fieldnames expects a structure, represented structure array, or supported object",
+                    "fieldnames expects a structure or supported object",
                     0,
                 ));
             }
@@ -30,19 +30,8 @@ pub(super) fn diagnostics(request: &CallRequest) -> Vec<InferenceDiagnostic> {
 }
 
 fn valid_target(kind: &ValueKindFact) -> bool {
-    match kind {
-        ValueKindFact::Struct(_) | ValueKindFact::Object(_) | ValueKindFact::Unknown => true,
-        ValueKindFact::Cell(cell) => {
-            matches!(
-                cell.element.kind,
-                ValueKindFact::Struct(_) | ValueKindFact::Unknown
-            ) && cell.elements.iter().all(|element| {
-                matches!(
-                    element.kind,
-                    ValueKindFact::Struct(_) | ValueKindFact::Unknown
-                )
-            })
-        }
-        _ => false,
-    }
+    matches!(
+        kind,
+        ValueKindFact::Struct(_) | ValueKindFact::Object(_) | ValueKindFact::Unknown
+    )
 }

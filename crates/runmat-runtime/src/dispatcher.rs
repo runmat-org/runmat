@@ -69,6 +69,11 @@ pub fn value_contains_gpu(value: &Value) -> bool {
         Value::GpuTensor(_) => true,
         Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
         Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
+        Value::StructArray(array) => {
+            let mut found = false;
+            array.for_each_value(|value| found |= value_contains_gpu(value));
+            found
+        }
         Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
         Value::Closure(closure) => closure.captures.iter().any(value_contains_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_gpu),
@@ -169,6 +174,15 @@ fn gather_if_needed_async_impl<'a>(
                     *value = updated;
                 }
                 Ok(Value::Struct(gathered))
+            }
+            Value::StructArray(array) => {
+                let gathered = array
+                    .clone()
+                    .try_map_values_async(|value| async move {
+                        gather_if_needed_async_impl(&value).await
+                    })
+                    .await?;
+                Ok(Value::StructArray(gathered))
             }
             Value::Object(obj) => {
                 let mut cloned = obj.clone();
@@ -578,6 +592,9 @@ fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) 
             .fields
             .values()
             .for_each(|value| visit_gpu_handles(value, visitor)),
+        Value::StructArray(array) => {
+            array.for_each_value(|value| visit_gpu_handles(value, visitor));
+        }
         Value::Object(value) => value
             .properties
             .values()
@@ -604,6 +621,9 @@ fn visit_gpu_handles_mut(value: &mut Value, visitor: &mut impl FnMut(&mut GpuTen
             .fields
             .values_mut()
             .for_each(|value| visit_gpu_handles_mut(value, visitor)),
+        Value::StructArray(array) => {
+            array.for_each_value_mut(|value| visit_gpu_handles_mut(value, visitor));
+        }
         Value::Object(value) => value
             .properties
             .values_mut()
@@ -962,6 +982,11 @@ pub fn value_contains_explicit_gpu(value: &Value) -> bool {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
         Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::StructArray(array) => {
+            let mut found = false;
+            array.for_each_value(|value| found |= value_contains_explicit_gpu(value));
+            found
+        }
         Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),

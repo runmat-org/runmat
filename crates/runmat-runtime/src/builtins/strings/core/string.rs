@@ -783,6 +783,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
         | Value::Object(_)
         | Value::Listener(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::OutputList(_)
         | Value::Future(_)
         | Value::Task(_)
@@ -851,7 +852,7 @@ async fn convert_to_string_array(
         Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) | Value::Listener(_) => Err(string_flow(
             "string: unsupported conversion from handle-based objects. Use class-specific formatters.",
         )),
-        Value::Struct(_) => Err(string_flow(
+        Value::Struct(_) | Value::StructArray(_) => Err(string_flow(
             "string: structs are not supported for automatic conversion",
         )),
         Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) | Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle { .. }

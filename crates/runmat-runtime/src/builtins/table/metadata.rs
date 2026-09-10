@@ -357,7 +357,7 @@ const GRPSTATS_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Alpha, DataVars, and VarNames options.",
     },
 ];
-const OBJECT_INDEX_INPUTS: [BuiltinParamDescriptor; 3] = [
+const OBJECT_INDEX_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -366,21 +366,14 @@ const OBJECT_INDEX_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Table object receiver.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Index kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
 ];
-const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -389,18 +382,11 @@ const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Table object receiver.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Index kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
     BuiltinParamDescriptor {
         name: "rhs",
@@ -812,12 +798,12 @@ const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &WRITE_NO_OUTPUT,
 }];
 const OBJECT_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = table.subsref(obj, kind, payload)",
+    label: "out = table.subsref(obj, S)",
     inputs: &OBJECT_INDEX_INPUTS,
     outputs: &ANY_OUTPUT,
 }];
 const OBJECT_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = table.subsasgn(obj, kind, payload, rhs)",
+    label: "obj = table.subsasgn(obj, S, rhs)",
     inputs: &OBJECT_ASSIGN_INPUTS,
     outputs: &ANY_OUTPUT,
 }];

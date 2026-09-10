@@ -118,8 +118,8 @@ mod tests {
 
     fn environment() -> ProgramEnvironment {
         ProgramEnvironment::new(
-            1,
-            1,
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
             Digest::sha256("runtime"),
             Digest::sha256("catalog"),
             "matlab",
@@ -144,5 +144,20 @@ mod tests {
         let mut tampered = archive.clone();
         tampered.payload[0] ^= 1;
         assert!(RuntimeArchive::new(tampered.manifest, tampered.payload).is_err());
+    }
+
+    #[test]
+    fn frozen_runtime_archive_three_is_rejected_before_host_admission() {
+        let error = RuntimeArchiveManifest::from_json(include_bytes!(
+            "../../tests/fixtures/runtime-archive-manifest-3.json"
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("aot.archive.schema"));
+        assert!(error.to_string().contains("actual 3, expected 4"));
+
+        let changed_fields = br#"{"schema_version":3,"native_ir_schema_version":5,"native_object_schema_version":4,"native_link_tokens":"changed representation"}"#;
+        let error = RuntimeArchiveManifest::from_json(changed_fields).unwrap_err();
+        assert!(error.to_string().contains("aot.archive.schema"));
+        assert!(error.to_string().contains("actual 3, expected 4"));
     }
 }

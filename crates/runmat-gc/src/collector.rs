@@ -467,6 +467,7 @@ pub struct IncrementalProgress {
 mod tests {
     use super::*;
     use crate::{GcConfig, GcStats, GenerationalAllocator};
+    use runmat_value::{StructArray, StructValue};
 
     #[test]
     fn test_mark_sweep_collector_creation() {
@@ -580,6 +581,64 @@ mod tests {
             .expect("mark phase should succeed");
 
         assert!(collector.marked_objects.lock().contains(&target_addr));
+    }
+
+    #[test]
+    fn collector_marks_handles_reachable_through_nd_structure_arrays() {
+        let config = GcConfig::default();
+        let stats = GcStats::new();
+        let mut allocator = GenerationalAllocator::new(&config);
+        let mut collector = MarkSweepCollector::new(&config);
+
+        let first_target = allocator
+            .allocate(Value::String("first".to_string()), &stats)
+            .expect("first target allocation");
+        let second_target = allocator
+            .allocate(Value::String("second".to_string()), &stats)
+            .expect("second target allocation");
+        let first_addr = first_target.addr();
+        let second_addr = second_target.addr();
+        let element = |payload: f64, target| {
+            let mut value = StructValue::new();
+            value.insert("payload", Value::Num(payload));
+            value.insert(
+                "nested",
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "TestHandle".into(),
+                    target,
+                    valid: true,
+                }),
+            );
+            value
+        };
+        let array = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            vec![element(1.0, first_target), element(2.0, second_target)],
+            vec![1, 1, 2],
+        )
+        .expect("N-D structure array");
+        let array_root = allocator
+            .allocate(Value::StructArray(array), &stats)
+            .expect("structure-array allocation");
+        let empty = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            Vec::new(),
+            vec![0, 2],
+        )
+        .expect("empty structure array");
+        let empty_root = allocator
+            .allocate(Value::StructArray(empty), &stats)
+            .expect("empty structure-array allocation");
+
+        collector
+            .mark_phase(&allocator, &[array_root, empty_root], 0)
+            .expect("mark phase should succeed");
+
+        let marked = collector.marked_objects.lock();
+        assert!(marked.contains(&array_root.addr()));
+        assert!(marked.contains(&empty_root.addr()));
+        assert!(marked.contains(&first_addr));
+        assert!(marked.contains(&second_addr));
     }
 
     #[test]

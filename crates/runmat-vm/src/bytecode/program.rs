@@ -55,6 +55,7 @@ impl Default for ExecutionContext {
 pub struct FunctionBytecode {
     pub function: FunctionId,
     pub display_name: String,
+    pub class_method_owner: Option<runmat_types::ClassMethodOwner>,
     #[serde(default)]
     pub private_owner_scope: String,
     #[serde(default)]
@@ -107,6 +108,7 @@ impl Default for FunctionBytecode {
         Self {
             function: FunctionId(0),
             display_name: String::new(),
+            class_method_owner: None,
             private_owner_scope: String::new(),
             source_id: None,
             capabilities: Default::default(),
@@ -145,6 +147,8 @@ impl FunctionBytecode {
         bytecode.call_arg_spans = self.call_arg_spans.clone();
         bytecode.coverage_sites = self.coverage_sites.clone();
         bytecode.source_id = self.source_id;
+        bytecode.active_function = Some(self.function);
+        bytecode.active_class_method_owner = self.class_method_owner.clone();
         bytecode.var_names = self.var_names.clone();
         bytecode.initially_unassigned_slots = self.initially_unassigned_slots.clone();
         bytecode.regions = self.regions.clone();
@@ -569,7 +573,6 @@ fn instruction_has_dynamic_dispatch(instruction: &Instr) -> bool {
             instruction,
             Instr::Index(_)
                 | Instr::IndexSlice(..)
-                | Instr::IndexSliceExpr { .. }
                 | Instr::IndexCell { .. }
                 | Instr::IndexCellExpand { .. }
                 | Instr::IndexCellList { .. }
@@ -579,12 +582,12 @@ fn instruction_has_dynamic_dispatch(instruction: &Instr) -> bool {
                 | Instr::StoreIndexCellDelete { .. }
                 | Instr::StoreSlice(..)
                 | Instr::StoreSliceDelete(..)
-                | Instr::StoreSliceExpr { .. }
-                | Instr::StoreSliceExprDelete { .. }
                 | Instr::LoadMember(_)
                 | Instr::LoadMemberOrInit(_)
                 | Instr::LoadMemberDynamic
                 | Instr::LoadMemberDynamicOrInit
+                | Instr::LoadMemberSequence { .. }
+                | Instr::LoadMemberDynamicSequence { .. }
                 | Instr::StoreMember(_)
                 | Instr::StoreMemberOrInit(_)
                 | Instr::StoreMemberDynamic
@@ -605,7 +608,6 @@ fn instruction_may_dispatch_method(
     match instruction {
         Instr::Index(_)
         | Instr::IndexSlice(..)
-        | Instr::IndexSliceExpr { .. }
         | Instr::IndexCell { .. }
         | Instr::IndexCellExpand { .. }
         | Instr::IndexCellList { .. } => runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name),
@@ -614,16 +616,16 @@ fn instruction_may_dispatch_method(
         | Instr::StoreIndexDelete(_)
         | Instr::StoreIndexCellDelete { .. }
         | Instr::StoreSlice(..)
-        | Instr::StoreSliceDelete(..)
-        | Instr::StoreSliceExpr { .. }
-        | Instr::StoreSliceExprDelete { .. } => {
-            runmat_runtime::OBJECT_SUBSASGN_METHOD.is(method_name)
-        }
-        Instr::LoadMember(name) | Instr::LoadMemberOrInit(name) => {
+        | Instr::StoreSliceDelete(..) => runmat_runtime::OBJECT_SUBSASGN_METHOD.is(method_name),
+        Instr::LoadMember(name)
+        | Instr::LoadMemberOrInit(name)
+        | Instr::LoadMemberSequence { member: name, .. } => {
             runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name)
                 || method_name == &runmat_types::MethodName::property_getter(name)
         }
-        Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
+        Instr::LoadMemberDynamic
+        | Instr::LoadMemberDynamicOrInit
+        | Instr::LoadMemberDynamicSequence { .. } => {
             runmat_runtime::OBJECT_SUBSREF_METHOD.is(method_name)
                 || method_name.is_property_getter()
         }
@@ -729,6 +731,10 @@ impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
+    #[serde(skip)]
+    pub active_function: Option<FunctionId>,
+    #[serde(skip)]
+    pub active_class_method_owner: Option<runmat_types::ClassMethodOwner>,
     #[serde(default)]
     pub instr_spans: Vec<runmat_hir::Span>,
     #[serde(default)]
@@ -879,6 +885,8 @@ impl Bytecode {
     pub fn empty() -> Self {
         Self {
             instructions: Vec::new(),
+            active_function: None,
+            active_class_method_owner: None,
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             coverage_sites: Vec::new(),
@@ -1031,6 +1039,7 @@ mod function_registry_tests {
         FunctionBytecode {
             function: FunctionId(id),
             display_name: display_name.into(),
+            class_method_owner: None,
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
             capabilities: Default::default(),

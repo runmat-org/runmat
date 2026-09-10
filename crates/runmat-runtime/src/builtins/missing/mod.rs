@@ -1346,6 +1346,10 @@ fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             }
             Ok(Value::Struct(out))
         }
+        Value::StructArray(array) => array
+            .clone()
+            .try_map_values(|field| ismissing_value(&field))
+            .map(Value::StructArray),
         Value::Object(object) if is_tabular_object(object) => ismissing_table(object),
         Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;
@@ -1413,6 +1417,18 @@ fn any_missing(value: &Value) -> BuiltinResult<bool> {
             for field in st.fields.values() {
                 if any_missing(field)? {
                     return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        Value::StructArray(array) => {
+            for field in array.field_names() {
+                if let Some(values) = array.field_values(field) {
+                    for value in values {
+                        if any_missing(value)? {
+                            return Ok(true);
+                        }
+                    }
                 }
             }
             Ok(false)
@@ -2990,7 +3006,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
-    use runmat_value::IntegerStorage;
+    use runmat_value::{IntegerStorage, StructArray};
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -3002,6 +3018,41 @@ mod tests {
         } else {
             (usize::MAX as f64) + 1.0
         }
+    }
+
+    #[test]
+    fn ismissing_preserves_typed_struct_array_shape_and_schema() {
+        let element = |value| {
+            let mut structure = StructValue::new();
+            structure.insert("payload", value);
+            structure
+        };
+        let array = StructArray::new(
+            vec![
+                element(Value::StringArray(
+                    StringArray::new(vec![MISSING_TEXT.into()], vec![1, 1]).unwrap(),
+                )),
+                element(Value::String("present".into())),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let Value::StructArray(output) =
+            ismissing_value(&Value::StructArray(array)).expect("ismissing structure array")
+        else {
+            panic!("expected typed structure array");
+        };
+        assert_eq!(output.shape(), &[2, 1]);
+        assert_eq!(
+            output.field_names().map(String::as_str).collect::<Vec<_>>(),
+            ["payload"]
+        );
+        let values = output.field_values("payload").unwrap();
+        assert!(matches!(
+            &values[0],
+            Value::LogicalArray(mask) if mask.shape == [1, 1] && mask.data == vec![1]
+        ));
+        assert_eq!(values[1], Value::Bool(false));
     }
 
     #[test]

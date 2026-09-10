@@ -68,7 +68,7 @@ fn recipe_and_materialized_artifact_have_distinct_exact_identities() {
         .unwrap()
         .with_materialized_program(
             support::recipe(revision),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"bytecode-a".to_vec(),
         )
         .build()
@@ -80,7 +80,7 @@ fn recipe_and_materialized_artifact_have_distinct_exact_identities() {
 
     let changed = ProgramArtifact::materialize(
         recipe,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterBytecodeV2,
         b"bytecode-b".to_vec(),
     )
     .unwrap();
@@ -97,13 +97,13 @@ fn accelerator_requirements_are_part_of_recipe_and_artifact_identity() {
     assert_ne!(plain.id().unwrap(), accelerated.id().unwrap());
     let plain_artifact = ProgramArtifact::materialize(
         &plain,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterBytecodeV2,
         b"same-program".to_vec(),
     )
     .unwrap();
     let accelerated_artifact = ProgramArtifact::materialize(
         &accelerated,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterBytecodeV2,
         b"same-program".to_vec(),
     )
     .unwrap();
@@ -139,7 +139,7 @@ fn artifact_tampering_and_revision_mismatch_are_rejected() {
         .unwrap()
         .with_materialized_program(
             support::recipe(revision),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"bytecode".to_vec(),
         )
         .build()

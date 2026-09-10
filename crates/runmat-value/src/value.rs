@@ -24,9 +24,11 @@ pub enum Value {
     /// Dense symbolic array with column-major shape semantics.
     SymbolicArray(SymbolicArray),
     Cell(CellArray),
-    // Struct (scalar or nested). Struct arrays are represented in higher layers;
-    // this variant holds a single struct's fields.
+    /// Scalar structure value. Empty and nonscalar structure arrays use
+    /// [`Value::StructArray`].
     Struct(StructValue),
+    /// Empty or nonscalar structure array with an explicit homogeneous schema.
+    StructArray(StructArray),
     // GPU-resident tensor handle (opaque; buffer managed by backend)
     GpuTensor(runmat_accelerate_api::GpuTensorHandle),
     // Simple object instance until full class system lands

@@ -13,8 +13,6 @@ use crate::indexing::read_slice::{
     read_sparse_slice_from_plan, read_tensor_slice_from_plan,
 };
 use crate::indexing::selectors::SliceSelector;
-use crate::object::dispatch::call_object_index_descriptor_method;
-use crate::object::indexing::ObjectIndexDescriptor;
 use crate::{call_builtin_async, RuntimeError};
 
 /// A snapshot of one MATLAB `for` iterable.
@@ -101,14 +99,22 @@ async fn read_column(source: &Value, column: usize) -> Result<Value, RuntimeErro
         }
         Value::SymbolicArray(value) => gather_symbolic(value, &column_plan(&value.shape, column)?),
         Value::Object(_) | Value::HandleObject(_) => {
-            let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+            let path = crate::object::indexing::ObjectSubscriptPath::single(
+                crate::object::indexing::ObjectSubscript::parentheses(
+                    crate::object::indexing::ObjectIndexSelector::IndexValues {
+                        components: vec![
+                            crate::object::indexing::ObjectIndexComponent::Colon,
+                            Value::Num((column + 1) as f64).into(),
+                        ],
+                    },
+                ),
+            );
+            crate::object::protocol::read_subscript_path_with_access(
                 source.clone(),
-                2,
-                1,
-                0,
-                &[Value::Num((column + 1) as f64)],
-            )?;
-            call_object_index_descriptor_method(descriptor).await
+                path,
+                crate::object::protocol::ObjectAccessContext::default(),
+            )
+            .await
         }
         // MATLAB scalars have size 1x1 and bind as themselves.
         value => Ok(value.clone()),

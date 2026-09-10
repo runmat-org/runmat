@@ -1,9 +1,9 @@
 use super::{run, structure};
-use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
+use runmat_value::{CellArray, IntegerStorage, StructArray, Tensor, Value};
 
 #[test]
 fn scalar_removal_preserves_the_original_and_retained_values() {
-    let original = structure(&[("name", Value::from("Ada")), ("score", Value::Num(42.0))]);
+    let original = structure(&[("name", Value::from("entry")), ("score", Value::Num(42.0))]);
     let result = run(original.clone(), vec![Value::from("score")]).unwrap();
     assert!(matches!(&original, Value::Struct(value) if value.fields.contains_key("score")));
     assert!(
@@ -12,26 +12,35 @@ fn scalar_removal_preserves_the_original_and_retained_values() {
 }
 
 #[test]
-fn represented_array_preserves_shape_and_updates_every_element() {
-    let first = structure(&[("name", Value::from("Ada")), ("score", Value::Num(90.0))]);
-    let second = structure(&[("name", Value::from("Grace")), ("score", Value::Num(95.0))]);
-    let array = CellArray::new_with_shape(vec![first, second], vec![1, 2]).unwrap();
-    let result = run(Value::Cell(array), vec![Value::from("score")]).unwrap();
-    let Value::Cell(array) = result else {
-        panic!("expected represented structure array");
+fn typed_array_preserves_shape_and_updates_every_element() {
+    let first = structure(&[("name", Value::from("first")), ("score", Value::Num(90.0))]);
+    let second = structure(&[("name", Value::from("second")), ("score", Value::Num(95.0))]);
+    let elements = [first, second]
+        .into_iter()
+        .map(|value| match value {
+            Value::Struct(value) => value,
+            _ => unreachable!(),
+        })
+        .collect();
+    let array = StructArray::new(elements, vec![1, 2]).unwrap();
+    let result = run(Value::StructArray(array), vec![Value::from("score")]).unwrap();
+    let Value::StructArray(array) = result else {
+        panic!("expected structure array");
     };
-    assert_eq!(array.shape, vec![1, 2]);
-    assert!(array.data.iter().all(|value| matches!(value, Value::Struct(structure) if structure.fields.len() == 1 && structure.fields.contains_key("name"))));
+    assert_eq!(array.shape(), [1, 2]);
+    assert!(array
+        .elements()
+        .all(|structure| structure.fields.len() == 1 && structure.fields.contains_key("name")));
 }
 
 #[test]
-fn represented_array_reports_the_first_requested_name_missing_from_any_element() {
+fn ordinary_heterogeneous_cell_is_rejected_as_a_target() {
     let first = structure(&[("a", Value::Num(1.0)), ("b", Value::Num(2.0))]);
     let second = structure(&[("b", Value::Num(3.0))]);
     let array = CellArray::new(vec![first, second], 1, 2).unwrap();
     let names = CellArray::new(vec![Value::from("a"), Value::from("missing")], 1, 2).unwrap();
     let error = run(Value::Cell(array), vec![Value::Cell(names)]).unwrap_err();
-    assert!(error.message().contains("non-existent field 'a'"));
+    assert!(error.message().contains("struct"));
 }
 
 #[test]

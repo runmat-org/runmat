@@ -301,8 +301,8 @@ mod tests {
             Digest::from_bytes(*project.graph_digest().bytes()),
             Digest::from_bytes(*project.source_revision().bytes()),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",
@@ -330,8 +330,9 @@ mod tests {
             .unwrap()
             .with_materialized_program(
                 recipe,
-                ExecutableForm::InterpreterBytecodeV1,
-                serde_json::to_vec(&runmat_vm::FunctionRegistry::default()).unwrap(),
+                ExecutableForm::InterpreterBytecodeV2,
+                runmat_vm::encode_interpreter_program_v2(&runmat_vm::FunctionRegistry::default())
+                    .unwrap(),
             )
             .build()
             .unwrap();
@@ -368,8 +369,8 @@ mod tests {
             Digest::from_bytes(*project.graph_digest().bytes()),
             Digest::from_bytes(*project.source_revision().bytes()),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",

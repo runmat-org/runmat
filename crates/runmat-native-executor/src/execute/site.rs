@@ -82,7 +82,19 @@ pub(super) fn execute(
         {
             return Ok(NativeSiteOutcome::exit());
         }
-        let outcome = execute_terminator(state, call, block.id, &block.terminator, exit)?;
+        let outcome = match execute_terminator(state, call, block.id, &block.terminator, exit) {
+            Ok(outcome) => {
+                state.finish_contextual_site();
+                outcome
+            }
+            Err(NativeExecutorError::CallSuspended) => {
+                return super::call_suspension::publish(state, call, request, exit);
+            }
+            Err(error) => {
+                state.finish_contextual_site();
+                return Err(error);
+            }
+        };
         refresh_frame_roots(state, call)?;
         Ok(outcome)
     } else {
@@ -149,12 +161,17 @@ pub(super) fn execute(
             && matches!(block.terminator.kind, NativeTerminatorKind::For { .. });
         if !retained_for_iterable {
             match execute_instruction(state, &instruction) {
-                Ok(()) => {}
+                Ok(()) => state.finish_contextual_site(),
                 Err(NativeExecutorError::CallSuspended) => {
                     return super::call_suspension::publish(state, call, request, exit);
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    state.finish_contextual_site();
+                    return Err(error);
+                }
             }
+        } else {
+            state.finish_contextual_site();
         }
         refresh_frame_roots(state, call)?;
         Ok(NativeSiteOutcome::continue_execution())
@@ -172,6 +189,7 @@ fn enter_site(
     state.hit_coverage(site);
     state.current_source = runtime_source(source);
     state.current_request = Some(request);
+    state.begin_contextual_site(request)?;
     state.enter_site_block(runmat_native_codegen::NativeBlockId(request.block));
     // SAFETY: NativeCall was validated before entry and its frame/resume
     // backing allocations live for the complete synchronous invocation.
@@ -220,6 +238,21 @@ fn execute_instruction(
     instruction: &NativeInstruction,
 ) -> NativeExecutorResult<()> {
     match &instruction.operation {
+        NativeOperation::Rvalue {
+            value,
+            result: runmat_native_codegen::NativeRvalueResult::SequenceAssignment(target),
+        } => {
+            if state.sequence_assignment_register.is_some() {
+                return Err(NativeExecutorError::Host(
+                    "native sequence register was overwritten before consumption".into(),
+                ));
+            }
+            let (destination, count) = super::mutation::prepare_sequence_assignment(state, target)?;
+            let results = evaluate_rvalue(state, value, count, None)?;
+            state.sequence_assignment_register = Some(
+                super::mutation::PreparedSequenceAssignment::with_values(destination, results)?,
+            );
+        }
         NativeOperation::Rvalue { value, .. } => {
             let output_local = (instruction.outputs.len() == 1)
                 .then(|| instruction.outputs[0].local)
@@ -264,8 +297,13 @@ fn execute_statement(
                 state.record_expression(value);
             }
         }
+        MirStmtKind::CaptureSequence {
+            destination,
+            source,
+        } => super::call::capture_sequence(state, *destination, source)?,
         MirStmtKind::Assign { .. }
         | MirStmtKind::MultiAssign { .. }
+        | MirStmtKind::SequenceAssign { .. }
         | MirStmtKind::PlaceMutation(_) => {
             return Err(NativeExecutorError::Host(
                 "native mutation statement was not consumed by its semantic adapter".into(),
@@ -568,6 +606,9 @@ pub(super) fn redirect_exception(
     state: &mut HostState,
     exception: runmat_runtime::native::NativeException,
 ) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteRequest>> {
+    state.sequence_assignment_register = None;
+    state.captured_sequences.clear();
+    state.finish_contextual_site();
     let Some(handler) = state.take_exception_handler() else {
         return Ok(None);
     };

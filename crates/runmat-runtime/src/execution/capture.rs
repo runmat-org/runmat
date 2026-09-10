@@ -57,6 +57,15 @@ fn visit_gpu_handles(
             }
             Ok(())
         }
+        Value::StructArray(array) => {
+            let mut result = Ok(());
+            array.for_each_value(|value| {
+                if result.is_ok() {
+                    result = visit_gpu_handles(value, operation, visited_handles);
+                }
+            });
+            result
+        }
         Value::Object(value) => {
             for value in value.properties.values() {
                 visit_gpu_handles(value, operation, visited_handles)?;
@@ -124,7 +133,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, HostTensorView, SpawnHandleConcurrency,
         ThreadProviderGuard,
     };
-    use runmat_value::{CellArray, HandleRef, StructValue};
+    use runmat_value::{CellArray, HandleRef, StructArray, StructValue};
 
     struct RejectProvider;
     static REJECT_PROVIDER: RejectProvider = RejectProvider;
@@ -240,5 +249,40 @@ mod tests {
             validate_spawn_capture(&object).unwrap_err().identifier(),
             Some("RunMat:SpawnGpuHandleUnsupported")
         );
+    }
+
+    #[test]
+    fn spawn_capture_recurses_through_nd_structure_arrays() {
+        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let element = |payload: Value, nested: Value| {
+            let mut value = StructValue::new();
+            value.insert("payload", payload);
+            value.insert("nested", nested);
+            value
+        };
+        let array = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            vec![
+                element(Value::Num(1.0), Value::Num(2.0)),
+                element(Value::Num(3.0), gpu(41, 51)),
+            ],
+            vec![1, 1, 2],
+        )
+        .expect("N-D structure array");
+        assert_eq!(
+            validate_spawn_capture(&Value::StructArray(array))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported")
+        );
+
+        let empty = StructArray::with_fields(
+            vec!["payload".into(), "nested".into()],
+            Vec::new(),
+            vec![0, 2],
+        )
+        .expect("empty structure array");
+        validate_spawn_capture(&Value::StructArray(empty))
+            .expect("empty structure array has no handles");
     }
 }

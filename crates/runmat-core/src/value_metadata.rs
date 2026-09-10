@@ -23,7 +23,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::CharArray(_) => "char".to_string(),
         Value::Symbolic(_) | Value::SymbolicArray(_) => "sym".to_string(),
         Value::Cell(_) => "cell".to_string(),
-        Value::Struct(_) => "struct".to_string(),
+        Value::Struct(_) | Value::StructArray(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -67,6 +67,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
+        Value::StructArray(array) => Some(array.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
         Value::Distributed(handle) => handle
             .global_shape
@@ -186,6 +187,7 @@ pub fn preview_numeric_values(
         | Value::Symbolic(_)
         | Value::SymbolicArray(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)

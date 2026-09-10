@@ -18,7 +18,8 @@ use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, NumericStorage, SparseTensor, StringArray, StructValue, Tensor, Value,
+    LogicalArray, NumericStorage, SparseTensor, StringArray, StructArray, StructValue, Tensor,
+    Value,
 };
 
 use super::format::{
@@ -1009,9 +1010,10 @@ fn parse_struct(
     dims: Vec<usize>,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
-    if dims.len() != 2 || dims[0] != 1 || dims[1] != 1 {
-        return Err(load_error("load: struct arrays are not supported yet"));
-    }
+    let element_count = dims
+        .iter()
+        .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+        .ok_or_else(|| load_error("load: struct array shape exceeds platform limits"))?;
     let len_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: struct missing maximum field length specifier"))?;
     if len_elem.data_type != MI_INT32 || len_elem.data.len() != 4 {
@@ -1041,8 +1043,11 @@ fn parse_struct(
         field_names.push(bytes_to_string(slice));
     }
 
-    let mut field_values = Vec::with_capacity(field_count);
-    for _ in 0..field_count {
+    let value_count = field_count
+        .checked_mul(element_count)
+        .ok_or_else(|| load_error("load: struct array field count exceeds platform limits"))?;
+    let mut field_values = Vec::with_capacity(value_count);
+    for _ in 0..value_count {
         let elem = read_tagged(cursor, false, endian)?
             .ok_or_else(|| load_error("load: struct field missing matrix payload"))?;
         if elem.data_type != MI_MATRIX {
@@ -1398,15 +1403,24 @@ fn mat_array_to_value(array: MatArray) -> BuiltinResult<Value> {
             field_names,
             field_values,
         } => {
-            if field_names.len() != field_values.len() {
+            let element_count = array
+                .dims
+                .iter()
+                .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+                .ok_or_else(|| load_error("load: struct array shape exceeds platform limits"))?;
+            let expected = field_names
+                .len()
+                .checked_mul(element_count)
+                .ok_or_else(|| load_error("load: struct field storage exceeds platform limits"))?;
+            if field_values.len() != expected {
                 return Err(load_error("load: struct field metadata is inconsistent"));
             }
-            let mut st = StructValue::new();
-            for (name, value) in field_names.into_iter().zip(field_values.into_iter()) {
-                let converted = mat_array_to_value(value)?;
-                st.fields.insert(name, converted);
-            }
-            Ok(Value::Struct(st))
+            let values = field_values
+                .into_iter()
+                .map(mat_array_to_value)
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            StructArray::normalize_field_major(field_names, values, array.dims.clone())
+                .map_err(load_error)
         }
         MatData::Sparse {
             rows,
@@ -1733,6 +1747,62 @@ pub(crate) mod tests {
     fn load_entries_from_bytes(bytes: Vec<u8>) -> Vec<(String, Value)> {
         let mut cursor = Cursor::new(bytes);
         read_mat_reader(&mut cursor).expect("read MAT bytes")
+    }
+
+    #[test]
+    fn parsed_struct_fields_are_consumed_in_mat_field_major_order() {
+        fn scalar(value: f64) -> MatArray {
+            MatArray {
+                class: MatClass::Double,
+                dims: vec![1, 1],
+                data: MatData::Numeric {
+                    real: NumericStorage::F64(vec![value]),
+                    imag: None,
+                },
+            }
+        }
+
+        // This models the ordered matrix subelements from an independently
+        // produced Level-5 structure: every element of `left`, then `right`.
+        let fixture = MatArray {
+            class: MatClass::Struct,
+            dims: vec![2, 2],
+            data: MatData::Struct {
+                field_names: vec!["left".into(), "right".into()],
+                field_values: vec![
+                    scalar(1.0),
+                    scalar(2.0),
+                    scalar(3.0),
+                    scalar(4.0),
+                    scalar(10.0),
+                    scalar(20.0),
+                    scalar(30.0),
+                    scalar(40.0),
+                ],
+            },
+        };
+        let Value::StructArray(array) = mat_array_to_value(fixture).unwrap() else {
+            panic!("expected structure array")
+        };
+        assert_eq!(array.shape(), [2, 2]);
+        assert_eq!(
+            array.field_values("left").unwrap(),
+            [
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+            ]
+        );
+        assert_eq!(
+            array.field_values("right").unwrap(),
+            [
+                Value::Num(10.0),
+                Value::Num(20.0),
+                Value::Num(30.0),
+                Value::Num(40.0),
+            ]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

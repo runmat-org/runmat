@@ -104,8 +104,27 @@ impl FactSatisfaction for StructFact {
             self.fields_complete,
             &expected.fields,
             expected.fields_complete,
+        ) && struct_elements_satisfy(
+            &self.elements,
+            self.elements_complete,
+            &expected.elements,
+            expected.elements_complete,
         )
     }
+}
+
+fn struct_elements_satisfy(
+    actual: &[std::collections::BTreeMap<String, ValueFact>],
+    actual_complete: bool,
+    expected: &[std::collections::BTreeMap<String, ValueFact>],
+    expected_complete: bool,
+) -> bool {
+    (!expected_complete || (actual_complete && actual.len() == expected.len()))
+        && actual.len() >= expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| fields_satisfy(actual, true, expected, true))
 }
 
 impl FactSatisfaction for ObjectFact {

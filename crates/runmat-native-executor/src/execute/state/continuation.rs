@@ -2,8 +2,53 @@ use super::*;
 
 impl HostState {
     pub fn refresh_roots(&mut self) -> NativeRootSet {
+        self.roots.truncate(self.locals.len());
         for (root, value) in self.roots.iter_mut().zip(&self.locals) {
             root.value = *value;
+        }
+        if let Some(sequence) = &self.sequence_assignment_register {
+            for (slot, value) in sequence.root_references() {
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
+        let contextual_roots = self.contextual_region_roots().collect::<Vec<_>>();
+        for value in contextual_roots {
+            let slot = u32::try_from(self.roots.len())
+                .expect("contextual region root cardinality is bounded by native value admission");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
+        let completed_call_roots =
+            super::super::call_suspension::completed_roots(self).collect::<Vec<_>>();
+        for value in completed_call_roots {
+            let slot = u32::try_from(self.roots.len())
+                .expect("completed call root cardinality is bounded by native value admission");
+            self.roots.push(NativeRoot {
+                value,
+                kind: NativeRootKind::TEMPORARY,
+                slot,
+            });
+        }
+        let mut sequence_root_slot = self.roots.len();
+        for values in self.captured_sequences.values() {
+            for value in values {
+                let slot = u32::try_from(sequence_root_slot).expect(
+                    "captured sequence root cardinality is validated when the sequence is captured",
+                );
+                self.roots.push(NativeRoot {
+                    value: *value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+                sequence_root_slot += 1;
+            }
         }
         NativeRootSet {
             roots: self.roots.as_ptr(),
@@ -65,6 +110,10 @@ impl HostState {
         }
     }
 
+    pub fn arm_deoptimization_fault(&mut self, fault: FaultInjection) {
+        self.deoptimization.inject = Some(fault);
+    }
+
     pub fn should_inject_safepoint(
         &mut self,
         safepoint: runmat_native_codegen::NativeSafepointId,
@@ -77,11 +126,27 @@ impl HostState {
         }
     }
 
+    pub fn deoptimization_transients_live(&self) -> bool {
+        self.pending_await.is_some()
+            || self.pending_call.is_some()
+            || self.completed_call.is_some()
+            || self.pending_place_mutation.is_some()
+            || self.sequence_assignment_register.is_some()
+            || !self.captured_sequences.is_empty()
+            || self.has_contextual_progress()
+    }
+
     pub fn materialize_deoptimization(
         &mut self,
         frame: &runmat_native_codegen::NativeFrameState,
         site: &runmat_native_codegen::NativeMirSite,
     ) -> NativeExecutorResult<MaterializedFrame> {
+        if self.deoptimization_transients_live() {
+            return Err(NativeExecutorError::Host(
+                "native deoptimization cannot materialize while contextual execution state is live"
+                    .into(),
+            ));
+        }
         let bytecode_pc = self
             .interpreter_resume_supported(site)
             .then(|| self.interpreter_resume_points.get(&frame.point).copied())
@@ -145,9 +210,7 @@ impl HostState {
     }
 
     fn interpreter_resume_supported(&self, site: &runmat_native_codegen::NativeMirSite) -> bool {
-        if self.pending_await.is_some()
-            || self.pending_call.is_some()
-            || self.pending_place_mutation.is_some()
+        if self.deoptimization_transients_live()
             || self.last_error.is_some()
             || !self.active_for_loops.is_empty()
             || !self.active_exception_handlers.is_empty()

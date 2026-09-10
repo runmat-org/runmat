@@ -15,9 +15,13 @@ use super::state::FlowState;
 use crate::analysis::inference::FunctionSummary;
 use crate::analysis::inference::{
     apply_rvalue_contract, assign_place, infer_rvalue, infer_rvalue_outputs, operand_fact,
-    rvalue_literal,
+    rvalue_literal, statement_contract_with_facts,
 };
 use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
+
+#[path = "flow/call_observations.rs"]
+mod call_observations;
+pub(crate) use call_observations::CallObservation;
 
 const WIDEN_AFTER_UPDATE: usize = 4;
 const MAX_BLOCK_UPDATES: usize = 64;
@@ -30,14 +34,6 @@ pub(crate) struct BodyFlow {
     pub converged: bool,
     pub diagnostics: Vec<crate::MirDiagnostic>,
     pub calls: Vec<CallObservation>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CallObservation {
-    pub callee: FunctionId,
-    pub arguments: Vec<ValueFact>,
-    pub span: Span,
-    pub argument_spans: Vec<Span>,
 }
 
 pub(crate) fn analyze_body(
@@ -123,7 +119,7 @@ pub(crate) fn analyze_body(
         );
         let mut pending_mutation = None;
         for (statement_index, statement) in block.statements.iter().enumerate() {
-            collect_call_observation(statement, &state, &mut calls);
+            call_observations::collect(statement, &state, summaries, &mut calls);
             transfer_statement(
                 statement,
                 &mut state,
@@ -165,51 +161,6 @@ pub(crate) fn analyze_body(
         converged,
         diagnostics,
         calls,
-    }
-}
-
-fn collect_call_observation(
-    statement: &MirStmt,
-    state: &FlowState,
-    calls: &mut Vec<CallObservation>,
-) {
-    let value = match &statement.kind {
-        MirStmtKind::Assign { value, .. }
-        | MirStmtKind::MultiAssign { value, .. }
-        | MirStmtKind::Expr(value) => value,
-        _ => return,
-    };
-    match value {
-        MirRvalue::Call(call) => {
-            let callee = match &call.callee {
-                crate::MirCallee::Static(
-                    runmat_hir::CallableIdentity::BoundFunction(function)
-                    | runmat_hir::CallableIdentity::AnonymousFunction(function)
-                    | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
-                ) => *function,
-                _ => return,
-            };
-            calls.push(CallObservation {
-                callee,
-                arguments: call
-                    .args
-                    .iter()
-                    .map(|argument| operand_fact(argument.operand(), state))
-                    .collect(),
-                span: statement.span,
-                argument_spans: call.arg_spans.clone(),
-            });
-        }
-        MirRvalue::Future { function, args, .. } => calls.push(CallObservation {
-            callee: *function,
-            arguments: args
-                .iter()
-                .map(|argument| operand_fact(argument.operand(), state))
-                .collect(),
-            span: statement.span,
-            argument_spans: Vec::new(),
-        }),
-        _ => {}
     }
 }
 
@@ -263,17 +214,56 @@ fn transfer_statement(
                 diagnostics,
             );
             for (index, target) in targets.targets.iter().enumerate() {
-                if let MirOutputTarget::Place(place) = target {
-                    assign_place(
+                match target {
+                    MirOutputTarget::Place(place) => assign_place(
                         place,
                         outputs.get(index).cloned().unwrap_or_else(dynamic_value),
                         LiteralValue::Unknown,
                         pending_mutation.take().as_ref(),
                         state,
+                    ),
+                    MirOutputTarget::Sequence(target) => {
+                        if let Some(local) = place_root_local(target.base()) {
+                            if let Some(fact) = state.locals.get_mut(local.0) {
+                                fact.set(
+                                    ValueFact::unknown(DynamicReason::RuntimeValue),
+                                    LiteralValue::Unknown,
+                                );
+                            }
+                        }
+                    }
+                    MirOutputTarget::Discard => {}
+                }
+            }
+            apply_rvalue_contract(value, state, summaries);
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            transfer_short_circuit_temps(value, state, summaries, diagnostics);
+            let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
+            let base = match target {
+                crate::MirSequenceTarget::Member { base, .. }
+                | crate::MirSequenceTarget::DynamicMember { base, .. }
+                | crate::MirSequenceTarget::CellContents { base, .. } => base,
+            };
+            if let Some(local) = place_root_local(base) {
+                if let Some(fact) = state.locals.get_mut(local.0) {
+                    fact.set(
+                        ValueFact::unknown(DynamicReason::RuntimeValue),
+                        LiteralValue::Unknown,
                     );
                 }
             }
             apply_rvalue_contract(value, state, summaries);
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            source.visit_outer_operands(|operand| {
+                let _ = operand_fact(operand, state);
+            });
+            let facts = state.value_facts();
+            let (effects, capabilities) =
+                statement_contract_with_facts(statement, summaries, &facts);
+            state.effects.0.extend(effects.0);
+            state.capabilities.0.extend(capabilities.0);
         }
         MirStmtKind::Expr(value) => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
@@ -302,6 +292,16 @@ fn transfer_statement(
                 }
             }
         }
+    }
+}
+
+fn place_root_local(place: &crate::MirPlace) -> Option<crate::MirLocalId> {
+    match place {
+        crate::MirPlace::Local(local) => Some(*local),
+        crate::MirPlace::Binding(_) => None,
+        crate::MirPlace::Member(base, _)
+        | crate::MirPlace::DynamicMember(base, _)
+        | crate::MirPlace::Index(base, _) => place_root_local(base),
     }
 }
 
@@ -515,4 +515,97 @@ fn block_entry_span(block: &BasicBlock) -> Span {
 
 fn dynamic_value() -> ValueFact {
     ValueFact::unknown(DynamicReason::Unspecified)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_calls_do_not_hide_static_calls_in_contextual_arguments() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main(callable, values, flag)
+  out = callable(values{[flag && helper(1 + 2), end]});
+end
+function out = helper(index)
+  out = index;
+end
+"#,
+        )
+        .expect("parse fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower HIR fixture");
+        let mir = crate::lowering::lower_assembly(&hir.assembly).expect("lower MIR fixture");
+        let program = super::super::interprocedural::analyze_program(&mir);
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let main = by_name["main"];
+        let flow = analyze_body(
+            &mir.bodies[&main],
+            ProgramFunctionId(u32::try_from(main.0).unwrap()),
+            &program.parameters[&main],
+            &program.captures[&main],
+            &program.summaries,
+        );
+        let helper = by_name["helper"];
+        let observations = flow
+            .calls
+            .iter()
+            .filter(|observation| observation.callee == helper)
+            .collect::<Vec<_>>();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].arguments.len(), 1);
+        assert!(matches!(
+            observations[0].arguments[0].kind,
+            ValueKindFact::Numeric(_)
+        ));
+        assert_eq!(
+            observations[0].arguments[0].shape.known_dims(),
+            Some(vec![Some(1), Some(1)])
+        );
+    }
+
+    #[test]
+    fn ordinary_short_circuit_calls_are_observed_once() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main(flag)
+  out = flag && helper(1 + 2);
+end
+function out = helper(value)
+  out = value;
+end
+"#,
+        )
+        .expect("parse fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower HIR fixture");
+        let mir = crate::lowering::lower_assembly(&hir.assembly).expect("lower MIR fixture");
+        let program = super::super::interprocedural::analyze_program(&mir);
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let main = by_name["main"];
+        let flow = analyze_body(
+            &mir.bodies[&main],
+            ProgramFunctionId(u32::try_from(main.0).unwrap()),
+            &program.parameters[&main],
+            &program.captures[&main],
+            &program.summaries,
+        );
+        let helper = by_name["helper"];
+        assert_eq!(
+            flow.calls
+                .iter()
+                .filter(|observation| observation.callee == helper)
+                .count(),
+            1
+        );
+    }
 }

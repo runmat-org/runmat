@@ -272,6 +272,13 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
             .data
             .iter()
             .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
+        Value::StructArray(array) => array.any_value(|value| {
+            is_numeric_or_resident(value) || contains_numeric_or_resident(value)
+        }),
         _ => false,
     }
 }
@@ -280,6 +287,8 @@ fn contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(contains_resident),
+        Value::Struct(value) => value.fields.values().any(contains_resident),
+        Value::StructArray(array) => array.any_value(contains_resident),
         _ => false,
     }
 }

@@ -334,6 +334,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             Err(ifftshift_error(&IFFTSHIFT_ERROR_INVALID_INPUT))
         }
         Value::Struct(_)
+        | Value::StructArray(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)

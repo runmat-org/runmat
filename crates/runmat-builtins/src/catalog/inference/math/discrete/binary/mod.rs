@@ -26,7 +26,7 @@ pub(super) fn infer(
     };
     let count = match operation {
         BinaryNumberTheoryRule::Lcm => 1,
-        BinaryNumberTheoryRule::Gcd => request.outputs.requested.fixed_count().min(3),
+        BinaryNumberTheoryRule::Gcd => request.outputs.requested.known_count().unwrap_or(3).min(3),
     };
     if operation == BinaryNumberTheoryRule::Gcd
         && count >= 2

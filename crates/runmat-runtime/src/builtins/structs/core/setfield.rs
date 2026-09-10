@@ -29,7 +29,7 @@ use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, NumericScalar, ObjectInstance,
-    StructValue, Tensor, Value,
+    StructArray, StructValue, Tensor, Value,
 };
 use std::convert::TryFrom;
 
@@ -466,7 +466,7 @@ async fn assign_with_leading_index(
     rhs: Value,
 ) -> BuiltinResult<Value> {
     match base {
-        Value::Cell(cell) => assign_into_struct_array(cell, selector, steps, rhs).await,
+        Value::StructArray(array) => assign_into_struct_array(array, selector, steps, rhs).await,
         other => Err(setfield_flow(format!(
             "setfield: leading indices require a struct array, got {other:?}"
         ))),
@@ -481,8 +481,8 @@ async fn assign_without_leading_index(
     match base {
         Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
         Value::Object(object) => assign_into_object(object, steps, rhs).await,
-        Value::Cell(cell) if is_struct_array(&cell) => {
-            if cell.data.is_empty() {
+        Value::StructArray(array) => {
+            if array.is_empty() {
                 Err(setfield_flow(
                     "setfield: struct array is empty; supply indices in a cell array",
                 ))
@@ -490,7 +490,7 @@ async fn assign_without_leading_index(
                 let selector = IndexSelector {
                     components: vec![IndexComponent::Scalar(1)],
                 };
-                assign_into_struct_array(cell, &selector, steps, rhs).await
+                assign_into_struct_array(array, &selector, steps, rhs).await
             }
         }
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs).await,
@@ -505,7 +505,7 @@ async fn assign_without_leading_index(
 }
 
 async fn assign_into_struct_array(
-    mut cell: CellArray,
+    array: StructArray,
     selector: &IndexSelector,
     steps: &[FieldStep],
     rhs: Value,
@@ -516,41 +516,46 @@ async fn assign_into_struct_array(
         ));
     }
 
-    let resolved = resolve_indices(&Value::Cell(cell.clone()), selector)?;
+    let resolved = resolve_struct_array_indices(&array, selector)?;
+    let selectors = resolved
+        .iter()
+        .copied()
+        .map(crate::indexing::selectors::SliceSelector::Scalar)
+        .collect::<Vec<_>>();
+    let plan = crate::indexing::plan::build_index_plan(&selectors, resolved.len(), array.shape())
+        .map_err(|_| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?;
+    let position = usize::try_from(plan.indices[0])
+        .map_err(|_| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?;
 
-    let position = match resolved.len() {
-        1 => {
-            let idx = resolved[0];
-            if idx == 0 || idx > cell.data.len() {
-                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
-            }
-            idx - 1
-        }
-        2 => {
-            let row = resolved[0];
-            let col = resolved[1];
-            if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
-            }
-            (row - 1) * cell.cols + (col - 1)
-        }
-        _ => {
-            return Err(setfield_flow(
-                "setfield: indexing with more than two indices is not supported yet",
-            ));
-        }
+    let mut array = array;
+    let current = array
+        .get_linear(position)
+        .map(|element| element.to_owned())
+        .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?;
+    let updated = assign_into_value(Value::Struct(current), steps, rhs).await?;
+    let Value::Struct(updated) = updated else {
+        return Err(setfield_flow(
+            "setfield: structure-array element update did not produce a structure",
+        ));
     };
 
-    let handle = cell
-        .data
-        .get(position)
-        .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
-        .clone();
-
-    let current = handle.clone();
-    let updated = assign_into_value(current, steps, rhs).await?;
-    cell.data[position] = updated;
-    Ok(Value::Cell(cell))
+    let new_fields = updated
+        .field_names()
+        .filter(|name| !array.field_names().any(|existing| existing == *name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for field in new_fields {
+        array
+            .insert_field(
+                field,
+                vec![Value::Tensor(Tensor::zeros(vec![0, 0])); array.len()],
+            )
+            .map_err(setfield_flow)?;
+    }
+    array = array
+        .replace_linear_scalar(&[position], updated)
+        .map_err(setfield_flow)?;
+    Ok(Value::StructArray(array))
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -560,6 +565,12 @@ async fn assign_into_value(value: Value, steps: &[FieldStep], rhs: Value) -> Bui
     }
     match value {
         Value::Struct(struct_value) => assign_into_struct(struct_value, steps, rhs).await,
+        Value::StructArray(array) => {
+            let selector = IndexSelector {
+                components: vec![IndexComponent::Scalar(1)],
+            };
+            assign_into_struct_array(array, &selector, steps, rhs).await
+        }
         Value::Object(object) => assign_into_object(object, steps, rhs).await,
         Value::Cell(cell) => assign_into_cell(cell, steps, rhs).await,
         Value::HandleObject(handle) => assign_into_handle(handle, steps, rhs).await,
@@ -1275,10 +1286,27 @@ fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec
     Ok(resolved)
 }
 
+fn resolve_struct_array_indices(
+    array: &StructArray,
+    selector: &IndexSelector,
+) -> BuiltinResult<Vec<usize>> {
+    let dims = selector.components.len();
+    selector
+        .components
+        .iter()
+        .enumerate()
+        .map(|(dimension, component)| match component {
+            IndexComponent::Scalar(index) => Ok(*index),
+            IndexComponent::End => struct_array_dimension_length(array, dims, dimension),
+        })
+        .collect()
+}
+
 fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => tensor_dimension_length(tensor, dims, dim_idx),
         Value::Cell(cell) => cell_dimension_length(cell, dims, dim_idx),
+        Value::StructArray(array) => struct_array_dimension_length(array, dims, dim_idx),
         Value::StringArray(array) => string_array_dimension_length(array, dims, dim_idx),
         Value::LogicalArray(logical) => logical_array_dimension_length(logical, dims, dim_idx),
         Value::CharArray(array) => char_array_dimension_length(array, dims, dim_idx),
@@ -1348,6 +1376,36 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
         ));
     }
     Ok(len)
+}
+
+fn struct_array_dimension_length(
+    array: &StructArray,
+    dims: usize,
+    dim_idx: usize,
+) -> BuiltinResult<usize> {
+    if dims == 1 {
+        return nonzero_dimension_length(array.len());
+    }
+    let shape = array.shape();
+    let extent = if dim_idx + 1 == dims && dims <= shape.len() {
+        shape[dim_idx..]
+            .iter()
+            .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+            .ok_or_else(|| setfield_flow("setfield: structure-array dimensions overflow"))?
+    } else {
+        shape.get(dim_idx).copied().unwrap_or(1)
+    };
+    nonzero_dimension_length(extent)
+}
+
+fn nonzero_dimension_length(length: usize) -> BuiltinResult<usize> {
+    if length == 0 {
+        Err(setfield_flow(
+            "Index exceeds the number of array elements (0).",
+        ))
+    } else {
+        Ok(length)
+    }
 }
 
 fn string_array_dimension_length(
@@ -1506,12 +1564,6 @@ fn value_to_bool(value: Value) -> BuiltinResult<bool> {
     }
 }
 
-fn is_struct_array(cell: &CellArray) -> bool {
-    cell.data
-        .iter()
-        .all(|handle| matches!(handle, Value::Struct(_)))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1589,12 +1641,11 @@ pub(crate) mod tests {
         let mut b = StructValue::new();
         b.fields
             .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-        let array = CellArray::new_with_shape(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2])
-            .unwrap();
+        let array = StructArray::new(vec![a, b], vec![1, 2]).unwrap();
         let indices =
             CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
         let updated = run_setfield(
-            Value::Cell(array),
+            Value::StructArray(array),
             vec![
                 Value::Cell(indices),
                 Value::from("id"),
@@ -1603,16 +1654,11 @@ pub(crate) mod tests {
         )
         .expect("setfield");
         match updated {
-            Value::Cell(cell) => {
-                let second = &cell.data[1].clone();
-                match second {
-                    Value::Struct(st) => {
-                        assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
-                    }
-                    other => panic!("expected struct element, got {other:?}"),
-                }
-            }
-            other => panic!("expected cell array, got {other:?}"),
+            Value::StructArray(array) => assert_eq!(
+                array.get_linear(1).unwrap().fields.get("id"),
+                Some(&Value::Int(IntValue::I32(42)))
+            ),
+            other => panic!("expected structure array, got {other:?}"),
         }
     }
 
@@ -1624,15 +1670,14 @@ pub(crate) mod tests {
         let mut b = StructValue::new();
         b.fields
             .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-        let array = CellArray::new_with_shape(vec![Value::Struct(a), Value::Struct(b)], vec![1, 2])
-            .unwrap();
+        let array = StructArray::new(vec![a, b], vec![1, 2]).unwrap();
         let index_tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("index tensor");
         let indices = CellArray::new_with_shape(vec![Value::Tensor(index_tensor)], vec![1, 1])
             .expect("index cell");
 
         let updated = run_setfield(
-            Value::Cell(array),
+            Value::StructArray(array),
             vec![
                 Value::Cell(indices),
                 Value::from("id"),
@@ -1641,13 +1686,11 @@ pub(crate) mod tests {
         )
         .expect("setfield");
         match updated {
-            Value::Cell(cell) => match &cell.data[1] {
-                Value::Struct(st) => {
-                    assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(42))));
-                }
-                other => panic!("expected struct element, got {other:?}"),
-            },
-            other => panic!("expected cell array, got {other:?}"),
+            Value::StructArray(array) => assert_eq!(
+                array.get_linear(1).unwrap().fields.get("id"),
+                Some(&Value::Int(IntValue::I32(42)))
+            ),
+            other => panic!("expected structure array, got {other:?}"),
         }
 
         assert!(parse_positive_scalar(&Value::Num(usize::MAX as f64)).is_err());
@@ -1810,14 +1853,10 @@ pub(crate) mod tests {
         second
             .fields
             .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-        let array = CellArray::new_with_shape(
-            vec![Value::Struct(first), Value::Struct(second)],
-            vec![1, 2],
-        )
-        .unwrap();
+        let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
         let index_cell = CellArray::new_with_shape(vec![Value::from("end")], vec![1, 1]).unwrap();
         let updated = run_setfield(
-            Value::Cell(array),
+            Value::StructArray(array),
             vec![
                 Value::Cell(index_cell),
                 Value::from("id"),
@@ -1826,16 +1865,11 @@ pub(crate) mod tests {
         )
         .expect("setfield");
         match updated {
-            Value::Cell(cell) => {
-                let second = &cell.data[1].clone();
-                match second {
-                    Value::Struct(st) => {
-                        assert_eq!(st.fields.get("id"), Some(&Value::Int(IntValue::I32(99))));
-                    }
-                    other => panic!("expected struct element, got {other:?}"),
-                }
-            }
-            other => panic!("expected cell array result, got {other:?}"),
+            Value::StructArray(array) => assert_eq!(
+                array.get_linear(1).unwrap().fields.get("id"),
+                Some(&Value::Int(IntValue::I32(99)))
+            ),
+            other => panic!("expected structure array result, got {other:?}"),
         }
     }
 

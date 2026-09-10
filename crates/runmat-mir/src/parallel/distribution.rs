@@ -136,6 +136,66 @@ impl MirDistributedOp {
         [Some(primary), secondary, tertiary].into_iter().flatten()
     }
 
+    pub fn for_each_operand_mut(&mut self, mut operation: impl FnMut(&mut MirOperand)) {
+        match self {
+            Self::Create { input, .. }
+            | Self::LocalPart { value: input }
+            | Self::Materialize { value: input }
+            | Self::Codistributor { value: input } => operation(input),
+            Self::Codistributed {
+                input, overload, ..
+            } => {
+                operation(input);
+                match overload {
+                    MirCodistributedOverload::ReplicatedInputDefault => {}
+                    MirCodistributedOverload::CodistributorOrDesignatedWorker { operand } => {
+                        operation(operand)
+                    }
+                    MirCodistributedOverload::DesignatedWorkerWithCodistributor {
+                        worker,
+                        codistributor,
+                    } => {
+                        operation(worker);
+                        operation(codistributor);
+                    }
+                }
+            }
+            Self::Build {
+                local_part,
+                codistributor,
+                validation,
+                ..
+            } => {
+                operation(local_part);
+                if let Some(codistributor) = codistributor {
+                    operation(codistributor);
+                }
+                if let MirDistributedBuildValidation::RuntimeOption(option) = validation {
+                    operation(option);
+                }
+            }
+            Self::GlobalIndices {
+                value,
+                dimension,
+                lab,
+                ..
+            } => {
+                operation(value);
+                operation(dimension);
+                if let Some(lab) = lab {
+                    operation(lab);
+                }
+            }
+            Self::Redistribute {
+                value,
+                codistributor,
+            } => {
+                operation(value);
+                operation(codistributor);
+            }
+        }
+    }
+
     pub fn input_mut(&mut self) -> &mut MirOperand {
         match self {
             Self::Create { input, .. }

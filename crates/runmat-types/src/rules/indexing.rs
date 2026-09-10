@@ -24,7 +24,16 @@ pub fn infer_index(
         }
         (ValueKindFact::Struct(structure), IndexKind::Paren) => {
             let mut result = container_result(base, selectors);
-            result.kind = ValueKindFact::Struct(structure.clone());
+            result.kind = if let Some(index) =
+                known_linear_index(&base.shape, selectors).filter(|_| structure.elements_complete)
+            {
+                structure.elements.get(index).map_or_else(
+                    || ValueKindFact::Struct(structure.clone()),
+                    |fields| ValueKindFact::Struct(crate::StructFact::scalar(fields.clone(), true)),
+                )
+            } else {
+                ValueKindFact::Struct(structure.clone())
+            };
             return FactInference::exact(result);
         }
         (ValueKindFact::Object(object), IndexKind::Paren) => {

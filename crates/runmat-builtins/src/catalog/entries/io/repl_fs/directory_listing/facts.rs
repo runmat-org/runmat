@@ -13,10 +13,7 @@ pub(super) fn metadata_listing() -> ValueFact {
         ("isdir".into(), ValueFact::scalar(ValueKindFact::Logical)),
         ("name".into(), character_row()),
     ]);
-    let element = ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields,
-        fields_complete: true,
-    }));
+    let element = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, true)));
     ValueFact::proven(
         ValueKindFact::Cell(CellFact {
             element: Box::new(element),

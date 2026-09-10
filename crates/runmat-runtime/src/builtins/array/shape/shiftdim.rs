@@ -430,6 +430,7 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
         Value::StringArray(array) => Ok(array.shape.clone()),
         Value::CharArray(array) => Ok(array.shape.clone()),
         Value::Cell(array) => Ok(array.shape.clone()),
+        Value::StructArray(array) => Ok(array.shape().to_vec()),
         Value::GpuTensor(handle) => Ok(handle.shape.clone()),
         Value::Num(_)
         | Value::Int(_)
@@ -492,6 +493,10 @@ async fn permute_value(value: Value, order: &[usize]) -> crate::BuiltinResult<Va
                 .map(Value::Cell)
                 .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
         }
+        Value::StructArray(array) => array
+            .permute(order)
+            .map(Value::StructArray)
+            .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
         Value::GpuTensor(handle) => permute_gpu(handle, order).await,
         Value::Num(_)
         | Value::Int(_)
@@ -529,6 +534,10 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
             .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
         Value::Cell(array) => CellArray::from_column_major(array.to_column_major(), shape.to_vec())
             .map(Value::Cell)
+            .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
+        Value::StructArray(array) => array
+            .reshape(shape.to_vec())
+            .map(Value::StructArray)
             .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error)),
         Value::CharArray(array) => reshape_char(array, shape).map(Value::CharArray),
         Value::GpuTensor(handle) => reshape_gpu(handle, shape),

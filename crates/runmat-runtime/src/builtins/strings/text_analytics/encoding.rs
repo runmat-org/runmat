@@ -598,6 +598,7 @@ fn value_contains_resident(value: &Value) -> bool {
         Value::GpuTensor(_) => true,
         Value::Cell(value) => value.data.iter().any(value_contains_resident),
         Value::Struct(value) => value.fields.values().any(value_contains_resident),
+        Value::StructArray(array) => array.any_value(value_contains_resident),
         Value::Object(value) => value.properties.values().any(value_contains_resident),
         Value::Closure(value) => value.captures.iter().any(value_contains_resident),
         Value::OutputList(values) => values.iter().any(value_contains_resident),

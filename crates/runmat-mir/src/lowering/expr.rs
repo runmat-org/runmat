@@ -1,6 +1,7 @@
 use crate::{
-    MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan,
-    MirIndexing, MirOperand, MirPlace, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
+    MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirExpansionSource,
+    MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand, MirPlace, MirRvalue,
+    MirShortCircuitOp, MirStmt, MirStmtKind,
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
@@ -79,14 +80,12 @@ pub(crate) fn lower_expr_with_replacements(
         },
         HirExprKind::Tensor(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Tensor,
-            rows: rows.len(),
-            cols: aggregate_col_count(rows),
+            row_lengths: rows.iter().map(Vec::len).collect(),
             elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::Cell(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Cell,
-            rows: rows.len(),
-            cols: aggregate_col_count(rows),
+            row_lengths: rows.iter().map(Vec::len).collect(),
             elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::StructLiteral(fields) => MirRvalue::StructLiteral {
@@ -160,13 +159,29 @@ pub(crate) fn lower_expr_with_replacements(
             base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             indexing: lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
         },
-        HirExprKind::Member(base, member) => MirRvalue::Member {
+        HirExprKind::SubscriptChain(chain) => MirRvalue::SubscriptChain(lower_subscript_chain(
+            ctx,
+            chain,
+            temps,
+            await_replacements,
+        )?),
+        HirExprKind::Member {
+            base,
+            member,
+            sequence_use,
+        } => MirRvalue::Member {
             base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             member: member.clone(),
+            sequence_use: *sequence_use,
         },
-        HirExprKind::MemberDynamic(base, member) => MirRvalue::DynamicMember {
+        HirExprKind::MemberDynamic {
+            base,
+            member,
+            sequence_use,
+        } => MirRvalue::DynamicMember {
             base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
+            sequence_use: *sequence_use,
         },
         HirExprKind::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -200,6 +215,51 @@ pub(crate) fn lower_expr_with_replacements(
     })
 }
 
+fn lower_subscript_chain(
+    ctx: &MirLoweringContext,
+    chain: &runmat_hir::HirSubscriptChain,
+    temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
+) -> Result<crate::MirSubscriptChain, HirError> {
+    let root = lower_operand_with_replacements(ctx, &chain.root, temps, await_replacements)?;
+    let mut steps = Vec::with_capacity(chain.steps.len());
+    for step in &chain.steps {
+        steps.push(match step {
+            runmat_hir::HirSubscriptStep::Index(indexing) => crate::MirSubscriptStep::Index(
+                lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
+            ),
+            runmat_hir::HirSubscriptStep::Member(member) => {
+                crate::MirSubscriptStep::Member(member.clone())
+            }
+            runmat_hir::HirSubscriptStep::DynamicMember(member) => {
+                crate::MirSubscriptStep::DynamicMember(lower_operand_with_replacements(
+                    ctx,
+                    member,
+                    temps,
+                    await_replacements,
+                )?)
+            }
+            runmat_hir::HirSubscriptStep::DottedInvoke { member, indexing } => {
+                crate::MirSubscriptStep::DottedInvoke {
+                    member: member.clone(),
+                    indexing: lower_indexing_with_replacements(
+                        ctx,
+                        indexing,
+                        temps,
+                        await_replacements,
+                    )?,
+                }
+            }
+        });
+    }
+    Ok(crate::MirSubscriptChain {
+        root,
+        steps,
+        sequence_use: chain.sequence_use,
+        context: chain.context,
+    })
+}
+
 fn lower_parallel_intrinsic(
     ctx: &MirLoweringContext,
     call: &runmat_hir::HirCall,
@@ -222,7 +282,10 @@ fn lower_parallel_intrinsic(
         args.iter()
             .map(|argument| match argument {
                 MirCallArg::Single(value) => Ok(value.clone()),
-                MirCallArg::Expansion { .. } => Err(HirError::new(format!(
+                MirCallArg::Expansion(_) => Err(HirError::new(format!(
+                    "{name}: comma-list expansion is not valid for a parallel primitive"
+                ))),
+                MirCallArg::CapturedSequence(_) => Err(HirError::new(format!(
                     "{name}: comma-list expansion is not valid for a parallel primitive"
                 ))),
             })
@@ -339,7 +402,10 @@ fn lower_parallel_intrinsic(
         ParallelIntrinsic::GlobalIndices => {
             let values = operands()?;
             arity(&values, &[2, 3])?;
-            let requested_outputs = u8::try_from(call.requested_outputs.fixed_count())
+            let requested_outputs =
+                u8::try_from(call.requested_outputs.known_count().ok_or_else(|| {
+                    HirError::new("globalIndices requires a statically known output count")
+                })?)
                 .map_err(|_| HirError::new("globalIndices: output count exceeds u8"))?;
             if !(1..=2).contains(&requested_outputs) {
                 return Err(HirError::new("globalIndices: expected one or two outputs"));
@@ -394,7 +460,12 @@ fn lower_parallel_intrinsic(
             let tag = values.get(1).cloned();
             Some(MirRvalue::Collective(
                 if intrinsic == ParallelIntrinsic::LabReceive {
-                    let requested_outputs = u8::try_from(call.requested_outputs.fixed_count())
+                    let requested_outputs =
+                        u8::try_from(call.requested_outputs.known_count().ok_or_else(|| {
+                            HirError::new(format!(
+                                "{name}: requires a statically known output count"
+                            ))
+                        })?)
                         .map_err(|_| HirError::new(format!("{name}: output count exceeds u8")))?;
                     if !(1..=3).contains(&requested_outputs) {
                         return Err(HirError::new(format!(
@@ -475,15 +546,52 @@ fn lower_call_arg(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirCallArg, HirError> {
+    match &arg.kind {
+        HirExprKind::Member {
+            base,
+            member,
+            sequence_use: runmat_types::SequenceUse::ExpandAll,
+        } => {
+            let source = MirExpansionSource::Member {
+                base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+                member: member.clone(),
+            };
+            return Ok(capture_call_sequence(ctx, source, temps, arg.span));
+        }
+        HirExprKind::SubscriptChain(chain)
+            if chain.sequence_use == runmat_types::SequenceUse::ExpandAll =>
+        {
+            let source = MirExpansionSource::SubscriptChain(lower_subscript_chain(
+                ctx,
+                chain,
+                temps,
+                await_replacements,
+            )?);
+            return Ok(capture_call_sequence(ctx, source, temps, arg.span));
+        }
+        HirExprKind::MemberDynamic {
+            base,
+            member,
+            sequence_use: runmat_types::SequenceUse::ExpandAll,
+        } => {
+            let source = MirExpansionSource::DynamicMember {
+                base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+                member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
+            };
+            return Ok(capture_call_sequence(ctx, source, temps, arg.span));
+        }
+        _ => {}
+    }
     if let HirExprKind::Call(call) = &arg.kind {
-        let requested_count = requested_output_count_for_arg_expansion(&call.requested_outputs);
+        let requested_count = requested_output_count_for_arg_expansion(&call.requested_outputs)?;
         if requested_count > 1 {
             let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
-            return Ok(MirCallArg::Expansion {
-                base: operand,
-                indices: Vec::new(),
-                expand_all: true,
-            });
+            return Ok(capture_call_sequence(
+                ctx,
+                MirExpansionSource::ReturnedOutputs(operand),
+                temps,
+                arg.span,
+            ));
         }
     }
 
@@ -501,93 +609,34 @@ fn lower_call_arg(
             ));
         }
         let base = lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
-        let mut indices = Vec::new();
-        let mut saw_colon = false;
-        let mut saw_non_colon = false;
-        for component in &indexing.components {
-            match component {
-                IndexComponent::Colon => {
-                    saw_colon = true;
-                    indices.push(MirOperand::Constant(MirConstant::String(StringLiteral(
-                        ":".to_string(),
-                    ))));
-                }
-                IndexComponent::Expr(expr) => {
-                    saw_non_colon = true;
-                    indices.push(lower_operand_with_replacements(
-                        ctx,
-                        expr,
-                        temps,
-                        await_replacements,
-                    )?);
-                }
-                IndexComponent::Logical(expr) => {
-                    saw_non_colon = true;
-                    indices.push(lower_operand_with_replacements(
-                        ctx,
-                        expr,
-                        temps,
-                        await_replacements,
-                    )?);
-                }
-                IndexComponent::End { offset, .. } => {
-                    saw_non_colon = true;
-                    if *offset == 0 {
-                        let local = ctx.fresh_temp(arg.span);
-                        temps.push(MirStmt {
-                            kind: MirStmtKind::Assign {
-                                place: MirPlace::Local(local),
-                                value: MirRvalue::End,
-                            },
-                            span: arg.span,
-                        });
-                        indices.push(MirOperand::Local(local));
-                    } else {
-                        let end_local = ctx.fresh_temp(arg.span);
-                        temps.push(MirStmt {
-                            kind: MirStmtKind::Assign {
-                                place: MirPlace::Local(end_local),
-                                value: MirRvalue::End,
-                            },
-                            span: arg.span,
-                        });
-                        let local = ctx.fresh_temp(arg.span);
-                        let op = if offset.is_negative() {
-                            OperatorKind::Subtract
-                        } else {
-                            OperatorKind::Add
-                        };
-                        temps.push(MirStmt {
-                            kind: MirStmtKind::Assign {
-                                place: MirPlace::Local(local),
-                                value: MirRvalue::Binary(
-                                    MirOperand::Local(end_local),
-                                    op,
-                                    MirOperand::Constant(MirConstant::Number(
-                                        offset.unsigned_abs().to_string(),
-                                    )),
-                                ),
-                            },
-                            span: arg.span,
-                        });
-                        indices.push(MirOperand::Local(local));
-                    }
-                }
-            }
-        }
-        let expand_all = saw_colon && !saw_non_colon;
-        if expand_all {
-            indices.clear();
-        }
-        Ok(MirCallArg::Expansion {
-            base,
-            indices,
-            expand_all,
-        })
+        let indexing = lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?;
+        Ok(capture_call_sequence(
+            ctx,
+            MirExpansionSource::CellContents { base, indexing },
+            temps,
+            arg.span,
+        ))
     } else {
         let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
         Ok(MirCallArg::Single(operand))
     }
+}
+
+fn capture_call_sequence(
+    ctx: &MirLoweringContext,
+    source: MirExpansionSource,
+    temps: &mut Vec<MirStmt>,
+    span: runmat_hir::Span,
+) -> MirCallArg {
+    let destination = ctx.fresh_sequence_local();
+    temps.push(MirStmt {
+        kind: MirStmtKind::CaptureSequence {
+            destination,
+            source,
+        },
+        span,
+    });
+    MirCallArg::CapturedSequence(destination)
 }
 
 fn lower_aggregate_elements(
@@ -595,15 +644,70 @@ fn lower_aggregate_elements(
     rows: &[Vec<HirExpr>],
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<Vec<MirOperand>, HirError> {
+) -> Result<Vec<crate::MirAggregateElement>, HirError> {
     rows.iter()
         .flat_map(|row| row.iter())
-        .map(|element| lower_operand_with_replacements(ctx, element, temps, await_replacements))
+        .map(|element| {
+            let source = match &element.kind {
+                HirExprKind::Member {
+                    base,
+                    member,
+                    sequence_use: runmat_types::SequenceUse::ExpandAll,
+                } => Some(MirExpansionSource::Member {
+                    base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+                    member: member.clone(),
+                }),
+                HirExprKind::MemberDynamic {
+                    base,
+                    member,
+                    sequence_use: runmat_types::SequenceUse::ExpandAll,
+                } => Some(MirExpansionSource::DynamicMember {
+                    base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+                    member: lower_operand_with_replacements(
+                        ctx,
+                        member,
+                        temps,
+                        await_replacements,
+                    )?,
+                }),
+                HirExprKind::Index(base, indexing)
+                    if indexing.kind == IndexKind::Brace
+                        && matches!(indexing.result_context, IndexResultContext::ReadCommaList) =>
+                {
+                    let base =
+                        lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+                    let indexing =
+                        lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?;
+                    Some(MirExpansionSource::CellContents { base, indexing })
+                }
+                HirExprKind::SubscriptChain(chain)
+                    if chain.sequence_use == runmat_types::SequenceUse::ExpandAll =>
+                {
+                    Some(MirExpansionSource::SubscriptChain(lower_subscript_chain(
+                        ctx,
+                        chain,
+                        temps,
+                        await_replacements,
+                    )?))
+                }
+                _ => None,
+            };
+            if let Some(source) = source {
+                let destination = ctx.fresh_sequence_local();
+                temps.push(MirStmt {
+                    kind: MirStmtKind::CaptureSequence {
+                        destination,
+                        source,
+                    },
+                    span: element.span,
+                });
+                Ok(crate::MirAggregateElement::CapturedSequence(destination))
+            } else {
+                lower_operand_with_replacements(ctx, element, temps, await_replacements)
+                    .map(crate::MirAggregateElement::Single)
+            }
+        })
         .collect()
-}
-
-fn aggregate_col_count(rows: &[Vec<HirExpr>]) -> usize {
-    rows.iter().map(Vec::len).max().unwrap_or(0)
 }
 
 pub(crate) fn lower_indexing(
@@ -647,12 +751,6 @@ fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
             if indexing
                 .components
                 .iter()
-                .any(index_component_needs_slice_expr)
-            {
-                MirIndexPlan::SliceExpr
-            } else if indexing
-                .components
-                .iter()
                 .all(index_component_is_definitely_scalar)
             {
                 MirIndexPlan::Scalar
@@ -663,46 +761,56 @@ fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
     }
 }
 
-fn index_component_needs_slice_expr(component: &IndexComponent) -> bool {
-    match component {
-        IndexComponent::Colon => false,
-        IndexComponent::End { offset, .. } => *offset != 0,
-        IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => {
-            hir_expr_needs_slice_expr(expr)
-        }
-    }
-}
-
-fn hir_expr_needs_slice_expr(expr: &HirExpr) -> bool {
+fn hir_expr_contains_end(expr: &HirExpr) -> bool {
     match &expr.kind {
         HirExprKind::End => true,
-        // Preserve range selectors as structured slice metadata in MIR/bytecode,
-        // rather than reclassifying them at runtime from temporary tensors.
-        HirExprKind::Range(_, _, _) => true,
-        HirExprKind::Unary(_, inner) => hir_expr_needs_slice_expr(inner),
+        HirExprKind::Unary(_, inner) => hir_expr_contains_end(inner),
         HirExprKind::Binary(left, _, right) => {
-            hir_expr_needs_slice_expr(left) || hir_expr_needs_slice_expr(right)
+            hir_expr_contains_end(left) || hir_expr_contains_end(right)
         }
-        HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .any(hir_expr_needs_slice_expr),
-        HirExprKind::Call(call) => call.args.iter().any(hir_expr_needs_slice_expr),
-        HirExprKind::CommandCall(_) => false,
+        HirExprKind::Range(start, step, end) => {
+            hir_expr_contains_end(start)
+                || step.as_deref().is_some_and(hir_expr_contains_end)
+                || hir_expr_contains_end(end)
+        }
+        HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => {
+            rows.iter().flatten().any(hir_expr_contains_end)
+        }
+        HirExprKind::Call(call) => call.args.iter().any(hir_expr_contains_end),
         HirExprKind::Index(base, indexing) => {
-            hir_expr_needs_slice_expr(base)
-                || indexing
-                    .components
-                    .iter()
-                    .any(index_component_needs_slice_expr)
+            hir_expr_contains_end(base)
+                || indexing.components.iter().any(|component| match component {
+                    IndexComponent::End { .. } => true,
+                    IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => {
+                        hir_expr_contains_end(expr)
+                    }
+                    IndexComponent::Colon => false,
+                })
         }
-        HirExprKind::Member(base, _) => hir_expr_needs_slice_expr(base),
-        HirExprKind::MemberDynamic(base, member) => {
-            hir_expr_needs_slice_expr(base) || hir_expr_needs_slice_expr(member)
+        HirExprKind::SubscriptChain(chain) => {
+            hir_expr_contains_end(&chain.root)
+                || chain.steps.iter().any(|step| match step {
+                    runmat_hir::HirSubscriptStep::Index(indexing)
+                    | runmat_hir::HirSubscriptStep::DottedInvoke { indexing, .. } => {
+                        indexing.components.iter().any(|component| match component {
+                            IndexComponent::End { .. } => true,
+                            IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => {
+                                hir_expr_contains_end(expr)
+                            }
+                            IndexComponent::Colon => false,
+                        })
+                    }
+                    runmat_hir::HirSubscriptStep::DynamicMember(member) => {
+                        hir_expr_contains_end(member)
+                    }
+                    runmat_hir::HirSubscriptStep::Member(_) => false,
+                })
         }
-        HirExprKind::WorkspaceFirstStaticProperty { .. } => false,
-        HirExprKind::Spawn(inner) => hir_expr_needs_slice_expr(inner),
-        HirExprKind::Await(inner) => hir_expr_needs_slice_expr(inner),
+        HirExprKind::Member { base, .. } => hir_expr_contains_end(base),
+        HirExprKind::MemberDynamic { base, member, .. } => {
+            hir_expr_contains_end(base) || hir_expr_contains_end(member)
+        }
+        HirExprKind::Spawn(inner) | HirExprKind::Await(inner) => hir_expr_contains_end(inner),
         _ => false,
     }
 }
@@ -725,23 +833,25 @@ fn hir_expr_is_definitely_scalar_index(expr: &HirExpr) -> bool {
 
 fn lower_index_component(
     ctx: &MirLoweringContext,
-    dim: usize,
+    _dim: usize,
     component: &IndexComponent,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexComponent, HirError> {
     Ok(match component {
         IndexComponent::Colon => MirIndexComponent::Colon,
-        IndexComponent::End { dim, offset } => MirIndexComponent::End {
-            dim: *dim,
-            offset: *offset,
-        },
+        IndexComponent::End { offset, .. } => lower_contextual_end(ctx, *offset),
+        IndexComponent::Expr(expr) if hir_expr_contains_end(expr) => {
+            let mut statements = Vec::new();
+            let value =
+                lower_operand_with_replacements(ctx, expr, &mut statements, await_replacements)?;
+            MirIndexComponent::ContextualExpr(crate::MirExpressionRegion::from_lowered(
+                statements, value,
+            )?)
+        }
         IndexComponent::Expr(expr) => match expr.kind {
             HirExprKind::Colon => MirIndexComponent::Colon,
-            HirExprKind::End => MirIndexComponent::End {
-                dim: Some(dim),
-                offset: 0,
-            },
+            HirExprKind::End => lower_contextual_end(ctx, 0),
             _ => MirIndexComponent::Expr(lower_operand_with_replacements(
                 ctx,
                 expr,
@@ -749,6 +859,14 @@ fn lower_index_component(
                 await_replacements,
             )?),
         },
+        IndexComponent::Logical(expr) if hir_expr_contains_end(expr) => {
+            let mut statements = Vec::new();
+            let value =
+                lower_operand_with_replacements(ctx, expr, &mut statements, await_replacements)?;
+            MirIndexComponent::ContextualExpr(crate::MirExpressionRegion::from_lowered(
+                statements, value,
+            )?)
+        }
         IndexComponent::Logical(expr) => MirIndexComponent::Expr(lower_operand_with_replacements(
             ctx,
             expr,
@@ -756,6 +874,44 @@ fn lower_index_component(
             await_replacements,
         )?),
     })
+}
+
+fn lower_contextual_end(ctx: &MirLoweringContext, offset: isize) -> MirIndexComponent {
+    let span = runmat_hir::Span::default();
+    let end_local = ctx.fresh_temp(span);
+    let mut statements = vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(end_local),
+            value: MirRvalue::End,
+        },
+        span,
+    }];
+    let result = if offset == 0 {
+        MirOperand::Local(end_local)
+    } else {
+        let result = ctx.fresh_temp(span);
+        let operator = if offset.is_negative() {
+            runmat_hir::OperatorKind::Subtract
+        } else {
+            runmat_hir::OperatorKind::Add
+        };
+        statements.push(MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(result),
+                value: MirRvalue::Binary(
+                    MirOperand::Local(end_local),
+                    operator,
+                    MirOperand::Constant(MirConstant::Number(offset.unsigned_abs().to_string())),
+                ),
+            },
+            span,
+        });
+        MirOperand::Local(result)
+    };
+    MirIndexComponent::ContextualExpr(
+        crate::MirExpressionRegion::from_lowered(statements, result)
+            .expect("canonical end expression region is valid"),
+    )
 }
 
 fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
@@ -871,8 +1027,12 @@ fn dynamic_call_rvalue(
     }))
 }
 
-fn requested_output_count_for_arg_expansion(requested: &RequestedOutputCount) -> usize {
-    requested.fixed_count()
+fn requested_output_count_for_arg_expansion(
+    requested: &RequestedOutputCount,
+) -> Result<usize, HirError> {
+    requested.executor_carrier_count().ok_or_else(|| {
+        HirError::new("destination output cardinality must be resolved by assignment lowering")
+    })
 }
 
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {

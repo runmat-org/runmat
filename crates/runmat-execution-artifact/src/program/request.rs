@@ -129,7 +129,9 @@ impl ProgramExecutionRequest {
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
             || (matches!(
                 self.artifact.form,
-                ExecutableForm::InterpreterScriptV1 | ExecutableForm::TestAttemptV1
+                ExecutableForm::InterpreterScriptV1
+                    | ExecutableForm::InterpreterScriptV2
+                    | ExecutableForm::TestAttemptV1
             ) && !self.arguments.is_empty())
         {
             return Err(ArtifactError::Invalid(
@@ -137,13 +139,12 @@ impl ProgramExecutionRequest {
             ));
         }
         if self.artifact.form == ExecutableForm::ExecutableUnitV3 {
-            let envelope = self
+            let admission = self
                 .artifact
-                .executable_unit()?
-                .expect("executable-unit form returns its validated envelope");
-            if self.callable.semantic_function()
-                != Some(envelope.manifest.identity.entrypoint_function)
-                || (envelope.manifest.identity.entrypoint_kind
+                .executable_unit_admission()?
+                .expect("executable-unit form returns its validated admission header");
+            if self.callable.semantic_function() != Some(admission.identity.entrypoint_function)
+                || (admission.identity.entrypoint_kind
                     == runmat_execution::ExecutableEntrypointKind::Script
                     && !self.arguments.is_empty())
             {
@@ -168,8 +169,10 @@ impl ProgramExecutionRequest {
 
 fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoint: &str) -> bool {
     match form {
-        ExecutableForm::InterpreterBytecodeV1 => callable.recipe_entrypoint() == entrypoint,
-        ExecutableForm::InterpreterScriptV1 => {
+        ExecutableForm::InterpreterBytecodeV1 | ExecutableForm::InterpreterBytecodeV2 => {
+            callable.recipe_entrypoint() == entrypoint
+        }
+        ExecutableForm::InterpreterScriptV1 | ExecutableForm::InterpreterScriptV2 => {
             callable
                 .semantic_function()
                 .is_some_and(|function| function.0 == 0)
@@ -356,7 +359,7 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"program".to_vec(),
         )
         .unwrap();
@@ -514,7 +517,7 @@ mod tests {
         spmd_request.requested_outputs = 2;
         spmd_request.artifact = ProgramArtifact::materialize(
             &spmd_request.recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"spmd-program".to_vec(),
         )
         .unwrap();

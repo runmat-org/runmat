@@ -76,39 +76,87 @@ fn remap_operand(operand: &mut MirOperand, remap: &HashMap<FunctionId, FunctionI
     }
 }
 
-fn remap_call_arg(argument: &mut MirCallArg, remap: &HashMap<FunctionId, FunctionId>) {
+fn remap_call_arg(
+    argument: &mut MirCallArg,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
     match argument {
         MirCallArg::Single(operand) => remap_operand(operand, remap),
-        MirCallArg::Expansion { base, indices, .. } => {
-            remap_operand(base, remap);
-            for index in indices {
-                remap_operand(index, remap);
+        MirCallArg::Expansion(source) => remap_expansion_source(source, remap)?,
+        MirCallArg::CapturedSequence(_) => {}
+    }
+    Ok(())
+}
+
+fn remap_expansion_source(
+    source: &mut crate::MirExpansionSource,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    match source {
+        crate::MirExpansionSource::SubscriptChain(chain) => {
+            remap_operand(&mut chain.root, remap);
+            for step in &mut chain.steps {
+                match step {
+                    crate::MirSubscriptStep::Index(indexing)
+                    | crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                        remap_indexing(indexing, remap)?
+                    }
+                    crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
+                    crate::MirSubscriptStep::Member(_) => {}
+                }
             }
         }
-    }
-}
-
-fn remap_indexing(indexing: &mut MirIndexing, remap: &HashMap<FunctionId, FunctionId>) {
-    for component in &mut indexing.components {
-        if let MirIndexComponent::Expr(operand) = component {
-            remap_operand(operand, remap);
+        crate::MirExpansionSource::CellContents { base, indexing } => {
+            remap_operand(base, remap);
+            remap_indexing(indexing, remap)?;
+        }
+        crate::MirExpansionSource::ReturnedOutputs(base)
+        | crate::MirExpansionSource::Member { base, .. } => remap_operand(base, remap),
+        crate::MirExpansionSource::DynamicMember { base, member } => {
+            remap_operand(base, remap);
+            remap_operand(member, remap);
         }
     }
+    Ok(())
 }
 
-fn remap_place(place: &mut MirPlace, remap: &HashMap<FunctionId, FunctionId>) {
+fn remap_indexing(
+    indexing: &mut MirIndexing,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    for component in &mut indexing.components {
+        match component {
+            MirIndexComponent::Expr(operand) => remap_operand(operand, remap),
+            MirIndexComponent::ContextualExpr(region) => {
+                region.try_visit_rvalues_mut(|value| remap_rvalue(value, remap))?;
+                region.try_visit_capture_sources_mut(|source| {
+                    remap_expansion_source(source, remap)
+                })?;
+                remap_operand(region.result_mut(), remap);
+            }
+            MirIndexComponent::Colon => {}
+        }
+    }
+    Ok(())
+}
+
+fn remap_place(
+    place: &mut MirPlace,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
     match place {
         MirPlace::DynamicMember(base, member) => {
-            remap_place(base, remap);
+            remap_place(base, remap)?;
             remap_operand(member, remap);
         }
         MirPlace::Index(base, indexing) => {
-            remap_place(base, remap);
-            remap_indexing(indexing, remap);
+            remap_place(base, remap)?;
+            remap_indexing(indexing, remap)?;
         }
-        MirPlace::Member(base, _) => remap_place(base, remap),
+        MirPlace::Member(base, _) => remap_place(base, remap)?,
         MirPlace::Local(_) | MirPlace::Binding(_) => {}
     }
+    Ok(())
 }
 
 fn remap_rvalue(
@@ -149,12 +197,14 @@ fn remap_rvalue(
                 MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => {}
             }
             for argument in &mut call.args {
-                remap_call_arg(argument, remap);
+                remap_call_arg(argument, remap)?;
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                remap_operand(element, remap);
+                if let Some(operand) = element.operand_mut() {
+                    remap_operand(operand, remap);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -164,17 +214,30 @@ fn remap_rvalue(
         }
         MirRvalue::Index { base, indexing } => {
             remap_operand(base, remap);
-            remap_indexing(indexing, remap);
+            remap_indexing(indexing, remap)?;
+        }
+        MirRvalue::SubscriptChain(chain) => {
+            remap_operand(&mut chain.root, remap);
+            for step in &mut chain.steps {
+                match step {
+                    crate::MirSubscriptStep::Index(indexing)
+                    | crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                        remap_indexing(indexing, remap)?
+                    }
+                    crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
+                    crate::MirSubscriptStep::Member(_) => {}
+                }
+            }
         }
         MirRvalue::Member { base, .. } => remap_operand(base, remap),
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             remap_operand(base, remap);
             remap_operand(member, remap);
         }
         MirRvalue::Future { function, args, .. } => {
             *function = mapped(*function, remap);
             for argument in args {
-                remap_call_arg(argument, remap);
+                remap_call_arg(argument, remap)?;
             }
         }
         MirRvalue::Distributed(operation) => remap_distributed(operation, remap)?,
@@ -193,20 +256,59 @@ fn remap_statement(
 ) -> Result<(), String> {
     match &mut statement.kind {
         MirStmtKind::Assign { place, value } => {
-            remap_place(place, remap);
+            remap_place(place, remap)?;
             remap_rvalue(value, remap)?;
         }
         MirStmtKind::MultiAssign { targets, value } => {
             for target in &mut targets.targets {
-                if let crate::MirOutputTarget::Place(place) = target {
-                    remap_place(place, remap);
+                match target {
+                    crate::MirOutputTarget::Place(place) => remap_place(place, remap)?,
+                    crate::MirOutputTarget::Sequence(target) => {
+                        remap_sequence_target(target, remap)?
+                    }
+                    crate::MirOutputTarget::Discard => {}
                 }
             }
             remap_rvalue(value, remap)?;
         }
+        MirStmtKind::SequenceAssign { target, value } => {
+            match target {
+                crate::MirSequenceTarget::Member { base, .. } => remap_place(base, remap)?,
+                crate::MirSequenceTarget::DynamicMember { base, member } => {
+                    remap_place(base, remap)?;
+                    remap_operand(member, remap);
+                }
+                crate::MirSequenceTarget::CellContents { base, indexing } => {
+                    remap_place(base, remap)?;
+                    remap_indexing(indexing, remap)?;
+                }
+            }
+            remap_rvalue(value, remap)?;
+        }
+        MirStmtKind::CaptureSequence { source, .. } => {
+            remap_expansion_source(source, remap)?;
+        }
         MirStmtKind::Expr(value) => remap_rvalue(value, remap)?,
-        MirStmtKind::PlaceMutation(mutation) => remap_place(&mut mutation.place, remap),
+        MirStmtKind::PlaceMutation(mutation) => remap_place(&mut mutation.place, remap)?,
         MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+    Ok(())
+}
+
+fn remap_sequence_target(
+    target: &mut crate::MirSequenceTarget,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    match target {
+        crate::MirSequenceTarget::Member { base, .. } => remap_place(base, remap)?,
+        crate::MirSequenceTarget::DynamicMember { base, member } => {
+            remap_place(base, remap)?;
+            remap_operand(member, remap);
+        }
+        crate::MirSequenceTarget::CellContents { base, indexing } => {
+            remap_place(base, remap)?;
+            remap_indexing(indexing, remap)?;
+        }
     }
     Ok(())
 }
@@ -260,7 +362,7 @@ fn remap_terminator(
         MirTerminatorKind::Await { future, result, .. } => {
             remap_operand(future, remap);
             if let Some(result) = result {
-                remap_place(result, remap);
+                remap_place(result, remap)?;
             }
         }
         MirTerminatorKind::Goto(_)

@@ -7,6 +7,7 @@ pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 4;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
+const MAX_RUNTIME_MANIFEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -67,16 +68,46 @@ pub struct RuntimeArchiveManifest {
     pub native_link_tokens: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct RuntimeArchiveManifestAdmission {
+    schema_version: u16,
+    native_ir_schema_version: u16,
+    native_object_schema_version: u16,
+}
+
 impl RuntimeArchiveManifest {
-    pub fn validate(&self) -> AotResult<()> {
-        if self.schema_version != RUNTIME_ARCHIVE_SCHEMA_VERSION
-            || self.runmat_version != env!("CARGO_PKG_VERSION")
-            || self.native_ir_schema_version != runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
-            || self.native_object_schema_version != NATIVE_OBJECT_SCHEMA_VERSION
-        {
+    /// Admit the revision header before decoding revision-sensitive manifest
+    /// fields such as targets, capabilities, and native link tokens.
+    pub fn from_json(bytes: &[u8]) -> AotResult<Self> {
+        if bytes.len() > MAX_RUNTIME_MANIFEST_BYTES {
             return Err(AotError::contract(
-                "aot.archive.schema",
-                "runtime archive schema or RunMat compiler version is incompatible",
+                "aot.archive.manifest",
+                format!(
+                    "runtime archive manifest exceeds its {MAX_RUNTIME_MANIFEST_BYTES}-byte bound"
+                ),
+            ));
+        }
+        let admission: RuntimeArchiveManifestAdmission = serde_json::from_slice(bytes)
+            .map_err(|error| AotError::contract("aot.archive.manifest", error.to_string()))?;
+        validate_schema_revisions(
+            admission.schema_version,
+            admission.native_ir_schema_version,
+            admission.native_object_schema_version,
+        )?;
+        serde_json::from_slice(bytes)
+            .map_err(|error| AotError::contract("aot.archive.manifest", error.to_string()))
+    }
+
+    pub fn validate(&self) -> AotResult<()> {
+        self.validate_schema_revisions()?;
+        if self.runmat_version != env!("CARGO_PKG_VERSION") {
+            return Err(AotError::contract(
+                "aot.archive.runmat_version",
+                format!(
+                    "RunMat version actual {}, expected {}",
+                    self.runmat_version,
+                    env!("CARGO_PKG_VERSION")
+                ),
             ));
         }
         self.native_target
@@ -116,6 +147,52 @@ impl RuntimeArchiveManifest {
         Ok(())
     }
 
+    fn validate_schema_revisions(&self) -> AotResult<()> {
+        validate_schema_revisions(
+            self.schema_version,
+            self.native_ir_schema_version,
+            self.native_object_schema_version,
+        )
+    }
+}
+
+fn validate_schema_revisions(
+    schema_version: u16,
+    native_ir_schema_version: u16,
+    native_object_schema_version: u16,
+) -> AotResult<()> {
+    if schema_version != RUNTIME_ARCHIVE_SCHEMA_VERSION {
+        return Err(AotError::contract(
+            "aot.archive.schema",
+            format!(
+                "runtime archive schema actual {}, expected {}",
+                schema_version, RUNTIME_ARCHIVE_SCHEMA_VERSION
+            ),
+        ));
+    }
+    if native_ir_schema_version != runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION {
+        return Err(AotError::contract(
+            "aot.archive.native_ir_schema",
+            format!(
+                "Native IR schema actual {}, expected {}",
+                native_ir_schema_version,
+                runmat_native_codegen::NATIVE_IR_SCHEMA_VERSION
+            ),
+        ));
+    }
+    if native_object_schema_version != NATIVE_OBJECT_SCHEMA_VERSION {
+        return Err(AotError::contract(
+            "aot.archive.native_object_schema",
+            format!(
+                "native object schema actual {}, expected {}",
+                native_object_schema_version, NATIVE_OBJECT_SCHEMA_VERSION
+            ),
+        ));
+    }
+    Ok(())
+}
+
+impl RuntimeArchiveManifest {
     pub fn validate_environment(&self, environment: &ProgramEnvironment) -> AotResult<()> {
         if self.runtime_fingerprint != environment.runtime_fingerprint
             || self.catalog_fingerprint != environment.catalog_fingerprint

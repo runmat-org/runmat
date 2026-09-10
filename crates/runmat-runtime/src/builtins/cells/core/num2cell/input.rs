@@ -42,6 +42,7 @@ pub(super) fn classify(value: Value) -> Input {
         | Value::String(_)
         | Value::Symbolic(_)
         | Value::Struct(_)
+        | Value::StructArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
         | Value::FunctionHandle(_)

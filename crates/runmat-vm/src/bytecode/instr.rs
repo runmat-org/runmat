@@ -1,6 +1,5 @@
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::indexing::EndExpr;
 use runmat_types::{ClassIdentity, MethodName};
 use runmat_value::IntValue;
 use serde::{Deserialize, Serialize};
@@ -9,6 +8,21 @@ use serde::{Deserialize, Serialize};
 pub struct StackEffect {
     pub pops: usize,
     pub pushes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AggregateElementSpec {
+    Single,
+    CapturedSequence { slot: usize },
+}
+
+impl AggregateElementSpec {
+    pub const fn stack_operand_count(self) -> usize {
+        match self {
+            Self::Single => 1,
+            Self::CapturedSequence { .. } => 0,
+        }
+    }
 }
 
 /// Source-level SPMD header form. Runtime operands are evaluated once and
@@ -257,6 +271,11 @@ pub enum Instr {
 
     // Array construction and direct indexing.
     CreateMatrix(usize, usize),
+    CreateMatrixFromSequences {
+        rows: usize,
+        row_lengths: Vec<usize>,
+        elements: Vec<AggregateElementSpec>,
+    },
     CreateMatrixDynamic(usize),
     CreateRange(bool),
     Index(usize),
@@ -264,48 +283,13 @@ pub enum Instr {
     // Slice indexing with compiler-encoded colon and plain `end` masks.
     IndexSlice(usize, usize, u32, u32),
 
-    // General slice/index path carrying dynamic ranges and `end` arithmetic.
-    IndexSliceExpr {
-        dims: usize,
-        numeric_count: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: Vec<usize>,
-        range_has_step: Vec<bool>,
-        range_start_exprs: Vec<Option<EndExpr>>,
-        range_step_exprs: Vec<Option<EndExpr>>,
-        range_end_exprs: Vec<EndExpr>,
-        end_numeric_exprs: Vec<(usize, EndExpr)>,
-    },
-
-    // Assignment counterpart to `IndexSliceExpr`.
-    StoreSliceExpr {
-        dims: usize,
-        numeric_count: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: Vec<usize>,
-        range_has_step: Vec<bool>,
-        range_start_exprs: Vec<Option<EndExpr>>,
-        range_step_exprs: Vec<Option<EndExpr>>,
-        range_end_exprs: Vec<EndExpr>,
-        end_numeric_exprs: Vec<(usize, EndExpr)>,
-    },
-    StoreSliceExprDelete {
-        dims: usize,
-        numeric_count: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: Vec<usize>,
-        range_has_step: Vec<bool>,
-        range_start_exprs: Vec<Option<EndExpr>>,
-        range_step_exprs: Vec<Option<EndExpr>>,
-        range_end_exprs: Vec<EndExpr>,
-        end_numeric_exprs: Vec<(usize, EndExpr)>,
-    },
-
     // Cell array construction and indexing.
     CreateCell2D(usize, usize),
+    CreateCellFromSequences {
+        rows: usize,
+        row_lengths: Vec<usize>,
+        elements: Vec<AggregateElementSpec>,
+    },
     CreateStructLiteral(Vec<String>),
     CreateObjectLiteral {
         class_name: ClassIdentity,
@@ -313,37 +297,27 @@ pub enum Instr {
     },
     IndexCell {
         num_indices: usize,
-        end_offsets: Vec<(usize, isize)>,
-        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Expands cell contents into a comma-separated list with fixed output arity.
     IndexCellExpand {
         num_indices: usize,
         out_count: usize,
-        end_offsets: Vec<(usize, isize)>,
-        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Expands cell contents into a first-class comma-separated list value.
     IndexCellList {
         num_indices: usize,
-        end_offsets: Vec<(usize, isize)>,
-        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Indexed assignment updates the base value and pushes the updated base.
     StoreIndex(usize),
     StoreIndexCell {
         num_indices: usize,
-        end_offsets: Vec<(usize, isize)>,
-        end_exprs: Vec<(usize, EndExpr)>,
     },
     StoreIndexDelete(usize),
     StoreIndexCellDelete {
         num_indices: usize,
-        end_offsets: Vec<(usize, isize)>,
-        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.
@@ -355,6 +329,128 @@ pub enum Instr {
     LoadMemberOrInit(runmat_types::MemberName),
     LoadMemberDynamic,
     LoadMemberDynamicOrInit,
+    LoadMemberSequence {
+        member: runmat_types::MemberName,
+        selection: runmat_types::SequenceUse,
+    },
+    LoadMemberDynamicSequence {
+        selection: runmat_types::SequenceUse,
+    },
+    MemberSequenceCardinality,
+    LoadMemberSequenceUsingOutputSlot {
+        member: runmat_types::MemberName,
+        output_count_slot: usize,
+    },
+    LoadMemberDynamicSequenceUsingOutputSlot {
+        output_count_slot: usize,
+    },
+    CaptureCallOutputSequence,
+    CaptureScalarSequence,
+    CaptureMemberSequence {
+        member: runmat_types::MemberName,
+        sequence_slot: usize,
+    },
+    CaptureMemberDynamicSequence {
+        sequence_slot: usize,
+    },
+    CaptureCellContentsSequence {
+        sequence_slot: usize,
+        num_indices: usize,
+        expand_all: bool,
+    },
+    CaptureReturnedOutputsSequence {
+        sequence_slot: usize,
+    },
+    ReadSubscriptPath {
+        steps: Vec<super::BytecodeSubscriptStep>,
+        selection: runmat_types::SequenceUse,
+        context: runmat_types::ObjectIndexingContext,
+        to_sequence_register: bool,
+    },
+    CaptureSubscriptPath {
+        steps: Vec<super::BytecodeSubscriptStep>,
+        sequence_slot: usize,
+        context: runmat_types::ObjectIndexingContext,
+    },
+    BeginSubscriptEndReceiver {
+        prefix: Vec<super::BytecodeSubscriptStep>,
+    },
+    LoadSubscriptEnd {
+        component: usize,
+        component_count: usize,
+    },
+    FinishSubscriptEndReceiver {
+        selector_count: usize,
+        prefix_operand_count: usize,
+    },
+    BeginOutputAssignment {
+        target_count: usize,
+    },
+    PrepareFixedOutputTarget,
+    PrepareDiscardOutputTarget,
+    PrepareMemberSequenceOutputTarget {
+        root_slot: usize,
+        member: runmat_types::MemberName,
+    },
+    PrepareMemberDynamicSequenceOutputTarget {
+        root_slot: usize,
+    },
+    PrepareIndexedMemberSequenceOutputTarget {
+        root_slot: usize,
+        member: runmat_types::MemberName,
+        num_indices: usize,
+    },
+    PrepareIndexedMemberDynamicSequenceOutputTarget {
+        root_slot: usize,
+        num_indices: usize,
+    },
+    PrepareCellContentsSequenceOutputTarget {
+        root_slot: usize,
+        num_indices: usize,
+        expand_all: bool,
+    },
+    BeginSequenceOutputTarget {
+        root_slot: usize,
+    },
+    PrepareMemberPathStep(runmat_types::MemberName),
+    PrepareDynamicMemberPathStep,
+    BeginPreparedIndexSelectors {
+        component_count: usize,
+    },
+    LoadPreparedIndexEnd {
+        component: usize,
+    },
+    BeginContextualIndexSelectors {
+        component_count: usize,
+    },
+    LoadContextualIndexEnd {
+        component: usize,
+    },
+    FinishContextualIndexSelectors {
+        component_count: usize,
+    },
+    PrepareParenthesesPathStep {
+        component_count: usize,
+        selectors: Vec<super::BytecodeSubscriptSelector>,
+    },
+    PrepareBracesPathStep {
+        component_count: usize,
+        selectors: Vec<super::BytecodeSubscriptSelector>,
+        expand_all: bool,
+    },
+    FinishMemberSequenceOutputTarget(runmat_types::MemberName),
+    FinishDynamicMemberSequenceOutputTarget,
+    FinishCellContentsSequenceOutputTarget {
+        component_count: usize,
+        selectors: Vec<super::BytecodeSubscriptSelector>,
+        expand_all: bool,
+    },
+    LoadPreparedOutputCardinality,
+    CommitPreparedOutputTargets {
+        retained_outputs: usize,
+    },
+    StoreMemberSequence(runmat_types::MemberName),
+    StoreMemberDynamicSequence,
     StoreMember(runmat_types::MemberName),
     StoreMemberOrInit(runmat_types::MemberName),
     StoreMemberDynamic,
@@ -654,6 +750,78 @@ impl Instr {
             | Instr::LoadMember(_)
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
+            Instr::LoadMemberSequence { selection, .. } => {
+                selection.output_count().and_then(|count| effect(1, count))
+            }
+            Instr::MemberSequenceCardinality => effect(1, 1),
+            Instr::LoadMemberSequenceUsingOutputSlot { .. } => effect(1, 0),
+            Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => effect(2, 0),
+            Instr::CaptureCallOutputSequence | Instr::CaptureScalarSequence => effect(1, 0),
+            Instr::ReadSubscriptPath {
+                steps,
+                selection,
+                to_sequence_register,
+                ..
+            } => {
+                if *to_sequence_register {
+                    effect(1 + subscript_operand_count(steps), 0)
+                } else {
+                    selection
+                        .output_count()
+                        .and_then(|count| effect(1 + subscript_operand_count(steps), count))
+                }
+            }
+            Instr::CaptureSubscriptPath { steps, .. } => {
+                effect(1 + subscript_operand_count(steps), 0)
+            }
+            Instr::BeginSubscriptEndReceiver { .. } => effect(0, 1),
+            Instr::LoadSubscriptEnd { .. } => effect(0, 1),
+            Instr::FinishSubscriptEndReceiver {
+                selector_count,
+                prefix_operand_count,
+            } => {
+                let consumed = selector_count
+                    .checked_add(*prefix_operand_count)?
+                    .checked_add(1)?;
+                effect(consumed, *selector_count)
+            }
+            Instr::BeginOutputAssignment { .. }
+            | Instr::PrepareFixedOutputTarget
+            | Instr::PrepareDiscardOutputTarget
+            | Instr::PrepareMemberSequenceOutputTarget { .. } => effect(0, 0),
+            Instr::LoadPreparedOutputCardinality => effect(0, 1),
+            Instr::PrepareMemberDynamicSequenceOutputTarget { .. } => effect(1, 0),
+            Instr::PrepareIndexedMemberSequenceOutputTarget { num_indices, .. } => {
+                effect(*num_indices, 0)
+            }
+            Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { num_indices, .. } => {
+                effect(num_indices.saturating_add(1), 0)
+            }
+            Instr::PrepareCellContentsSequenceOutputTarget { num_indices, .. } => {
+                effect(*num_indices, 0)
+            }
+            Instr::BeginSequenceOutputTarget { .. }
+            | Instr::PrepareMemberPathStep(_)
+            | Instr::BeginPreparedIndexSelectors { .. }
+            | Instr::FinishMemberSequenceOutputTarget(_) => effect(0, 0),
+            Instr::PrepareDynamicMemberPathStep
+            | Instr::FinishDynamicMemberSequenceOutputTarget => effect(1, 0),
+            Instr::LoadPreparedIndexEnd { .. } | Instr::LoadContextualIndexEnd { .. } => {
+                effect(0, 1)
+            }
+            Instr::BeginContextualIndexSelectors { .. }
+            | Instr::FinishContextualIndexSelectors { .. } => effect(0, 0),
+            Instr::PrepareParenthesesPathStep { selectors, .. }
+            | Instr::PrepareBracesPathStep { selectors, .. }
+            | Instr::FinishCellContentsSequenceOutputTarget { selectors, .. } => {
+                effect(subscript_selector_operand_count(selectors), 0)
+            }
+            Instr::CommitPreparedOutputTargets { retained_outputs } => effect(0, *retained_outputs),
+            Instr::CaptureMemberSequence { .. } | Instr::CaptureReturnedOutputsSequence { .. } => {
+                effect(1, 0)
+            }
+            Instr::CaptureMemberDynamicSequence { .. } => effect(2, 0),
+            Instr::CaptureCellContentsSequence { num_indices, .. } => effect(1 + *num_indices, 0),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallBuiltinMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
             Instr::CallSuperConstructorMulti { arg_count, .. } => effect(*arg_count, 1),
@@ -692,6 +860,15 @@ impl Instr {
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
+            Instr::CreateMatrixFromSequences { elements, .. }
+            | Instr::CreateCellFromSequences { elements, .. } => effect(
+                elements
+                    .iter()
+                    .copied()
+                    .map(AggregateElementSpec::stack_operand_count)
+                    .sum(),
+                1,
+            ),
             Instr::CreateStructLiteral(fields) => effect(fields.len(), 1),
             Instr::CreateObjectLiteral { fields, .. } => effect(fields.len(), 1),
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
@@ -724,26 +901,16 @@ impl Instr {
                     effect(pops, 1)
                 }
             }
-            Instr::IndexSliceExpr {
-                numeric_count,
-                range_dims,
-                ..
-            } => effect(1 + numeric_count + range_dims.len(), 1),
-            Instr::StoreSliceExpr {
-                numeric_count,
-                range_dims,
-                ..
-            }
-            | Instr::StoreSliceExprDelete {
-                numeric_count,
-                range_dims,
-                ..
-            } => effect(2 + numeric_count + range_dims.len(), 1),
             Instr::StoreMember(_)
             | Instr::StoreMemberOrInit(_)
             | Instr::StoreMemberDynamic
             | Instr::StoreMemberDynamicOrInit => effect(2, 1),
+            Instr::StoreMemberSequence(_) => effect(1, 1),
+            Instr::StoreMemberDynamicSequence => effect(2, 1),
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
+            Instr::LoadMemberDynamicSequence { selection } => {
+                selection.output_count().and_then(|count| effect(2, count))
+            }
             Instr::CreateClosure(_, capture_count)
             | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
             Instr::LoadStaticProperty(_, _) | Instr::LoadWorkspaceFirstStaticProperty { .. } => {
@@ -762,18 +929,13 @@ impl Instr {
             | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }
             | Instr::CallSuperMethodExpandMultiOutput { specs, .. }
             | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
-                let fixed = specs.iter().filter(|s| !s.is_expand).count();
-                let expanded: usize = specs
-                    .iter()
-                    .filter(|s| s.is_expand)
-                    .map(|s| 1 + s.num_indices)
-                    .sum();
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
                 let handle = usize::from(matches!(
                     self,
                     Instr::CallFevalExpandMultiOutput(_, _)
                         | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
                 ));
-                effect(handle + fixed + expanded, 1)
+                effect(handle + operands, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
             Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::LeaveTry(_) => {
@@ -803,4 +965,18 @@ impl Instr {
             Instr::StochasticEvolution => None,
         }
     }
+}
+
+fn subscript_operand_count(steps: &[super::BytecodeSubscriptStep]) -> usize {
+    steps
+        .iter()
+        .map(super::BytecodeSubscriptStep::operand_count)
+        .sum()
+}
+
+fn subscript_selector_operand_count(selectors: &[super::BytecodeSubscriptSelector]) -> usize {
+    selectors
+        .iter()
+        .filter(|selector| matches!(selector, super::BytecodeSubscriptSelector::Value))
+        .count()
 }

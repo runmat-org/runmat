@@ -11,3 +11,4 @@ macro_rules! id_newtype {
 
 id_newtype!(BasicBlockId);
 id_newtype!(MirLocalId);
+id_newtype!(MirSequenceLocalId);

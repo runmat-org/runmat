@@ -1,9 +1,4 @@
-use runmat_value::{CellArray, StructValue, Value};
-
-pub(super) struct StructArray {
-    elements: Vec<StructValue>,
-    shape: Vec<usize>,
-}
+use runmat_value::{StructArray, StructValue, Value};
 
 pub(super) enum Target {
     Scalar(StructValue),
@@ -14,64 +9,35 @@ impl Target {
     pub(super) fn parse(value: Value) -> crate::BuiltinResult<Self> {
         match value {
             Value::Struct(structure) => Ok(Self::Scalar(structure)),
-            Value::Cell(array) => StructArray::from_cell(array).map(Self::Array),
+            Value::StructArray(array) => Ok(Self::Array(array)),
             other => Err(super::error::invalid_target(&other)),
         }
     }
 
     pub(super) fn source_order(&self) -> Vec<String> {
-        self.representative()
-            .map(|structure| structure.field_names().cloned().collect())
-            .unwrap_or_default()
+        match self {
+            Self::Scalar(structure) => structure.field_names().cloned().collect(),
+            Self::Array(array) => array.field_names().cloned().collect(),
+        }
     }
 
     pub(super) fn validate_schema(&self, fields: &[String]) -> crate::BuiltinResult<()> {
         match self {
             Self::Scalar(structure) => validate_fields(structure, fields),
-            Self::Array(array) => array
-                .elements
-                .iter()
-                .try_for_each(|structure| validate_fields(structure, fields)),
+            Self::Array(array) => validate_field_set(array.field_names(), fields),
         }
     }
 
     pub(super) fn reorder(self, fields: &[String]) -> crate::BuiltinResult<Value> {
         match self {
             Self::Scalar(structure) => reorder_structure(structure, fields).map(Value::Struct),
-            Self::Array(array) => array.reorder(fields).map(Value::Cell),
+            Self::Array(mut array) => {
+                array
+                    .reorder_fields(fields)
+                    .map_err(super::error::rebuild)?;
+                Ok(Value::StructArray(array))
+            }
         }
-    }
-
-    fn representative(&self) -> Option<&StructValue> {
-        match self {
-            Self::Scalar(structure) => Some(structure),
-            Self::Array(array) => array.elements.first(),
-        }
-    }
-}
-
-impl StructArray {
-    fn from_cell(array: CellArray) -> crate::BuiltinResult<Self> {
-        let mut elements = Vec::with_capacity(array.data.len());
-        for value in array.data {
-            let Value::Struct(structure) = value else {
-                return Err(super::error::invalid_target_kind());
-            };
-            elements.push(structure);
-        }
-        Ok(Self {
-            elements,
-            shape: array.shape,
-        })
-    }
-
-    fn reorder(self, fields: &[String]) -> crate::BuiltinResult<CellArray> {
-        let values = self
-            .elements
-            .into_iter()
-            .map(|structure| reorder_structure(structure, fields).map(Value::Struct))
-            .collect::<crate::BuiltinResult<Vec<_>>>()?;
-        CellArray::new_with_shape(values, self.shape).map_err(super::error::rebuild)
     }
 }
 
@@ -81,6 +47,17 @@ fn validate_fields(structure: &StructValue, fields: &[String]) -> crate::Builtin
             .iter()
             .all(|name| structure.fields.contains_key(name))
     {
+        return Err(super::error::field_mismatch());
+    }
+    Ok(())
+}
+
+fn validate_field_set<'a>(
+    source: impl Iterator<Item = &'a String>,
+    fields: &[String],
+) -> crate::BuiltinResult<()> {
+    let source = source.collect::<Vec<_>>();
+    if source.len() != fields.len() || !fields.iter().all(|name| source.contains(&name)) {
         return Err(super::error::field_mismatch());
     }
     Ok(())

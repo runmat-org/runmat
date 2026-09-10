@@ -20,11 +20,12 @@ pub enum NativeOperation {
     Statement(runmat_mir::MirStmtKind),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "arity")]
 pub enum NativeRvalueResult {
     Assignment,
     MultiAssignment(u32),
+    SequenceAssignment(runmat_mir::MirSequenceTarget),
     Expression,
     Discard,
     Terminator,

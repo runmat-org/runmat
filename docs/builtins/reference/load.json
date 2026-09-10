@@ -78,7 +78,7 @@
     },
     {
       "question": "How are structures handled?",
-      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested scalar structs, cells, logical arrays, sparse matrices, object envelopes, and numeric data are supported. Struct arrays report an explicit unsupported-data error until RunMat has a first-class struct-array value."
+      "answer": "Structure scalars and arrays are reconstructed with their field order, dimensions, and column-major element order intact. Empty structure arrays retain their declared field schema. Nested structures, cells, logical arrays, sparse matrices, object envelopes, and numeric data are supported."
     },
     {
       "question": "Does `load` call `loadobj` for saved objects?",

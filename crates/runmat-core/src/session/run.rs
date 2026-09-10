@@ -1642,7 +1642,7 @@ fn apply_requested_output_policy(
     outcome.flow = match requested_outputs {
         RequestedOutputCount::Zero => RuntimeFlow::NoValue,
         RequestedOutputCount::One => match outcome.flow {
-            RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+            RuntimeFlow::OutputList(mut values) => {
                 if values.is_empty() {
                     RuntimeFlow::NoValue
                 } else {
@@ -1656,7 +1656,7 @@ fn apply_requested_output_policy(
                 RuntimeFlow::NoValue
             } else if *count == 1 {
                 match outcome.flow {
-                    RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+                    RuntimeFlow::OutputList(mut values) => {
                         if values.is_empty() {
                             RuntimeFlow::NoValue
                         } else {
@@ -1669,7 +1669,7 @@ fn apply_requested_output_policy(
                 match outcome.flow {
                     RuntimeFlow::NoValue => RuntimeFlow::OutputList(Vec::new()),
                     RuntimeFlow::Single(value) => RuntimeFlow::OutputList(vec![value]),
-                    RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+                    RuntimeFlow::OutputList(mut values) => {
                         values.truncate(*count);
                         RuntimeFlow::OutputList(values)
                     }
@@ -1677,7 +1677,8 @@ fn apply_requested_output_policy(
                 }
             }
         }
-        RequestedOutputCount::CurrentFunctionNargout => outcome.flow,
+        RequestedOutputCount::CurrentFunctionNargout
+        | RequestedOutputCount::DestinationSequenceCardinality => outcome.flow,
     };
     outcome
 }

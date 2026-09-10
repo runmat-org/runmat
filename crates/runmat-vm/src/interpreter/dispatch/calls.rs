@@ -32,6 +32,15 @@ pub enum UserCallHandling {
     Uncaught(Box<RuntimeError>),
 }
 
+pub struct MethodExpandCallContext<'a> {
+    pub identity: CallableIdentity,
+    pub fallback_policy: CallableFallbackPolicy,
+    pub specs: &'a [ArgumentSpec],
+    pub requested_outputs: usize,
+    pub current_function_name: &'a str,
+    pub runtime: &'a runmat_runtime::context::RuntimeContext,
+}
+
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
     // Preserve values for non-singleton requests (including zero). Statement-level
     // display/public-result policy is decided later by core/session plumbing.
@@ -148,25 +157,28 @@ fn imported_static_method_owner(
 pub async fn build_builtin_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs, runtime).await
+    build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
 pub async fn build_feval_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs, runtime).await
+    build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
 pub async fn build_user_function_expand_multi_args(
     stack: &mut Vec<Value>,
     specs: &[ArgumentSpec],
+    sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
-    build_expanded_args_from_specs(stack, specs, runtime).await
+    build_expanded_args_from_specs(stack, specs, sequence_state, runtime).await
 }
 
 pub fn handle_builtin_outcome(
@@ -748,14 +760,16 @@ async fn handle_method_or_member_index_call_inner(
 
 pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
-    identity: CallableIdentity,
-    fallback_policy: CallableFallbackPolicy,
-    specs: &[ArgumentSpec],
-    requested_outputs: usize,
-    current_function_name: &str,
-    runtime: &runmat_runtime::context::RuntimeContext,
+    sequence_state: &mut super::SequenceState,
+    context: MethodExpandCallContext<'_>,
 ) -> Result<MethodHandling, RuntimeError> {
-    let mut args = build_user_function_expand_multi_args(stack, specs, runtime).await?;
+    let mut args = build_user_function_expand_multi_args(
+        stack,
+        context.specs,
+        sequence_state,
+        context.runtime,
+    )
+    .await?;
     if args.is_empty() {
         return Err(crate::interpreter::errors::mex(
             "MethodCallMissingReceiver",
@@ -763,23 +777,27 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ));
     }
     let base = args.remove(0);
-    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
+    let _output_guard =
+        runmat_runtime::output_context::push_output_count(context.requested_outputs);
     let current_class_context =
-        runmat_runtime::class_registry::class_context_for_function(current_function_name);
+        runmat_runtime::class_registry::class_context_for_function(context.current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let value = Box::pin(
         runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
             base,
-            identity,
+            context.identity,
             args,
-            requested_outputs,
-            (!current_function_name.is_empty()).then_some(current_function_name),
-            fallback_policy,
+            context.requested_outputs,
+            (!context.current_function_name.is_empty()).then_some(context.current_function_name),
+            context.fallback_policy,
         ),
     )
     .await?;
-    stack.push(normalize_requested_outputs(value, requested_outputs));
+    stack.push(normalize_requested_outputs(
+        value,
+        context.requested_outputs,
+    ));
     Ok(MethodHandling::Completed)
 }
 

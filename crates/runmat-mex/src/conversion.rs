@@ -7,7 +7,7 @@ use runmat_value::{
     record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
     HandleRef, HostComplexBuffer, HostCopyReason, HostIndexBuffer, HostNumericBuffer,
     IntegerComplexStorage, IntegerStorage, LogicalArray, NumericScalar, NumericStorage,
-    ObjectArray, ObjectInstance, SparseTensor, StructValue, Tensor, Value,
+    ObjectArray, ObjectInstance, SparseTensor, StructArray, StructValue, Tensor, Value,
 };
 
 use crate::mxarray::{
@@ -185,6 +185,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
         Value::SparseTensor(value) => sparse_to_mx(value, mode),
         Value::Cell(value) => cell_to_mx(value, mode, interface, context),
         Value::Struct(value) => struct_to_mx(value, mode, interface, context),
+        Value::StructArray(value) => struct_array_to_mx(value, mode, interface, context),
         Value::Object(value) => object_to_mx(
             &value.class_name,
             &[value],
@@ -498,28 +499,6 @@ fn cell_to_mx(
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
     let column_major = value.to_column_major();
-    if let Some(fields) = uniform_struct_fields(&column_major) {
-        let mut values = Vec::with_capacity(fields.len() * column_major.len());
-        for field in &fields {
-            for element in &column_major {
-                let Value::Struct(element) = element else {
-                    unreachable!("uniform struct check")
-                };
-                values.push(
-                    element
-                        .fields
-                        .get(field)
-                        .map(|value| {
-                            value_to_mx_for_interface_in_context(value, mode, interface, context)
-                                .map(Box::new)
-                        })
-                        .transpose()?,
-                );
-            }
-        }
-        return MxArray::structure(fields, values, value.shape.clone())
-            .map_err(MxConversionError::new);
-    }
     let values = column_major
         .iter()
         .map(|value| {
@@ -529,6 +508,32 @@ fn cell_to_mx(
         })
         .collect::<Result<Vec<_>, _>>()?;
     MxArray::cell(values, value.shape.clone()).map_err(MxConversionError::new)
+}
+
+fn struct_array_to_mx(
+    value: &StructArray,
+    mode: MxApiMode,
+    interface: MxBoundaryInterface,
+    context: Option<&MxValueContext>,
+) -> Result<MxArray, MxConversionError> {
+    let fields = value.field_names().cloned().collect::<Vec<_>>();
+    let capacity = fields.len().checked_mul(value.len()).ok_or_else(|| {
+        MxConversionError::new("structure array field storage exceeds platform limits")
+    })?;
+    let mut values = Vec::with_capacity(capacity);
+    for field in &fields {
+        let column = value
+            .field_values(field)
+            .ok_or_else(|| MxConversionError::new("structure array field is missing"))?;
+        for field_value in column {
+            values.push(
+                value_to_mx_for_interface_in_context(field_value, mode, interface, context)
+                    .map(Box::new)
+                    .map(Some)?,
+            );
+        }
+    }
+    MxArray::structure(fields, values, value.shape().to_vec()).map_err(MxConversionError::new)
 }
 
 fn struct_to_mx(
@@ -595,22 +600,6 @@ fn object_to_mx(
         }
     }
     MxArray::object(class_name.clone(), properties, values, shape).map_err(MxConversionError::new)
-}
-
-fn uniform_struct_fields(values: &[Value]) -> Option<Vec<String>> {
-    let Value::Struct(first) = values.first()? else {
-        return None;
-    };
-    let fields = first.field_names().cloned().collect::<Vec<_>>();
-    values
-        .iter()
-        .all(|value| {
-            let Value::Struct(value) = value else {
-                return false;
-            };
-            value.field_names().eq(fields.iter())
-        })
-        .then_some(fields)
 }
 
 fn numeric_from_mx(value: &MxNumeric, shape: &[usize]) -> Result<Value, MxConversionError> {
@@ -744,25 +733,29 @@ fn struct_from_mx(
     shape: &[usize],
     context: Option<&MxValueContext>,
 ) -> Result<Value, MxConversionError> {
-    let numel = shape.iter().product::<usize>();
-    let mut structures = Vec::with_capacity(numel);
-    for element in 0..numel {
-        let mut structure = StructValue::new();
-        for (field_index, field) in fields.iter().enumerate() {
-            let value = values[field_index * numel + element]
+    let numel = shape
+        .iter()
+        .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+        .ok_or_else(|| MxConversionError::new("structure array shape exceeds platform limits"))?;
+    let expected = fields.len().checked_mul(numel).ok_or_else(|| {
+        MxConversionError::new("structure array field storage exceeds platform limits")
+    })?;
+    if values.len() != expected {
+        return Err(MxConversionError::new(
+            "structure array field storage is inconsistent",
+        ));
+    }
+    let field_values = values
+        .iter()
+        .map(|value| {
+            value
                 .as_deref()
                 .map(|value| value_from_mx_in_context(value, context))
-                .transpose()?
-                .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])));
-            structure.insert(field.clone(), value);
-        }
-        structures.push(Value::Struct(structure));
-    }
-    if numel == 1 {
-        return Ok(structures.pop().expect("one struct element"));
-    }
-    CellArray::from_column_major(structures, shape.to_vec())
-        .map(Value::Cell)
+                .transpose()
+                .map(|value| value.unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0]))))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    StructArray::normalize_field_major(fields.to_vec(), field_values, shape.to_vec())
         .map_err(MxConversionError::new)
 }
 
@@ -773,7 +766,11 @@ fn object_from_mx(
     shape: &[usize],
     context: Option<&MxValueContext>,
 ) -> Result<Value, MxConversionError> {
-    let numel = shape.iter().product::<usize>();
+    let numel = shape.iter().try_fold(1usize, |count, extent| {
+        count
+            .checked_mul(*extent)
+            .ok_or_else(|| MxConversionError::new("object array shape exceeds platform limits"))
+    })?;
     let mut objects = Vec::with_capacity(numel);
     for element in 0..numel {
         let mut object = ObjectInstance::new(class_name.clone());
@@ -1090,16 +1087,63 @@ mod tests {
     }
 
     #[test]
-    fn cell_backed_struct_arrays_use_field_major_mx_storage() {
-        let mut first = StructValue::new();
-        first.insert("id", Value::Int(IntValue::U64(u64::MAX)));
-        let mut second = StructValue::new();
-        second.insert("id", Value::Int(IntValue::U64(9_007_199_254_740_993)));
-        let original = Value::Cell(
-            CellArray::new(vec![Value::Struct(first), Value::Struct(second)], 1, 2).unwrap(),
-        );
+    fn structure_arrays_use_field_major_mx_storage() {
+        let elements = (0..4)
+            .map(|index| {
+                let mut value = StructValue::new();
+                value.insert(
+                    "id",
+                    Value::Int(IntValue::U64(9_007_199_254_740_993 + index as u64)),
+                );
+                value.insert("weight", Value::Num(10.0 + index as f64));
+                value
+            })
+            .collect();
+        let original = Value::StructArray(StructArray::new(elements, vec![2, 2]).unwrap());
         let boundary = value_to_mx(&original, MxApiMode::InterleavedComplex).unwrap();
-        assert!(matches!(boundary.data(), MxArrayData::Struct { .. }));
+        let MxArrayData::Struct { fields, values } = boundary.data() else {
+            panic!("expected structure boundary")
+        };
+        assert_eq!(fields, &["id", "weight"]);
+        assert_eq!(values.len(), 8);
+        for index in 0..4 {
+            assert_eq!(
+                value_from_mx(values[index].as_deref().unwrap()).unwrap(),
+                Value::Int(IntValue::U64(9_007_199_254_740_993 + index as u64))
+            );
+            assert_eq!(
+                value_from_mx(values[4 + index].as_deref().unwrap()).unwrap(),
+                Value::Num(10.0 + index as f64)
+            );
+        }
+        assert_eq!(value_from_mx(&boundary).unwrap(), original);
+    }
+
+    #[test]
+    fn structure_array_boundary_preserves_nd_and_empty_shapes() {
+        let nd_elements = (0..4)
+            .map(|index| {
+                let mut value = StructValue::new();
+                value.insert("id", Value::Num(index as f64));
+                value
+            })
+            .collect();
+        let nd = Value::StructArray(StructArray::new(nd_elements, vec![2, 1, 2]).unwrap());
+        let empty = Value::StructArray(
+            StructArray::empty(vec!["id".into(), "weight".into()], vec![0, 3, 2]).unwrap(),
+        );
+        for original in [nd, empty] {
+            let boundary = value_to_mx(&original, MxApiMode::InterleavedComplex).unwrap();
+            assert_eq!(value_from_mx(&boundary).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn cells_of_structs_remain_cells_at_the_mx_boundary() {
+        let original =
+            Value::Cell(CellArray::new(vec![Value::Struct(StructValue::new())], 1, 1).unwrap());
+        let boundary = value_to_mx(&original, MxApiMode::InterleavedComplex).unwrap();
+        assert!(matches!(boundary.data(), MxArrayData::Cell(_)));
         assert_eq!(value_from_mx(&boundary).unwrap(), original);
     }
 }

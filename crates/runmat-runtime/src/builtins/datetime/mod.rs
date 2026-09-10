@@ -15,8 +15,8 @@ use runmat_value::{CharArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{
-    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
-    OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
+    OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
 const BUILTIN_NAME: &str = "datetime";
@@ -267,7 +267,7 @@ const DATESHIFT_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Optional current/next/previous/nearest or integer occurrence rule.",
     },
 ];
-const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -276,21 +276,14 @@ const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Datetime receiver object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index/member payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
 ];
-const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "obj",
         ty: BuiltinParamType::Any,
@@ -299,18 +292,11 @@ const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Datetime receiver object.",
     },
     BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
+        name: "S",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Index/member payload.",
+        description: "Standard substruct-compatible indexing path.",
     },
     BuiltinParamDescriptor {
         name: "rhs",
@@ -553,13 +539,13 @@ const DATETIME_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     outputs: &OUT_NUMERIC,
 }];
 const DATETIME_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = datetime.subsref(obj, kind, payload)",
+    label: "out = datetime.subsref(obj, S)",
     inputs: &DATETIME_SUBSREF_INPUTS,
     outputs: &OUT_ANY,
 }];
 const DATETIME_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
     [BuiltinSignatureDescriptor {
-        label: "out = datetime.subsasgn(obj, kind, payload, rhs)",
+        label: "out = datetime.subsasgn(obj, S, rhs)",
         inputs: &DATETIME_SUBSASGN_INPUTS,
         outputs: &OUT_ANY,
     }];
@@ -3859,10 +3845,19 @@ async fn datetick_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     descriptor(crate::builtins::datetime::DATETIME_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime"
 )]
-async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
-    match kind.as_str() {
-        OBJECT_INDEX_PAREN => datetime_indexing(obj, payload).await,
-        OBJECT_INDEX_MEMBER => {
+async fn datetime_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsref(obj, path, datetime_read_step, None).await
+}
+
+async fn datetime_read_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> crate::BuiltinResult<Value> {
+    let payload = step.selector_value()?;
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Paren => datetime_indexing(obj, payload).await,
+        crate::object::indexing::ObjectIndexKind::Member => {
             let Value::Object(object) = obj else {
                 return Err(datetime_error(
                     "datetime.subsref: receiver must be a datetime object",
@@ -3876,9 +3871,9 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
                 ))),
             }
         }
-        other => Err(datetime_error(format!(
-            "datetime.subsref: unsupported indexing kind '{other}'"
-        ))),
+        crate::object::indexing::ObjectIndexKind::Brace => Err(datetime_error(
+            "datetime.subsref: brace indexing is not supported",
+        )),
     }
 }
 
@@ -3889,17 +3884,39 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
 )]
 async fn datetime_subsasgn(
     obj: Value,
-    kind: String,
-    payload: Value,
+    subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
+    crate::object::protocol::execute_owned_subsasgn(
+        obj,
+        path,
+        vec![rhs],
+        datetime_read_step,
+        |obj, step, mut values| async move {
+            let rhs = values
+                .pop()
+                .ok_or_else(|| datetime_error("datetime.subsasgn: assignment value is missing"))?;
+            datetime_write_step(obj, step, rhs).await
+        },
+        None,
+    )
+    .await
+}
+
+async fn datetime_write_step(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
+    let payload = step.selector_value()?;
     let Value::Object(mut object) = obj else {
         return Err(datetime_error(
             "datetime.subsasgn: receiver must be a datetime object",
         ));
     };
-    match kind.as_str() {
-        OBJECT_INDEX_MEMBER => {
+    match step.kind() {
+        crate::object::indexing::ObjectIndexKind::Member => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
@@ -3914,9 +3931,9 @@ async fn datetime_subsasgn(
                 ))),
             }
         }
-        _ => Err(datetime_error(format!(
-            "datetime.subsasgn: unsupported indexing kind '{kind}'"
-        ))),
+        _ => Err(datetime_error(
+            "datetime.subsasgn: only member assignment is supported",
+        )),
     }
 }
 
@@ -4879,6 +4896,27 @@ pub fn datetime_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
 mod tests {
     use super::*;
 
+    async fn datetime_subsref(
+        obj: Value,
+        kind: String,
+        payload: Value,
+    ) -> crate::BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::datetime_subsref(obj, subscript).await
+    }
+
+    async fn datetime_subsasgn(
+        obj: Value,
+        kind: String,
+        payload: Value,
+        rhs: Value,
+    ) -> crate::BuiltinResult<Value> {
+        let subscript =
+            crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
+        super::datetime_subsasgn(obj, subscript, rhs).await
+    }
+
     fn run_datetime(args: Vec<Value>) -> Value {
         futures::executor::block_on(datetime_builtin(args)).expect("datetime")
     }
@@ -4921,7 +4959,7 @@ mod tests {
             .any(|signature| signature.label == "X = hour(t, F)"));
         assert_eq!(
             DATETIME_SUBSREF_DESCRIPTOR.signatures[0].label,
-            "out = datetime.subsref(obj, kind, payload)"
+            "out = datetime.subsref(obj, S)"
         );
         assert_eq!(
             DATETIME_BINARY_DESCRIPTOR.signatures[0].label,

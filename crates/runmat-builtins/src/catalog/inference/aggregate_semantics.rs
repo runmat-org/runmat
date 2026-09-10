@@ -55,8 +55,8 @@ pub(super) fn infer_struct_builtin(
 }
 
 fn struct_fact(fields: BTreeMap<String, ValueFact>, fields_complete: bool) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Struct(StructFact {
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
         fields,
         fields_complete,
-    }))
+    )))
 }

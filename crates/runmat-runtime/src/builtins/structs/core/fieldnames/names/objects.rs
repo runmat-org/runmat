@@ -31,7 +31,7 @@ pub(super) fn listener(_listener: &Listener) -> Vec<String> {
 fn extend_target_names(names: &mut BTreeSet<String>, target: &Value) -> crate::BuiltinResult<()> {
     match target {
         Value::Struct(structure) => names.extend(super::structures::scalar(structure)),
-        Value::Cell(array) => names.extend(super::structures::array(array)?),
+        Value::StructArray(array) => names.extend(super::structures::array(array)),
         Value::Object(object) => names.extend(self::object(object)),
         Value::Listener(listener) => names.extend(self::listener(listener)),
         Value::HandleObject(handle) => names.extend(class_properties(&handle.class_name)),

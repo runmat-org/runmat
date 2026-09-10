@@ -387,6 +387,18 @@ fn repelem_host_value(
             let out = repelem_cell_array(&ca, factors, single_arg)?;
             Ok(Value::Cell(out))
         }
+        Value::Struct(structure) => {
+            let (_, shape) = repelem_column_major(&[0usize], &[1, 1], factors, single_arg)?;
+            runmat_value::StructArray::replicate_scalar(structure, shape).map_err(repelem_internal)
+        }
+        Value::StructArray(array) => {
+            let shape = array.shape().to_vec();
+            let source = (0..array.len()).collect::<Vec<_>>();
+            let (indices, shape) = repelem_column_major(&source, &shape, factors, single_arg)?;
+            array
+                .select_linear(&indices, shape)
+                .map_err(repelem_internal)
+        }
         Value::GpuTensor(_) => Err(repelem_internal(
             "repelem: resident input reached the host replication boundary",
         )),
@@ -996,7 +1008,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::repelem_builtin(value, rest))
@@ -1624,6 +1636,40 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn structure_replication_normalizes_scalar_and_preserves_column_major_order() {
+        let mut scalar = StructValue::new();
+        scalar.insert("id", Value::Num(1.0));
+        assert!(matches!(
+            repelem_builtin(Value::Struct(scalar.clone()), vec![Value::Num(1.0)]).unwrap(),
+            Value::Struct(_)
+        ));
+
+        let mut second = StructValue::new();
+        second.insert("id", Value::Num(2.0));
+        let array = StructArray::new(vec![scalar, second], vec![2, 1]).unwrap();
+        let Value::StructArray(output) = repelem_builtin(
+            Value::StructArray(array),
+            vec![Value::Num(2.0), Value::Num(1.0)],
+        )
+        .unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(output.shape(), [4, 1]);
+        assert_eq!(
+            output
+                .elements()
+                .map(|element| element.fields["id"].clone())
+                .collect::<Vec<_>>(),
+            [
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]
+        );
     }
 
     #[test]

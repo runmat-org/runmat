@@ -1,5 +1,5 @@
-use runmat_mir::{MirCall, MirCallArg, MirCallee};
-use runmat_runtime::call::arguments::MaterializedArgument;
+use runmat_mir::{MirCall, MirCallArg, MirCallee, MirExpansionSource, MirSequenceLocalId};
+use runmat_runtime::call::arguments::{MaterializedArgument, MaterializedExpansionSource};
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_value::Value;
 
@@ -8,12 +8,34 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::operand::materialize_operand;
 use super::state::HostState;
 
-pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorResult<Vec<Value>> {
-    if let Some(outputs) = super::call_suspension::take_completed(state)? {
+pub(super) fn evaluate(
+    state: &mut HostState,
+    call: &MirCall,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    let embedded = state.enter_embedded_call();
+    let result = evaluate_inner(state, call, requested_outputs, embedded.as_ref());
+    if let Ok(outputs) = &result {
+        state.cache_embedded_call(embedded.as_ref(), outputs);
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outputs), Ok(())) => Ok(outputs),
+    }
+}
+
+fn evaluate_inner(
+    state: &mut HostState,
+    call: &MirCall,
+    requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
         return Ok(outputs);
     }
     let mut arguments = materialize_arguments(state, &call.args)?;
-    let requested_outputs = call.requested_outputs.fixed_count();
     if matches!(
         call.syntax,
         runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
@@ -38,6 +60,7 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorR
                     .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
                 let value = complete_call(
                     state,
+                    embedded.cloned(),
                     {
                         let identity = identity.clone();
                         let fallback_policy = call.fallback_policy;
@@ -94,6 +117,7 @@ pub(super) fn evaluate(state: &mut HostState, call: &MirCall) -> NativeExecutorR
             );
             return complete_call(
                 state,
+                embedded.cloned(),
                 runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
                 requested_outputs,
             );
@@ -185,19 +209,116 @@ fn materialize_argument(
         MirCallArg::Single(operand) => {
             materialize_operand(state, operand).map(MaterializedArgument::Single)
         }
-        MirCallArg::Expansion {
-            base,
-            indices,
-            expand_all,
-        } => Ok(MaterializedArgument::Expansion {
-            base: materialize_operand(state, base)?,
-            indices: indices
-                .iter()
-                .map(|index| materialize_operand(state, index))
-                .collect::<NativeExecutorResult<Vec<_>>>()?,
-            expand_all: *expand_all,
-        }),
+        MirCallArg::Expansion(source) => Ok(MaterializedArgument::Expansion(
+            materialize_expansion_source(state, source)?,
+        )),
+        MirCallArg::CapturedSequence(sequence) => {
+            let values = take_captured_sequence(state, *sequence)?;
+            Ok(MaterializedArgument::Sequence(
+                runmat_runtime::sequence::ValueSequence::comma_separated(values),
+            ))
+        }
     }
+}
+
+pub(super) fn capture_sequence(
+    state: &mut HostState,
+    destination: MirSequenceLocalId,
+    source: &MirExpansionSource,
+) -> NativeExecutorResult<()> {
+    if state.captured_sequences.contains_key(&destination) {
+        return Err(NativeExecutorError::Host(format!(
+            "native sequence local {} was overwritten before consumption",
+            destination.0
+        )));
+    }
+    let values = if let MirExpansionSource::SubscriptChain(chain) = source {
+        super::subscript_path::read(state, chain, 1)?
+    } else {
+        let source = materialize_expansion_source(state, source)?;
+        let sequence = super::sync::complete(
+            &state.runtime,
+            runmat_runtime::call::arguments::materialize_expansion(&state.runtime, source),
+            "sequence capture",
+        )?;
+        sequence.resolve(
+            runmat_types::SequenceUse::ExpandAll,
+            runmat_runtime::sequence::SequenceResolutionContext::default(),
+        )?
+    };
+    let existing_roots = state
+        .roots
+        .len()
+        .checked_add(
+            state
+                .captured_sequences
+                .values()
+                .try_fold(0usize, |total, values| total.checked_add(values.len()))
+                .ok_or_else(|| {
+                    NativeExecutorError::Host("native sequence root cardinality overflow".into())
+                })?,
+        )
+        .and_then(|total| total.checked_add(values.len()))
+        .ok_or_else(|| {
+            NativeExecutorError::Host("native sequence root cardinality overflow".into())
+        })?;
+    u32::try_from(existing_roots).map_err(|_| {
+        NativeExecutorError::Host("native sequence root cardinality exceeds the ABI".into())
+    })?;
+    let references = values
+        .into_iter()
+        .map(|value| state.arena.insert(value))
+        .collect();
+    state.captured_sequences.insert(destination, references);
+    Ok(())
+}
+
+pub(super) fn take_captured_sequence(
+    state: &mut HostState,
+    sequence: MirSequenceLocalId,
+) -> NativeExecutorResult<Vec<Value>> {
+    let references = state.captured_sequences.remove(&sequence).ok_or_else(|| {
+        NativeExecutorError::Host(format!(
+            "native sequence local {} was read before capture or after consumption",
+            sequence.0
+        ))
+    })?;
+    references
+        .into_iter()
+        .map(|reference| state.arena.get(reference).cloned())
+        .collect()
+}
+
+fn materialize_expansion_source(
+    state: &mut HostState,
+    source: &MirExpansionSource,
+) -> NativeExecutorResult<MaterializedExpansionSource> {
+    Ok(match source {
+        runmat_mir::MirExpansionSource::SubscriptChain(_) => {
+            return Err(NativeExecutorError::Host(
+                "subscript-chain expansion must use typed sequence capture".into(),
+            ));
+        }
+        runmat_mir::MirExpansionSource::CellContents { base, indexing } => {
+            let base = materialize_operand(state, base)?;
+            super::indexing::materialize_cell_expansion_source(state, base, indexing)?
+        }
+        runmat_mir::MirExpansionSource::ReturnedOutputs(base) => {
+            MaterializedExpansionSource::ReturnedOutputs(materialize_operand(state, base)?)
+        }
+        runmat_mir::MirExpansionSource::Member { base, member } => {
+            MaterializedExpansionSource::Member {
+                base: materialize_operand(state, base)?,
+                member: member.clone(),
+            }
+        }
+        runmat_mir::MirExpansionSource::DynamicMember { base, member } => {
+            MaterializedExpansionSource::DynamicMember {
+                base: materialize_operand(state, base)?,
+                member: materialize_operand(state, member)?,
+            }
+        }
+    })
 }
 
 pub(super) fn builtin(
@@ -206,11 +327,32 @@ pub(super) fn builtin(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    if let Some(outputs) = super::call_suspension::take_completed(state)? {
+    let embedded = state.enter_embedded_call();
+    let result = builtin_inner(state, name, arguments, requested_outputs, embedded.as_ref());
+    if let Ok(outputs) = &result {
+        state.cache_embedded_call(embedded.as_ref(), outputs);
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outputs), Ok(())) => Ok(outputs),
+    }
+}
+
+fn builtin_inner(
+    state: &mut HostState,
+    name: &str,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
         return Ok(outputs);
     }
     complete_call(
         state,
+        embedded.cloned(),
         {
             let name = name.to_owned();
             async move {
@@ -228,12 +370,14 @@ pub(super) fn builtin(
 
 fn complete_call(
     state: &mut HostState,
+    embedded: Option<super::state::EmbeddedOperationIdentity>,
     future: impl std::future::Future<Output = Result<Value, runmat_runtime::RuntimeError>> + 'static,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
     let runtime = state.runtime.clone();
     super::call_suspension::begin(
         state,
+        embedded,
         Box::pin(async move {
             let value = runtime.scope(future).await?;
             normalize_outputs(value, requested_outputs)

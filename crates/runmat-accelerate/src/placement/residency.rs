@@ -186,6 +186,11 @@ fn summarize_value(
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
+        Value::StructArray(array) => {
+            array.for_each_value(|element| {
+                summarize_value(element, summary, visited_gpu, visited_handles)
+            });
+        }
         Value::Object(value) => {
             for element in value.properties.values() {
                 summarize_value(element, summary, visited_gpu, visited_handles);
@@ -278,7 +283,7 @@ fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
-    use runmat_value::{CellArray, Tensor};
+    use runmat_value::{CellArray, StructArray, StructValue, Tensor};
 
     use super::*;
 
@@ -309,5 +314,43 @@ mod tests {
         assert_eq!(summary.host_bytes, 16);
         assert_eq!(summary.provider_bytes.get(&9), Some(&16));
         assert_eq!(summary.required_upload_bytes(9), 16);
+    }
+
+    #[test]
+    fn nd_structure_array_residency_visits_field_columns_and_empty_schema() {
+        let gpu = GpuTensorHandle::new(vec![2, 2], 9, 51)
+            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let element = |host: Value, resident: Value| {
+            let mut value = StructValue::new();
+            value.insert("host", host);
+            value.insert("resident", resident);
+            value
+        };
+        let array = StructArray::with_fields(
+            vec!["host".into(), "resident".into()],
+            vec![
+                element(Value::Num(1.0), Value::GpuTensor(gpu.clone())),
+                element(
+                    Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
+                    Value::GpuTensor(gpu),
+                ),
+            ],
+            vec![1, 1, 2],
+        )
+        .expect("N-D structure array");
+        let value = Value::StructArray(array);
+        let empty = Value::StructArray(
+            StructArray::with_fields(
+                vec!["host".into(), "resident".into()],
+                Vec::new(),
+                vec![0, 2],
+            )
+            .expect("empty structure array"),
+        );
+
+        let summary = summarize_values(&[&value, &empty]);
+        assert_eq!(summary.host_bytes, 24);
+        assert_eq!(summary.provider_bytes.get(&9), Some(&16));
+        assert_eq!(summary.required_upload_bytes(9), 24);
     }
 }

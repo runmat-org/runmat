@@ -6,6 +6,7 @@ use crate::NativeTarget;
 pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 5;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 2;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
+const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
@@ -68,6 +69,11 @@ pub struct AotProgramFunction {
     pub name: String,
 }
 
+#[derive(serde::Deserialize)]
+struct AotProgramManifestAdmission {
+    schema_version: u16,
+}
+
 impl AotProgramManifest {
     pub fn from_assembly(
         assembly: &crate::NativeAssembly,
@@ -100,11 +106,19 @@ impl AotProgramManifest {
     }
 
     pub fn validate(&self) -> Result<(), crate::NativeCodegenError> {
+        if self.schema_version != AOT_PROGRAM_MANIFEST_SCHEMA_VERSION {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program.schema",
+                format!(
+                    "AOT program manifest schema actual {}, expected {}",
+                    self.schema_version, AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
+                ),
+            ));
+        }
         self.executable.program.validate().map_err(|error| {
             crate::NativeCodegenError::new("native.aot.program", error.to_string())
         })?;
-        if self.schema_version != AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
-            || !valid_identity(&self.executable.root_package, 256)
+        if !valid_identity(&self.executable.root_package, 256)
             || !valid_identity(&self.executable.entrypoint, 512)
             || self.functions.is_empty()
             || self.functions.len() > MAX_AOT_PROGRAM_FUNCTIONS
@@ -142,7 +156,13 @@ impl AotProgramManifest {
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, crate::NativeCodegenError> {
         self.validate()?;
-        serde_json::to_vec(self).map_err(|error| {
+        let value = serde_json::to_value(self).map_err(|error| {
+            crate::NativeCodegenError::new(
+                "native.aot.program",
+                format!("failed to encode AOT program manifest: {error}"),
+            )
+        })?;
+        serde_json::to_vec(&value).map_err(|error| {
             crate::NativeCodegenError::new(
                 "native.aot.program",
                 format!("failed to encode AOT program manifest: {error}"),
@@ -151,7 +171,37 @@ impl AotProgramManifest {
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, crate::NativeCodegenError> {
-        let manifest: Self = serde_json::from_slice(bytes).map_err(|error| {
+        if bytes.len() > MAX_AOT_PROGRAM_MANIFEST_BYTES {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program.bounds",
+                format!(
+                    "AOT program manifest exceeds its {MAX_AOT_PROGRAM_MANIFEST_BYTES}-byte bound"
+                ),
+            ));
+        }
+        let admission: AotProgramManifestAdmission =
+            serde_json::from_slice(bytes).map_err(|error| {
+                crate::NativeCodegenError::new(
+                    "native.aot.program",
+                    format!("failed to decode AOT program manifest: {error}"),
+                )
+            })?;
+        if admission.schema_version != AOT_PROGRAM_MANIFEST_SCHEMA_VERSION {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program.schema",
+                format!(
+                    "AOT program manifest schema actual {}, expected {}",
+                    admission.schema_version, AOT_PROGRAM_MANIFEST_SCHEMA_VERSION
+                ),
+            ));
+        }
+        let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|error| {
+            crate::NativeCodegenError::new(
+                "native.aot.program",
+                format!("failed to decode AOT program manifest: {error}"),
+            )
+        })?;
+        let manifest: Self = serde_json::from_value(value).map_err(|error| {
             crate::NativeCodegenError::new(
                 "native.aot.program",
                 format!("failed to decode AOT program manifest: {error}"),
@@ -172,6 +222,21 @@ impl AotProgramManifest {
             .iter()
             .find(|function| function.name == name)
             .map(|function| function.function)
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::AotProgramManifest;
+
+    #[test]
+    fn stale_program_manifest_is_rejected_before_changed_function_shape() {
+        let error = AotProgramManifest::from_canonical_bytes(
+            br#"{"schema_version":1,"functions":"changed representation"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "native.aot.program.schema");
+        assert!(error.message.contains("actual 1, expected 2"));
     }
 }
 

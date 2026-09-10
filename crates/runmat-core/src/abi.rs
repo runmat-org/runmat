@@ -123,7 +123,6 @@ pub enum RuntimeFlow {
     NoValue,
     Single(Value),
     OutputList(Vec<Value>),
-    CommaList(Vec<Value>),
     DynamicList(DynamicListHandle),
 }
 
@@ -135,7 +134,7 @@ impl RuntimeFlow {
     pub fn durable_workspace_value(&self) -> Option<&Value> {
         match self {
             Self::Single(value) => Some(value),
-            Self::NoValue | Self::OutputList(_) | Self::CommaList(_) | Self::DynamicList(_) => None,
+            Self::NoValue | Self::OutputList(_) | Self::DynamicList(_) => None,
         }
     }
 }
@@ -288,9 +287,6 @@ mod tests {
             .durable_workspace_value()
             .is_some());
         assert!(RuntimeFlow::OutputList(vec![Value::Num(1.0)])
-            .durable_workspace_value()
-            .is_none());
-        assert!(RuntimeFlow::CommaList(vec![Value::Num(1.0)])
             .durable_workspace_value()
             .is_none());
     }

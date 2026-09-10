@@ -214,6 +214,22 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
             Ok(permute_char_array("ipermute", ca, &inverse)
                 .map(Value::CharArray)?)
         }
+        Value::Struct(structure) => {
+            validate_rank("ipermute", &order_vec, 2)?;
+            Ok(Value::Struct(structure))
+        }
+        Value::StructArray(array) => {
+            validate_rank(
+                "ipermute",
+                &order_vec,
+                crate::builtins::common::shape::effective_rank(array.shape()),
+            )?;
+            let zero_based = inverse.iter().map(|dimension| dimension - 1).collect::<Vec<_>>();
+            array
+                .permute(&zero_based)
+                .map(Value::StructArray)
+                .map_err(ipermute_error)
+        }
         Value::GpuTensor(handle) => {
             validate_rank("ipermute", &order_vec, handle.shape.len())?;
             Ok(ipermute_gpu(handle, &inverse).await?)
@@ -265,7 +281,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use runmat_value::{
         CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        Tensor, Value,
+        StructArray, StructValue, Tensor, Value,
     };
 
     #[test]
@@ -529,6 +545,42 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[test]
+    fn ipermute_struct_array_uses_effective_rank_and_padding() {
+        let mut first = StructValue::new();
+        first.insert("value", Value::Num(1.0));
+        let mut second = StructValue::new();
+        second.insert("value", Value::Num(2.0));
+        let array = StructArray::new(vec![first, second], vec![2, 1, 1]).unwrap();
+        let short = make_tensor(&[2.0, 1.0], &[1, 2]);
+        let Value::StructArray(direct) = ipermute_builtin(
+            Value::StructArray(array.clone()),
+            Value::Tensor(short.clone()),
+        )
+        .unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(direct.shape(), &[1, 2]);
+        let short_permuted = array.clone().permute(&[1, 0]).unwrap();
+        let Value::StructArray(permuted) =
+            ipermute_builtin(Value::StructArray(short_permuted), Value::Tensor(short)).unwrap()
+        else {
+            panic!("expected structure array");
+        };
+        assert_eq!(permuted.shape(), &[2, 1]);
+        assert_eq!(permuted.field_values("value"), array.field_values("value"));
+
+        let padded = make_tensor(&[2.0, 1.0, 3.0, 4.0], &[1, 4]);
+        let padded_permuted = array.clone().permute(&[1, 0, 2, 3]).unwrap();
+        let Value::StructArray(permuted) =
+            ipermute_builtin(Value::StructArray(padded_permuted), Value::Tensor(padded)).unwrap()
+        else {
+            panic!("expected structure array");
+        };
+        assert_eq!(permuted.shape(), &[2, 1, 1, 1]);
+        assert_eq!(permuted.field_values("value"), array.field_values("value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

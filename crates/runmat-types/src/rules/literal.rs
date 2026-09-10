@@ -99,8 +99,7 @@ fn numeric_scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
 }
 
 pub fn infer_struct_literal(fields: BTreeMap<String, ValueFact>) -> FactInference {
-    FactInference::exact(ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        fields,
-        fields_complete: true,
-    })))
+    FactInference::exact(ValueFact::scalar(ValueKindFact::Struct(
+        StructFact::scalar(fields, true),
+    )))
 }

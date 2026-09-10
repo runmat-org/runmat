@@ -30,9 +30,9 @@ pub use error::ContractError;
 pub use executable::{
     ExecutableComponentDescriptor, ExecutableComponentKind, ExecutableComponentPayload,
     ExecutableComponentRevisions, ExecutableEntrypointKind, ExecutableIdentity,
-    ExecutableOptionalSection, ExecutableSectionSupport, ExecutableUnitEnvelope,
-    ExecutableUnitManifest, SectionRequirement, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
-    EXECUTABLE_UNIT_SCHEMA_VERSION,
+    ExecutableOptionalSection, ExecutableSectionSupport, ExecutableUnitAdmission,
+    ExecutableUnitEnvelope, ExecutableUnitManifest, SectionRequirement,
+    EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 pub use gang::{GangHandle, GangRequest, GangSnapshot, SpmdOutputValue, SpmdTaskContext};
 pub use handle::{

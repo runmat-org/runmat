@@ -525,8 +525,10 @@ fn visit_statement_rvalues(statement: &MirStmt, operation: &mut impl FnMut(&MirR
     match &statement.kind {
         MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
+        | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => visit_rvalue(value, operation),
         MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {}
     }

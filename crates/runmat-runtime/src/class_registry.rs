@@ -13,7 +13,8 @@ use std::thread::ThreadId;
 
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_types::{
-    standard, ClassIdentity, MemberAccess, MemberName, MethodName, StaticClassIdentity,
+    standard, CallableFallbackPolicy, CallableIdentity, ClassIdentity, MemberAccess, MemberName,
+    MethodName, QualifiedName, StaticClassIdentity, SymbolName,
 };
 use runmat_value::Value;
 
@@ -35,8 +36,26 @@ pub struct RuntimeMethod {
     pub is_abstract: bool,
     pub is_sealed: bool,
     pub access: MemberAccess,
+    /// Declaration-time spelling resolved into `BoundRuntimeMethod::callable`
+    /// during class registration. Execution never reinterprets this string.
     pub function_name: String,
     pub implicit_class_argument: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMethodCallingConvention {
+    Direct,
+    StandardSubstruct,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundRuntimeMethod {
+    pub registry_generation: u64,
+    pub declaration: RuntimeMethod,
+    pub declaring_class: ClassIdentity,
+    pub callable: CallableIdentity,
+    pub fallback: CallableFallbackPolicy,
+    pub convention: RuntimeMethodCallingConvention,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +105,9 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeClassState {
+    generation: u64,
     classes: HashMap<ClassIdentity, RuntimeClass>,
+    method_bindings: HashMap<(ClassIdentity, MethodName), BoundRuntimeMethod>,
     sealed: HashSet<ClassIdentity>,
     abstract_classes: HashSet<ClassIdentity>,
     static_values: HashMap<(ClassIdentity, String), Value>,
@@ -96,8 +117,12 @@ pub(crate) struct RuntimeClassState {
 
 impl Default for RuntimeClassState {
     fn default() -> Self {
+        let classes = primitive_class_registry();
+        let method_bindings = bind_class_methods(&classes, 1);
         Self {
-            classes: primitive_class_registry(),
+            generation: 1,
+            classes,
+            method_bindings,
             sealed: HashSet::new(),
             abstract_classes: HashSet::new(),
             static_values: HashMap::new(),
@@ -304,11 +329,36 @@ pub fn register_class_with_sealed(def: RuntimeClass, is_sealed: bool) {
 pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abstract: bool) {
     let class_name = def.name.clone();
     with_state_mut(|state| {
+        state.generation = state.generation.wrapping_add(1).max(1);
+        let bindings = bind_methods_for_class(&def, state.generation).collect::<Vec<_>>();
+        state
+            .method_bindings
+            .retain(|(owner, _), _| owner != &class_name);
+        state.method_bindings.extend(bindings);
         state.classes.insert(class_name.clone(), def);
         set_membership(&mut state.sealed, &class_name, is_sealed);
         set_membership(&mut state.abstract_classes, &class_name, is_abstract);
         state.enumerations.entry(class_name).or_default();
     });
+}
+
+pub fn class_registry_generation() -> u64 {
+    with_state(|state| state.generation)
+}
+
+/// Resolve a legacy execution-frame spelling to its registered typed method.
+/// This is the only boundary where declaration text is interpreted as caller
+/// identity; protocol execution uses the returned identities exclusively.
+pub fn caller_method_for_function(function_name: &str) -> Option<(ClassIdentity, MethodName)> {
+    with_state(|state| {
+        let mut matches = state
+            .method_bindings
+            .iter()
+            .filter(|(_, bound)| bound.declaration.function_name == function_name)
+            .map(|((class, method), _)| (class.clone(), method.clone()));
+        let unique = matches.next()?;
+        matches.next().is_none().then_some(unique)
+    })
 }
 
 fn set_membership(registry: &mut HashSet<ClassIdentity>, name: &ClassIdentity, present: bool) {
@@ -350,36 +400,7 @@ pub fn class_names() -> Vec<ClassIdentity> {
 /// Resolve the declaring class context for a runtime function name. Executors
 /// use this shared lookup to apply identical private/protected member access.
 pub fn class_context_for_function(function_name: &str) -> Option<ClassIdentity> {
-    if function_name.is_empty() {
-        return None;
-    }
-    if let Some((class_name, method_name)) = function_name.rsplit_once('.') {
-        if !class_name.is_empty() && !method_name.is_empty() {
-            let identity = ClassIdentity::new(class_name).ok()?;
-            if get_class(&identity).is_some() {
-                return Some(identity);
-            }
-        }
-    }
-    class_names().into_iter().find(|class_name| {
-        get_class(class_name).is_some_and(|class_def| {
-            class_def.methods.values().any(|method| {
-                method.function_name == function_name
-                    || method
-                        .function_name
-                        .strip_prefix(class_name.display_name())
-                        .is_some_and(|suffix| {
-                            suffix
-                                .strip_prefix('.')
-                                .is_some_and(|name| name == function_name)
-                        })
-                    || method
-                        .function_name
-                        .rsplit_once('.')
-                        .is_some_and(|(_, name)| name == function_name)
-            })
-        })
-    })
+    caller_method_for_function(function_name).map(|(class, _)| class)
 }
 
 pub fn is_class_sealed(name: &ClassIdentity) -> bool {
@@ -445,6 +466,126 @@ pub fn lookup_method(
     method: &runmat_types::MethodName,
 ) -> Option<(RuntimeMethod, ClassIdentity)> {
     lookup_member(class_name, |class| class.methods.get(method).cloned())
+}
+
+pub fn lookup_bound_method(
+    class_name: &ClassIdentity,
+    method: &MethodName,
+) -> Option<BoundRuntimeMethod> {
+    with_state(|state| {
+        let mut current = Some(class_name.clone());
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            let class = state.classes.get(&name)?;
+            if let Some(binding) = state.method_bindings.get(&(name.clone(), method.clone())) {
+                return Some(binding.clone());
+            }
+            current = class.parent.clone();
+        }
+        None
+    })
+}
+
+fn bind_class_methods(
+    classes: &HashMap<ClassIdentity, RuntimeClass>,
+    generation: u64,
+) -> HashMap<(ClassIdentity, MethodName), BoundRuntimeMethod> {
+    classes
+        .values()
+        .flat_map(|class| bind_methods_for_class(class, generation))
+        .collect()
+}
+
+fn bind_methods_for_class(
+    class: &RuntimeClass,
+    generation: u64,
+) -> impl Iterator<Item = ((ClassIdentity, MethodName), BoundRuntimeMethod)> + '_ {
+    class.methods.values().cloned().map(move |declaration| {
+        let method = declaration.name.clone();
+        let (callable, fallback) = resolve_method_callable(&class.name, &declaration);
+        let convention = if crate::object::protocol::ObjectProtocol::from_method(&method)
+            .is_some_and(crate::object::protocol::ObjectProtocol::uses_standard_substruct)
+        {
+            RuntimeMethodCallingConvention::StandardSubstruct
+        } else {
+            RuntimeMethodCallingConvention::Direct
+        };
+        (
+            (class.name.clone(), method),
+            BoundRuntimeMethod {
+                registry_generation: generation,
+                declaration,
+                declaring_class: class.name.clone(),
+                callable,
+                fallback,
+                convention,
+            },
+        )
+    })
+}
+
+fn resolve_method_callable(
+    owner: &ClassIdentity,
+    method: &RuntimeMethod,
+) -> (CallableIdentity, CallableFallbackPolicy) {
+    let function_name = method.function_name.trim();
+    if let Some(function) = crate::call::closures::resolve_method_semantic_function_id(
+        owner,
+        &method.name.0,
+        function_name,
+    ) {
+        return (
+            CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
+            CallableFallbackPolicy::None,
+        );
+    }
+    if let Some(callable) = runmat_builtins::builtin_callable_identity_by_name(function_name) {
+        return (callable, CallableFallbackPolicy::None);
+    }
+    if function_name.is_empty() {
+        return (
+            crate::call::identity::external_qualified_identity(
+                owner.display_name(),
+                &method.name.0,
+            ),
+            CallableFallbackPolicy::ExternalBoundary,
+        );
+    }
+    if function_name.contains('.') {
+        return runtime_named_callable(function_name);
+    }
+    (
+        crate::call::identity::external_qualified_identity(owner.display_name(), function_name),
+        CallableFallbackPolicy::ExternalBoundary,
+    )
+}
+
+fn runtime_named_callable(name: &str) -> (CallableIdentity, CallableFallbackPolicy) {
+    if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(name.trim()) {
+        return (
+            CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
+            CallableFallbackPolicy::None,
+        );
+    }
+    let segments: Vec<&str> = name.split('.').collect();
+    if segments.len() > 1 && segments.iter().all(|segment| !segment.trim().is_empty()) {
+        return (
+            CallableIdentity::ExternalName(QualifiedName(
+                segments
+                    .into_iter()
+                    .map(|segment| SymbolName(segment.trim().to_owned()))
+                    .collect(),
+            )),
+            CallableFallbackPolicy::ExternalBoundary,
+        );
+    }
+    (
+        CallableIdentity::DynamicName(SymbolName(name.trim().to_owned())),
+        CallableFallbackPolicy::RuntimeNameResolution,
+    )
 }
 
 fn lookup_member<T>(
@@ -537,6 +678,40 @@ mod tests {
             properties: HashMap::new(),
             methods: HashMap::new(),
         }
+    }
+
+    fn class_with_method(name: ClassIdentity, method: &str, function: &str) -> RuntimeClass {
+        let mut class = empty_class(name, None);
+        let declaration = RuntimeMethod {
+            name: method.into(),
+            is_static: false,
+            is_abstract: false,
+            is_sealed: false,
+            access: MemberAccess::Public,
+            function_name: function.into(),
+            implicit_class_argument: None,
+        };
+        class.methods.insert(declaration.name.clone(), declaration);
+        class
+    }
+
+    #[test]
+    fn legacy_function_spelling_only_grants_an_unambiguous_typed_caller() {
+        let function = format!(
+            "shared_protocol_impl_{}",
+            TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let first = unique_class_name("caller_first");
+        register_class(class_with_method(first.clone(), "subsref", &function));
+        assert_eq!(
+            caller_method_for_function(&function),
+            Some((first, MethodName::from("subsref")))
+        );
+
+        let second = unique_class_name("caller_second");
+        register_class(class_with_method(second, "subsref", &function));
+        assert_eq!(caller_method_for_function(&function), None);
+        assert_eq!(class_context_for_function(&function), None);
     }
 
     #[test]

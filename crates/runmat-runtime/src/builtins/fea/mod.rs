@@ -4957,18 +4957,43 @@ fn promote_named_integer_fields(
                 let Some(target) = object.properties.get_mut(name) else {
                     continue;
                 };
-                if signed_fields.contains(&name.as_str()) {
-                    if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
-                        *target = exact;
-                    }
-                } else if unsigned_fields.contains(&name.as_str()) {
-                    if let Some(exact) = exact_integer_json_value(builtin, error, child, false)? {
-                        *target = exact;
-                    }
-                } else {
-                    promote_named_integer_fields(
+                promote_named_integer_field(
+                    builtin,
+                    error,
+                    name,
+                    target,
+                    child,
+                    signed_fields,
+                    unsigned_fields,
+                )?;
+            }
+        }
+        (Value::Struct(value), serde_json::Value::Object(map)) => {
+            for (name, child) in map {
+                let Some(target) = value.fields.get_mut(name) else {
+                    continue;
+                };
+                promote_named_integer_field(
+                    builtin,
+                    error,
+                    name,
+                    target,
+                    child,
+                    signed_fields,
+                    unsigned_fields,
+                )?;
+            }
+        }
+        (Value::Struct(value), serde_json::Value::Array(items)) if items.len() == 1 => {
+            if let serde_json::Value::Object(map) = &items[0] {
+                for (name, child) in map {
+                    let Some(target) = value.fields.get_mut(name) else {
+                        continue;
+                    };
+                    promote_named_integer_field(
                         builtin,
                         error,
+                        name,
                         target,
                         child,
                         signed_fields,
@@ -4977,30 +5002,40 @@ fn promote_named_integer_fields(
                 }
             }
         }
-        (Value::Struct(value), serde_json::Value::Object(map)) => {
-            for (name, child) in map {
-                let Some(target) = value.fields.get_mut(name) else {
-                    continue;
-                };
-                if signed_fields.contains(&name.as_str()) {
-                    if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
-                        *target = exact;
-                    }
-                } else if unsigned_fields.contains(&name.as_str()) {
-                    if let Some(exact) = exact_integer_json_value(builtin, error, child, false)? {
-                        *target = exact;
-                    }
-                } else {
-                    promote_named_integer_fields(
-                        builtin,
-                        error,
-                        target,
-                        child,
-                        signed_fields,
-                        unsigned_fields,
-                    )?;
-                }
+        (Value::StructArray(array), serde_json::Value::Array(items)) => {
+            let Some((json_shape, leaves)) =
+                crate::builtins::io::json::layout::rectangular_leaves(items)
+            else {
+                return Ok(());
+            };
+            let shape = if json_shape.len() == 1 {
+                vec![json_shape[0], 1]
+            } else {
+                json_shape
+            };
+            if shape != array.shape() {
+                return Ok(());
             }
+            let leaves = crate::builtins::io::json::layout::row_to_column_major(leaves, &shape)
+                .map_err(|message| builtin_error(builtin, error, message))?;
+            array.try_for_each_indexed_value_mut(|name, index, target| -> BuiltinResult<()> {
+                let Some(serde_json::Value::Object(map)) = leaves.get(index).copied() else {
+                    return Ok(());
+                };
+                let Some(child) = map.get(name) else {
+                    return Ok(());
+                };
+                promote_named_integer_field(
+                    builtin,
+                    error,
+                    name,
+                    target,
+                    child,
+                    signed_fields,
+                    unsigned_fields,
+                )?;
+                Ok(())
+            })?;
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
             for (target, child) in cell.data.iter_mut().zip(items) {
@@ -5015,6 +5050,35 @@ fn promote_named_integer_fields(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn promote_named_integer_field(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    name: &str,
+    target: &mut Value,
+    child: &serde_json::Value,
+    signed_fields: &[&str],
+    unsigned_fields: &[&str],
+) -> BuiltinResult<()> {
+    let exact = if signed_fields.contains(&name) {
+        exact_integer_json_value(builtin, error, child, true)?
+    } else if unsigned_fields.contains(&name) {
+        exact_integer_json_value(builtin, error, child, false)?
+    } else {
+        return promote_named_integer_fields(
+            builtin,
+            error,
+            target,
+            child,
+            signed_fields,
+            unsigned_fields,
+        );
+    };
+    if let Some(exact) = exact {
+        *target = exact;
     }
     Ok(())
 }
@@ -5590,7 +5654,7 @@ fn sanitize_id(id: &str) -> String {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{CellArray, StructValue};
+    use runmat_value::{CellArray, StructArray, StructValue};
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -5970,6 +6034,33 @@ mod tests {
     }
 
     #[test]
+    fn fea_struct_array_integer_promotion_aligns_rectangular_json_column_major() {
+        let element = || {
+            let mut structure = StructValue::new();
+            structure.insert("id", Value::Num(0.0));
+            structure
+        };
+        let array =
+            StructArray::new(vec![element(), element(), element(), element()], vec![2, 2]).unwrap();
+        let mut value = Value::StructArray(array);
+        let json = serde_json::json!([[{"id": 1}, {"id": 2}], [{"id": 3}, {"id": 4}]]);
+        promote_named_integer_fields("fea.test", &ERROR_INPUT, &mut value, &json, &[], &["id"])
+            .unwrap();
+        let Value::StructArray(array) = value else {
+            panic!("expected structure array");
+        };
+        assert_eq!(
+            array.field_values("id").unwrap(),
+            [
+                Value::Int(IntValue::U64(1)),
+                Value::Int(IntValue::U64(3)),
+                Value::Int(IntValue::U64(2)),
+                Value::Int(IntValue::U64(4)),
+            ]
+        );
+    }
+
+    #[test]
     fn fea_numeric_constructors_cross_all_integer_classes_once_into_binary64() {
         for integer in [
             IntValue::I8(1),
@@ -6204,10 +6295,7 @@ mod tests {
             object.properties.get("optional_delta"),
             Some(Value::Tensor(tensor)) if tensor.is_empty()
         ));
-        let Some(Value::Cell(entries)) = object.properties.get("failure_entries") else {
-            panic!("expected failure entry cell");
-        };
-        let Some(Value::Struct(entry)) = entries.data.first() else {
+        let Some(Value::Struct(entry)) = object.properties.get("failure_entries") else {
             panic!("expected failure entry struct");
         };
         assert_eq!(

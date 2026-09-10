@@ -27,10 +27,39 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
                 MirStmtKind::MultiAssign { targets, value } => {
                     scan_rvalue(body, value, &mut reads_captures);
                     for target in &targets.targets {
-                        if let crate::MirOutputTarget::Place(place) = target {
-                            scan_place_write(body, place, &mut writes_captures);
+                        match target {
+                            crate::MirOutputTarget::Place(place) => {
+                                scan_place_write(body, place, &mut writes_captures)
+                            }
+                            crate::MirOutputTarget::Sequence(target) => scan_sequence_target(
+                                body,
+                                target,
+                                &mut reads_captures,
+                                &mut writes_captures,
+                            ),
+                            crate::MirOutputTarget::Discard => {}
                         }
                     }
+                }
+                MirStmtKind::SequenceAssign { target, value } => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                    match target {
+                        crate::MirSequenceTarget::Member { base, .. } => {
+                            scan_place_write(body, base, &mut writes_captures)
+                        }
+                        crate::MirSequenceTarget::DynamicMember { base, member } => {
+                            scan_place_write(body, base, &mut writes_captures);
+                            scan_operand(body, member, &mut reads_captures);
+                        }
+                        crate::MirSequenceTarget::CellContents { base, indexing } => {
+                            scan_place_write(body, base, &mut writes_captures);
+                            scan_indexing(body, indexing, &mut reads_captures);
+                        }
+                    }
+                }
+                MirStmtKind::CaptureSequence { source, .. } => {
+                    source
+                        .visit_operands(|operand| scan_operand(body, operand, &mut reads_captures));
                 }
                 MirStmtKind::Expr(value) => {
                     scan_rvalue(body, value, &mut reads_captures);
@@ -103,6 +132,24 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
     }
 }
 
+fn scan_sequence_target(
+    body: &MirBody,
+    target: &crate::MirSequenceTarget,
+    reads_captures: &mut BTreeSet<BindingId>,
+    writes_captures: &mut BTreeSet<BindingId>,
+) {
+    scan_place_write(body, target.base(), writes_captures);
+    match target {
+        crate::MirSequenceTarget::Member { .. } => {}
+        crate::MirSequenceTarget::DynamicMember { member, .. } => {
+            scan_operand(body, member, reads_captures)
+        }
+        crate::MirSequenceTarget::CellContents { indexing, .. } => {
+            scan_indexing(body, indexing, reads_captures)
+        }
+    }
+}
+
 fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<BindingId>) {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
@@ -123,10 +170,12 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                 match &stmt.kind {
                     crate::MirStmtKind::Assign { value, .. }
                     | crate::MirStmtKind::Expr(value)
-                    | crate::MirStmtKind::MultiAssign { value, .. } => {
+                    | crate::MirStmtKind::MultiAssign { value, .. }
+                    | crate::MirStmtKind::SequenceAssign { value, .. } => {
                         scan_rvalue(body, value, reads_captures);
                     }
                     crate::MirStmtKind::PlaceMutation(_)
+                    | crate::MirStmtKind::CaptureSequence { .. }
                     | crate::MirStmtKind::WorkspaceEffect { .. }
                     | crate::MirStmtKind::EnvironmentEffect(_) => {}
                 }
@@ -145,12 +194,14 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                 scan_operand(body, callee, reads_captures);
             }
             for arg in &call.args {
-                scan_operand(body, arg.operand(), reads_captures);
+                arg.visit_operands(|operand| scan_operand(body, operand, reads_captures));
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                scan_operand(body, element, reads_captures);
+                if let Some(operand) = element.operand() {
+                    scan_operand(body, operand, reads_captures);
+                }
             }
         }
         MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
@@ -162,15 +213,32 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
             scan_operand(body, base, reads_captures);
             scan_indexing(body, indexing, reads_captures);
         }
+        MirRvalue::SubscriptChain(chain) => {
+            scan_operand(body, &chain.root, reads_captures);
+            for step in &chain.steps {
+                match step {
+                    crate::MirSubscriptStep::Index(indexing) => {
+                        scan_indexing(body, indexing, reads_captures)
+                    }
+                    crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                        scan_indexing(body, indexing, reads_captures)
+                    }
+                    crate::MirSubscriptStep::DynamicMember(member) => {
+                        scan_operand(body, member, reads_captures)
+                    }
+                    crate::MirSubscriptStep::Member(_) => {}
+                }
+            }
+        }
         MirRvalue::Future { args, .. } => {
             for arg in args {
-                scan_operand(body, arg.operand(), reads_captures);
+                arg.visit_operands(|operand| scan_operand(body, operand, reads_captures));
             }
         }
         MirRvalue::Member { base, .. } => {
             scan_operand(body, base, reads_captures);
         }
-        MirRvalue::DynamicMember { base, member } => {
+        MirRvalue::DynamicMember { base, member, .. } => {
             scan_operand(body, base, reads_captures);
             scan_operand(body, member, reads_captures);
         }
@@ -204,9 +272,31 @@ fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BT
             MirIndexComponent::Expr(operand) => {
                 scan_operand(body, operand, reads_captures);
             }
-            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+            MirIndexComponent::ContextualExpr(region) => {
+                scan_expression_region(body, region, reads_captures);
+            }
+            MirIndexComponent::Colon => {}
         }
     }
+}
+
+fn scan_expression_region(
+    body: &MirBody,
+    region: &crate::MirExpressionRegion,
+    reads_captures: &mut BTreeSet<BindingId>,
+) {
+    for step in region.steps() {
+        match step {
+            crate::MirExpressionStep::Let { value, .. } => scan_rvalue(body, value, reads_captures),
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_operands(|operand| scan_operand(body, operand, reads_captures));
+                source.visit_expression_regions_dyn(&mut |nested| {
+                    scan_expression_region(body, nested, reads_captures)
+                });
+            }
+        }
+    }
+    scan_operand(body, region.result(), reads_captures);
 }
 
 fn place_root(place: &MirPlace) -> Option<MirLocalId> {
@@ -306,7 +396,9 @@ fn analyze_spawn_boundaries_with_capture_facts(
                         }
                     }
                 }
-                MirStmtKind::MultiAssign { value, .. } | MirStmtKind::Expr(value) => {
+                MirStmtKind::MultiAssign { value, .. }
+                | MirStmtKind::SequenceAssign { value, .. }
+                | MirStmtKind::Expr(value) => {
                     collect_classified_spawn_rvalue(
                         value,
                         stmt.span,
@@ -315,6 +407,7 @@ fn analyze_spawn_boundaries_with_capture_facts(
                         &mut boundaries,
                     );
                 }
+                MirStmtKind::CaptureSequence { .. } => {}
                 MirStmtKind::PlaceMutation(_)
                 | MirStmtKind::WorkspaceEffect { .. }
                 | MirStmtKind::EnvironmentEffect(_) => {}

@@ -10,7 +10,7 @@ use crate::{
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Structure field order", paragraphs: &[
         "`fieldnames(S)` returns an N-by-1 cell array of character rows. A scalar structure retains insertion order and comparisons remain case-sensitive.",
-        "RunMat currently represents structure arrays with cell-backed storage. For that representation, every element must be a scalar structure and the result is the sorted union of represented field names. Empty scalar structures and empty represented arrays return a 0-by-1 cell array.",
+        "Structure arrays retain one ordered field schema across every element. Empty scalar structures return a 0-by-1 cell array; empty structure arrays retain and report their declared field schema.",
     ] },
     BuiltinDocumentationSection { heading: "Object-family extension", paragraphs: &[
         "In RunMat compatibility mode, value objects, handle objects, and listeners expose the property metadata currently represented by the runtime. Class-declared nonstatic properties, inherited properties, dynamic instance properties, and valid handle-target metadata are merged into a deterministic result.",
@@ -23,8 +23,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "What does fieldnames return?", answer: "An N-by-1 cell array whose elements are character-row field names." },
-    BuiltinDocumentationFaq { question: "Are field names sorted?", answer: "Scalar structures retain insertion order. RunMat's current cell-backed structure-array representation returns a sorted union, and supported object families use deterministic property ordering." },
-    BuiltinDocumentationFaq { question: "Can fieldnames inspect structure arrays?", answer: "Yes, for RunMat's current cell-backed representation when every element is a scalar structure. A cell containing only scalar structures is therefore interpreted as a represented structure array. Empty arrays return an empty column cell array." },
+    BuiltinDocumentationFaq { question: "Are field names sorted?", answer: "Scalar structures and structure arrays retain field insertion order. Supported object families use deterministic property ordering." },
+    BuiltinDocumentationFaq { question: "Can fieldnames inspect structure arrays?", answer: "Yes. It returns the array's ordered field schema, including the retained schema of an empty structure array. Ordinary cell arrays remain cells even when their elements are structures." },
     BuiltinDocumentationFaq { question: "Can fieldnames inspect objects?", answer: "RunMat compatibility mode supports the currently represented value, handle, and listener properties as an explicit extension. MATLAB compatibility mode rejects that extension." },
     BuiltinDocumentationFaq { question: "Does fieldnames gather GPU data?", answer: "No. It inspects metadata and leaves nested provider-resident values untouched." },
     BuiltinDocumentationFaq { question: "Are unsupported inputs converted?", answer: "No. Numeric, logical, text, and resident array inputs reject without conversion." },

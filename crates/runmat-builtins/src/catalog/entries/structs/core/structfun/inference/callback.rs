@@ -59,6 +59,7 @@ fn fields(request: &CallRequest) -> FieldOutputs {
         Some(ValueKindFact::Struct(StructFact {
             fields,
             fields_complete,
+            ..
         })) => {
             let mut discovered = fields
                 .iter()

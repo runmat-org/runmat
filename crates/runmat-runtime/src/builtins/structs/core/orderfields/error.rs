@@ -9,23 +9,12 @@ pub(super) fn invalid_target(value: &runmat_value::Value) -> crate::RuntimeError
     build(format!("{} (got {value:?})", error.message), error)
 }
 
-pub(super) fn invalid_target_kind() -> crate::RuntimeError {
-    build_from(&runmat_builtins::ORDERFIELDS_ERROR_INVALID_TARGET)
-}
-
 pub(super) fn empty_struct_array() -> crate::RuntimeError {
     build_from(&runmat_builtins::ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY)
 }
 
 pub(super) fn no_fields() -> crate::RuntimeError {
     build_from(&runmat_builtins::ORDERFIELDS_ERROR_NO_FIELDS)
-}
-
-pub(super) fn invalid_reference(context: impl std::fmt::Display) -> crate::RuntimeError {
-    contextual(
-        &runmat_builtins::ORDERFIELDS_ERROR_INVALID_REFERENCE,
-        context,
-    )
 }
 
 pub(super) fn invalid_name(context: impl std::fmt::Display) -> crate::RuntimeError {

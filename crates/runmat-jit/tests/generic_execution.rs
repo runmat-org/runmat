@@ -16,7 +16,8 @@ use runmat_execution::{
     ProgramRevision, EXECUTABLE_UNIT_SCHEMA_VERSION,
 };
 use runmat_hir::{
-    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, WorkspaceEffect,
+    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, Span, StringLiteral,
+    WorkspaceEffect,
 };
 use runmat_jit::{
     entry::{EntryKey, EntryRegistry},
@@ -24,11 +25,11 @@ use runmat_jit::{
     GenericCompiler, JitError,
 };
 use runmat_mir::{
-    AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall,
-    MirCallArg, MirCallee, MirConstant, MirFunctionMetadata, MirIndexComponent, MirIndexPlan,
-    MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirOutputTarget,
-    MirOutputTargetList, MirPlace, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminator, MirTerminatorKind,
+    AsyncBehaviorFact, BasicBlock, BasicBlockId, MirAggregateElement, MirAggregateKind,
+    MirAssembly, MirBody, MirCall, MirCallArg, MirCallee, MirConstant, MirFunctionMetadata,
+    MirIndexComponent, MirIndexPlan, MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand,
+    MirOutputTarget, MirOutputTargetList, MirPlace, MirPlaceMutation, MirRvalue, MirStmt,
+    MirStmtKind, MirSubscriptChain, MirSubscriptStep, MirTerminator, MirTerminatorKind,
 };
 use runmat_native_codegen::{lower_executable, NativeLoweringInput, NativeTarget};
 use runmat_native_executor::{
@@ -42,11 +43,12 @@ use runmat_runtime::{context::RuntimeContext, execution::RuntimeExecutionService
 use runmat_types::{
     AliasFact, BindingId, BuiltinId, CallableFallbackPolicy, CallableIdentity,
     CapabilityRequirement, CapabilitySet, DeoptimizationPointId, InteropManifest, NumericClass,
-    NumericDomain, NumericFact, ParallelManifest, ProgramFunctionId, ProgramPointId,
-    ProgramSourceId, RegionContract, RegionGuardCondition, RegionGuardContract, RegionGuardId,
-    RegionId, RegionProvenance, RegionValueFact, RegionValueId, RequestedOutputCount,
-    ResidencyFact, ShapeFact, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
-    PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
+    NumericDomain, NumericFact, ObjectIndexingContext, ParallelManifest, ProgramFunctionId,
+    ProgramPointId, ProgramSourceId, RegionContract, RegionGuardCondition, RegionGuardContract,
+    RegionGuardId, RegionId, RegionProvenance, RegionValueFact, RegionValueId,
+    RequestedOutputCount, ResidencyFact, SequenceUse, ShapeFact, ValueFact, ValueKindFact,
+    INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
+    REGION_CONTRACT_SCHEMA_VERSION,
 };
 use runmat_value::Value;
 
@@ -641,6 +643,177 @@ fn suspending_external_call_resumes_exactly_without_replay() {
 }
 
 #[test]
+fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
+    let runtime = runtime_context();
+    let activation = runtime.enter();
+    let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
+        Arc::new(|name| (name == "suspending_prefix_subsref").then_some(9)),
+    ));
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "SuspendingPrefixObject".into(),
+        parent: None,
+        properties: std::collections::HashMap::new(),
+        methods: [(
+            "subsref".into(),
+            runmat_runtime::class_registry::RuntimeMethod {
+                name: "subsref".into(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: runmat_types::MemberAccess::Public,
+                function_name: "suspending_prefix_subsref".into(),
+                implicit_class_argument: None,
+            },
+        )]
+        .into_iter()
+        .collect(),
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, _arguments, requested_outputs| {
+            assert_eq!(function, 9);
+            assert_eq!(requested_outputs, 1);
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let mut yielded = false;
+                futures::future::poll_fn(|context| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        context.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                Ok(Value::Tensor(
+                    runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+                ))
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(suspending_subscript_prefix_fixture()).unwrap();
+    let output = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        vec![Value::Object(runmat_value::ObjectInstance::new(
+            "SuspendingPrefixObject",
+        ))],
+        1,
+        runtime,
+    ))
+    .unwrap();
+    assert_eq!(output.outputs, vec![Value::Num(3.0)]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    drop(invoker);
+    drop(resolver);
+}
+
+#[test]
+fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
+    let runtime = runtime_context();
+    let activation = runtime.enter();
+    let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
+        Arc::new(|name| match name {
+            "staged_path_subsref" => Some(11),
+            "staged_path_end" => Some(12),
+            _ => None,
+        }),
+    ));
+    let method = |name: &str, function_name: &str| runmat_runtime::class_registry::RuntimeMethod {
+        name: name.into(),
+        is_static: false,
+        is_abstract: false,
+        is_sealed: false,
+        access: runmat_types::MemberAccess::Public,
+        function_name: function_name.into(),
+        implicit_class_argument: None,
+    };
+    runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        name: "StagedPathObject".into(),
+        parent: None,
+        properties: std::collections::HashMap::new(),
+        methods: [
+            ("subsref".into(), method("subsref", "staged_path_subsref")),
+            ("end".into(), method("end", "staged_path_end")),
+        ]
+        .into_iter()
+        .collect(),
+    });
+    let subsref_calls = Arc::new(AtomicUsize::new(0));
+    let end_calls = Arc::new(AtomicUsize::new(0));
+    let observed_subsref = Arc::clone(&subsref_calls);
+    let observed_end = Arc::clone(&end_calls);
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, _arguments, requested_outputs| {
+            assert_eq!(requested_outputs, 1);
+            let future: runmat_runtime::user_functions::UserFunctionFuture = match function {
+                11 => {
+                    let call = observed_subsref.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async move {
+                        if call == 0 {
+                            return Ok(Value::Object(runmat_value::ObjectInstance::new(
+                                "StagedPathObject",
+                            )));
+                        }
+                        let mut yielded = false;
+                        futures::future::poll_fn(|context| {
+                            if yielded {
+                                std::task::Poll::Ready(())
+                            } else {
+                                yielded = true;
+                                context.waker().wake_by_ref();
+                                std::task::Poll::Pending
+                            }
+                        })
+                        .await;
+                        Ok(Value::Num(42.0))
+                    })
+                }
+                12 => {
+                    observed_end.fetch_add(1, Ordering::SeqCst);
+                    Box::pin(async move {
+                        let mut yielded = false;
+                        futures::future::poll_fn(|context| {
+                            if yielded {
+                                std::task::Poll::Ready(())
+                            } else {
+                                yielded = true;
+                                context.waker().wake_by_ref();
+                                std::task::Poll::Pending
+                            }
+                        })
+                        .await;
+                        Ok(Value::Num(1.0))
+                    })
+                }
+                _ => panic!("unexpected semantic function {function}"),
+            };
+            future
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(staged_subscript_suspension_fixture()).unwrap();
+    let output = futures::executor::block_on(executor.invoke_async(
+        ProgramFunctionId(0),
+        vec![Value::Object(runmat_value::ObjectInstance::new(
+            "StagedPathObject",
+        ))],
+        1,
+        runtime,
+    ))
+    .unwrap();
+    assert_eq!(output.outputs, vec![Value::Num(42.0)]);
+    assert_eq!(subsref_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(end_calls.load(Ordering::SeqCst), 2);
+    drop(invoker);
+    drop(resolver);
+}
+
+#[test]
 fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
     let executor = compile_executor(branch_fixture()).unwrap();
     let execution = executor
@@ -924,6 +1097,123 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
 }
 
 #[test]
+fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
+    for destination in [
+        SequenceDestinationFixture::Static,
+        SequenceDestinationFixture::Dynamic,
+    ] {
+        let executor = compile_executor(sequence_member_assignment_fixture(destination)).unwrap();
+        let Value::StructArray(array) = executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs
+            .pop()
+            .unwrap()
+        else {
+            panic!("expected updated structure array")
+        };
+        assert_eq!(
+            array.field_values("value").unwrap(),
+            &[Value::Num(7.0), Value::Num(8.0)]
+        );
+    }
+
+    let executor = compile_executor(sequence_member_assignment_fixture(
+        SequenceDestinationFixture::Indexed,
+    ))
+    .unwrap();
+    let Value::StructArray(array) = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("expected indexed structure-array update")
+    };
+    assert_eq!(
+        array.field_values("value").unwrap(),
+        &[Value::Num(7.0), Value::Num(2.0), Value::Num(8.0)]
+    );
+}
+
+#[test]
+fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
+    for dynamic in [false, true] {
+        let runtime = runtime_context();
+        let order = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&order);
+        let activation = runtime.enter();
+        let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(move |function, _, requested_outputs| {
+                let observed = Arc::clone(&observed);
+                Box::pin(async move {
+                    match function {
+                        9 => {
+                            assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 0);
+                            if dynamic {
+                                Ok(Value::String("value".into()))
+                            } else {
+                                Ok(Value::Tensor(
+                                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+                                ))
+                            }
+                        }
+                        10 => {
+                            assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 1);
+                            assert_eq!(requested_outputs, 2);
+                            Ok(Value::OutputList(vec![Value::Num(7.0), Value::Num(8.0)]))
+                        }
+                        _ => unreachable!("unexpected fixture function"),
+                    }
+                })
+            }),
+        ));
+        drop(activation);
+
+        let executor = compile_executor(sequence_member_order_fixture(dynamic)).unwrap();
+        let Value::StructArray(array) = executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
+            .unwrap()
+            .outputs
+            .pop()
+            .unwrap()
+        else {
+            panic!("expected updated structure array")
+        };
+        assert_eq!(order.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            array.field_values("value").unwrap(),
+            &[Value::Num(7.0), Value::Num(8.0)]
+        );
+        drop(invoker);
+    }
+}
+
+#[test]
+fn generic_native_structure_assignment_uses_shared_growth_semantics() {
+    let executor = compile_executor(structure_growth_fixture()).unwrap();
+    let Value::StructArray(array) = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap()
+        .outputs
+        .pop()
+        .unwrap()
+    else {
+        panic!("expected grown structure array")
+    };
+    assert_eq!(array.shape(), &[1, 3]);
+    assert!(matches!(
+        array.get_linear(1).unwrap().fields.get("value"),
+        Some(Value::Tensor(value)) if value.is_empty()
+    ));
+    assert_eq!(
+        array.get_linear(2).unwrap().fields.get("value"),
+        Some(&Value::Num(3.0))
+    );
+}
+
+#[test]
 fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     let runtime = runtime_context();
     futures::executor::block_on(runtime.scope(async {
@@ -1060,24 +1350,426 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
     let activation = runtime.enter();
     let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(move |function, arguments, requested_outputs| {
-            assert_eq!(function, 9);
+            assert!(matches!(function, 8 | 9));
             assert_eq!(requested_outputs, 1);
             invoker_calls.fetch_add(1, Ordering::SeqCst);
             let value = arguments[0].clone();
-            Box::pin(async move { Ok(value) })
+            Box::pin(async move {
+                if function == 8 {
+                    return Ok(value);
+                }
+                let mut yielded = false;
+                futures::future::poll_fn(|context| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        context.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                Ok(value)
+            })
         }),
     ));
     drop(activation);
-    let called = compile_executor(end_call_fixture()).unwrap();
+    let called_assembly = end_call_fixture();
+    let contextual_site = called_assembly.functions[0].blocks[0]
+        .instructions
+        .iter()
+        .find(|instruction| instruction.site.construct == runmat_mir::MirConstructKind::Index)
+        .expect("contextual indexing site");
     assert_eq!(
-        called
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime)
-            .unwrap()
-            .outputs,
+        contextual_site.class,
+        runmat_mir::NativeLoweringClass::RuntimeSlowPath
+    );
+    let called = compile_executor(called_assembly).unwrap();
+    assert_eq!(
+        futures::executor::block_on(called.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
         vec![Value::Num(40.0)]
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    drop(invoker);
+}
+
+#[test]
+fn contextual_regions_at_one_site_resume_without_replaying_prior_regions() {
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, arguments, _| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            let value = arguments[0].clone();
+            Box::pin(async move {
+                if function == 9 {
+                    let mut yielded = false;
+                    futures::future::poll_fn(|context| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            context.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                }
+                Ok(value)
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(end_two_regions_fixture()).unwrap();
+    assert_eq!(
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
+        vec![Value::Num(40.0)]
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    drop(invoker);
+}
+
+#[test]
+fn contextual_step_calls_have_distinct_resume_identities() {
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, _, _| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if function == 9 {
+                    let mut yielded = false;
+                    futures::future::poll_fn(|context| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            context.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                }
+                Ok(Value::Bool(true))
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(end_two_calls_one_step_fixture()).unwrap();
+    assert_eq!(
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
+        vec![Value::Num(30.0)]
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "the completed first call must not replay when the later call suspends"
+    );
+    drop(invoker);
+}
+
+#[test]
+fn nested_contextual_call_restores_the_outer_operation_identity() {
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, arguments, _| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            let argument = arguments.first().cloned();
+            Box::pin(async move {
+                if function == 9 {
+                    let mut yielded = false;
+                    futures::future::poll_fn(|context| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            context.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                    return Ok(Value::Bool(true));
+                }
+                Ok(argument.expect("fixture function 8 receives one argument"))
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(end_nested_context_then_call_fixture()).unwrap();
+    assert_eq!(
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
+        vec![Value::Num(30.0)]
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "nested completion must not be consumed by or replayed as the outer call"
+    );
+    drop(invoker);
+}
+
+#[test]
+fn caught_contextual_selector_call_error_clears_native_site_state() {
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |_, _, _| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let mut yielded = false;
+                futures::future::poll_fn(|context| {
+                    if yielded {
+                        std::task::Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        context.waker().wake_by_ref();
+                        std::task::Poll::Pending
+                    }
+                })
+                .await;
+                Err(runmat_runtime::runtime_error::semantic_error(
+                    "ExpectedFixtureFailure",
+                    "expected contextual selector failure",
+                ))
+            })
+        }),
+    ));
+    drop(activation);
+
+    let executor = compile_executor(caught_contextual_error_fixture()).unwrap();
+    assert_eq!(
+        futures::executor::block_on(executor.invoke_async(
+            ProgramFunctionId(0),
+            Vec::new(),
+            1,
+            runtime,
+        ))
+        .unwrap()
+        .outputs,
+        vec![Value::Num(7.0)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     drop(invoker);
+}
+
+#[test]
+fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("contextual-live".to_string()))
+        .expect("allocate rooted contextual test value");
+    let handle = rooted.handle();
+    let completion_root =
+        runmat_gc::gc_allocate_rooted(Value::String("completed-call-live".to_string()))
+            .expect("allocate rooted completed-call test value");
+    let completion_handle = completion_root.handle();
+    thread_local! {
+        static CONTEXTUAL_HANDLES: std::cell::RefCell<Option<(runmat_gc::GcHandle, runmat_gc::GcHandle)>> = const { std::cell::RefCell::new(None) };
+    }
+    CONTEXTUAL_HANDLES.with(|slot| *slot.borrow_mut() = Some((handle, completion_handle)));
+    let runtime = runtime_context();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let activation = runtime.enter();
+    let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function, _arguments, _| {
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            let (retained_handle, completed_handle) = CONTEXTUAL_HANDLES
+                .with(|slot| slot.borrow().expect("contextual handles installed"));
+            let retained = Value::HandleObject(runmat_value::HandleRef {
+                class_name: "ContextualGcValue".into(),
+                target: retained_handle,
+                valid: true,
+            });
+            let completed = Value::HandleObject(runmat_value::HandleRef {
+                class_name: "CompletedCallGcValue".into(),
+                target: completed_handle,
+                valid: true,
+            });
+            Box::pin(async move {
+                if function == 9 {
+                    let mut yielded = false;
+                    futures::future::poll_fn(|context| {
+                        if yielded {
+                            std::task::Poll::Ready(())
+                        } else {
+                            yielded = true;
+                            context.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                    runmat_gc::gc_collect_major().map_err(|error| {
+                        runmat_runtime::RuntimeError::new(format!(
+                            "contextual GC stress collection failed: {error}"
+                        ))
+                    })?;
+                    runmat_gc::gc_clone_value(&retained_handle).map_err(|error| {
+                        runmat_runtime::RuntimeError::new(format!(
+                            "contextual roots did not retain their handle: {error}"
+                        ))
+                    })?;
+                    return Ok(completed);
+                }
+                if call == 0 {
+                    Ok(retained)
+                } else {
+                    Ok(Value::Num(4.0))
+                }
+            })
+        }),
+    ));
+    drop(activation);
+
+    let assembly = contextual_gc_roots_fixture();
+    let executor = compile_executor(assembly.clone()).unwrap();
+    let mut invocation = executor
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
+            function: ProgramFunctionId(0),
+            captures: Vec::new(),
+            arguments: Vec::new(),
+            requested_outputs: 1,
+            runtime,
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: None,
+            workspace: None,
+        })
+        .unwrap();
+    let runmat_native_executor::execute::NativeInvocationStep::Suspended {
+        continuation,
+        generation,
+    } = invocation.advance().unwrap()
+    else {
+        panic!("second contextual call must suspend")
+    };
+    let resume = invocation.resume_state();
+    let suspended_safepoint = assembly.functions[0].blocks[resume.block as usize]
+        .instructions
+        .iter()
+        .find(|instruction| {
+            instruction.site.point.position == resume.position
+                && match instruction.site.phase {
+                    runmat_native_codegen::NativeSitePhase::Rvalue => resume.phase == 0,
+                    runmat_native_codegen::NativeSitePhase::Statement => resume.phase == 1,
+                    runmat_native_codegen::NativeSitePhase::TerminatorRvalue => resume.phase == 2,
+                    runmat_native_codegen::NativeSitePhase::Terminator => resume.phase == 3,
+                }
+                && instruction.site.ordinal == resume.ordinal
+        })
+        .and_then(|instruction| instruction.safepoint)
+        .expect("suspended contextual site has a safepoint");
+    invocation.inject_deoptimization_fault(FaultInjection::Safepoint(suspended_safepoint));
+    rooted
+        .unroot()
+        .expect("transfer handle ownership to contextual native roots");
+    futures::executor::block_on(invocation.resume_suspension(continuation, generation)).unwrap();
+    completion_root
+        .unroot()
+        .expect("transfer handle ownership to completed-call native roots");
+    runmat_gc::gc_collect_major().expect("collect between call completion and site replay");
+    runmat_gc::gc_clone_value(&completion_handle)
+        .expect("completed call output remains rooted before consumption");
+    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
+        invocation.advance().unwrap()
+    else {
+        panic!("contextual GC-stressed invocation must complete")
+    };
+    assert_eq!(execution.outputs, vec![Value::Num(40.0)]);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    drop(invoker);
+    CONTEXTUAL_HANDLES.with(|slot| *slot.borrow_mut() = None);
+}
+
+#[test]
+fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
+    let success = compile_executor(branch_fixture()).unwrap();
+    assert_eq!(
+        success
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs,
+        vec![Value::Num(7.0)]
+    );
+
+    for should_suspend in [false, true] {
+        let runtime = runtime_context();
+        let activation = runtime.enter();
+        let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(move |_, _, _| {
+                Box::pin(async move {
+                    if should_suspend {
+                        let mut yielded = false;
+                        futures::future::poll_fn(|context| {
+                            if yielded {
+                                std::task::Poll::Ready(())
+                            } else {
+                                yielded = true;
+                                context.waker().wake_by_ref();
+                                std::task::Poll::Pending
+                            }
+                        })
+                        .await;
+                    }
+                    Err(runmat_runtime::runtime_error::semantic_error(
+                        "ExpectedTerminatorFailure",
+                        "expected terminator call failure",
+                    ))
+                })
+            }),
+        ));
+        drop(activation);
+        let executor = compile_executor(caught_terminator_call_fixture()).unwrap();
+        assert_eq!(
+            futures::executor::block_on(executor.invoke_async(
+                ProgramFunctionId(0),
+                Vec::new(),
+                1,
+                runtime,
+            ))
+            .unwrap()
+            .outputs,
+            vec![Value::Num(7.0)]
+        );
+        drop(invoker);
+    }
 }
 
 fn runtime_context() -> RuntimeContext {
@@ -1137,6 +1829,7 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
                 name: FunctionName("main".into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -1278,6 +1971,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
                 name: FunctionName("branch".into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -1557,11 +2251,14 @@ fn aggregate_fixture() -> runmat_native_codegen::NativeAssembly {
                 place: MirPlace::Local(MirLocalId(0)),
                 value: MirRvalue::Aggregate {
                     kind: MirAggregateKind::Tensor,
-                    rows: 1,
-                    cols: 2,
+                    row_lengths: vec![2],
                     elements: vec![
-                        MirOperand::Constant(MirConstant::Number("1".into())),
-                        MirOperand::Constant(MirConstant::Number("2".into())),
+                        MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                            "1".into(),
+                        ))),
+                        MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                            "2".into(),
+                        ))),
                     ],
                 },
             },
@@ -1667,6 +2364,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
                 name: FunctionName("switch".into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -1786,6 +2484,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
                 name: FunctionName("for_loop".into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -1821,12 +2520,17 @@ fn index_fixture() -> runmat_native_codegen::NativeAssembly {
                     place: MirPlace::Local(MirLocalId(0)),
                     value: MirRvalue::Aggregate {
                         kind: MirAggregateKind::Tensor,
-                        rows: 1,
-                        cols: 3,
+                        row_lengths: vec![3],
                         elements: vec![
-                            MirOperand::Constant(MirConstant::Number("10".into())),
-                            MirOperand::Constant(MirConstant::Number("20".into())),
-                            MirOperand::Constant(MirConstant::Number("30".into())),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "10".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "20".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "30".into(),
+                            ))),
                         ],
                     },
                 },
@@ -1880,6 +2584,7 @@ fn member_fixture() -> runmat_native_codegen::NativeAssembly {
                     value: MirRvalue::Member {
                         base: MirOperand::Local(MirLocalId(0)),
                         member: runmat_types::MemberName("answer".into()),
+                        sequence_use: SequenceUse::RequireSingle,
                     },
                 },
                 span,
@@ -1911,12 +2616,17 @@ fn index_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
                     place: MirPlace::Local(MirLocalId(0)),
                     value: MirRvalue::Aggregate {
                         kind: MirAggregateKind::Tensor,
-                        rows: 1,
-                        cols: 3,
+                        row_lengths: vec![3],
                         elements: vec![
-                            MirOperand::Constant(MirConstant::Number("10".into())),
-                            MirOperand::Constant(MirConstant::Number("20".into())),
-                            MirOperand::Constant(MirConstant::Number("30".into())),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "10".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "20".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "30".into(),
+                            ))),
                         ],
                     },
                 },
@@ -1935,6 +2645,61 @@ fn index_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
                 kind: MirStmtKind::Assign {
                     place,
                     value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("99".into()))),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+fn structure_growth_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let indexing = MirIndexing {
+        kind: runmat_types::IndexKind::Paren,
+        plan: MirIndexPlan::Scalar,
+        components: vec![MirIndexComponent::Expr(MirOperand::Constant(
+            MirConstant::Number("3".into()),
+        ))],
+        result_context: runmat_types::IndexResultContext::AssignmentTarget,
+        cell_expand_all: false,
+    };
+    let place = MirPlace::Index(Box::new(MirPlace::Local(MirLocalId(0))), indexing);
+    lower_body(
+        "structure_growth",
+        1,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::StructLiteral {
+                        fields: vec![(
+                            runmat_types::MemberName("value".into()),
+                            MirOperand::Constant(MirConstant::Number("1".into())),
+                        )],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
+                    place: place.clone(),
+                    kind: runmat_types::PlaceMutationKind::IndexedAssign,
+                    creation_policy: runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
+                    shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+                }),
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place,
+                    value: MirRvalue::StructLiteral {
+                        fields: vec![(
+                            runmat_types::MemberName("value".into()),
+                            MirOperand::Constant(MirConstant::Number("3".into())),
+                        )],
+                    },
                 },
                 span,
             },
@@ -1999,11 +2764,14 @@ fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
                     place: MirPlace::Local(MirLocalId(0)),
                     value: MirRvalue::Aggregate {
                         kind: MirAggregateKind::Cell,
-                        rows: 1,
-                        cols: 2,
+                        row_lengths: vec![2],
                         elements: vec![
-                            MirOperand::Constant(MirConstant::Number("11".into())),
-                            MirOperand::Constant(MirConstant::Number("22".into())),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "11".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "22".into(),
+                            ))),
                         ],
                     },
                 },
@@ -2044,6 +2812,264 @@ fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
             },
         ],
         MirOperand::Local(MirLocalId(3)),
+        span,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum SequenceDestinationFixture {
+    Static,
+    Dynamic,
+    Indexed,
+}
+
+fn sequence_member_assignment_fixture(
+    destination: SequenceDestinationFixture,
+) -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let cell = |values: &[&str]| MirRvalue::Aggregate {
+        kind: MirAggregateKind::Cell,
+        row_lengths: vec![values.len()],
+        elements: values
+            .iter()
+            .map(|value| {
+                MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                    (*value).into(),
+                )))
+            })
+            .collect(),
+    };
+    let struct_call = |cell_local| {
+        MirRvalue::Call(MirCall {
+            callee: MirCallee::Static(CallableIdentity::Builtin(BuiltinId("struct".into()))),
+            args: vec![
+                MirCallArg::Single(MirOperand::Constant(MirConstant::String(StringLiteral(
+                    "'value'".into(),
+                )))),
+                MirCallArg::Single(MirOperand::Local(cell_local)),
+            ],
+            arg_spans: vec![span, span],
+            syntax: runmat_hir::CallSyntax::Plain,
+            requested_outputs: RequestedOutputCount::One,
+            fallback_policy: CallableFallbackPolicy::None,
+            workspace_first_name: None,
+            bare_identifier: false,
+            async_behavior: AsyncBehaviorFact::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Pure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        })
+    };
+    let target = match destination {
+        SequenceDestinationFixture::Dynamic => runmat_mir::MirSequenceTarget::DynamicMember {
+            base: MirPlace::Local(MirLocalId(1)),
+            member: MirOperand::Local(MirLocalId(4)),
+        },
+        SequenceDestinationFixture::Static => runmat_mir::MirSequenceTarget::Member {
+            base: MirPlace::Local(MirLocalId(1)),
+            member: runmat_types::MemberName("value".into()),
+        },
+        SequenceDestinationFixture::Indexed => runmat_mir::MirSequenceTarget::Member {
+            base: MirPlace::Index(
+                Box::new(MirPlace::Local(MirLocalId(1))),
+                MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: MirIndexPlan::Slice,
+                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(4)))],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            ),
+            member: runmat_types::MemberName("value".into()),
+        },
+    };
+    lower_body(
+        "sequence_member_assignment",
+        5,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: cell(match destination {
+                        SequenceDestinationFixture::Indexed => &["1", "2", "3"],
+                        _ => &["1", "2"],
+                    }),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: struct_call(MirLocalId(0)),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(2)),
+                    value: cell(&["7", "8"]),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(3)),
+                    value: struct_call(MirLocalId(2)),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(4)),
+                    value: match destination {
+                        SequenceDestinationFixture::Indexed => MirRvalue::Aggregate {
+                            kind: MirAggregateKind::Tensor,
+                            row_lengths: vec![2],
+                            elements: vec![
+                                MirAggregateElement::Single(MirOperand::Constant(
+                                    MirConstant::Number("1".into()),
+                                )),
+                                MirAggregateElement::Single(MirOperand::Constant(
+                                    MirConstant::Number("3".into()),
+                                )),
+                            ],
+                        },
+                        _ => MirRvalue::Use(MirOperand::Constant(MirConstant::String(
+                            StringLiteral("'value'".into()),
+                        ))),
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::SequenceAssign {
+                    target,
+                    value: MirRvalue::Member {
+                        base: MirOperand::Local(MirLocalId(3)),
+                        member: runmat_types::MemberName("value".into()),
+                        sequence_use: SequenceUse::SelectDestinationCardinality,
+                    },
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(1)),
+        span,
+    )
+}
+
+fn sequence_member_order_fixture(dynamic: bool) -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 4 };
+    let external_call = |function, requested_outputs| {
+        MirRvalue::Call(MirCall {
+            callee: MirCallee::Static(CallableIdentity::ExternalFunction {
+                function: runmat_types::FunctionId(function),
+                display_name: format!("fixture.sequence_{function}"),
+            }),
+            args: Vec::new(),
+            arg_spans: Vec::new(),
+            syntax: runmat_hir::CallSyntax::Plain,
+            requested_outputs,
+            fallback_policy: CallableFallbackPolicy::None,
+            workspace_first_name: None,
+            bare_identifier: false,
+            async_behavior: AsyncBehaviorFact::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Pure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        })
+    };
+    let target = if dynamic {
+        runmat_mir::MirSequenceTarget::DynamicMember {
+            base: MirPlace::Local(MirLocalId(1)),
+            member: MirOperand::Local(MirLocalId(2)),
+        }
+    } else {
+        runmat_mir::MirSequenceTarget::Member {
+            base: MirPlace::Index(
+                Box::new(MirPlace::Local(MirLocalId(1))),
+                MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: MirIndexPlan::Slice,
+                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            ),
+            member: runmat_types::MemberName("value".into()),
+        }
+    };
+    lower_body(
+        "sequence_member_order",
+        3,
+        vec![
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Aggregate {
+                        kind: MirAggregateKind::Cell,
+                        row_lengths: vec![2],
+                        elements: vec![
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "1".into(),
+                            ))),
+                            MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                                "2".into(),
+                            ))),
+                        ],
+                    },
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(1)),
+                    value: MirRvalue::Call(MirCall {
+                        callee: MirCallee::Static(CallableIdentity::Builtin(BuiltinId(
+                            "struct".into(),
+                        ))),
+                        args: vec![
+                            MirCallArg::Single(MirOperand::Constant(MirConstant::String(
+                                StringLiteral("'value'".into()),
+                            ))),
+                            MirCallArg::Single(MirOperand::Local(MirLocalId(0))),
+                        ],
+                        arg_spans: vec![span, span],
+                        syntax: runmat_hir::CallSyntax::Plain,
+                        requested_outputs: RequestedOutputCount::One,
+                        fallback_policy: CallableFallbackPolicy::None,
+                        workspace_first_name: None,
+                        bare_identifier: false,
+                        async_behavior: AsyncBehaviorFact::NeverSuspends,
+                        effects: runmat_builtins::BuiltinEffects::none(),
+                        workspace_effect: None,
+                        environment_effect: None,
+                        purity: runmat_builtins::BuiltinPurity::Pure,
+                        semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                    }),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(2)),
+                    value: external_call(9, RequestedOutputCount::One),
+                },
+                span,
+            },
+            MirStmt {
+                kind: MirStmtKind::SequenceAssign {
+                    target,
+                    value: external_call(10, RequestedOutputCount::DestinationSequenceCardinality),
+                },
+                span,
+            },
+        ],
+        MirOperand::Local(MirLocalId(1)),
         span,
     )
 }
@@ -2096,6 +3122,7 @@ fn lower_body(
                 name: FunctionName(name.into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -2115,6 +3142,198 @@ fn lower_body(
         analysis: &analysis,
         manifest: &manifest,
         binding_names: None,
+        target: NativeTarget::current(),
+    })
+    .unwrap()
+}
+
+fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let function = FunctionId(0);
+    let end_region = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![statement(1, MirRvalue::End, span)],
+        MirOperand::Local(MirLocalId(1)),
+    )
+    .unwrap();
+    let chain = MirRvalue::SubscriptChain(MirSubscriptChain {
+        root: MirOperand::Local(MirLocalId(0)),
+        steps: vec![
+            MirSubscriptStep::Member(runmat_hir::MemberName("child".into())),
+            MirSubscriptStep::Index(MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(end_region)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            }),
+        ],
+        sequence_use: SequenceUse::RequireSingle,
+        context: ObjectIndexingContext::Expression,
+    });
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: vec![BindingId(0)],
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: (0..3)
+                    .map(|id| MirLocal {
+                        id: MirLocalId(id),
+                        binding: (id == 0).then_some(BindingId(0)),
+                        kind: if id == 0 {
+                            MirLocalKind::Parameter
+                        } else {
+                            MirLocalKind::Temporary
+                        },
+                        span,
+                    })
+                    .collect(),
+                blocks: vec![BasicBlock {
+                    id: BasicBlockId(0),
+                    statements: vec![statement(2, chain, span)],
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(2))]),
+                        span,
+                    },
+                }],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName("suspending_subscript_prefix".into()),
+                parent: None,
+                enclosing_class: None,
+                class_method_owner: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let binding_names = BTreeMap::from([(BindingId(0), "input".to_string())]);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: Some(&binding_names),
+        target: NativeTarget::current(),
+    })
+    .unwrap()
+}
+
+fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let function = FunctionId(0);
+    let end_region = |local| {
+        runmat_mir::MirExpressionRegion::from_lowered(
+            vec![statement(local, MirRvalue::End, span)],
+            MirOperand::Local(MirLocalId(local)),
+        )
+        .unwrap()
+    };
+    let chain = MirRvalue::SubscriptChain(MirSubscriptChain {
+        root: MirOperand::Local(MirLocalId(0)),
+        steps: vec![
+            MirSubscriptStep::Member(runmat_hir::MemberName("child".into())),
+            MirSubscriptStep::Index(MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![
+                    MirIndexComponent::ContextualExpr(end_region(1)),
+                    MirIndexComponent::ContextualExpr(end_region(2)),
+                ],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            }),
+            MirSubscriptStep::Member(runmat_hir::MemberName("final".into())),
+        ],
+        sequence_use: SequenceUse::RequireSingle,
+        context: ObjectIndexingContext::Expression,
+    });
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: vec![BindingId(0)],
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: (0..4)
+                    .map(|id| MirLocal {
+                        id: MirLocalId(id),
+                        binding: (id == 0).then_some(BindingId(0)),
+                        kind: if id == 0 {
+                            MirLocalKind::Parameter
+                        } else {
+                            MirLocalKind::Temporary
+                        },
+                        span,
+                    })
+                    .collect(),
+                blocks: vec![BasicBlock {
+                    id: BasicBlockId(0),
+                    statements: vec![statement(3, chain, span)],
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(3))]),
+                        span,
+                    },
+                }],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName("staged_subscript_suspension".into()),
+                parent: None,
+                enclosing_class: None,
+                class_method_owner: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    let binding_names = BTreeMap::from([(BindingId(0), "input".to_string())]);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: Some(&binding_names),
         target: NativeTarget::current(),
     })
     .unwrap()
@@ -2187,6 +3406,7 @@ fn workspace_binding_fixture(
                 name: FunctionName(name.into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -2279,6 +3499,7 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
                 name: FunctionName("workspace_first".into()),
                 parent: None,
                 enclosing_class: None,
+                class_method_owner: None,
                 kind: FunctionKind::SyntheticEntrypoint,
                 argument_validations: Vec::new(),
                 captures: Vec::new(),
@@ -2307,32 +3528,36 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
 fn end_scalar_fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
     let mut statements = tensor_assignment(span);
-    statements.extend([
-        statement(1, MirRvalue::End, span),
-        statement(
-            2,
-            MirRvalue::Binary(
-                MirOperand::Local(MirLocalId(1)),
-                runmat_types::OperatorKind::Subtract,
-                MirOperand::Constant(MirConstant::Number("1".into())),
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                2,
+                MirRvalue::Binary(
+                    MirOperand::Local(MirLocalId(1)),
+                    runmat_types::OperatorKind::Subtract,
+                    MirOperand::Constant(MirConstant::Number("1".into())),
+                ),
+                span,
             ),
-            span,
-        ),
-        statement(
-            3,
-            MirRvalue::Index {
-                base: MirOperand::Local(MirLocalId(0)),
-                indexing: MirIndexing {
-                    kind: runmat_types::IndexKind::Paren,
-                    plan: MirIndexPlan::SliceExpr,
-                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
-                    result_context: runmat_types::IndexResultContext::ReadSingle,
-                    cell_expand_all: false,
-                },
+        ],
+        MirOperand::Local(MirLocalId(2)),
+    )
+    .unwrap();
+    statements.push(statement(
+        3,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
             },
-            span,
-        ),
-    ]);
+        },
+        span,
+    ));
     lower_body(
         "end_scalar",
         4,
@@ -2345,41 +3570,45 @@ fn end_scalar_fixture() -> runmat_native_codegen::NativeAssembly {
 fn end_range_fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 5 };
     let mut statements = tensor_assignment(span);
-    statements.extend([
-        statement(1, MirRvalue::End, span),
-        statement(
-            2,
-            MirRvalue::Binary(
-                MirOperand::Local(MirLocalId(1)),
-                runmat_types::OperatorKind::Subtract,
-                MirOperand::Constant(MirConstant::Number("1".into())),
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                2,
+                MirRvalue::Binary(
+                    MirOperand::Local(MirLocalId(1)),
+                    runmat_types::OperatorKind::Subtract,
+                    MirOperand::Constant(MirConstant::Number("1".into())),
+                ),
+                span,
             ),
-            span,
-        ),
-        statement(
-            3,
-            MirRvalue::Range {
-                start: MirOperand::Constant(MirConstant::Number("1".into())),
-                step: None,
-                end: MirOperand::Local(MirLocalId(2)),
-            },
-            span,
-        ),
-        statement(
-            4,
-            MirRvalue::Index {
-                base: MirOperand::Local(MirLocalId(0)),
-                indexing: MirIndexing {
-                    kind: runmat_types::IndexKind::Paren,
-                    plan: MirIndexPlan::SliceExpr,
-                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(3)))],
-                    result_context: runmat_types::IndexResultContext::ReadSingle,
-                    cell_expand_all: false,
+            statement(
+                3,
+                MirRvalue::Range {
+                    start: MirOperand::Constant(MirConstant::Number("1".into())),
+                    step: None,
+                    end: MirOperand::Local(MirLocalId(2)),
                 },
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(3)),
+    )
+    .unwrap();
+    statements.push(statement(
+        4,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
             },
-            span,
-        ),
-    ]);
+        },
+        span,
+    ));
     lower_body(
         "end_range",
         5,
@@ -2392,52 +3621,674 @@ fn end_range_fixture() -> runmat_native_codegen::NativeAssembly {
 fn end_call_fixture() -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
     let mut statements = tensor_assignment(span);
-    statements.extend([
-        statement(1, MirRvalue::End, span),
-        statement(
-            2,
-            MirRvalue::Call(MirCall {
-                callee: MirCallee::Static(CallableIdentity::BoundFunction(
-                    runmat_types::FunctionId(9),
-                )),
-                args: vec![MirCallArg::Single(MirOperand::Local(MirLocalId(1)))],
-                arg_spans: vec![span],
-                syntax: runmat_hir::CallSyntax::Plain,
-                requested_outputs: RequestedOutputCount::One,
-                fallback_policy: CallableFallbackPolicy::None,
-                workspace_first_name: None,
-                bare_identifier: false,
-                async_behavior: AsyncBehaviorFact::NeverSuspends,
-                effects: runmat_builtins::BuiltinEffects::none(),
-                workspace_effect: None,
-                environment_effect: None,
-                purity: runmat_builtins::BuiltinPurity::Pure,
-                semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
-            }),
-            span,
-        ),
-        statement(
-            3,
-            MirRvalue::Index {
-                base: MirOperand::Local(MirLocalId(0)),
-                indexing: MirIndexing {
-                    kind: runmat_types::IndexKind::Paren,
-                    plan: MirIndexPlan::SliceExpr,
-                    components: vec![MirIndexComponent::Expr(MirOperand::Local(MirLocalId(2)))],
-                    result_context: runmat_types::IndexResultContext::ReadSingle,
-                    cell_expand_all: false,
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                2,
+                MirRvalue::StructLiteral {
+                    fields: vec![(
+                        runmat_hir::MemberName("value".into()),
+                        MirOperand::Local(MirLocalId(1)),
+                    )],
                 },
+                span,
+            ),
+            MirStmt {
+                kind: MirStmtKind::CaptureSequence {
+                    destination: runmat_mir::MirSequenceLocalId(0),
+                    source: runmat_mir::MirExpansionSource::Member {
+                        base: MirOperand::Local(MirLocalId(2)),
+                        member: runmat_hir::MemberName("value".into()),
+                    },
+                },
+                span,
             },
-            span,
-        ),
-    ]);
+            statement(
+                3,
+                MirRvalue::Call(MirCall {
+                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(8),
+                    )),
+                    args: vec![MirCallArg::Single(MirOperand::Local(MirLocalId(1)))],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::MaySuspend,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Impure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+                span,
+            ),
+            statement(
+                4,
+                MirRvalue::Call(MirCall {
+                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(9),
+                    )),
+                    args: vec![MirCallArg::Single(MirOperand::Local(MirLocalId(3)))],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::MaySuspend,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Pure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+                span,
+            ),
+            statement(
+                5,
+                MirRvalue::Call(MirCall {
+                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(8),
+                    )),
+                    args: vec![MirCallArg::CapturedSequence(
+                        runmat_mir::MirSequenceLocalId(0),
+                    )],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::MaySuspend,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Impure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(5)),
+    )
+    .unwrap();
+    statements.push(statement(
+        6,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            },
+        },
+        span,
+    ));
     lower_body(
         "end_call",
-        4,
+        7,
         statements,
-        MirOperand::Local(MirLocalId(3)),
+        MirOperand::Local(MirLocalId(6)),
         span,
     )
+}
+
+fn end_two_regions_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let mut statements = vec![statement(
+        0,
+        MirRvalue::Aggregate {
+            kind: MirAggregateKind::Tensor,
+            row_lengths: vec![2, 2],
+            elements: ["10", "20", "30", "40"]
+                .into_iter()
+                .map(|value| {
+                    MirAggregateElement::Single(MirOperand::Constant(MirConstant::Number(
+                        value.into(),
+                    )))
+                })
+                .collect(),
+        },
+        span,
+    )];
+    let selector = |local: usize, function: usize| {
+        runmat_mir::MirExpressionRegion::from_lowered(
+            vec![
+                statement(local, MirRvalue::End, span),
+                statement(
+                    local + 1,
+                    MirRvalue::Call(MirCall {
+                        callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                            runmat_types::FunctionId(function),
+                        )),
+                        args: vec![MirCallArg::Single(MirOperand::Local(MirLocalId(local)))],
+                        arg_spans: vec![span],
+                        syntax: runmat_hir::CallSyntax::Plain,
+                        requested_outputs: RequestedOutputCount::One,
+                        fallback_policy: CallableFallbackPolicy::None,
+                        workspace_first_name: None,
+                        bare_identifier: false,
+                        async_behavior: AsyncBehaviorFact::MaySuspend,
+                        effects: runmat_builtins::BuiltinEffects::none(),
+                        workspace_effect: None,
+                        environment_effect: None,
+                        purity: runmat_builtins::BuiltinPurity::Impure,
+                        semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                    }),
+                    span,
+                ),
+            ],
+            MirOperand::Local(MirLocalId(local + 1)),
+        )
+        .unwrap()
+    };
+    statements.push(statement(
+        5,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![
+                    MirIndexComponent::ContextualExpr(selector(1, 8)),
+                    MirIndexComponent::ContextualExpr(selector(3, 9)),
+                ],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            },
+        },
+        span,
+    ));
+    lower_body(
+        "end_two_regions",
+        6,
+        statements,
+        MirOperand::Local(MirLocalId(5)),
+        span,
+    )
+}
+
+fn end_two_calls_one_step_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let mut statements = tensor_assignment(span);
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                4,
+                MirRvalue::ShortCircuit {
+                    left: MirOperand::Constant(MirConstant::Bool(true)),
+                    op: runmat_mir::MirShortCircuitOp::And,
+                    right_temps: vec![
+                        statement(2, contextual_call(8, Vec::new(), span), span),
+                        statement(3, contextual_call(9, Vec::new(), span), span),
+                    ],
+                    right: MirOperand::Local(MirLocalId(3)),
+                },
+                span,
+            ),
+            statement(
+                5,
+                MirRvalue::Binary(
+                    MirOperand::Local(MirLocalId(1)),
+                    runmat_types::OperatorKind::Subtract,
+                    MirOperand::Local(MirLocalId(4)),
+                ),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(5)),
+    )
+    .unwrap();
+    statements.push(statement(
+        6,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            },
+        },
+        span,
+    ));
+    lower_body(
+        "end_two_calls_one_step",
+        7,
+        statements,
+        MirOperand::Local(MirLocalId(6)),
+        span,
+    )
+}
+
+fn end_nested_context_then_call_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let mut statements = tensor_assignment(span);
+    let nested = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(2, MirRvalue::End, span),
+            statement(
+                3,
+                contextual_call(8, vec![MirOperand::Local(MirLocalId(2))], span),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(3)),
+    )
+    .unwrap();
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                6,
+                MirRvalue::ShortCircuit {
+                    left: MirOperand::Constant(MirConstant::Bool(true)),
+                    op: runmat_mir::MirShortCircuitOp::And,
+                    right_temps: vec![
+                        statement(
+                            4,
+                            MirRvalue::Index {
+                                base: MirOperand::Local(MirLocalId(0)),
+                                indexing: MirIndexing {
+                                    kind: runmat_types::IndexKind::Paren,
+                                    plan: MirIndexPlan::Slice,
+                                    components: vec![MirIndexComponent::ContextualExpr(nested)],
+                                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                                    cell_expand_all: false,
+                                },
+                            },
+                            span,
+                        ),
+                        statement(5, contextual_call(9, Vec::new(), span), span),
+                    ],
+                    right: MirOperand::Local(MirLocalId(5)),
+                },
+                span,
+            ),
+            statement(
+                7,
+                MirRvalue::Binary(
+                    MirOperand::Local(MirLocalId(1)),
+                    runmat_types::OperatorKind::Subtract,
+                    MirOperand::Local(MirLocalId(6)),
+                ),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(7)),
+    )
+    .unwrap();
+    statements.push(statement(
+        8,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            },
+        },
+        span,
+    ));
+    lower_body(
+        "end_nested_context_then_call",
+        9,
+        statements,
+        MirOperand::Local(MirLocalId(8)),
+        span,
+    )
+}
+
+fn contextual_call(function: usize, args: Vec<MirOperand>, span: Span) -> MirRvalue {
+    MirRvalue::Call(MirCall {
+        callee: MirCallee::Static(CallableIdentity::BoundFunction(runmat_types::FunctionId(
+            function,
+        ))),
+        arg_spans: vec![span; args.len()],
+        args: args.into_iter().map(MirCallArg::Single).collect(),
+        syntax: runmat_hir::CallSyntax::Plain,
+        requested_outputs: RequestedOutputCount::One,
+        fallback_policy: CallableFallbackPolicy::None,
+        workspace_first_name: None,
+        bare_identifier: false,
+        async_behavior: AsyncBehaviorFact::MaySuspend,
+        effects: runmat_builtins::BuiltinEffects::none(),
+        workspace_effect: None,
+        environment_effect: None,
+        purity: runmat_builtins::BuiltinPurity::Impure,
+        semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+    })
+}
+
+fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let function = FunctionId(0);
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                2,
+                contextual_call(9, vec![MirOperand::Local(MirLocalId(1))], span),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(2)),
+    )
+    .unwrap();
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: (0..5)
+                    .map(|id| MirLocal {
+                        id: MirLocalId(id),
+                        binding: None,
+                        kind: MirLocalKind::Temporary,
+                        span,
+                    })
+                    .collect(),
+                blocks: vec![
+                    BasicBlock {
+                        id: BasicBlockId(0),
+                        statements: tensor_assignment(span),
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::TryCatch {
+                                try_block: BasicBlockId(1),
+                                catch_block: BasicBlockId(2),
+                                catch_binding: None,
+                            },
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(1),
+                        statements: vec![statement(
+                            4,
+                            MirRvalue::Index {
+                                base: MirOperand::Local(MirLocalId(0)),
+                                indexing: MirIndexing {
+                                    kind: runmat_types::IndexKind::Paren,
+                                    plan: MirIndexPlan::Slice,
+                                    components: vec![MirIndexComponent::ContextualExpr(selector)],
+                                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                                    cell_expand_all: false,
+                                },
+                            },
+                            span,
+                        )],
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(BasicBlockId(3)),
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(2),
+                        statements: vec![statement(
+                            4,
+                            MirRvalue::Use(MirOperand::Constant(MirConstant::Number("7".into()))),
+                            span,
+                        )],
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(BasicBlockId(3)),
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(3),
+                        statements: Vec::new(),
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(4))]),
+                            span,
+                        },
+                    },
+                ],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName("caught_contextual_error".into()),
+                parent: None,
+                enclosing_class: None,
+                class_method_owner: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: None,
+        target: NativeTarget::current(),
+    })
+    .unwrap()
+}
+
+fn contextual_gc_roots_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let mut statements = tensor_assignment(span);
+    let selector = runmat_mir::MirExpressionRegion::from_lowered(
+        vec![
+            statement(1, MirRvalue::End, span),
+            statement(
+                2,
+                contextual_call(8, vec![MirOperand::Local(MirLocalId(1))], span),
+                span,
+            ),
+            statement(
+                3,
+                MirRvalue::StructLiteral {
+                    fields: vec![(
+                        runmat_hir::MemberName("value".into()),
+                        MirOperand::Local(MirLocalId(2)),
+                    )],
+                },
+                span,
+            ),
+            MirStmt {
+                kind: MirStmtKind::CaptureSequence {
+                    destination: runmat_mir::MirSequenceLocalId(0),
+                    source: runmat_mir::MirExpansionSource::Member {
+                        base: MirOperand::Local(MirLocalId(3)),
+                        member: runmat_hir::MemberName("value".into()),
+                    },
+                },
+                span,
+            },
+            statement(
+                4,
+                contextual_call(9, vec![MirOperand::Local(MirLocalId(1))], span),
+                span,
+            ),
+            statement(
+                5,
+                MirRvalue::Call(MirCall {
+                    callee: MirCallee::Static(CallableIdentity::BoundFunction(
+                        runmat_types::FunctionId(8),
+                    )),
+                    args: vec![MirCallArg::CapturedSequence(
+                        runmat_mir::MirSequenceLocalId(0),
+                    )],
+                    arg_spans: vec![span],
+                    syntax: runmat_hir::CallSyntax::Plain,
+                    requested_outputs: RequestedOutputCount::One,
+                    fallback_policy: CallableFallbackPolicy::None,
+                    workspace_first_name: None,
+                    bare_identifier: false,
+                    async_behavior: AsyncBehaviorFact::MaySuspend,
+                    effects: runmat_builtins::BuiltinEffects::none(),
+                    workspace_effect: None,
+                    environment_effect: None,
+                    purity: runmat_builtins::BuiltinPurity::Impure,
+                    semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+                }),
+                span,
+            ),
+        ],
+        MirOperand::Local(MirLocalId(5)),
+    )
+    .unwrap();
+    statements.push(statement(
+        6,
+        MirRvalue::Index {
+            base: MirOperand::Local(MirLocalId(0)),
+            indexing: MirIndexing {
+                kind: runmat_types::IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::ContextualExpr(selector)],
+                result_context: runmat_types::IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            },
+        },
+        span,
+    ));
+    lower_body(
+        "contextual_gc_roots",
+        7,
+        statements,
+        MirOperand::Local(MirLocalId(6)),
+        span,
+    )
+}
+
+fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 5 };
+    let function = FunctionId(0);
+    let mir = MirAssembly {
+        bodies: [(
+            function,
+            MirBody {
+                function,
+                abi: FunctionAbi {
+                    fixed_inputs: Vec::new(),
+                    varargin: None,
+                    fixed_outputs: Vec::new(),
+                    varargout: None,
+                    implicit_nargin: None,
+                    implicit_nargout: None,
+                },
+                locals: (0..2)
+                    .map(|id| MirLocal {
+                        id: MirLocalId(id),
+                        binding: None,
+                        kind: MirLocalKind::Temporary,
+                        span,
+                    })
+                    .collect(),
+                blocks: vec![
+                    BasicBlock {
+                        id: BasicBlockId(0),
+                        statements: Vec::new(),
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::TryCatch {
+                                try_block: BasicBlockId(1),
+                                catch_block: BasicBlockId(2),
+                                catch_binding: None,
+                            },
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(1),
+                        statements: Vec::new(),
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::For {
+                                binding: MirLocalId(1),
+                                iterable: contextual_call(9, Vec::new(), span),
+                                body_block: BasicBlockId(3),
+                                exit_block: BasicBlockId(3),
+                            },
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(2),
+                        statements: vec![statement(
+                            0,
+                            MirRvalue::Use(MirOperand::Constant(MirConstant::Number("7".into()))),
+                            span,
+                        )],
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(BasicBlockId(3)),
+                            span,
+                        },
+                    },
+                    BasicBlock {
+                        id: BasicBlockId(3),
+                        statements: Vec::new(),
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Return(vec![MirOperand::Local(MirLocalId(0))]),
+                            span,
+                        },
+                    },
+                ],
+            },
+        )]
+        .into_iter()
+        .collect(),
+        functions: [(
+            function,
+            MirFunctionMetadata {
+                source: ProgramSourceId(0),
+                name: FunctionName("caught_terminator_call".into()),
+                parent: None,
+                enclosing_class: None,
+                class_method_owner: None,
+                kind: FunctionKind::SyntheticEntrypoint,
+                argument_validations: Vec::new(),
+                captures: Vec::new(),
+                modifiers: FunctionModifiers::default(),
+                span,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        classes: Vec::new(),
+        entrypoints: vec![function],
+    };
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let manifest = manifest(analysis.revision.schema_version);
+    lower_executable(NativeLoweringInput {
+        mir: &mir,
+        analysis: &analysis,
+        manifest: &manifest,
+        binding_names: None,
+        target: NativeTarget::current(),
+    })
+    .unwrap()
 }
 
 fn tensor_assignment(span: Span) -> Vec<MirStmt> {
@@ -2445,11 +4296,14 @@ fn tensor_assignment(span: Span) -> Vec<MirStmt> {
         0,
         MirRvalue::Aggregate {
             kind: MirAggregateKind::Tensor,
-            rows: 1,
-            cols: 4,
+            row_lengths: vec![4],
             elements: ["10", "20", "30", "40"]
                 .into_iter()
-                .map(|value| MirOperand::Constant(MirConstant::Number(value.into())))
+                .map(|value| {
+                    runmat_mir::MirAggregateElement::Single(MirOperand::Constant(
+                        MirConstant::Number(value.into()),
+                    ))
+                })
                 .collect(),
         },
         span,
@@ -2471,8 +4325,8 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
         Digest::sha256(b"r13-graph"),
         Digest::sha256(b"r13-sources"),
         ProgramEnvironment::new(
-            1,
-            1,
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
             Digest::sha256(b"r13-runtime"),
             Digest::sha256(b"r13-catalog"),
             "matlab",

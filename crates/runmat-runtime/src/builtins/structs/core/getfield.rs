@@ -25,7 +25,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
-    NumericScalar, ObjectInstance, StructValue, Tensor, Value,
+    NumericScalar, ObjectInstance, StructArray, StructValue, Tensor, Value,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::structs::core::getfield")]
@@ -757,6 +757,7 @@ async fn apply_indices(
         }
         Value::CharArray(array) => index_char_array(array, &resolved),
         Value::ComplexTensor(tensor) => index_complex_tensor(tensor, &resolved),
+        Value::StructArray(array) => index_struct_array(array, &resolved),
         Value::Cell(cell) if !unwrap_cell_element => index_cell_parentheses(cell, &resolved),
         Value::Tensor(_)
         | Value::StringArray(_)
@@ -834,6 +835,24 @@ fn apply_vector_index(
                 Ok(Some(Value::Cell(cell)))
             }
         }
+        Value::StructArray(array) => {
+            let zero_based = indices
+                .iter()
+                .map(|index| {
+                    if *index < 1 || *index > array.len() {
+                        Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))
+                    } else {
+                        Ok(*index - 1)
+                    }
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let output_shape = numeric_linear_selection_shape(array.shape(), shape, indices.len());
+            Ok(Some(
+                array
+                    .select_linear(&zero_based, output_shape)
+                    .map_err(getfield_flow)?,
+            ))
+        }
         _ => Ok(None),
     }
 }
@@ -850,6 +869,7 @@ fn apply_logical_index(
         Value::Tensor(tensor) => tensor.len(),
         Value::Cell(cell) => cell.data.len(),
         Value::LogicalArray(logical) => logical.data.len(),
+        Value::StructArray(array) => array.len(),
         _ => return Ok(None),
     };
     if mask
@@ -911,6 +931,14 @@ fn apply_logical_index(
                     .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
                 Ok(Some(Value::Cell(cell)))
             }
+        }
+        Value::StructArray(array) => {
+            let shape = logical_linear_selection_shape(array.shape(), index_shape, selected_len);
+            Ok(Some(
+                array
+                    .select_linear(&selected, shape)
+                    .map_err(getfield_flow)?,
+            ))
         }
         _ => Ok(None),
     }
@@ -1031,6 +1059,10 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult
     match value {
         Value::Tensor(tensor) => tensor_dimension_length(tensor, dims, dim_idx),
         Value::Cell(cell) => cell_dimension_length(cell, dims, dim_idx),
+        Value::StructArray(array) => {
+            crate::indexing::shape::selector_extent(array.shape(), dims, dim_idx)
+                .map_err(|_| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))
+        }
         Value::StringArray(sa) => string_array_dimension_length(sa, dims, dim_idx),
         Value::LogicalArray(logical) => logical_array_dimension_length(logical, dims, dim_idx),
         Value::CharArray(array) => char_array_dimension_length(array, dims, dim_idx),
@@ -1047,6 +1079,17 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult
         }
         _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
     }
+}
+
+fn index_struct_array(array: &StructArray, indices: &[usize]) -> BuiltinResult<Value> {
+    let selectors = indices
+        .iter()
+        .copied()
+        .map(crate::indexing::selectors::SliceSelector::Scalar)
+        .collect::<Vec<_>>();
+    let plan = crate::indexing::plan::build_index_plan(&selectors, indices.len(), array.shape())
+        .map_err(|_| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
+    crate::indexing::structure::read_with_plan(array, &plan)
 }
 
 fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> BuiltinResult<usize> {
@@ -1353,19 +1396,19 @@ async fn get_field_value(
         }
         Value::Listener(listener) => get_listener_field(&listener, name),
         Value::MException(ex) => get_exception_field(&ex, name),
-        Value::Cell(cell) if is_struct_array(&cell) => {
-            if cell.data.is_empty() {
+        Value::StructArray(array) => {
+            if array.is_empty() {
                 return Err(getfield_error_with_message(
                     "Struct contents reference from an empty struct array.",
                     &GETFIELD_ERROR_NON_STRUCT_REFERENCE,
                 ));
             }
             // Default to first element when no index is specified
-            let first_entry = &cell.data[0];
-            match first_entry {
-                Value::Struct(st) => get_struct_field(st, name),
-                _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
-            }
+            array
+                .get_linear(0)
+                .and_then(|element| element.fields.get(name))
+                .cloned()
+                .ok_or_else(|| getfield_error(&GETFIELD_ERROR_MISSING_FIELD))
         }
         _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
     }
@@ -1545,12 +1588,6 @@ fn exception_stack_to_value(stack: &[String]) -> BuiltinResult<Value> {
         .map_err(|e| getfield_flow(format!("getfield: {e}")))
 }
 
-fn is_struct_array(cell: &CellArray) -> bool {
-    cell.data
-        .iter()
-        .all(|handle| matches!(handle, Value::Struct(_)))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1602,11 +1639,13 @@ pub(crate) mod tests {
     #[test]
     fn getfield_struct_array_element() {
         let mut first = StructValue::new();
-        first.fields.insert("name".to_string(), Value::from("Ada"));
+        first
+            .fields
+            .insert("name".to_string(), Value::from("entry-a"));
         let mut second = StructValue::new();
         second
             .fields
-            .insert("name".to_string(), Value::from("Grace"));
+            .insert("name".to_string(), Value::from("entry-b"));
         let array = CellArray::new_with_shape(
             vec![Value::Struct(first), Value::Struct(second)],
             vec![1, 2],
@@ -1619,17 +1658,19 @@ pub(crate) mod tests {
             vec![Value::Cell(index), Value::from("name")],
         )
         .expect("struct array element");
-        assert_eq!(result, Value::from("Grace"));
+        assert_eq!(result, Value::from("entry-b"));
     }
 
     #[test]
     fn getfield_index_selectors_read_typed_integer_storage_exactly() {
         let mut first = StructValue::new();
-        first.fields.insert("name".to_string(), Value::from("Ada"));
+        first
+            .fields
+            .insert("name".to_string(), Value::from("entry-a"));
         let mut second = StructValue::new();
         second
             .fields
-            .insert("name".to_string(), Value::from("Grace"));
+            .insert("name".to_string(), Value::from("entry-b"));
         let array = CellArray::new_with_shape(
             vec![Value::Struct(first), Value::Struct(second)],
             vec![1, 2],
@@ -1645,7 +1686,7 @@ pub(crate) mod tests {
             vec![Value::Cell(index), Value::from("name")],
         )
         .expect("struct array element");
-        assert_eq!(result, Value::from("Grace"));
+        assert_eq!(result, Value::from("entry-b"));
 
         assert!(parse_positive_integer(usize::MAX as f64).is_err());
         assert!(parse_positive_integer(usize::MAX as f64 + 1.0).is_err());
@@ -2222,29 +2263,53 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(3.0));
     }
 
+    #[test]
+    fn getfield_nd_end_collapses_dimensions_into_final_selector() {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let elements = (1..=24)
+            .map(|value| {
+                let mut structure = StructValue::new();
+                structure.insert("payload", Value::Num(value as f64));
+                structure
+            })
+            .collect();
+        let array = StructArray::with_fields(vec!["payload".into()], elements, vec![2, 3, 4])
+            .expect("N-D structure array");
+        let index = CellArray::new(
+            vec![Value::Num(1.0), Value::CharArray(CharArray::new_row("end"))],
+            1,
+            2,
+        )
+        .expect("index selector");
+        let result = run_getfield(
+            Value::StructArray(array),
+            vec![Value::Cell(index), Value::from("payload")],
+        )
+        .expect("collapsed end index");
+        assert_eq!(result, Value::Num(23.0));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_struct_array_defaults_to_first() {
         let mut first = StructValue::new();
-        first.fields.insert("name".to_string(), Value::from("Ada"));
+        first
+            .fields
+            .insert("name".to_string(), Value::from("entry-a"));
         let mut second = StructValue::new();
         second
             .fields
-            .insert("name".to_string(), Value::from("Grace"));
-        let array = CellArray::new_with_shape(
-            vec![Value::Struct(first), Value::Struct(second)],
-            vec![1, 2],
-        )
-        .unwrap();
-        let result =
-            run_getfield(Value::Cell(array), vec![Value::from("name")]).expect("default index");
-        assert_eq!(result, Value::from("Ada"));
+            .insert("name".to_string(), Value::from("entry-b"));
+        let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
+        let result = run_getfield(Value::StructArray(array), vec![Value::from("name")])
+            .expect("default index");
+        assert_eq!(result, Value::from("entry-a"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_char_array_single_element() {
-        let chars = CharArray::new_row("Ada");
+        let chars = CharArray::new_row("entry-a");
         let mut st = StructValue::new();
         st.fields
             .insert("name".to_string(), Value::CharArray(chars));
@@ -2259,7 +2324,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
-                assert_eq!(ca.data, vec!['d']);
+                assert_eq!(ca.data, vec!['n']);
             }
             other => panic!("expected 1x1 CharArray, got {other:?}"),
         }

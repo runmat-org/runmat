@@ -19,7 +19,7 @@ pub(super) fn convert(value: Value) -> BuiltinResult<Value> {
             .ok_or_else(|| conversion_error("sym")),
         Value::SymbolicArray(value) => double_from_symbolic_array(value),
         Value::Cell(_) => Err(conversion_error("cell")),
-        Value::Struct(_) => Err(conversion_error("struct")),
+        Value::Struct(_) | Value::StructArray(_) => Err(conversion_error("struct")),
         Value::ObjectArray(value) => Err(conversion_error(value.class_name().display_name())),
         Value::Object(value) => Err(conversion_error(value.class_name.display_name())),
         Value::HandleObject(value) => Err(conversion_error(value.class_name.display_name())),

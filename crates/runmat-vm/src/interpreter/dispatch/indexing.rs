@@ -1,25 +1,21 @@
 use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
 use runmat_runtime::call::arguments::expand_brace_values;
-use runmat_runtime::indexing as runtime_indexing;
 use runmat_runtime::indexing::plan::{
-    build_expr_index_plan, build_expr_sparse_assignment_plan, build_index_plan,
-    build_sparse_assignment_plan, ExprPlanSpec, IndexPlan,
+    build_assignment_plan, build_index_plan, build_sparse_assignment_plan, IndexPlan,
 };
 use runmat_runtime::indexing::read_linear as idx_read_linear;
 use runmat_runtime::indexing::read_slice as idx_read_slice;
 use runmat_runtime::indexing::selectors::{
-    build_cell_scalar_selectors, build_slice_selectors, index_scalar_from_value, SliceSelector,
+    build_assignment_selectors, build_scalar_selectors, build_slice_selectors,
+    index_scalar_from_value, SliceSelector,
 };
 use runmat_runtime::indexing::write_linear as idx_write_linear;
 use runmat_runtime::indexing::write_slice as idx_write_slice;
-use runmat_runtime::indexing::EndExpr;
 use runmat_runtime::object::dispatch::{
-    call_object_index_descriptor_method, call_object_index_descriptor_method_with_outputs,
-    class_defines_member_subsasgn, class_defines_member_subsref, value_defines_index_overload,
+    invoke_resolved_object_index_path_method, resolve_object_index_protocol,
 };
 use runmat_runtime::object::indexing::{
-    class_name_from_base, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
-    ObjectParenExprSelectorSpec,
+    ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
@@ -54,7 +50,7 @@ fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {
 }
 
 /// Applies a slice assignment to an integer scalar after materializing its
-/// exact storage. This keeps StoreSlice and StoreSliceExpr on the same path as
+/// exact storage. This keeps slice stores on the same path as
 /// StoreIndex instead of constructing an f64 compatibility tensor first.
 async fn assign_integer_scalar_with_plan(
     value: IntValue,
@@ -94,6 +90,42 @@ fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
         }
         _ => err,
     }
+}
+
+fn object_slice_selector(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<ObjectIndexSelector, RuntimeError> {
+    if end_mask != 0 {
+        return Err(crate::interpreter::errors::mex(
+            "ContextualEndRequiresSubscriptPath",
+            "object end must be evaluated through the contextual subscript path",
+        ));
+    }
+    let mut values = numeric.iter();
+    let mut components = Vec::with_capacity(dims);
+    for dimension in 0..dims {
+        if colon_mask & (1_u32 << dimension) != 0 {
+            components.push(ObjectIndexComponent::Colon);
+        } else {
+            let value = values.next().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "MalformedObjectSelector",
+                    "object selector is missing an indexed component",
+                )
+            })?;
+            components.push(ObjectIndexComponent::Value(value.clone()));
+        }
+    }
+    if values.next().is_some() {
+        return Err(crate::interpreter::errors::mex(
+            "MalformedObjectSelector",
+            "object selector contains excess indexed components",
+        ));
+    }
+    Ok(ObjectIndexSelector::IndexValues { components })
 }
 
 async fn read_scalar_like_slice(
@@ -169,14 +201,18 @@ async fn read_scalar_like_slice(
 }
 
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
-    let class_name = class_name_from_base(base)?;
-    let class = runmat_runtime::class_registry::get_class(class_name)?;
-    let supported = match op {
-        ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
-        ObjectIndexOp::Subsasgn => class_defines_member_subsasgn(&class),
+    let protocol = match op {
+        ObjectIndexOp::Subsref => runmat_runtime::object::protocol::ObjectProtocol::Subsref,
+        ObjectIndexOp::Subsasgn => runmat_runtime::object::protocol::ObjectProtocol::Subsasgn,
     };
-    if supported {
-        return None;
+    match runmat_runtime::object::protocol::resolve_object_protocol(
+        base,
+        protocol,
+        &runmat_runtime::object::protocol::ObjectAccessContext::default(),
+    ) {
+        Ok(runmat_runtime::object::protocol::ProtocolResolution::Method(_)) => return None,
+        Err(error) => return Some(error),
+        Ok(runmat_runtime::object::protocol::ProtocolResolution::DefaultIndexing) => {}
     }
     match op {
         ObjectIndexOp::Subsref => Some(crate::interpreter::errors::mex(
@@ -196,15 +232,58 @@ async fn assign_object_scalar_indices(
     rhs: Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
-        return call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
-            base,
+    let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
+    if let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution {
+        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
             ObjectIndexSelector::ScalarIndices { indices },
-            rhs,
-        ))
+        ));
+        return runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+            &method,
+            base,
+            path,
+            vec![rhs],
+        )
         .await;
     }
     runmat_runtime::indexing::object::assign_scalar_indices(base, &indices, rhs, delete)
+}
+
+async fn invoke_object_brace_read(
+    base: Value,
+    indices: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+    let path =
+        ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+            components: indices.into_iter().map(Into::into).collect(),
+        }));
+    invoke_resolved_object_index_path_method(&resolution, base, path, requested_outputs).await
+}
+
+async fn invoke_object_brace_assignment(
+    base: Value,
+    indices: Vec<Value>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
+    let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution else {
+        return Err(crate::interpreter::errors::mex(
+            "MissingSubsasgn",
+            "class does not define subsasgn for brace assignment",
+        ));
+    };
+    let path =
+        ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+            components: indices.into_iter().map(Into::into).collect(),
+        }));
+    runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+        &method,
+        base,
+        path,
+        vec![rhs],
+    )
+    .await
 }
 
 async fn linear_index_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
@@ -230,53 +309,8 @@ async fn linear_index_values(values: &[Value]) -> Result<Vec<usize>, RuntimeErro
     Ok(out)
 }
 
-async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError> {
-    let mut scalar = value.clone();
-    if matches!(scalar, Value::GpuTensor(_)) {
-        scalar = runmat_runtime::dispatcher::gather_if_needed_async(&scalar).await?;
-    }
-    match scalar {
-        Value::Num(n) => Ok(n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Tensor(t) if runmat_runtime::builtins::common::tensor::is_scalar_tensor(&t) => {
-            Ok(tensor_value_f64(&t, 0))
-        }
-        _ => Err(crate::interpreter::errors::mex(
-            "UnsupportedIndexType",
-            "Range selector operands must be numeric scalars",
-        )),
-    }
-}
-
-fn validate_expr_range_step_metadata(
-    range_dims: &[usize],
-    range_has_step: &[bool],
-) -> Result<(), RuntimeError> {
-    if range_dims.len() != range_has_step.len() {
-        return Err(crate::interpreter::errors::mex(
-            "InvalidRangeSelectorPlan",
-            "inconsistent range step metadata",
-        ));
-    }
-    Ok(())
-}
-
-fn assign_scalar_struct_index(
-    _base: runmat_value::StructValue,
-    indices: &[usize],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    match indices {
-        [1] | [1, 1] => Ok(rhs),
-        _ => Err(crate::interpreter::errors::mex(
-            "IndexOutOfBounds",
-            "Struct subscript out of bounds",
-        )),
-    }
-}
-
 async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
-    let selectors = build_cell_scalar_selectors(values)
+    let selectors = build_scalar_selectors(values)
         .await
         .map_err(map_cell_scalar_selector_error)?;
     let mut indices = Vec::with_capacity(selectors.len());
@@ -294,111 +328,19 @@ async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeErr
     Ok(indices)
 }
 
-fn apply_cell_end_offsets_for_base(
-    base: &Value,
-    raw_indices: &[Value],
-    end_offsets: &[(usize, isize)],
-    allow_end_plus_one_growth: bool,
-) -> Result<Vec<Value>, RuntimeError> {
-    if end_offsets.is_empty() {
-        return Ok(raw_indices.to_vec());
-    }
-    let Value::Cell(ca) = base else {
-        return Ok(raw_indices.to_vec());
-    };
-    let mut seen = vec![false; raw_indices.len()];
-    for (position, _) in end_offsets {
-        if *position >= raw_indices.len() {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "cell end-selector position is out of bounds",
-            ));
-        }
-        if std::mem::replace(&mut seen[*position], true) {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "cell end-selector position appears more than once",
-            ));
-        }
-    }
-    let mut adjusted = raw_indices.to_vec();
-    for (position, offset) in end_offsets {
-        if *position >= adjusted.len() {
-            return Err(crate::interpreter::errors::mex(
-                "CellIndexOutOfBounds",
-                "Cell end selector position is out of bounds",
-            ));
-        }
-        let len =
-            runmat_runtime::object::cell::cell_selector_extent(ca, adjusted.len(), *position)?;
-        let resolved = (len as isize) + *offset;
-        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > len) {
-            return Err(crate::interpreter::errors::mex(
-                "CellIndexOutOfBounds",
-                "Cell index out of bounds",
-            ));
-        }
-        adjusted[*position] = Value::Num(resolved as f64);
-    }
-    Ok(adjusted)
-}
-
-async fn apply_cell_end_exprs_for_base(
-    base: &Value,
-    raw_indices: &[Value],
-    end_exprs: &[(usize, EndExpr)],
-    vars: &mut [Value],
-    allow_end_plus_one_growth: bool,
-) -> Result<Vec<Value>, RuntimeError> {
-    if end_exprs.is_empty() {
-        return Ok(raw_indices.to_vec());
-    }
-    let Value::Cell(ca) = base else {
-        return Ok(raw_indices.to_vec());
-    };
-    let mut seen = vec![false; raw_indices.len()];
-    for (position, _) in end_exprs {
-        if *position >= raw_indices.len() {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "cell end-selector position is out of bounds",
-            ));
-        }
-        if std::mem::replace(&mut seen[*position], true) {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "cell end-selector position appears more than once",
-            ));
-        }
-    }
-    let mut adjusted = raw_indices.to_vec();
-    for (position, end_expr) in end_exprs {
-        if *position >= adjusted.len() {
-            return Err(crate::interpreter::errors::mex(
-                "CellIndexOutOfBounds",
-                "Cell end selector position is out of bounds",
-            ));
-        }
-        let dim_len =
-            runmat_runtime::object::cell::cell_selector_extent(ca, adjusted.len(), *position)?;
-        let resolved = resolve_end_expr_index(dim_len, end_expr, vars).await?;
-        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > dim_len) {
-            return Err(crate::interpreter::errors::mex(
-                "CellIndexOutOfBounds",
-                "Cell index out of bounds",
-            ));
-        }
-        adjusted[*position] = Value::Num(resolved as f64);
-    }
-    Ok(adjusted)
-}
-
 fn gather_cell_with_plan(
     ca: &CellArray,
     plan: &runmat_runtime::indexing::plan::IndexPlan,
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
     runmat_runtime::object::cell::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
+}
+
+fn gather_struct_array_with_plan(
+    array: &runmat_value::StructArray,
+    plan: &runmat_runtime::indexing::plan::IndexPlan,
+) -> Result<Value, RuntimeError> {
+    runmat_runtime::indexing::structure::read_with_plan(array, plan)
 }
 
 fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
@@ -438,10 +380,8 @@ enum BraceOutcomeExpectation {
     ExpandedValues { invalid_message: &'static str },
 }
 
-struct BraceStackRequest<'a> {
+struct BraceStackRequest {
     num_indices: usize,
-    end_offsets: &'a [(usize, isize)],
-    end_exprs: &'a [(usize, EndExpr)],
     operation: BraceIndexOperation,
     expectation: BraceOutcomeExpectation,
 }
@@ -475,13 +415,7 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                        Value::Object(obj),
-                        ObjectIndexSelector::IndexValues {
-                            values: raw_indices.to_vec(),
-                        },
-                    ))
-                    .await?
+                    invoke_object_brace_read(Value::Object(obj), raw_indices.to_vec(), 1).await?
                 }
                 Value::HandleObject(handle) => {
                     if let Some(err) = missing_member_index_overload_error(
@@ -490,13 +424,8 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                        Value::HandleObject(handle),
-                        ObjectIndexSelector::IndexValues {
-                            values: raw_indices.to_vec(),
-                        },
-                    ))
-                    .await?
+                    invoke_object_brace_read(Value::HandleObject(handle), raw_indices.to_vec(), 1)
+                        .await?
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(raw_indices).await?;
@@ -561,13 +490,11 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+                    invoke_object_brace_assignment(
                         Value::Object(obj),
-                        ObjectIndexSelector::IndexValues {
-                            values: raw_indices.to_vec(),
-                        },
+                        raw_indices.to_vec(),
                         rhs,
-                    ))
+                    )
                     .await?
                 }
                 Value::HandleObject(handle) => {
@@ -577,13 +504,11 @@ async fn execute_brace_operation(
                     ) {
                         return Err(err);
                     }
-                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+                    invoke_object_brace_assignment(
                         Value::HandleObject(handle),
-                        ObjectIndexSelector::IndexValues {
-                            values: raw_indices.to_vec(),
-                        },
+                        raw_indices.to_vec(),
                         rhs,
-                    ))
+                    )
                     .await?
                 }
                 Value::Cell(ca) => {
@@ -710,29 +635,13 @@ async fn read_composite_entry(
 
 async fn execute_brace_operation_from_stack(
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
-    request: BraceStackRequest<'_>,
+    _vars: &mut [Value],
+    request: BraceStackRequest,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<(), RuntimeError> {
     let raw_indices = pop_index_values(stack, request.num_indices)?;
     let base = pop_index_base(stack)?;
-    let allow_end_plus_one_growth = matches!(request.operation, BraceIndexOperation::Store { .. });
-    let adjusted_end_exprs = apply_cell_end_exprs_for_base(
-        &base,
-        &raw_indices,
-        request.end_exprs,
-        vars,
-        allow_end_plus_one_growth,
-    )
-    .await?;
-    let adjusted_indices = apply_cell_end_offsets_for_base(
-        &base,
-        &adjusted_end_exprs,
-        request.end_offsets,
-        allow_end_plus_one_growth,
-    )?;
-    let outcome =
-        execute_brace_operation(base, &adjusted_indices, request.operation, runtime).await?;
+    let outcome = execute_brace_operation(base, &raw_indices, request.operation, runtime).await?;
     match (outcome, request.expectation) {
         (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
             stack.push(value)
@@ -759,225 +668,6 @@ async fn execute_brace_operation_from_stack(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-struct IndexContext<'a> {
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: &'a [usize],
-    base_shape: &'a [usize],
-}
-
-impl<'a> IndexContext<'a> {
-    fn new(
-        dims: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: &'a [usize],
-        base_shape: &'a [usize],
-    ) -> Self {
-        Self {
-            dims,
-            colon_mask,
-            end_mask,
-            range_dims,
-            base_shape,
-        }
-    }
-
-    fn dim_len_for_numeric_position(&self, numeric_position: usize) -> usize {
-        let mut seen_numeric = 0usize;
-        let mut dim_for_pos = 0usize;
-        for d in 0..self.dims {
-            let is_colon = selector_mask_has_dim(self.colon_mask, d);
-            let is_end = selector_mask_has_dim(self.end_mask, d);
-            let is_range = self.range_dims.contains(&d);
-            if is_colon || is_end || is_range {
-                continue;
-            }
-            if seen_numeric == numeric_position {
-                dim_for_pos = d;
-                break;
-            }
-            seen_numeric += 1;
-        }
-        if self.dims == 1 {
-            let n = self.base_shape.iter().copied().product::<usize>();
-            n.max(1)
-        } else {
-            self.base_shape.get(dim_for_pos).copied().unwrap_or(1)
-        }
-    }
-}
-
-fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
-    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
-}
-
-struct SparseFullRangeExprSpec<'a> {
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: &'a [usize],
-    range_params: &'a [(f64, f64)],
-    range_start_exprs: &'a [Option<EndExpr>],
-    range_step_exprs: &'a [Option<EndExpr>],
-    range_end_exprs: &'a [EndExpr],
-}
-
-fn sparse_full_range_exprs_as_colon_mask(spec: SparseFullRangeExprSpec<'_>) -> Option<u32> {
-    if spec.range_dims.is_empty()
-        || spec.range_dims.len() != spec.range_params.len()
-        || spec.range_dims.len() != spec.range_start_exprs.len()
-        || spec.range_dims.len() != spec.range_step_exprs.len()
-        || spec.range_dims.len() != spec.range_end_exprs.len()
-    {
-        return None;
-    }
-    let mut mask = spec.colon_mask;
-    for (pos, &dim) in spec.range_dims.iter().enumerate() {
-        if dim >= spec.dims || dim >= u32::BITS as usize {
-            return None;
-        }
-        if selector_mask_has_dim(mask, dim) || selector_mask_has_dim(spec.end_mask, dim) {
-            return None;
-        }
-        let (start, step) = spec.range_params[pos];
-        if start != 1.0 || step != 1.0 {
-            return None;
-        }
-        if spec.range_start_exprs[pos].is_some() || spec.range_step_exprs[pos].is_some() {
-            return None;
-        }
-        if !matches!(spec.range_end_exprs[pos], EndExpr::End) {
-            return None;
-        }
-        mask |= 1u32 << dim;
-    }
-    Some(mask)
-}
-
-fn validate_index_context_plan(ctx: IndexContext<'_>) -> Result<(), RuntimeError> {
-    if ctx.dims > u32::BITS as usize {
-        return Err(crate::interpreter::errors::mex(
-            "InvalidRangeSelectorPlan",
-            "selector dimension metadata exceeds mask width",
-        ));
-    }
-    let mut seen = vec![false; ctx.dims];
-    for &dim in ctx.range_dims {
-        if dim >= ctx.dims {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidRangeSelectorDim",
-                "range selector dimension is out of bounds",
-            ));
-        }
-        if std::mem::replace(&mut seen[dim], true) {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidRangeSelectorPlan",
-                "range selector dimension appears more than once",
-            ));
-        }
-        if selector_mask_has_dim(ctx.colon_mask, dim) || selector_mask_has_dim(ctx.end_mask, dim) {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidRangeSelectorPlan",
-                "range selector conflicts with colon/end selector masks",
-            ));
-        }
-    }
-    Ok(())
-}
-
-async fn apply_end_offsets_to_numeric(
-    numeric: &[Value],
-    ctx: IndexContext<'_>,
-    end_offsets: &[(usize, EndExpr)],
-    vars: &mut [Value],
-) -> Result<Vec<Value>, RuntimeError> {
-    validate_index_context_plan(ctx)?;
-    let mut seen = vec![false; numeric.len()];
-    for (position, _) in end_offsets {
-        if *position >= numeric.len() {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "end-selector position is out of bounds",
-            ));
-        }
-        if std::mem::replace(&mut seen[*position], true) {
-            return Err(crate::interpreter::errors::mex(
-                "InvalidEndSelectorPlan",
-                "end-selector position appears more than once",
-            ));
-        }
-    }
-
-    let mut adjusted = numeric.to_vec();
-    for (position, end_expr) in end_offsets {
-        if let Some(value) = adjusted.get_mut(*position) {
-            let dim_len = ctx.dim_len_for_numeric_position(*position);
-            let idx_val = resolve_end_expr_value(dim_len, end_expr, vars).await?;
-            *value = Value::Num(idx_val);
-        }
-    }
-    Ok(adjusted)
-}
-
-fn exact_index_from_f64(value: f64) -> Option<i64> {
-    if !value.is_finite() {
-        return None;
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return None;
-    }
-    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
-        return None;
-    }
-    Some(rounded as i64)
-}
-
-async fn resolve_end_expr_value(
-    dim_len: usize,
-    end_expr: &EndExpr,
-    vars: &[Value],
-) -> Result<f64, RuntimeError> {
-    runtime_indexing::resolve_end_expr_value(dim_len, end_expr, |local| vars.get(local).cloned())
-        .await
-}
-
-async fn resolve_end_expr_index(
-    dim_len: usize,
-    end_expr: &EndExpr,
-    vars: &[Value],
-) -> Result<i64, RuntimeError> {
-    let value = resolve_end_expr_value(dim_len, end_expr, vars).await?;
-    exact_index_from_f64(value).ok_or_else(|| {
-        crate::interpreter::errors::mex(
-            "UnsupportedIndexType",
-            "Index values must be positive integers or logical values",
-        )
-    })
-}
-
-async fn resolve_range_end_value(
-    dim_len: usize,
-    end_expr: &EndExpr,
-    vars: &[Value],
-) -> Result<f64, RuntimeError> {
-    resolve_end_expr_value(dim_len, end_expr, vars).await
-}
-
-async fn build_expr_slice_plan(
-    spec: ExprPlanSpec<'_>,
-    vars: &[Value],
-) -> Result<runmat_runtime::indexing::plan::IndexPlan, RuntimeError> {
-    build_expr_index_plan(spec, |dim_len, expr| {
-        let expr = expr.clone();
-        async move { resolve_range_end_value(dim_len, &expr, vars).await }
-    })
-    .await
-}
-
 pub async fn paren_index_value(
     base: Value,
     raw_indices: Vec<Value>,
@@ -989,15 +679,20 @@ pub async fn paren_index_value(
             runmat_runtime::foreign::index_foreign_resource(reference.clone(), raw_indices).await
         }
         Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) => {
-            if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
-                let descriptor = ObjectIndexDescriptor::subsref_paren(
-                    base,
+            let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+            if matches!(
+                resolution,
+                runmat_runtime::object::protocol::ProtocolResolution::Method(_)
+            ) {
+                let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
                     ObjectIndexSelector::IndexValues {
-                        values: raw_indices,
+                        components: raw_indices.into_iter().map(Into::into).collect(),
                     },
-                );
-                return call_object_index_descriptor_method_with_outputs(
-                    descriptor,
+                ));
+                return invoke_resolved_object_index_path_method(
+                    &resolution,
+                    base,
+                    path,
                     requested_outputs,
                 )
                 .await;
@@ -1010,7 +705,7 @@ pub async fn paren_index_value(
             runmat_runtime::indexing::object::read_with_plan(&base, &plan)
         }
         Value::Cell(ca) => {
-            let selectors = build_cell_scalar_selectors(&raw_indices).await?;
+            let selectors = build_scalar_selectors(&raw_indices).await?;
             let plan = build_index_plan(&selectors, raw_indices.len(), &ca.shape)?;
             Ok(gather_cell_with_plan(ca, &plan)?)
         }
@@ -1041,8 +736,15 @@ pub async fn paren_index_value(
             }
         }
         _ => {
-            let indices = linear_index_values(&raw_indices).await?;
-            idx_read_linear::generic_index(&base, &indices).await
+            if let Some(shape) = runmat_runtime::indexing::value::shape(&base) {
+                let selectors =
+                    build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, &shape).await?;
+                let plan = build_index_plan(&selectors, raw_indices.len(), &shape)?;
+                runmat_runtime::indexing::value::read_with_plan(base, &plan)
+            } else {
+                let indices = linear_index_values(&raw_indices).await?;
+                idx_read_linear::generic_index(&base, &indices).await
+            }
         }
     }
 }
@@ -1123,18 +825,12 @@ pub async fn dispatch_indexing(
             stack.push(paren_index_value(base, raw_indices, 1, function_registry).await?);
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCell {
-            num_indices,
-            end_offsets,
-            end_exprs,
-        } => {
+        crate::bytecode::Instr::IndexCell { num_indices } => {
             execute_brace_operation_from_stack(
                 stack,
                 vars,
                 BraceStackRequest {
                     num_indices: *num_indices,
-                    end_offsets,
-                    end_exprs,
                     operation: BraceIndexOperation::ReadSingle,
                     expectation: BraceOutcomeExpectation::SingleValue {
                         invalid_message: "IndexCell expected a single value outcome",
@@ -1148,16 +844,12 @@ pub async fn dispatch_indexing(
         crate::bytecode::Instr::IndexCellExpand {
             num_indices,
             out_count,
-            end_offsets,
-            end_exprs,
         } => {
             execute_brace_operation_from_stack(
                 stack,
                 vars,
                 BraceStackRequest {
                     num_indices: *num_indices,
-                    end_offsets,
-                    end_exprs,
                     operation: BraceIndexOperation::Expand {
                         out_count: *out_count,
                     },
@@ -1170,18 +862,12 @@ pub async fn dispatch_indexing(
             .await?;
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCellList {
-            num_indices,
-            end_offsets,
-            end_exprs,
-        } => {
+        crate::bytecode::Instr::IndexCellList { num_indices } => {
             execute_brace_operation_from_stack(
                 stack,
                 vars,
                 BraceStackRequest {
                     num_indices: *num_indices,
-                    end_offsets,
-                    end_exprs,
                     operation: BraceIndexOperation::List,
                     expectation: BraceOutcomeExpectation::SingleValue {
                         invalid_message: "IndexCellList expected a single list value",
@@ -1192,16 +878,8 @@ pub async fn dispatch_indexing(
             .await?;
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndexCell {
-            num_indices,
-            end_offsets,
-            end_exprs,
-        }
-        | crate::bytecode::Instr::StoreIndexCellDelete {
-            num_indices,
-            end_offsets,
-            end_exprs,
-        } => {
+        crate::bytecode::Instr::StoreIndexCell { num_indices }
+        | crate::bytecode::Instr::StoreIndexCellDelete { num_indices } => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete { .. });
             if delete {
                 return Err(crate::interpreter::errors::mex(
@@ -1218,8 +896,6 @@ pub async fn dispatch_indexing(
                 vars,
                 BraceStackRequest {
                     num_indices: *num_indices,
-                    end_offsets,
-                    end_exprs,
                     operation: BraceIndexOperation::Store { rhs },
                     expectation: BraceOutcomeExpectation::SingleValue {
                         invalid_message: "StoreIndexCell expected a single base value",
@@ -1356,7 +1032,42 @@ pub async fn dispatch_indexing(
                         ca, &indices, &rhs, delete,
                     )?)
                 }
-                Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
+                Value::Struct(structure) => {
+                    let selectors = indices
+                        .iter()
+                        .copied()
+                        .map(SliceSelector::Scalar)
+                        .collect::<Vec<_>>();
+                    let plan = if delete {
+                        build_index_plan(&selectors, indices.len(), &[1, 1])?
+                    } else {
+                        build_assignment_plan(&selectors, indices.len(), &[1, 1])?
+                    };
+                    stack.push(runmat_runtime::indexing::structure::assign_with_plan(
+                        Value::Struct(structure),
+                        &plan,
+                        rhs,
+                        delete,
+                    )?);
+                }
+                Value::StructArray(array) => {
+                    let selectors = indices
+                        .iter()
+                        .copied()
+                        .map(SliceSelector::Scalar)
+                        .collect::<Vec<_>>();
+                    let plan = if delete {
+                        build_index_plan(&selectors, indices.len(), array.shape())?
+                    } else {
+                        build_assignment_plan(&selectors, indices.len(), array.shape())?
+                    };
+                    stack.push(runmat_runtime::indexing::structure::assign_with_plan(
+                        Value::StructArray(array),
+                        &plan,
+                        rhs,
+                        delete,
+                    )?);
+                }
                 Value::SparseTensor(sparse) => stack.push(
                     idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
                 ),
@@ -1419,15 +1130,19 @@ pub async fn dispatch_indexing(
             };
             match base {
                 base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                    if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
-                        let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
-                            base,
-                            *dims,
-                            *colon_mask,
-                            *end_mask,
-                            &numeric,
-                        )?;
-                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    let resolution =
+                        resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+                    if matches!(
+                        resolution,
+                        runmat_runtime::object::protocol::ProtocolResolution::Method(_)
+                    ) {
+                        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
+                            object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
+                        ));
+                        stack.push(
+                            invoke_resolved_object_index_path_method(&resolution, base, path, 1)
+                                .await?,
+                        );
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -1541,6 +1256,18 @@ pub async fn dispatch_indexing(
                     let plan = build_index_plan(&selectors, *dims, &ca.shape)?;
                     stack.push(gather_cell_with_plan(&ca, &plan)?);
                 }
+                Value::StructArray(array) => {
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        array.shape(),
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, array.shape())?;
+                    stack.push(gather_struct_array_with_plan(&array, &plan)?);
+                }
                 other => {
                     stack.push(
                         read_scalar_like_slice(&other, *dims, *colon_mask, *end_mask, &numeric)
@@ -1584,16 +1311,29 @@ pub async fn dispatch_indexing(
             ))?;
             match base {
                 base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
-                        let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
-                            base,
-                            *dims,
-                            *colon_mask,
-                            *end_mask,
-                            &numeric,
-                            rhs,
-                        )?;
-                        stack.push(call_object_index_descriptor_method(descriptor).await?);
+                    let resolution =
+                        resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
+                    if matches!(
+                        resolution,
+                        runmat_runtime::object::protocol::ProtocolResolution::Method(_)
+                    ) {
+                        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
+                            object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
+                        ));
+                        let runmat_runtime::object::protocol::ProtocolResolution::Method(method) =
+                            resolution
+                        else {
+                            unreachable!()
+                        };
+                        stack.push(
+                            runmat_runtime::object::protocol::invoke_resolved_object_assignment(
+                                &method,
+                                base,
+                                path,
+                                vec![rhs],
+                            )
+                            .await?,
+                        );
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -1717,6 +1457,27 @@ pub async fn dispatch_indexing(
                         )?,
                     );
                 }
+                base @ (Value::Struct(_) | Value::StructArray(_)) => {
+                    let shape = match &base {
+                        Value::StructArray(array) => array.shape().to_vec(),
+                        _ => vec![1, 1],
+                    };
+                    let selectors = if delete {
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
+                            .await?
+                    } else {
+                        build_assignment_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
+                            .await?
+                    };
+                    let plan = if delete {
+                        build_index_plan(&selectors, *dims, &shape)?
+                    } else {
+                        build_assignment_plan(&selectors, *dims, &shape)?
+                    };
+                    stack.push(runmat_runtime::indexing::structure::assign_with_plan(
+                        base, &plan, rhs, delete,
+                    )?);
+                }
                 Value::SparseTensor(sparse) => {
                     let shape = sparse.shape();
                     let selectors = if delete {
@@ -1784,761 +1545,6 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::IndexSliceExpr {
-            dims,
-            numeric_count,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_has_step,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-        } => {
-            validate_expr_range_step_metadata(range_dims, range_has_step)?;
-            let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
-            for _ in 0..*numeric_count {
-                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?);
-            }
-            numeric.reverse();
-            let mut range_params: Vec<(f64, f64)> = Vec::with_capacity(range_dims.len());
-            for i in (0..range_dims.len()).rev() {
-                let has_step = range_has_step[i];
-                let step = if has_step {
-                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                        "StackUnderflow",
-                        "stack underflow",
-                    ))?;
-                    range_selector_scalar_to_f64(&v).await?
-                } else {
-                    1.0
-                };
-                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?;
-                let start = range_selector_scalar_to_f64(&v).await?;
-                range_params.push((start, step));
-            }
-            range_params.reverse();
-            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            if !end_numeric_exprs.is_empty() {
-                numeric = match &base {
-                    Value::GpuTensor(handle) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(
-                                *dims,
-                                *colon_mask,
-                                *end_mask,
-                                range_dims,
-                                &handle.shape,
-                            ),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::Tensor(t) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::Int(value) => {
-                        let tensor = integer_scalar_tensor(value.clone())?;
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(
-                                *dims,
-                                *colon_mask,
-                                *end_mask,
-                                range_dims,
-                                &tensor.shape,
-                            ),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::ComplexTensor(t) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::SparseTensor(s) => {
-                        let shape = s.shape();
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::StringArray(sa) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::Cell(ca) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                        let shape = runmat_runtime::indexing::object::shape(value)
-                            .expect("object-like values have an object-array shape");
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    _ => numeric,
-                };
-            }
-            if let Value::GpuTensor(handle) = &base {
-                let vm_plan = build_expr_slice_plan(
-                    ExprPlanSpec {
-                        dims: *dims,
-                        colon_mask: *colon_mask,
-                        end_mask: *end_mask,
-                        range_dims,
-                        range_params: &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        numeric: &numeric,
-                        shape: &handle.shape,
-                    },
-                    vars,
-                )
-                .await?;
-
-                if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
-                    stack.push(result);
-                    return Ok(true);
-                }
-
-                let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                    crate::interpreter::errors::mex(
-                        "AccelerationProviderUnavailable",
-                        "No acceleration provider registered",
-                    )
-                })?;
-                let host = provider.download(handle).await.map_err(|e| {
-                    crate::interpreter::errors::mex(
-                        "AccelerationOperationFailed",
-                        &format!("slice: {e}"),
-                    )
-                })?;
-                let tensor = runmat_value::Tensor::new(host.data, host.shape)
-                    .map_err(|e| map_slice_shape_error("slice", e))?;
-                base = Value::Tensor(tensor);
-            }
-            match base {
-                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                    let spec = ObjectParenExprSelectorSpec {
-                        dims: *dims,
-                        colon_mask: *colon_mask,
-                        end_mask: *end_mask,
-                        range_dims,
-                        range_params: &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        numeric: &numeric,
-                    };
-                    if value_defines_index_overload(&base, ObjectIndexOp::Subsref) {
-                        let descriptor =
-                            ObjectIndexDescriptor::subsref_paren_from_expr_slice(base, spec)?;
-                        stack.push(call_object_index_descriptor_method(descriptor).await?);
-                    } else {
-                        let shape = runmat_runtime::indexing::object::shape(&base)
-                            .expect("object-like values have an object-array shape");
-                        let vm_plan = build_expr_slice_plan(
-                            ExprPlanSpec {
-                                dims: *dims,
-                                colon_mask: *colon_mask,
-                                end_mask: *end_mask,
-                                range_dims,
-                                range_params: &range_params,
-                                range_start_exprs,
-                                range_step_exprs,
-                                range_end_exprs,
-                                numeric: &numeric,
-                                shape: &shape,
-                            },
-                            vars,
-                        )
-                        .await?;
-                        stack.push(runmat_runtime::indexing::object::read_with_plan(
-                            &base, &vm_plan,
-                        )?);
-                    }
-                }
-                Value::ComplexTensor(t) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)?);
-                }
-                Value::Tensor(t) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)?);
-                }
-                Value::LogicalArray(la) => {
-                    let data: Vec<f64> = la
-                        .data
-                        .iter()
-                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-                        .collect();
-                    let tensor = runmat_value::Tensor::new(data, la.shape.clone())
-                        .map_err(|e| map_slice_shape_error("slice", e))?;
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &tensor.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    let sliced = idx_read_slice::read_tensor_slice_from_plan(&tensor, &vm_plan)?;
-                    stack.push(match sliced {
-                        Value::Tensor(t) => logical_value_from_tensor(t)?,
-                        Value::Num(n) => Value::Bool(n != 0.0),
-                        other => other,
-                    });
-                }
-                Value::SparseTensor(s) => {
-                    if let Some(full_range_colon_mask) =
-                        sparse_full_range_exprs_as_colon_mask(SparseFullRangeExprSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                        })
-                    {
-                        stack.push(
-                            idx_read_slice::read_sparse_slice(
-                                &s,
-                                *dims,
-                                full_range_colon_mask,
-                                *end_mask,
-                                &numeric,
-                            )
-                            .await?,
-                        );
-                        return Ok(true);
-                    }
-                    let shape = s.shape();
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(idx_read_slice::read_sparse_slice_from_plan(&s, &vm_plan)?);
-                }
-                Value::StringArray(sa) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &sa.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(idx_read_slice::gather_string_slice(&sa, &vm_plan)?);
-                }
-                Value::Cell(ca) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &ca.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(gather_cell_with_plan(&ca, &vm_plan)?);
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "SliceNonTensor",
-                        "Slicing only supported on tensors",
-                    ))
-                }
-            }
-            Ok(true)
-        }
-        crate::bytecode::Instr::StoreSliceExpr {
-            dims,
-            numeric_count,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_has_step,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-        }
-        | crate::bytecode::Instr::StoreSliceExprDelete {
-            dims,
-            numeric_count,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_has_step,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-        } => {
-            validate_expr_range_step_metadata(range_dims, range_has_step)?;
-            let delete = matches!(instr, crate::bytecode::Instr::StoreSliceExprDelete { .. });
-            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            let mut range_params: Vec<(f64, f64)> = Vec::with_capacity(range_dims.len());
-            for i in (0..range_dims.len()).rev() {
-                let has = range_has_step[i];
-                let step = if has {
-                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                        "StackUnderflow",
-                        "stack underflow",
-                    ))?;
-                    range_selector_scalar_to_f64(&v).await?
-                } else {
-                    1.0
-                };
-                let st = stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?;
-                let st = range_selector_scalar_to_f64(&st).await?;
-                range_params.push((st, step));
-            }
-            range_params.reverse();
-            let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
-            for _ in 0..*numeric_count {
-                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?);
-            }
-            numeric.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            if !end_numeric_exprs.is_empty() {
-                numeric = match &base {
-                    Value::GpuTensor(handle) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(
-                                *dims,
-                                *colon_mask,
-                                *end_mask,
-                                range_dims,
-                                &handle.shape,
-                            ),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::Tensor(t) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::ComplexTensor(t) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::SparseTensor(s) => {
-                        let shape = s.shape();
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::StringArray(sa) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    Value::Cell(ca) => {
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                        let shape = runmat_runtime::indexing::object::shape(value)
-                            .expect("object-like values have an object-array shape");
-                        apply_end_offsets_to_numeric(
-                            &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &shape),
-                            end_numeric_exprs,
-                            vars,
-                        )
-                        .await?
-                    }
-                    _ => numeric,
-                };
-            }
-            match base {
-                Value::ComplexTensor(t) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    if delete {
-                        stack.push(idx_write_slice::delete_complex_with_plan(
-                            t, &vm_plan, &rhs,
-                        )?);
-                        return Ok(true);
-                    }
-                    stack.push(idx_write_slice::assign_complex_with_plan(t, &vm_plan, &rhs).await?);
-                }
-                Value::Tensor(t) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(if delete {
-                        idx_write_slice::delete_tensor_with_plan(t, &vm_plan, &rhs)?
-                    } else {
-                        idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?
-                    });
-                }
-                Value::Int(value) => {
-                    let tensor = integer_scalar_tensor(value.clone())?;
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &tensor.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    stack.push(
-                        assign_integer_scalar_with_plan(value, &vm_plan, &rhs, delete).await?,
-                    );
-                }
-                Value::GpuTensor(h) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &h.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    let updated = if delete {
-                        idx_write_slice::delete_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
-                    } else {
-                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
-                    };
-                    stack.push(updated);
-                }
-                Value::SparseTensor(sparse) => {
-                    let shape = sparse.shape();
-                    let read_only_vars: &[Value] = vars;
-                    let spec = ExprPlanSpec {
-                        dims: *dims,
-                        colon_mask: *colon_mask,
-                        end_mask: *end_mask,
-                        range_dims,
-                        range_params: &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        numeric: &numeric,
-                        shape: &shape,
-                    };
-                    let vm_plan = if delete {
-                        build_expr_slice_plan(spec, vars).await?
-                    } else {
-                        build_expr_sparse_assignment_plan(spec, |dim_len, expr| {
-                            let expr = expr.clone();
-                            async move {
-                                resolve_range_end_value(dim_len, &expr, read_only_vars).await
-                            }
-                        })
-                        .await?
-                    };
-                    stack.push(if delete {
-                        idx_write_slice::delete_sparse_with_plan(sparse, &vm_plan, &rhs)?
-                    } else {
-                        idx_write_slice::assign_sparse_with_plan(sparse, &vm_plan, &rhs).await?
-                    });
-                }
-                base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-                    let spec = ObjectParenExprSelectorSpec {
-                        dims: *dims,
-                        colon_mask: *colon_mask,
-                        end_mask: *end_mask,
-                        range_dims,
-                        range_params: &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        numeric: &numeric,
-                    };
-                    if value_defines_index_overload(&base, ObjectIndexOp::Subsasgn) {
-                        let descriptor =
-                            ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(base, spec, rhs)?;
-                        stack.push(call_object_index_descriptor_method(descriptor).await?);
-                    } else {
-                        let shape = runmat_runtime::indexing::object::shape(&base)
-                            .expect("object-like values have an object-array shape");
-                        let vm_plan = build_expr_slice_plan(
-                            ExprPlanSpec {
-                                dims: *dims,
-                                colon_mask: *colon_mask,
-                                end_mask: *end_mask,
-                                range_dims,
-                                range_params: &range_params,
-                                range_start_exprs,
-                                range_step_exprs,
-                                range_end_exprs,
-                                numeric: &numeric,
-                                shape: &shape,
-                            },
-                            vars,
-                        )
-                        .await?;
-                        stack.push(runmat_runtime::indexing::object::assign_with_plan(
-                            base, &vm_plan, rhs, delete,
-                        )?);
-                    }
-                }
-                Value::StringArray(mut sa) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &sa.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    if !vm_plan.indices.is_empty() {
-                        let rhs_view = idx_write_slice::build_string_rhs_view(
-                            &rhs,
-                            &vm_plan.selection_lengths,
-                        )?;
-                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)?;
-                    }
-                    stack.push(Value::StringArray(sa));
-                }
-                Value::Cell(ca) => {
-                    let vm_plan = build_expr_slice_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &ca.shape,
-                        },
-                        vars,
-                    )
-                    .await?;
-                    let selected: Vec<usize> = vm_plan
-                        .indices
-                        .iter()
-                        .map(|idx| (*idx as usize) + 1)
-                        .collect();
-                    stack.push(
-                        runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
-                            ca, &selected, &rhs, delete,
-                        )?,
-                    );
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "SliceNonTensor",
-                        "StoreSliceExpr only supports tensors, cells, and string arrays currently",
-                    ));
-                }
-            }
-            Ok(true)
-        }
         _ => Ok(false),
     }
 }
@@ -2546,17 +1552,13 @@ pub async fn dispatch_indexing(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
-        apply_end_offsets_to_numeric, assign_integer_scalar_with_plan, integer_scalar_tensor,
-        map_slice_plan_error, range_selector_scalar_to_f64, symbolic_scalar_from_value,
-        validate_expr_range_step_metadata, IndexContext,
+        assign_integer_scalar_with_plan, integer_scalar_tensor, map_slice_plan_error,
+        symbolic_scalar_from_value,
     };
     use futures::executor::block_on;
     use runmat_runtime::indexing::plan::IndexPlan;
-    use runmat_runtime::indexing::EndExpr;
     use runmat_value::{
-        CellArray, IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor,
-        Value,
+        IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor, Value,
     };
 
     #[test]
@@ -2624,22 +1626,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_expr_range_step_metadata_rejects_mismatched_arity() {
-        let err = validate_expr_range_step_metadata(&[0, 1], &[true])
-            .expect_err("mismatched range step metadata should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
-    }
-
-    #[test]
-    fn range_selector_scalar_to_f64_rejects_non_numeric_scalar() {
-        let err = block_on(range_selector_scalar_to_f64(&Value::String(
-            "x".to_string(),
-        )))
-        .expect_err("non-numeric range selector scalar should fail");
-        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
-    }
-
-    #[test]
     fn typed_integer_scalar_range_and_symbolic_paths_ignore_f64_mirrors() {
         macro_rules! assert_typed_scalar {
             ($storage:expr, $expected:expr) => {{
@@ -2647,10 +1633,6 @@ mod tests {
                     Tensor::new_integer($storage, vec![1, 1]).expect("typed integer scalar");
                 let value = Value::Tensor(tensor);
 
-                assert_eq!(
-                    block_on(range_selector_scalar_to_f64(&value)).unwrap(),
-                    $expected
-                );
                 assert_eq!(
                     symbolic_scalar_from_value(&value).unwrap(),
                     SymbolicExpr::constant($expected)
@@ -2667,145 +1649,6 @@ mod tests {
         assert_typed_scalar!(IntegerStorage::U32(vec![32]), 32.0);
         assert_typed_scalar!(IntegerStorage::U64(vec![64]), 64.0);
     }
-
-    #[test]
-    fn apply_end_offsets_rejects_out_of_bounds_positions() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(1, 0, 0, &[], &[5]),
-            &[(1, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("out-of-bounds end-selector position should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_duplicate_positions() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(1, 0, 0, &[], &[5]),
-            &[(0, EndExpr::End), (0, EndExpr::Const(2.0))],
-            &mut vars,
-        ))
-        .expect_err("duplicate end-selector positions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_duplicate_range_dims_in_context() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(2, 0, 0, &[1, 1], &[5, 5]),
-            &[(0, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("duplicate range dims should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_out_of_bounds_range_dims_in_context() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(2, 0, 0, &[2], &[5, 5]),
-            &[(0, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("out-of-bounds range dims should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_range_dim_conflicting_with_colon_mask_in_context() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(2, 0b01, 0, &[0], &[5, 5]),
-            &[(0, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("range/colon conflict should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_range_dim_conflicting_with_end_mask_in_context() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(2, 0, 0b10, &[1], &[5, 5]),
-            &[(0, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("range/end conflict should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_end_offsets_rejects_context_rank_exceeding_mask_width() {
-        let mut vars = vec![];
-        let err = block_on(apply_end_offsets_to_numeric(
-            &[Value::Num(1.0)],
-            IndexContext::new(33, 0, 0, &[], &[1; 33]),
-            &[(0, EndExpr::End)],
-            &mut vars,
-        ))
-        .expect_err("selector rank beyond mask width should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_cell_end_offsets_rejects_duplicate_positions() {
-        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
-        let err =
-            apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(0, 0), (0, 1)], false)
-                .expect_err("duplicate cell end-offset positions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_cell_end_offsets_rejects_out_of_bounds_positions() {
-        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
-        let err = apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(1, 0)], false)
-            .expect_err("out-of-bounds cell end-offset positions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_cell_end_exprs_rejects_duplicate_positions() {
-        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
-        let mut vars = vec![];
-        let err = block_on(apply_cell_end_exprs_for_base(
-            &base,
-            &[Value::Num(1.0)],
-            &[(0, EndExpr::End), (0, EndExpr::Const(1.0))],
-            &mut vars,
-            false,
-        ))
-        .expect_err("duplicate cell end-expression positions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
-    #[test]
-    fn apply_cell_end_exprs_rejects_out_of_bounds_positions() {
-        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
-        let mut vars = vec![];
-        let err = block_on(apply_cell_end_exprs_for_base(
-            &base,
-            &[Value::Num(1.0)],
-            &[(1, EndExpr::End)],
-            &mut vars,
-            false,
-        ))
-        .expect_err("out-of-bounds cell end-expression positions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
-    }
-
     #[test]
     fn resolve_cell_indices_rejects_fractional_values() {
         let err = block_on(super::resolve_cell_indices(&[Value::Num(1.5)]))

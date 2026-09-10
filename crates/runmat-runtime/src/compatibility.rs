@@ -93,6 +93,13 @@ fn value_contains_sparse_integer(
             .fields
             .values()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
+        Value::StructArray(array) => {
+            let mut found = false;
+            array.for_each_value(|value| {
+                found |= value_contains_sparse_integer(value, visited_handles)
+            });
+            found
+        }
         Value::Object(object) => object
             .properties
             .values()

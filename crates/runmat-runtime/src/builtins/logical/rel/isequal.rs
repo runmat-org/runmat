@@ -229,6 +229,21 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
 
         // Structs
         (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b, nan_equal),
+        (Value::StructArray(a), Value::StructArray(b)) => {
+            a.shape() == b.shape()
+                && a.field_names().eq(b.field_names())
+                && a.field_names().all(|name| {
+                    a.field_values(name)
+                        .zip(b.field_values(name))
+                        .is_some_and(|(left, right)| {
+                            left.len() == right.len()
+                                && left
+                                    .iter()
+                                    .zip(right)
+                                    .all(|(left, right)| values_equal(left, right, nan_equal))
+                        })
+                })
+        }
 
         // Different types are not equal
         _ => false,
@@ -406,11 +421,12 @@ fn structs_equal(
     if a.fields.len() != b.fields.len() {
         return false;
     }
-    a.fields.iter().all(|(key, value)| {
-        b.fields
-            .get(key)
-            .is_some_and(|other| values_equal(value, other, nan_equal))
-    })
+    a.fields
+        .iter()
+        .zip(&b.fields)
+        .all(|((left_name, left), (right_name, right))| {
+            left_name == right_name && values_equal(left, right, nan_equal)
+        })
 }
 
 fn equality_error(

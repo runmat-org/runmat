@@ -12,7 +12,7 @@ use runmat_builtins::{
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
+use runmat_value::{CellArray, ObjectInstance, StructArray, StructValue, Value};
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 
 pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
@@ -333,7 +333,7 @@ fn serialized_object_envelope(
     Value::Struct(st)
 }
 
-fn serialized_envelope(value: &Value) -> Option<(String, Value)> {
+fn serialized_envelope(value: &Value) -> Option<(String, String, bool, Value)> {
     let Value::Struct(st) = value else {
         return None;
     };
@@ -342,12 +342,21 @@ fn serialized_envelope(value: &Value) -> Option<(String, Value)> {
         .get(SERIALIZED_CLASS_FIELD)
         .and_then(|value| String::try_from(value).ok())?;
     let payload = st.fields.get(SERIALIZED_PAYLOAD_FIELD)?.clone();
-    if st.fields.get(SERIALIZED_KIND_FIELD).is_none()
-        || st.fields.get(SERIALIZED_HAD_SAVEOBJ_FIELD).is_none()
-    {
-        return None;
-    }
-    Some((class_name, payload))
+    let kind = st
+        .fields
+        .get(SERIALIZED_KIND_FIELD)
+        .and_then(|value| String::try_from(value).ok())?;
+    let had_saveobj = st
+        .fields
+        .get(SERIALIZED_HAD_SAVEOBJ_FIELD)
+        .and_then(|value| {
+            if let Value::Bool(value) = value {
+                Some(*value)
+            } else {
+                None
+            }
+        })?;
+    Some((class_name, kind, had_saveobj, payload))
 }
 
 async fn prepare_value_for_save_depth(value: Value, depth: usize) -> crate::BuiltinResult<Value> {
@@ -397,6 +406,14 @@ async fn prepare_value_for_save_depth(value: Value, depth: usize) -> crate::Buil
             }
             Ok(Value::Struct(converted))
         }
+        Value::StructArray(array) => {
+            let converted = array
+                .try_map_values_async(|field| async move {
+                    Box::pin(prepare_value_for_save_depth(field, depth + 1)).await
+                })
+                .await?;
+            Ok(Value::StructArray(converted))
+        }
         Value::Cell(cell) => {
             let mut converted = Vec::with_capacity(cell.data.len());
             for value in cell.data {
@@ -429,19 +446,44 @@ async fn restore_value_after_load_depth(value: Value, depth: usize) -> crate::Bu
         ));
     }
 
-    if let Some((class_name, payload)) = serialized_envelope(&value) {
+    if let Some((class_name, kind, had_saveobj, payload)) = serialized_envelope(&value) {
         let restored_payload = Box::pin(restore_value_after_load_depth(payload, depth + 1)).await?;
-        if let Some(restored) =
-            call_loadobj_if_available(&class_name, restored_payload.clone()).await?
-        {
-            return Ok(restored);
+        if had_saveobj {
+            if let Some(restored) =
+                call_loadobj_if_available(&class_name, restored_payload.clone()).await?
+            {
+                return Ok(restored);
+            }
         }
         if let Value::Struct(fields) = restored_payload {
-            return Ok(Value::Object(ObjectInstance {
+            let object = Value::Object(ObjectInstance {
                 class_name: class_name.into(),
                 properties: fields.fields.into_iter().collect(),
                 dynamic_properties: None,
-            }));
+            });
+            return match kind.as_str() {
+                SERIALIZED_KIND_VALUE => Ok(object),
+                SERIALIZED_KIND_HANDLE => {
+                    let class_name = object_class_name(&object).expect("constructed object class");
+                    let target = runmat_gc::gc_allocate(object).map_err(|error| {
+                        serialization_error(
+                            LOADOBJ_METHOD.display_name(),
+                            &SERIALIZATION_ERROR_ARGUMENT,
+                            format!("failed to restore serialized handle object: {error}"),
+                        )
+                    })?;
+                    Ok(Value::HandleObject(runmat_value::HandleRef {
+                        class_name,
+                        target,
+                        valid: true,
+                    }))
+                }
+                _ => Err(serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_ARGUMENT,
+                    format!("unsupported serialized object kind '{kind}'"),
+                )),
+            };
         }
         return Ok(restored_payload);
     }
@@ -456,6 +498,14 @@ async fn restore_value_after_load_depth(value: Value, depth: usize) -> crate::Bu
                 );
             }
             Ok(Value::Struct(converted))
+        }
+        Value::StructArray(array) => {
+            let converted = array
+                .try_map_values_async(|field| async move {
+                    Box::pin(restore_value_after_load_depth(field, depth + 1)).await
+                })
+                .await?;
+            Ok(Value::StructArray(converted))
         }
         Value::Cell(cell) => {
             let mut converted = Vec::with_capacity(cell.data.len());
@@ -523,7 +573,7 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
 pub async fn loadobj_builtin(value: Value) -> crate::BuiltinResult<Value> {
     if !matches!(
         value,
-        Value::Object(_) | Value::HandleObject(_) | Value::Struct(_)
+        Value::Object(_) | Value::HandleObject(_) | Value::Struct(_) | Value::StructArray(_)
     ) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &LOADOBJ_PASSTHROUGH_EXTENSION,
@@ -539,6 +589,12 @@ mod tests {
     use futures::executor::block_on;
 
     use tempfile::tempdir;
+
+    fn structure(field: &str, value: Value) -> StructValue {
+        let mut structure = StructValue::new();
+        structure.insert(field, value);
+        structure
+    }
 
     #[test]
     fn loadobj_preserves_nested_integer_payloads_without_materialization() {
@@ -569,6 +625,132 @@ mod tests {
     }
 
     #[test]
+    fn mat_object_recursion_preserves_empty_and_nd_structure_arrays() {
+        let empty = StructArray::with_fields(vec!["payload".into()], Vec::new(), vec![0, 2, 3])
+            .expect("empty structure array");
+        let saved = block_on(prepare_value_for_mat_save(Value::StructArray(empty)))
+            .expect("prepare empty array");
+        let Value::StructArray(saved) = saved else {
+            panic!("expected typed empty structure array");
+        };
+        assert_eq!(saved.shape(), [0, 2, 3]);
+        assert_eq!(
+            saved.field_names().cloned().collect::<Vec<_>>(),
+            ["payload"]
+        );
+
+        let elements = (0..4)
+            .map(|index| structure("payload", Value::Int(IntValue::U64(index))))
+            .collect();
+        let array = StructArray::with_fields(vec!["payload".into()], elements, vec![2, 1, 2])
+            .expect("N-D structure array");
+        let restored = block_on(restore_value_from_mat_load(
+            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare"),
+        ))
+        .expect("restore");
+        let Value::StructArray(restored) = restored else {
+            panic!("expected typed N-D structure array");
+        };
+        assert_eq!(restored.shape(), [2, 1, 2]);
+        for (index, element) in restored.elements().enumerate() {
+            assert_eq!(
+                element.fields.get("payload"),
+                Some(&Value::Int(IntValue::U64(index as u64)))
+            );
+        }
+    }
+
+    #[test]
+    fn mat_object_recursion_restores_nested_value_and_handle_objects() {
+        let mut value_object = ObjectInstance::new("NestedValue".to_string());
+        value_object
+            .properties
+            .insert("payload".into(), Value::Int(IntValue::U64(u64::MAX)));
+
+        let mut handle_object = ObjectInstance::new("NestedHandle".to_string());
+        handle_object
+            .properties
+            .insert("payload".into(), Value::String("entry".into()));
+        let target = runmat_gc::gc_allocate(Value::Object(handle_object)).expect("handle target");
+        let handle = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "NestedHandle".into(),
+            target,
+            valid: true,
+        });
+
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![
+                structure("payload", Value::Object(value_object)),
+                structure("payload", handle),
+            ],
+            vec![2, 1],
+        )
+        .expect("structure array");
+        let restored = block_on(restore_value_from_mat_load(
+            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare"),
+        ))
+        .expect("restore");
+        let Value::StructArray(restored) = restored else {
+            panic!("expected typed structure array");
+        };
+        assert!(matches!(
+            restored.get_linear(0).unwrap().fields.get("payload"),
+            Some(Value::Object(object)) if object.class_name.display_name() == "NestedValue"
+        ));
+        let Some(Value::HandleObject(handle)) =
+            restored.get_linear(1).unwrap().fields.get("payload")
+        else {
+            panic!("expected nested handle object");
+        };
+        assert_eq!(handle.class_name.display_name(), "NestedHandle");
+        assert!(runmat_gc::gc_with_value(&handle.target, |target| {
+            matches!(target, Value::Object(object)
+                if object.properties.get("payload") == Some(&Value::String("entry".into())))
+        })
+        .expect("live handle target"));
+    }
+
+    #[test]
+    fn mat_object_recursion_reports_nested_invalid_envelope_and_depth() {
+        let invalid = serialized_object_envelope(
+            "InvalidEnvelope".into(),
+            "unsupported",
+            false,
+            Value::Struct(StructValue::new()),
+        );
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![
+                structure("payload", invalid),
+                structure("payload", Value::Num(1.0)),
+            ],
+            vec![2, 1],
+        )
+        .expect("structure array");
+        let error = block_on(restore_value_from_mat_load(Value::StructArray(array)))
+            .expect_err("invalid nested envelope must fail");
+        assert_eq!(error.identifier(), SERIALIZATION_ERROR_ARGUMENT.identifier);
+
+        let mut nested = Value::Num(1.0);
+        for _ in 0..=MAX_SERIALIZATION_DEPTH {
+            nested = Value::Struct(structure("next", nested));
+        }
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![
+                structure("payload", nested),
+                structure("payload", Value::Num(2.0)),
+            ],
+            vec![2, 1],
+        )
+        .expect("structure array");
+        let error = block_on(prepare_value_for_mat_save(Value::StructArray(array)))
+            .expect_err("nested depth must fail");
+        assert_eq!(error.identifier(), SERIALIZATION_ERROR_RECURSION.identifier);
+    }
+
+    #[test]
     fn loadobj_plain_integer_passthrough_is_declared_and_mode_gated() {
         assert_eq!(LOADOBJ_INTEGER_CAPABILITIES.len(), 2);
         assert_eq!(LOADOBJ_EXTENSIONS.len(), 1);
@@ -586,6 +768,24 @@ mod tests {
             error.identifier(),
             LOADOBJ_PASSTHROUGH_EXTENSION.error_identifier
         );
+    }
+
+    #[test]
+    fn loadobj_accepts_typed_struct_arrays_in_compatibility_mode() {
+        let array = StructArray::with_fields(
+            vec!["payload".into()],
+            vec![
+                structure("payload", Value::Num(1.0)),
+                structure("payload", Value::Num(2.0)),
+            ],
+            vec![2, 1],
+        )
+        .unwrap();
+        let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let restored = block_on(loadobj_builtin(Value::StructArray(array.clone())))
+            .expect("structure arrays are part of the compatible loadobj domain");
+        drop(strict);
+        assert_eq!(restored, Value::StructArray(array));
     }
 
     #[test]

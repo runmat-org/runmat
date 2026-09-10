@@ -998,100 +998,10 @@ fn remap_emit_label(label: &mut crate::bytecode::EmitLabel, slot_remap: &HashMap
     }
 }
 
-fn remap_end_expr_slots(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    slot_remap: &HashMap<usize, usize>,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::Var(slot) => remap_slot(slot, slot_remap),
-        runmat_runtime::indexing::EndExpr::ResolvedCall { args, .. } => {
-            for arg in args {
-                remap_end_expr_slots(arg, slot_remap);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(left, right)
-        | runmat_runtime::indexing::EndExpr::Sub(left, right)
-        | runmat_runtime::indexing::EndExpr::Mul(left, right)
-        | runmat_runtime::indexing::EndExpr::Div(left, right)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(left, right)
-        | runmat_runtime::indexing::EndExpr::Pow(left, right) => {
-            remap_end_expr_slots(left, slot_remap);
-            remap_end_expr_slots(right, slot_remap);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_end_expr_slots(inner, slot_remap),
-        runmat_runtime::indexing::EndExpr::End | runmat_runtime::indexing::EndExpr::Const(_) => {}
-    }
-}
-
-fn remap_optional_end_expr_slots(
-    exprs: &mut [Option<runmat_runtime::indexing::EndExpr>],
-    slot_remap: &HashMap<usize, usize>,
-) {
-    for expr in exprs.iter_mut().flatten() {
-        remap_end_expr_slots(expr, slot_remap);
-    }
-}
-
-fn remap_indexed_end_expr_slots(
-    exprs: &mut [(usize, runmat_runtime::indexing::EndExpr)],
-    slot_remap: &HashMap<usize, usize>,
-) {
-    for (_, expr) in exprs {
-        remap_end_expr_slots(expr, slot_remap);
-    }
-}
-
-fn remap_end_expr_vec_slots(
-    exprs: &mut [runmat_runtime::indexing::EndExpr],
-    slot_remap: &HashMap<usize, usize>,
-) {
-    for expr in exprs {
-        remap_end_expr_slots(expr, slot_remap);
-    }
-}
-
 fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
     match instr {
         Instr::LoadVar(slot) | Instr::LoadVarForIndexAssignment(slot) | Instr::StoreVar(slot) => {
             remap_slot(slot, slot_remap);
-        }
-        Instr::IndexSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | Instr::StoreSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | Instr::StoreSliceExprDelete {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        } => {
-            remap_optional_end_expr_slots(range_start_exprs, slot_remap);
-            remap_optional_end_expr_slots(range_step_exprs, slot_remap);
-            remap_end_expr_vec_slots(range_end_exprs, slot_remap);
-            remap_indexed_end_expr_slots(end_numeric_exprs, slot_remap);
-        }
-        Instr::IndexCell { end_exprs, .. }
-        | Instr::IndexCellExpand { end_exprs, .. }
-        | Instr::IndexCellList { end_exprs, .. }
-        | Instr::StoreIndexCell { end_exprs, .. }
-        | Instr::StoreIndexCellDelete { end_exprs, .. } => {
-            remap_indexed_end_expr_slots(end_exprs, slot_remap);
         }
         Instr::CallFevalMultiUsingOutputSlot(_, slot)
         | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, slot)
@@ -1204,49 +1114,6 @@ fn remap_eval_local_function_instr(instr: &mut Instr, remap: &HashMap<FunctionId
         | Instr::CallFunctionExpandMultiOutput { identity, .. } => {
             remap_eval_local_callable_identity(identity, remap);
         }
-        Instr::IndexSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | Instr::StoreSliceExpr {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        }
-        | Instr::StoreSliceExprDelete {
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            ..
-        } => {
-            for expr in range_start_exprs.iter_mut().flatten() {
-                remap_eval_local_end_expr(expr, remap);
-            }
-            for expr in range_step_exprs.iter_mut().flatten() {
-                remap_eval_local_end_expr(expr, remap);
-            }
-            for expr in range_end_exprs {
-                remap_eval_local_end_expr(expr, remap);
-            }
-            for (_, expr) in end_numeric_exprs {
-                remap_eval_local_end_expr(expr, remap);
-            }
-        }
-        Instr::IndexCell { end_exprs, .. }
-        | Instr::IndexCellExpand { end_exprs, .. }
-        | Instr::IndexCellList { end_exprs, .. }
-        | Instr::StoreIndexCell { end_exprs, .. }
-        | Instr::StoreIndexCellDelete { end_exprs, .. } => {
-            for (_, expr) in end_exprs {
-                remap_eval_local_end_expr(expr, remap);
-            }
-        }
         _ => {}
     }
 }
@@ -1270,38 +1137,6 @@ fn remap_eval_local_callable_identity(
         | CallableIdentity::Method(_)
         | CallableIdentity::DynamicName(_)
         | CallableIdentity::ExternalName(_) => {}
-    }
-}
-
-fn remap_eval_local_end_expr(
-    expr: &mut runmat_runtime::indexing::EndExpr,
-    remap: &HashMap<FunctionId, FunctionId>,
-) {
-    match expr {
-        runmat_runtime::indexing::EndExpr::ResolvedCall { identity, args, .. } => {
-            remap_eval_local_callable_identity(identity, remap);
-            for arg in args {
-                remap_eval_local_end_expr(arg, remap);
-            }
-        }
-        runmat_runtime::indexing::EndExpr::Add(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Sub(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Mul(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Div(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::LeftDiv(lhs, rhs)
-        | runmat_runtime::indexing::EndExpr::Pow(lhs, rhs) => {
-            remap_eval_local_end_expr(lhs, remap);
-            remap_eval_local_end_expr(rhs, remap);
-        }
-        runmat_runtime::indexing::EndExpr::Neg(inner)
-        | runmat_runtime::indexing::EndExpr::Pos(inner)
-        | runmat_runtime::indexing::EndExpr::Floor(inner)
-        | runmat_runtime::indexing::EndExpr::Ceil(inner)
-        | runmat_runtime::indexing::EndExpr::Round(inner)
-        | runmat_runtime::indexing::EndExpr::Fix(inner) => remap_eval_local_end_expr(inner, remap),
-        runmat_runtime::indexing::EndExpr::End
-        | runmat_runtime::indexing::EndExpr::Const(_)
-        | runmat_runtime::indexing::EndExpr::Var(_) => {}
     }
 }
 

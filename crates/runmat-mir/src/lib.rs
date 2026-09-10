@@ -10,6 +10,7 @@ mod block;
 mod body;
 mod call;
 mod diagnostics;
+mod expression_region;
 mod function;
 mod ids;
 mod indexing;
@@ -27,6 +28,7 @@ pub use body::*;
 pub use call::*;
 pub use construct::*;
 pub use diagnostics::*;
+pub use expression_region::*;
 pub use function::*;
 pub use ids::*;
 pub use indexing::*;
@@ -38,4 +40,4 @@ pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-pub const MIR_SCHEMA_VERSION: u16 = 2;
+pub const MIR_SCHEMA_VERSION: u16 = 3;

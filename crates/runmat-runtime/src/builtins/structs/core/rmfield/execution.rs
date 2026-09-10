@@ -16,31 +16,18 @@ pub(super) fn execute(target: Value, fields: Vec<Value>) -> crate::BuiltinResult
         }
         super::target::Target::Array(mut array) => {
             remove_array(&mut array, names.as_slice())?;
-            array.into_cell().map(Value::Cell)
+            Ok(Value::StructArray(array))
         }
     }
 }
 
 fn remove_array(
-    array: &mut super::target::StructArray,
-    names: &[String],
-) -> crate::BuiltinResult<()> {
-    validate_array(array, names)?;
-    for structure in &mut array.elements {
-        remove_known(structure, names);
-    }
-    Ok(())
-}
-
-fn validate_array(
-    array: &super::target::StructArray,
+    array: &mut runmat_value::StructArray,
     names: &[String],
 ) -> crate::BuiltinResult<()> {
     for name in names {
-        for structure in &array.elements {
-            if !structure.fields.contains_key(name) {
-                return Err(super::error::missing_field(name));
-            }
+        if array.remove_field(name).is_none() {
+            return Err(super::error::missing_field(name));
         }
     }
     Ok(())
@@ -53,11 +40,4 @@ fn remove(structure: &mut StructValue, names: &[String]) -> crate::BuiltinResult
         }
     }
     Ok(())
-}
-
-fn remove_known(structure: &mut StructValue, names: &[String]) {
-    for name in names {
-        let removed = structure.remove(name);
-        debug_assert!(removed.is_some());
-    }
 }

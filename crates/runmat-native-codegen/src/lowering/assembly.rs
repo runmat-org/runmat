@@ -17,6 +17,14 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         .validate()
         .map_err(|error| NativeCodegenError::new("native.lowering.manifest", error.to_string()))?;
     input
+        .manifest
+        .identity
+        .program
+        .validate_current_compiler()
+        .map_err(|error| {
+            NativeCodegenError::new("native.lowering.compiler_compatibility", error.to_string())
+        })?;
+    input
         .analysis
         .revision
         .validate_current()
@@ -33,7 +41,11 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
     if input.manifest.revisions.mir_schema != runmat_mir::MIR_SCHEMA_VERSION {
         return Err(NativeCodegenError::new(
             "native.lowering.mir_schema",
-            "Native IR requires MIR schema 2 with retained source identities",
+            format!(
+                "Native IR received MIR schema {}; expected {}. Rebuild the program with this RunMat version",
+                input.manifest.revisions.mir_schema,
+                runmat_mir::MIR_SCHEMA_VERSION
+            ),
         ));
     }
     super::requirements::validate_requirements(input.mir, input.manifest)?;
@@ -249,13 +261,6 @@ pub fn verify_against_mir(
             )
             .at_function(function_id));
         }
-        if native.index_expressions != super::index_expression::derive(body, function_id)? {
-            return Err(NativeCodegenError::new(
-                "native.ir.mir_index_expressions",
-                "Native IR selector-expression metadata differs from canonical MIR",
-            )
-            .at_function(function_id));
-        }
         let expected = super::inventory::expected_sites(function_id, body)?;
         if native.expected_sites != expected {
             return Err(NativeCodegenError::new(
@@ -326,8 +331,10 @@ fn verify_statement_operations(
             let expected_rvalue = match &statement.kind {
                 runmat_mir::MirStmtKind::Assign { value, .. }
                 | runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
                 | runmat_mir::MirStmtKind::Expr(value) => Some(value),
                 runmat_mir::MirStmtKind::PlaceMutation(_)
+                | runmat_mir::MirStmtKind::CaptureSequence { .. }
                 | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
                 | runmat_mir::MirStmtKind::EnvironmentEffect(_) => None,
             };

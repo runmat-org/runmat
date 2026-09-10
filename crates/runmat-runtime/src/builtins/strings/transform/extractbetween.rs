@@ -482,6 +482,12 @@ fn contains_nested_numeric_or_resident(value: &Value) -> bool {
         Value::Cell(cell) => cell.data.iter().any(|value| {
             is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
         }),
+        Value::Struct(value) => value.fields.values().any(|value| {
+            is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
+        }),
+        Value::StructArray(array) => array.any_value(|value| {
+            is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
+        }),
         _ => false,
     }
 }
@@ -490,6 +496,8 @@ fn is_resident_or_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
         Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
+        Value::Struct(value) => value.fields.values().any(is_resident_or_contains_resident),
+        Value::StructArray(array) => array.any_value(is_resident_or_contains_resident),
         _ => false,
     }
 }

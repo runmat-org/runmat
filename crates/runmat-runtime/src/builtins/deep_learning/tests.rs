@@ -11,7 +11,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{handle_precision, handle_storage, GpuTensorStorage, HostTensorView};
 use runmat_value::{
     CellArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
-    ObjectInstance, StringArray, StructValue, Tensor, Value,
+    ObjectInstance, StringArray, StructArray, StructValue, Tensor, Value,
 };
 
 #[runmat_macros::runtime_builtin(
@@ -2404,6 +2404,35 @@ fn dlupdate_maps_matching_struct_and_cell_trees() {
         panic!("expected cell bias");
     };
     assert_eq!(bias.data, vec![Value::Num(7.0)]);
+}
+
+#[test]
+fn dlupdate_preserves_typed_struct_array_shape_and_schema() {
+    let element = |value| {
+        let mut structure = StructValue::new();
+        structure.insert("Weight", Value::Num(value));
+        structure
+    };
+    let left = StructArray::new(vec![element(1.0), element(2.0)], vec![2, 1]).unwrap();
+    let right = StructArray::new(vec![element(10.0), element(20.0)], vec![2, 1]).unwrap();
+    let output = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("plus".into()),
+        Value::StructArray(left),
+        Value::StructArray(right),
+    ]))
+    .expect("dlupdate structure array");
+    let Value::StructArray(output) = output else {
+        panic!("expected typed structure array");
+    };
+    assert_eq!(output.shape(), &[2, 1]);
+    assert_eq!(
+        output.field_names().map(String::as_str).collect::<Vec<_>>(),
+        ["Weight"]
+    );
+    assert_eq!(
+        output.field_values("Weight").unwrap(),
+        [Value::Num(11.0), Value::Num(22.0)]
+    );
 }
 
 #[test]

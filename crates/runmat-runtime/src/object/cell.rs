@@ -2,7 +2,7 @@ use crate::builtins::common::tensor::tensor_element_len;
 use crate::indexing::selectors::IndexScalar;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
-use runmat_value::{CellArray, NumericScalar, StructValue, Tensor, Value};
+use runmat_value::{CellArray, NumericScalar, Tensor, Value};
 
 mod selection;
 
@@ -243,70 +243,6 @@ pub fn gather_cell_paren_linear_indices(
         CellArray::new_with_shape(handles, shape)
             .map_err(|e| map_cell_shape_error("cell paren indexing error", e))?,
     ))
-}
-
-pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
-    if ca.data.len() == 1 {
-        return Ok(match &ca.data[0] {
-            Value::Struct(st) => st.fields.get(field).cloned().unwrap_or(Value::Num(0.0)),
-            other => other.clone(),
-        });
-    }
-
-    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-    for value in &ca.data {
-        match value {
-            Value::Struct(st) => out.push(st.fields.get(field).cloned().unwrap_or(Value::Num(0.0))),
-            other => out.push(other.clone()),
-        }
-    }
-    let cell = CellArray::new(out, ca.rows, ca.cols)
-        .map_err(|e| map_cell_shape_error("cell field gather", e))?;
-    Ok(Value::Cell(cell))
-}
-
-pub fn assign_cell_member<OnWrite>(
-    mut ca: CellArray,
-    field: String,
-    rhs: Value,
-    mut on_write: OnWrite,
-) -> Result<Value, RuntimeError>
-where
-    OnWrite: FnMut(&Value, &Value),
-{
-    let rhs_cell = if let Value::Cell(rc) = &rhs {
-        if rc.rows != ca.rows || rc.cols != ca.cols {
-            return Err(mex(
-                "CellMemberRhsShapeMismatch",
-                "field assignment cell RHS shape mismatch",
-            ));
-        }
-        Some(rc)
-    } else {
-        None
-    };
-
-    for i in 0..ca.data.len() {
-        let rv = if let Some(rc) = rhs_cell {
-            rc.data[i].clone()
-        } else {
-            rhs.clone()
-        };
-        match &mut ca.data[i] {
-            Value::Struct(st) => {
-                if let Some(oldv) = st.fields.get(&field) {
-                    on_write(oldv, &rv);
-                }
-                st.fields.insert(field.clone(), rv);
-            }
-            other => {
-                let mut st = StructValue::new();
-                st.fields.insert(field.clone(), rv);
-                *other = Value::Struct(st);
-            }
-        }
-    }
-    Ok(Value::Cell(ca))
 }
 
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
@@ -695,28 +631,8 @@ fn assign_cell_paren_from_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        assign_cell_member, expand_cell_indices, map_cell_shape_error,
-        resolve_cell_assignment_positions,
-    };
-    use runmat_value::{CellArray, IntegerStorage, StructValue, Tensor, Value};
-
-    #[test]
-    fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {
-        let base = CellArray::new(
-            vec![
-                Value::Struct(StructValue::new()),
-                Value::Struct(StructValue::new()),
-            ],
-            1,
-            2,
-        )
-        .expect("base cell");
-        let rhs = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("rhs cell");
-        let err = assign_cell_member(base, "field".to_string(), Value::Cell(rhs), |_old, _new| {})
-            .expect_err("shape mismatch should fail");
-        assert_eq!(err.identifier(), Some("RunMat:CellMemberRhsShapeMismatch"));
-    }
+    use super::{expand_cell_indices, map_cell_shape_error, resolve_cell_assignment_positions};
+    use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
 
     #[test]
     fn cell_shape_error_mapping_reports_identifier() {

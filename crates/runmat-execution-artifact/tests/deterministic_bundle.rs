@@ -17,7 +17,7 @@ fn identical_projects_have_checkout_independent_bundle_identity_and_archive() {
         .unwrap()
         .with_materialized_program(
             support::recipe(first_revision),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"canonical-bytecode".to_vec(),
         )
         .build()
@@ -26,7 +26,7 @@ fn identical_projects_have_checkout_independent_bundle_identity_and_archive() {
         .unwrap()
         .with_materialized_program(
             support::recipe(second_revision),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"canonical-bytecode".to_vec(),
         )
         .build()
@@ -113,7 +113,7 @@ fn accelerator_requirements_survive_package_archive_round_trip() {
         .unwrap()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"accelerated-bytecode".to_vec(),
         )
         .build()
@@ -246,7 +246,7 @@ fn foreign_artifacts_are_exact_first_class_bundle_objects() {
         .unwrap()
         .with_materialized_program(
             recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"canonical-bytecode".to_vec(),
         )
         .build()
@@ -307,7 +307,7 @@ fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
     let recipe = bundle.manifest.recipes[0].clone();
     bundle.manifest.artifacts[0] = runmat_execution_artifact::ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::InterpreterBytecodeV1,
+        ExecutableForm::InterpreterBytecodeV2,
         b"legacy-bytecode".to_vec(),
     )
     .unwrap();

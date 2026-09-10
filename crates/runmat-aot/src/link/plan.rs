@@ -128,7 +128,14 @@ mod tests {
     ) -> (RelocatableNativeObject, crate::archive::RuntimeArchive) {
         let runtime = Digest::sha256(b"runtime");
         let catalog = Digest::sha256(b"catalog");
-        let environment = ProgramEnvironment::new(1, 1, runtime, catalog, "matlab").unwrap();
+        let environment = ProgramEnvironment::new(
+            runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+            runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
+            runtime,
+            catalog,
+            "matlab",
+        )
+        .unwrap();
         let archive = build_runtime_archive(
             b"!<arch>\nfixture",
             &environment,

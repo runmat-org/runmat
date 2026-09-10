@@ -112,10 +112,7 @@ fn vector_index_assignment_lowers_to_store_slice() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::StoreSlice(..)
-                | runmat_vm::Instr::StoreSliceDelete(..)
-                | runmat_vm::Instr::StoreSliceExpr { .. }
-                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
         )),
         "vector index assignment should lower through StoreSlice* instructions"
     );
@@ -143,10 +140,7 @@ fn logical_mask_assignment_lowers_to_store_slice() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::StoreSlice(..)
-                | runmat_vm::Instr::StoreSliceDelete(..)
-                | runmat_vm::Instr::StoreSliceExpr { .. }
-                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
         )),
         "logical mask assignment should lower through StoreSlice* instructions"
     );

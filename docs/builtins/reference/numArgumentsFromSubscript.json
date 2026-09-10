@@ -33,7 +33,7 @@
     "The public signature is `n = numArgumentsFromSubscript(A, S, indexingContext)`.",
     "`S.type` accepts `\"()\"`, `\".\"`, or `\"{}\"` as a string scalar or row character vector.",
     "`S.subs` is text for dot indexing and a cell array of index vectors for parentheses or brace indexing.",
-    "Scalar structs describe one indexing level. Compound substruct arrays are accepted through RunMat's struct-array cell representation, where each cell element is a scalar struct with `type` and `subs` fields.",
+    "Scalar structures describe one indexing level. A structure array describes multiple levels; every element has `type` and `subs` fields.",
     "Object and handle-object targets dispatch to the receiver class's `numArgumentsFromSubscript` method when it is registered. If no overload exists, RunMat falls back to default array behavior.",
     "For ordinary arrays, parentheses and dot indexing report one argument. Brace indexing reports the number of selected elements, including validated numeric vector selectors, logical selectors, `':'`, and multidimensional selector products.",
     "All eight integer target classes and integer scalar/vector subscripts use authoritative shape or typed element storage. Wide positive `uint64` selectors are validated without binary64 conversion, and the structural result crosses to the documented double scalar only when exactly representable.",

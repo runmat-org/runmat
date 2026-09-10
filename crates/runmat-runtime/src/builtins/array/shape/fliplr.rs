@@ -239,13 +239,17 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
             "fliplr: cell arrays are not yet supported",
             &FLIPLR_ERROR_UNSUPPORTED_INPUT,
         )),
+        Value::Struct(structure) => Ok(Value::Struct(structure)),
+        Value::StructArray(array) => array
+            .flip(1)
+            .map(Value::StructArray)
+            .map_err(|error| fliplr_error(error)),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::SparseTensor(_)
-        | Value::Struct(_)
         | Value::ObjectArray(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -278,8 +282,8 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Type;
     use runmat_value::{
-        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
-        Tensor, Value,
+        CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructArray,
+        StructValue, Tensor, Value,
     };
 
     #[test]
@@ -497,12 +501,26 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn fliplr_rejects_unsupported_type() {
-        let value = Value::Struct(StructValue::new());
-        let err = fliplr_builtin(value).expect_err("structs are unsupported");
-        assert!(
-            err.to_string().contains("unsupported input type"),
-            "unexpected error message: {err}"
+    fn fliplr_preserves_scalar_and_reorders_struct_arrays() {
+        let mut first = StructValue::new();
+        first.insert("value", Value::Num(1.0));
+        assert_eq!(
+            fliplr_builtin(Value::Struct(first.clone())).unwrap(),
+            Value::Struct(first.clone())
+        );
+        let mut second = StructValue::new();
+        second.insert("value", Value::Num(2.0));
+        let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
+        let Value::StructArray(output) = fliplr_builtin(Value::StructArray(array)).unwrap() else {
+            panic!("expected structure array");
+        };
+        assert_eq!(
+            output.get_linear(0).unwrap().fields["value"],
+            Value::Num(2.0)
+        );
+        assert_eq!(
+            output.get_linear(1).unwrap().fields["value"],
+            Value::Num(1.0)
         );
     }
 

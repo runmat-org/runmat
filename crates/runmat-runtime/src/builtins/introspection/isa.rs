@@ -164,7 +164,7 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         "char" => matches!(value, Value::CharArray(_)),
         "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
         "cell" => matches!(value, Value::Cell(_)),
-        "struct" => matches!(value, Value::Struct(_)),
+        "struct" => matches!(value, Value::Struct(_) | Value::StructArray(_)),
         "function_handle" => matches!(
             value,
             Value::FunctionHandle(_)

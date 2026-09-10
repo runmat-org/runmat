@@ -236,8 +236,8 @@ mod tests {
             Digest::sha256(b"graph"),
             Digest::sha256(b"source"),
             ProgramEnvironment::new(
-                1,
-                1,
+                runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2,
                 Digest::sha256(b"runtime"),
                 Digest::sha256(b"catalog"),
                 "matlab",
@@ -263,7 +263,7 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::InterpreterBytecodeV1,
+            ExecutableForm::InterpreterBytecodeV2,
             b"not-executed".to_vec(),
         )
         .expect("program artifact");

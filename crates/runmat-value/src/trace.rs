@@ -17,6 +17,12 @@ impl Trace for StructValue {
     }
 }
 
+impl Trace for StructArray {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        self.for_each_value(|value| value.trace(tracer));
+    }
+}
+
 impl Trace for Closure {
     fn trace(&self, tracer: &mut dyn Tracer) {
         for value in &self.captures {
@@ -58,6 +64,7 @@ impl Trace for Value {
         match self {
             Value::Cell(cells) => cells.trace(tracer),
             Value::Struct(struct_value) => struct_value.trace(tracer),
+            Value::StructArray(array) => array.trace(tracer),
             Value::HandleObject(handle) => handle.trace(tracer),
             Value::Listener(listener) => listener.trace(tracer),
             Value::Closure(closure) => closure.trace(tracer),

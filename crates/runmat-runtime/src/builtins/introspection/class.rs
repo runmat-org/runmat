@@ -127,7 +127,7 @@ pub(crate) fn class_identity_for_value(value: &Value) -> runmat_types::ClassIden
         Value::CharArray(_) => runmat_types::standard::CHAR.owned(),
         Value::Symbolic(_) | Value::SymbolicArray(_) => runmat_types::ClassIdentity::from("sym"),
         Value::Cell(_) => runmat_types::standard::CELL.owned(),
-        Value::Struct(_) => runmat_types::standard::STRUCT.owned(),
+        Value::Struct(_) | Value::StructArray(_) => runmat_types::standard::STRUCT.owned(),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_is_explicit(handle) {
                 runmat_types::ClassIdentity::from("gpuArray")
@@ -306,7 +306,8 @@ pub(crate) mod tests {
         assert_eq!(class_name_for_value(&string_scalar), "string");
 
         let string_array = Value::StringArray(
-            StringArray::new(vec!["Ada".into(), "Grace".into()], vec![1, 2]).expect("string array"),
+            StringArray::new(vec!["entry-a".into(), "entry-b".into()], vec![1, 2])
+                .expect("string array"),
         );
         assert_eq!(class_name_for_value(&string_array), "string");
 

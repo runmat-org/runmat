@@ -168,10 +168,7 @@ mod tests {
                 "cell",
             ),
             (
-                ValueKindFact::Struct(runmat_types::StructFact {
-                    fields: BTreeMap::new(),
-                    fields_complete: true,
-                }),
+                ValueKindFact::Struct(runmat_types::StructFact::scalar(BTreeMap::new(), true)),
                 "struct",
             ),
             (
