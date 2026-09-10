@@ -164,3 +164,84 @@ fn provenance(connector: &AnalysisConnector) -> ContributionProvenance {
         contribution_id: ContributionId(format!("connector:{}", connector.connector_id)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use runmat_analysis_core::{
+        AnalysisConnector, AnalysisConstraint, ConnectorKind, PrescribedStructuralDofs,
+        PrescribedValue, RegionTarget, Rotation, RotationDofValue, Stiffness,
+        StructuralConstraintKind, StructuralRotationDof,
+    };
+
+    use crate::{
+        assembly::{assemble_structural_system, StructuralFormulationRequirement},
+        excitation::{realize_step_excitations, ExcitationSamplePoint},
+        fixtures::{fixture_model, FixtureId},
+    };
+
+    #[test]
+    fn connector_stiffness_and_constraints_jointly_eliminate_rigid_modes() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let constraint = match &mut model.constraints[0] {
+            AnalysisConstraint::Structural(constraint) => constraint,
+            _ => unreachable!(),
+        };
+        constraint.kind = StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+            target: RegionTarget::point("node:1"),
+            translations: Vec::new(),
+            rotations: [
+                StructuralRotationDof::Rx,
+                StructuralRotationDof::Ry,
+                StructuralRotationDof::Rz,
+            ]
+            .into_iter()
+            .map(|dof| RotationDofValue {
+                dof,
+                value: PrescribedValue::Constant(Rotation::new(0.0)),
+            })
+            .collect(),
+        });
+
+        let rotation_only = assemble(&model);
+        assert!(rotation_only.operator.nullspace_evidence().is_none());
+
+        model.connectors = vec![AnalysisConnector {
+            connector_id: "root_translation_anchor".into(),
+            primary: RegionTarget::point("node:1"),
+            secondary: None,
+            kind: ConnectorKind::TranslationalSpring {
+                stiffness: Stiffness::new(4_000.0),
+            },
+        }];
+        let anchored = assemble(&model);
+        assert!(anchored.operator.nullspace_evidence().is_some());
+        anchored
+            .operator
+            .prepare_linear()
+            .expect("the combined physical anchoring must prove coercive");
+
+        model.constraints.clear();
+        let partly_anchored = assemble(&model);
+        assert!(partly_anchored.operator.nullspace_evidence().is_none());
+        partly_anchored
+            .operator
+            .prepare_linear()
+            .expect_err("a translational spring alone must not conceal rotational mechanisms");
+    }
+
+    fn assemble(model: &runmat_analysis_core::AnalysisModel) -> super::super::AssemblySummary {
+        let excitations = realize_step_excitations(
+            model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .expect("fixture excitations");
+        assemble_structural_system(
+            model,
+            &excitations,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("valid explicit structural assembly")
+    }
+}

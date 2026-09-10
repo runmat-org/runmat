@@ -163,7 +163,7 @@ pub(super) fn prove(
                 component_index,
                 node_identities,
                 null_mode_count: 6,
-                projected_constraint_rank: 6,
+                projected_anchor_rank: 6,
                 anchoring: NullspaceAnchoring::ConstraintRowSpace,
             }
         })

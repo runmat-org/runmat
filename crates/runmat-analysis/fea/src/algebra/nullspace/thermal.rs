@@ -80,7 +80,7 @@ pub(super) fn prove(
             component_index,
             node_identities,
             null_mode_count: 1,
-            projected_constraint_rank: 1,
+            projected_anchor_rank: 1,
             anchoring,
         });
     }

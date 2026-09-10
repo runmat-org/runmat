@@ -1701,13 +1701,46 @@ fn assemble_explicit_structural_system(
         });
     }
 
+    let element_stiffness = stiffness_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    if has_rayleigh_damping {
+        damping_assembler.add_contribution(ContributionProvenance {
+            domain: ContributionDomain::Structural,
+            contribution_id: ContributionId("explicit_element_rayleigh_damping".to_string()),
+        });
+    } else {
+        damping_assembler.add_contribution(ContributionProvenance {
+            domain: ContributionDomain::Structural,
+            contribution_id: ContributionId("undamped_explicit_structure".to_string()),
+        });
+    }
+    let element_damping = damping_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    let mut connector_stiffness_assembler = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    let mut connector_damping_assembler = RealSparseAssembler::square(
+        dof_count,
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
     let connector_summary = assemble_explicit_connectors(
         &model.connectors,
         structural,
         &structural_dof_layout,
-        &mut stiffness_assembler,
-        &mut damping_assembler,
+        &mut connector_stiffness_assembler,
+        &mut connector_damping_assembler,
     )?;
+    let connector_stiffness = connector_stiffness_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    let connector_damping = connector_damping_assembler
+        .finish()
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
 
     let source_projection =
         apply_explicit_structural_loads(structural, excitations, &structural_dof_layout, &mut rhs)?;
@@ -1825,9 +1858,16 @@ fn assemble_explicit_structural_system(
             Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
         ));
     }
-    let stiffness = stiffness_assembler
-        .finish()
-        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    let stiffness = if connector_summary.stiffness_count == 0 {
+        element_stiffness.clone()
+    } else {
+        RealSparseMatrix::scaled_sum(
+            &[(1.0, &element_stiffness), (1.0, &connector_stiffness)],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+    };
     let mass = RealSparseMatrix::diagonal(
         mass_diag,
         OperatorRole::Mass,
@@ -1838,35 +1878,38 @@ fn assemble_explicit_structural_system(
         domain: ContributionDomain::Structural,
         contribution_id: ContributionId("explicit_beam_shell_mass".to_string()),
     });
-    if has_rayleigh_damping {
-        damping_assembler.add_contribution(ContributionProvenance {
-            domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("explicit_element_rayleigh_damping".to_string()),
-        });
-    } else if connector_summary.damping_count == 0 {
-        damping_assembler.add_contribution(ContributionProvenance {
-            domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("undamped_explicit_structure".to_string()),
-        });
-    }
-    let damping = damping_assembler
-        .finish()
-        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
+    let damping = if connector_summary.damping_count == 0 {
+        element_damping
+    } else {
+        RealSparseMatrix::scaled_sum(
+            &[(1.0, &element_damping), (1.0, &connector_damping)],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?
+    };
     let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
         .expect("assembled explicit operator roles and dimensions are valid");
-    let nullspace_evidence = if model.connectors.is_empty() {
-        match NullspaceEliminationEvidence::prove_structural_frame(
+    let nullspace_evidence = match if connector_summary.stiffness_count == 0 {
+        NullspaceEliminationEvidence::prove_structural_frame(
             structural,
             &structural_dof_layout,
             operators.stiffness(),
             &constrained,
-        ) {
-            Ok(evidence) => Some(evidence),
-            Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
-            Err(error) => return Err(StructuralAssemblyError::SparseOperator(error.to_string())),
-        }
+        )
     } else {
-        None
+        NullspaceEliminationEvidence::prove_connector_anchored_structural_frame(
+            structural,
+            &structural_dof_layout,
+            &element_stiffness,
+            &connector_stiffness,
+            operators.stiffness(),
+            &constrained,
+        )
+    } {
+        Ok(evidence) => Some(evidence),
+        Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
+        Err(error) => return Err(StructuralAssemblyError::SparseOperator(error.to_string())),
     };
     let operator = AssembledRealSystem::try_new_with_nullspace_evidence(
         operators,

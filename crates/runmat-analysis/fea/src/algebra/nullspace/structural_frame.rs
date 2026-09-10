@@ -23,11 +23,53 @@ pub(super) fn prove(
     operator: &RealSparseMatrix,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
+    prove_impl(
+        structural,
+        layout,
+        operator,
+        None,
+        operator,
+        constrained_dofs,
+    )
+}
+
+pub(super) fn prove_with_connector_anchors(
+    structural: &StructuralModel,
+    layout: &StructuralDofLayout,
+    element_operator: &RealSparseMatrix,
+    connector_operator: &RealSparseMatrix,
+    combined_operator: &RealSparseMatrix,
+    constrained_dofs: &[bool],
+) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
+    prove_impl(
+        structural,
+        layout,
+        element_operator,
+        Some(connector_operator),
+        combined_operator,
+        constrained_dofs,
+    )
+}
+
+fn prove_impl(
+    structural: &StructuralModel,
+    layout: &StructuralDofLayout,
+    element_operator: &RealSparseMatrix,
+    connector_operator: Option<&RealSparseMatrix>,
+    combined_operator: &RealSparseMatrix,
+    constrained_dofs: &[bool],
+) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     if structural.nodes.is_empty()
         || layout.node_count() != structural.nodes.len()
-        || layout.total_dof_count() != operator.rows()
-        || operator.rows() != operator.columns()
-        || constrained_dofs.len() != operator.rows()
+        || layout.total_dof_count() != combined_operator.rows()
+        || combined_operator.rows() != combined_operator.columns()
+        || element_operator.rows() != combined_operator.rows()
+        || element_operator.columns() != combined_operator.columns()
+        || connector_operator.is_some_and(|operator| {
+            operator.rows() != combined_operator.rows()
+                || operator.columns() != combined_operator.columns()
+        })
+        || constrained_dofs.len() != combined_operator.rows()
         || layout.reference_point_count() != 0
         || structural.elements.iter().any(|element| {
             !matches!(
@@ -39,10 +81,31 @@ pub(super) fn prove(
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
     validate_operator(
-        operator,
+        element_operator,
         OperatorRole::Stiffness,
         MatrixDefiniteness::PositiveSemidefinite,
     )?;
+    validate_operator(
+        combined_operator,
+        OperatorRole::Stiffness,
+        MatrixDefiniteness::PositiveSemidefinite,
+    )?;
+    if let Some(operator) = connector_operator {
+        validate_operator(
+            operator,
+            OperatorRole::Stiffness,
+            MatrixDefiniteness::PositiveSemidefinite,
+        )?;
+        let expected = RealSparseMatrix::scaled_sum(
+            &[(1.0, element_operator), (1.0, operator)],
+            OperatorRole::Stiffness,
+            combined_operator.properties(),
+        )
+        .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
+        if expected != *combined_operator {
+            return Err(NullspaceEvidenceError::BindingMismatch);
+        }
+    }
 
     let node_by_id = structural
         .nodes
@@ -81,8 +144,8 @@ pub(super) fn prove(
         mode_count,
     };
 
-    let mut modes = vec![vec![0.0; operator.columns()]; mode_count];
-    for column in 0..operator.columns() {
+    let mut modes = vec![vec![0.0; combined_operator.columns()]; mode_count];
+    for column in 0..combined_operator.columns() {
         for (mode, value) in rigid_mode_response(column, &context)?
             .into_iter()
             .enumerate()
@@ -91,43 +154,71 @@ pub(super) fn prove(
         }
     }
     for mode in &modes {
-        let applied =
-            super::spmv(operator, mode).map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
-        verify_null_mode(operator, mode, &applied)?;
+        let applied = super::spmv(element_operator, mode)
+            .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
+        verify_null_mode(element_operator, mode, &applied)?;
     }
-    let projected = constrained_dofs
+    let mut projected = constrained_dofs
         .iter()
         .copied()
         .enumerate()
         .filter(|(_, constrained)| *constrained)
         .map(|(column, _)| rigid_mode_response(column, &context))
         .collect::<Result<Vec<_>, _>>()?;
+    if let Some(operator) = connector_operator {
+        let applied_modes = modes
+            .iter()
+            .map(|mode| {
+                super::spmv(operator, mode).map_err(|_| NullspaceEvidenceError::DimensionMismatch)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        projected.extend((0..operator.rows()).map(|row| {
+            applied_modes
+                .iter()
+                .map(|applied| applied[row])
+                .collect::<Vec<_>>()
+        }));
+    }
     if numerical_rank(projected) != mode_count {
         return Err(NullspaceEvidenceError::UnderconstrainedComponent);
     }
 
-    let component_evidence = components
-        .into_iter()
-        .enumerate()
-        .map(|(component_index, nodes)| {
-            let mut node_identities = nodes
-                .iter()
-                .map(|node| explicit_node_identity(structural, *node))
-                .collect::<Result<Vec<_>, _>>()?;
-            node_identities.sort_unstable();
-            Ok(NullspaceComponentEvidence {
-                component_index,
-                node_identities,
-                null_mode_count: RIGID_MODE_COUNT,
-                projected_constraint_rank: RIGID_MODE_COUNT,
-                anchoring: NullspaceAnchoring::ConstraintRowSpace,
+    let component_evidence = if connector_operator.is_some() {
+        let mut node_identities = (0..structural.nodes.len())
+            .map(|node| explicit_node_identity(structural, node))
+            .collect::<Result<Vec<_>, _>>()?;
+        node_identities.sort_unstable();
+        vec![NullspaceComponentEvidence {
+            component_index: 0,
+            node_identities,
+            null_mode_count: mode_count,
+            projected_anchor_rank: mode_count,
+            anchoring: NullspaceAnchoring::OperatorAndConstraintRowSpace,
+        }]
+    } else {
+        components
+            .into_iter()
+            .enumerate()
+            .map(|(component_index, nodes)| {
+                let mut node_identities = nodes
+                    .iter()
+                    .map(|node| explicit_node_identity(structural, *node))
+                    .collect::<Result<Vec<_>, _>>()?;
+                node_identities.sort_unstable();
+                Ok(NullspaceComponentEvidence {
+                    component_index,
+                    node_identities,
+                    null_mode_count: RIGID_MODE_COUNT,
+                    projected_anchor_rank: RIGID_MODE_COUNT,
+                    anchoring: NullspaceAnchoring::ConstraintRowSpace,
+                })
             })
-        })
-        .collect::<Result<Vec<_>, NullspaceEvidenceError>>()?;
+            .collect::<Result<Vec<_>, NullspaceEvidenceError>>()?
+    };
     NullspaceEliminationEvidence::new(
         NullspaceKind::StructuralFrameRigidBody3d,
         digest(TOPOLOGY_DOMAIN, &(&structural.nodes, &structural.elements))?,
-        operator,
+        combined_operator,
         digest(CONSTRAINT_DOMAIN, &constrained_dofs)?,
         constrained_dofs,
         component_evidence,

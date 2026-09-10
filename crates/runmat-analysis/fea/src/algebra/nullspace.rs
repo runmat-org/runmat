@@ -43,7 +43,7 @@ pub struct NullspaceComponentEvidence {
     component_index: usize,
     node_identities: Vec<StableDigest>,
     null_mode_count: usize,
-    projected_constraint_rank: usize,
+    projected_anchor_rank: usize,
     anchoring: NullspaceAnchoring,
 }
 
@@ -61,6 +61,7 @@ pub enum NullspaceAnchoring {
         robin_count: usize,
     },
     ConstraintRowSpace,
+    OperatorAndConstraintRowSpace,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -139,6 +140,24 @@ impl NullspaceEliminationEvidence {
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
         structural_frame::prove(structural, layout, operator, constrained_dofs)
+    }
+
+    pub fn prove_connector_anchored_structural_frame(
+        structural: &runmat_analysis_core::StructuralModel,
+        layout: &StructuralDofLayout,
+        element_operator: &RealSparseMatrix,
+        connector_operator: &RealSparseMatrix,
+        combined_operator: &RealSparseMatrix,
+        constrained_dofs: &[bool],
+    ) -> Result<Self, NullspaceEvidenceError> {
+        structural_frame::prove_with_connector_anchors(
+            structural,
+            layout,
+            element_operator,
+            connector_operator,
+            combined_operator,
+            constrained_dofs,
+        )
     }
 
     pub(super) fn new(
@@ -227,7 +246,7 @@ impl NullspaceEliminationEvidence {
                             .windows(2)
                             .all(|pair| pair[0] < pair[1])
                         || component.null_mode_count == 0
-                        || component.projected_constraint_rank != component.null_mode_count
+                        || component.projected_anchor_rank != component.null_mode_count
                         || !anchoring_matches(component, self.kind)
                 })
             || self.expected_identity()? != self.proof_identity
@@ -314,6 +333,10 @@ fn anchoring_matches(component: &NullspaceComponentEvidence, kind: NullspaceKind
         (
             NullspaceAnchoring::ConstraintRowSpace,
             NullspaceKind::SolidRigidBody3d | NullspaceKind::StructuralFrameRigidBody3d,
+        ) => true,
+        (
+            NullspaceAnchoring::OperatorAndConstraintRowSpace,
+            NullspaceKind::StructuralFrameRigidBody3d,
         ) => true,
         _ => false,
     }
