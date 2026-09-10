@@ -1,33 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisModel, CfdDomain, ExcitationAction, ExcitationTarget, PhysicalSignal, SignalId,
-    SignalOrdinate, SignalRepresentation, SignalValue, ThermoMechanicalDomain,
+    AnalysisModel, ExcitationAction, ExcitationTarget, PhysicalSignal, SignalId, SignalOrdinate,
+    SignalRepresentation, SignalValue, ThermoMechanicalDomain,
 };
-
-pub(crate) fn cfd_velocity_scales(model: &AnalysisModel, _domain: &CfdDomain) -> Vec<f64> {
-    normalized_scales(excitation_signal_values(
-        model,
-        |action| matches!(action, ExcitationAction::InletVelocity(_)),
-        |signal| match signal {
-            PhysicalSignal::Velocity(signal) => {
-                scalar_or_vector_magnitudes(&signal.representation, |value| value.meters_per_second)
-            }
-            _ => None,
-        },
-    ))
-}
-
-pub(crate) fn nominal_inlet_velocity_m_per_s(model: &AnalysisModel) -> Option<f64> {
-    maximum_absolute(excitation_signal_values(
-        model,
-        |action| matches!(action, ExcitationAction::InletVelocity(_)),
-        |signal| match signal {
-            PhysicalSignal::Velocity(signal) => {
-                scalar_or_vector_magnitudes(&signal.representation, |value| value.meters_per_second)
-            }
-            _ => None,
-        },
-    ))
-}
 
 pub(crate) fn applied_temperature_delta_k(
     model: &AnalysisModel,
@@ -121,16 +95,6 @@ fn signal<'a>(model: &'a AnalysisModel, id: &SignalId) -> Option<&'a PhysicalSig
     model.signals.iter().find(|signal| signal.signal_id() == id)
 }
 
-fn normalized_scales(values: Vec<f64>) -> Vec<f64> {
-    let Some(nominal) = maximum_absolute(values.clone()) else {
-        return Vec::new();
-    };
-    if nominal <= f64::EPSILON {
-        return Vec::new();
-    }
-    values.into_iter().map(|value| value / nominal).collect()
-}
-
 fn maximum_absolute(values: Vec<f64>) -> Option<f64> {
     values
         .into_iter()
@@ -145,25 +109,6 @@ fn scalar_values<Q>(
 ) -> Option<Vec<f64>> {
     values(representation)?
         .map(|value| scalar_value(value, &component))
-        .collect()
-}
-
-fn scalar_or_vector_magnitudes<Q>(
-    representation: &SignalRepresentation<Q>,
-    component: impl Fn(&Q) -> f64,
-) -> Option<Vec<f64>> {
-    values(representation)?
-        .map(|value| match value {
-            SignalValue::Scalar(value) => Some(component(value)),
-            SignalValue::Vector3(values) => Some(
-                values
-                    .iter()
-                    .map(|value| component(value).powi(2))
-                    .sum::<f64>()
-                    .sqrt(),
-            ),
-            SignalValue::Tensor { .. } => None,
-        })
         .collect()
 }
 

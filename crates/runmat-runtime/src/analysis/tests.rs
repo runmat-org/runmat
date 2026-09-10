@@ -8335,9 +8335,10 @@ fn canonical_boundary_faces_define_complete_tetrahedral_interface_connectivity()
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let topology = CfdDomainTopology::from_solver_mesh(&mesh);
 
-    let edges = mesh_boundary_face_adjacencies(&topology, 4);
+    let (edges, mesh_coverage) = coupled_interface_graph_edges_for_topology(&topology, 4);
 
     assert_eq!(edges.len(), 6);
+    assert_eq!(mesh_coverage, 1.0);
     assert!(edges.contains(&(0, 1)));
     assert!(edges.contains(&(2, 3)));
 }

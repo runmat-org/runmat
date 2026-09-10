@@ -2,29 +2,28 @@ use std::collections::BTreeMap;
 
 use runmat_meshing_core::SolverMeshArtifact;
 
-/// Flow-oriented projection of the canonical solver mesh.
+/// Deterministic finite-volume-oriented projection of a canonical solver mesh.
 ///
-/// This module owns only the deterministic topology and scale derivation needed
-/// by runtime flow solvers. The canonical mesh remains owned and validated by
-/// `runmat-meshing-core`; physics-specific interpretation remains with the
-/// runtime solver.
-pub(super) struct SolverMeshFlowTopology {
-    pub(super) node_count: usize,
-    pub(super) control_volume_count: usize,
-    pub(super) face_count: usize,
-    pub(super) internal_face_count: usize,
-    pub(super) boundary_face_count: usize,
-    pub(super) domain_length_m: f64,
-    pub(super) hydraulic_diameter_m: f64,
-    pub(super) mean_boundary_face_area_m2: f64,
-    pub(super) dx_m: f64,
-    pub(super) active_dimension_count: usize,
-    pub(super) edge_nodes: Vec<[u32; 2]>,
-    pub(super) boundary_face_edges: Vec<[u32; 3]>,
+/// This is geometry and connectivity derived from the admitted mesh. It contains no fluid
+/// constitutive law, boundary policy, solver choice, or placement state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowTopologyProjection {
+    pub node_count: usize,
+    pub control_volume_count: usize,
+    pub face_count: usize,
+    pub internal_face_count: usize,
+    pub boundary_face_count: usize,
+    pub domain_length_m: f64,
+    pub hydraulic_diameter_m: f64,
+    pub mean_boundary_face_area_m2: f64,
+    pub dx_m: f64,
+    pub active_dimension_count: usize,
+    pub edge_nodes: Vec<[u32; 2]>,
+    pub boundary_face_edges: Vec<[u32; 3]>,
 }
 
-impl SolverMeshFlowTopology {
-    pub(super) fn derive(mesh: &SolverMeshArtifact) -> Self {
+impl FlowTopologyProjection {
+    pub fn derive(mesh: &SolverMeshArtifact) -> Self {
         let node_positions = mesh
             .topology
             .nodes
@@ -159,13 +158,13 @@ fn norm(vector: [f64; 3]) -> f64 {
 mod tests {
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
-    use super::SolverMeshFlowTopology;
+    use super::FlowTopologyProjection;
 
     #[test]
     fn derives_flow_connectivity_and_scales_from_canonical_tetrahedron() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
-        let topology = SolverMeshFlowTopology::derive(&mesh);
+        let topology = FlowTopologyProjection::derive(&mesh);
 
         assert_eq!(topology.node_count, 4);
         assert_eq!(topology.control_volume_count, 1);
@@ -187,8 +186,8 @@ mod tests {
         let mut reordered = mesh.clone();
         reordered.topology.boundary_faces.reverse();
 
-        let canonical = SolverMeshFlowTopology::derive(&mesh);
-        let permuted = SolverMeshFlowTopology::derive(&reordered);
+        let canonical = FlowTopologyProjection::derive(&mesh);
+        let permuted = FlowTopologyProjection::derive(&reordered);
 
         assert_eq!(canonical.node_count, permuted.node_count);
         assert_eq!(

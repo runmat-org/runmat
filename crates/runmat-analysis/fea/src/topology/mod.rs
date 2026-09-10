@@ -4,6 +4,7 @@ mod boundary;
 mod contract;
 mod derive;
 mod element;
+mod flow;
 mod identity;
 mod quadrature;
 
@@ -12,6 +13,7 @@ pub use contract::{
     BoundaryNormalOrientation, BoundaryQuadraturePoint, ProjectedBoundaryFace, ProjectedElement,
     ProjectedNode, VolumeQuadraturePoint,
 };
+pub use flow::FlowTopologyProjection;
 
 #[cfg(test)]
 mod tests;

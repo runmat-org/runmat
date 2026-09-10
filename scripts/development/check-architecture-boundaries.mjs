@@ -100,6 +100,23 @@ const runtimeAcousticKernelDeclarations = [
 if (runtimeAcousticKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
   fail("runmat-runtime must adapt acoustic operations without owning acoustic numerical kernels");
 }
+const runtimeCfdKernelDeclarations = [
+  /\bfn\s+(?:solve|recover)_cfd_/,
+  /\bfn\s+cfd_(?:assembly|boundary|known_answer|residual|reynolds|velocity_pressure)/,
+  /\bstruct\s+Cfd(?:BoundarySummary|DomainTopology|KnownAnswerMetrics|VelocityPressureSolution)\b/,
+];
+if (runtimeCfdKernelDeclarations.some((pattern) => pattern.test(runtimeAnalysisSource))) {
+  fail("runmat-runtime must adapt CFD operations without owning CFD numerical kernels");
+}
+if (
+  allRust.some(
+    ({ path: sourcePath, text }) =>
+      sourcePath.startsWith("crates/runmat-runtime/") &&
+      /\b(?:struct|enum)\s+(?:SolverMeshFlowTopology|FlowTopologyProjection)\b/.test(text),
+  )
+) {
+  fail("runmat-runtime must consume, not declare, canonical flow-topology projections");
+}
 
 const builtinsSources = allRust
   .filter(({ path: sourcePath }) => sourcePath.startsWith("crates/runmat-builtins/"))
