@@ -1,34 +1,13 @@
-use thiserror::Error;
-
 use crate::assembly::{
     elements::solid::{
-        strain_displacement_matrix, Tetrahedron10ElementError, Tetrahedron10ElementGeometry,
-        Tetrahedron4ElementError, Tetrahedron4ElementGeometry,
+        strain_displacement_matrix, Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
     },
     SolidRecoveryElementSummary, SolidRecoveryGeometry,
 };
 
-const COMPONENT_COUNT: usize = 6;
+use super::error::StructuralFieldRecoveryError;
 
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum SolidFieldRecoveryError {
-    #[error("solid recovery displacement is absent or non-finite at node {node_index}")]
-    InvalidDisplacement { node_index: usize },
-    #[error("Tet4 solid recovery failed for element {element_id}: {source}")]
-    Tetrahedron4 {
-        element_id: String,
-        source: Tetrahedron4ElementError,
-    },
-    #[error("Tet10 solid recovery failed for element {element_id}: {source}")]
-    Tetrahedron10 {
-        element_id: String,
-        source: Tetrahedron10ElementError,
-    },
-    #[error("solid recovery material is invalid for element {element_id}")]
-    InvalidMaterial { element_id: String },
-    #[error("solid recovery produced a non-finite field for element {element_id}")]
-    NonFiniteResult { element_id: String },
-}
+const COMPONENT_COUNT: usize = 6;
 
 pub(super) struct SolidRecoveredFields {
     pub strain: Vec<f64>,
@@ -39,7 +18,7 @@ pub(super) struct SolidRecoveredFields {
 pub(super) fn recover_solid_fields(
     elements: &[SolidRecoveryElementSummary],
     displacement: &[f64],
-) -> Result<SolidRecoveredFields, SolidFieldRecoveryError> {
+) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
     let mut strain = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
     let mut stress = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
     let mut strain_energy_density = Vec::with_capacity(elements.len());
@@ -53,7 +32,7 @@ pub(super) fn recover_solid_fields(
                 .map(|(strain, stress)| strain * stress)
                 .sum::<f64>();
         if !energy.is_finite() {
-            return Err(SolidFieldRecoveryError::NonFiniteResult {
+            return Err(StructuralFieldRecoveryError::NonFiniteResult {
                 element_id: element.element_id.clone(),
             });
         }
@@ -71,7 +50,7 @@ pub(super) fn recover_solid_fields(
 fn recover_element_strain(
     element: &SolidRecoveryElementSummary,
     displacement: &[f64],
-) -> Result<[f64; COMPONENT_COUNT], SolidFieldRecoveryError> {
+) -> Result<[f64; COMPONENT_COUNT], StructuralFieldRecoveryError> {
     match &element.geometry {
         SolidRecoveryGeometry::Tetrahedron4 {
             node_indices,
@@ -81,7 +60,7 @@ fn recover_element_strain(
             let b = strain_displacement_matrix(Tetrahedron4ElementGeometry {
                 nodes_m: *coordinates_m,
             })
-            .map_err(|source| SolidFieldRecoveryError::Tetrahedron4 {
+            .map_err(|source| StructuralFieldRecoveryError::Tetrahedron4 {
                 element_id: element.element_id.clone(),
                 source,
             })?;
@@ -100,7 +79,7 @@ fn recover_element_strain(
             nodes_m: *coordinates_m,
         }
         .volume_average_strain(gather_displacement::<10, 30>(node_indices, displacement)?)
-        .map_err(|source| SolidFieldRecoveryError::Tetrahedron10 {
+        .map_err(|source| StructuralFieldRecoveryError::Tetrahedron10 {
             element_id: element.element_id.clone(),
             source,
         }),
@@ -110,17 +89,17 @@ fn recover_element_strain(
 fn gather_displacement<const N: usize, const D: usize>(
     node_indices: &[usize; N],
     displacement: &[f64],
-) -> Result<[f64; D], SolidFieldRecoveryError> {
+) -> Result<[f64; D], StructuralFieldRecoveryError> {
     debug_assert_eq!(D, N * 3);
     let mut gathered = [0.0; D];
     for (local_node, node_index) in node_indices.iter().copied().enumerate() {
         let start = node_index
             .checked_mul(3)
-            .ok_or(SolidFieldRecoveryError::InvalidDisplacement { node_index })?;
+            .ok_or(StructuralFieldRecoveryError::InvalidDisplacement { node_index })?;
         let nodal = displacement
             .get(start..start + 3)
             .filter(|values| values.iter().all(|value| value.is_finite()))
-            .ok_or(SolidFieldRecoveryError::InvalidDisplacement { node_index })?;
+            .ok_or(StructuralFieldRecoveryError::InvalidDisplacement { node_index })?;
         gathered[local_node * 3..local_node * 3 + 3].copy_from_slice(nodal);
     }
     Ok(gathered)
@@ -129,14 +108,14 @@ fn gather_displacement<const N: usize, const D: usize>(
 fn recover_element_stress(
     element: &SolidRecoveryElementSummary,
     strain: [f64; COMPONENT_COUNT],
-) -> Result<[f64; COMPONENT_COUNT], SolidFieldRecoveryError> {
+) -> Result<[f64; COMPONENT_COUNT], StructuralFieldRecoveryError> {
     let lambda = element.material.lame_lambda_pa().map_err(|_| {
-        SolidFieldRecoveryError::InvalidMaterial {
+        StructuralFieldRecoveryError::InvalidMaterial {
             element_id: element.element_id.clone(),
         }
     })?;
     let mu = element.material.shear_modulus_pa().map_err(|_| {
-        SolidFieldRecoveryError::InvalidMaterial {
+        StructuralFieldRecoveryError::InvalidMaterial {
             element_id: element.element_id.clone(),
         }
     })?;
@@ -152,7 +131,7 @@ fn recover_element_stress(
     if stress.iter().all(|value| value.is_finite()) {
         Ok(stress)
     } else {
-        Err(SolidFieldRecoveryError::NonFiniteResult {
+        Err(StructuralFieldRecoveryError::NonFiniteResult {
             element_id: element.element_id.clone(),
         })
     }

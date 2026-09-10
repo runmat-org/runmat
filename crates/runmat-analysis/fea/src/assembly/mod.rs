@@ -309,9 +309,6 @@ pub enum StructuralAssemblyError {
     UnsupportedScheduledConstraint {
         constraint_id: String,
     },
-    UnsupportedShellDamping {
-        element_id: String,
-    },
     UnsupportedConstraintFrame {
         constraint_id: String,
         frame: String,
@@ -462,10 +459,6 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "structural assembly requires study-constant prescribed constraints: constraint_id={constraint_id}"
             ),
-            Self::UnsupportedShellDamping { element_id } => write!(
-                f,
-                "Rayleigh damping is not implemented for the shell proxy: element_id={element_id}"
-            ),
             Self::UnsupportedConstraintFrame {
                 constraint_id,
                 frame,
@@ -590,7 +583,7 @@ pub struct ShellRecoveryElementSummary {
     pub element_id: String,
     pub region_id: String,
     pub node_indices: [usize; 3],
-    pub area_m2: f64,
+    pub geometry: ShellElementGeometry,
     pub section: ShellSection,
     pub material: ShellMaterial,
 }
@@ -1668,11 +1661,6 @@ fn assemble_explicit_structural_system(
                 region_id: element.region_id.clone(),
             }
         })?;
-        if material.damping != runmat_analysis_core::MechanicalDampingModel::Undamped {
-            return Err(StructuralAssemblyError::UnsupportedShellDamping {
-                element_id: element.element_id.clone(),
-            });
-        }
         let shell_material = ShellMaterial {
             youngs_modulus_pa: material.youngs_modulus_pa,
             poisson_ratio: material.poisson_ratio,
@@ -1707,18 +1695,22 @@ fn assemble_explicit_structural_system(
                 stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
             }
         }
-        add_lumped_shell_mass(
-            &mut mass_diag,
+        let element_mass = lumped_shell_mass(section, material.density_kg_per_m3, frame.area_m2);
+        for (local, &global) in element_dofs.iter().enumerate() {
+            mass_diag[global] += element_mass[local];
+        }
+        has_rayleigh_damping |= add_rayleigh_element_damping(
+            &mut damping_assembler,
             &element_dofs,
-            section,
-            material.density_kg_per_m3,
-            frame.area_m2,
+            &stiffness,
+            &element_mass,
+            material.damping,
         );
         structural_shell_recovery.push(ShellRecoveryElementSummary {
             element_id: element.element_id.clone(),
             region_id: element.region_id.clone(),
             node_indices,
-            area_m2: frame.area_m2,
+            geometry,
             section,
             material: shell_material,
         });
@@ -1842,8 +1834,8 @@ fn assemble_explicit_structural_system(
         )
     } else {
         StructuralFormulationRealization::new(
-            StructuralOperatorImplementation::PairSpringShellProxy,
-            Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            StructuralOperatorImplementation::MindlinReissnerTri3Shell,
+            Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
         )
     };
     let stiffness = stiffness_assembler
@@ -1862,7 +1854,7 @@ fn assemble_explicit_structural_system(
     if has_rayleigh_damping {
         damping_assembler.add_contribution(ContributionProvenance {
             domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("explicit_beam_rayleigh_damping".to_string()),
+            contribution_id: ContributionId("explicit_element_rayleigh_damping".to_string()),
         });
     } else if connector_summary.damping_count == 0 {
         damping_assembler.add_contribution(ContributionProvenance {
@@ -1875,8 +1867,8 @@ fn assemble_explicit_structural_system(
         .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
     let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
         .expect("assembled explicit operator roles and dimensions are valid");
-    let nullspace_evidence = if !beam_elements.is_empty() && model.connectors.is_empty() {
-        match NullspaceEliminationEvidence::prove_beam(
+    let nullspace_evidence = if model.connectors.is_empty() {
+        match NullspaceEliminationEvidence::prove_structural_frame(
             structural,
             &structural_dof_layout,
             operators.stiffness(),
@@ -2124,25 +2116,23 @@ fn add_rayleigh_element_damping<const D: usize>(
     true
 }
 
-fn add_lumped_shell_mass(
-    mass_diag: &mut [f64],
-    element_dofs: &[usize; SHELL_ELEMENT_DOF_COUNT],
+fn lumped_shell_mass(
     section: ShellSection,
     density_kg_per_m3: f64,
     area_m2: f64,
-) {
+) -> [f64; SHELL_ELEMENT_DOF_COUNT] {
     let nodal_mass = density_kg_per_m3 * section.thickness_m * area_m2 / 3.0;
     let nodal_rotary_inertia = nodal_mass * section.thickness_m.powi(2) / 12.0;
+    let mut element_mass = [0.0; SHELL_ELEMENT_DOF_COUNT];
     for node_offset in [0usize, 6, 12] {
         for component in 0..3 {
-            let dof = element_dofs[node_offset + component];
-            mass_diag[dof] += nodal_mass;
+            element_mass[node_offset + component] = nodal_mass;
         }
         for component in 3..6 {
-            let dof = element_dofs[node_offset + component];
-            mass_diag[dof] += nodal_rotary_inertia;
+            element_mass[node_offset + component] = nodal_rotary_inertia;
         }
     }
+    element_mass
 }
 
 fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
@@ -3095,7 +3085,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_proxy_rejects_authored_rayleigh_damping() {
+    fn shell_assembles_authored_rayleigh_damping() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         model.materials[0].mechanical.damping =
             runmat_analysis_core::MechanicalDampingModel::Rayleigh {
@@ -3103,20 +3093,23 @@ mod tests {
                 stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(0.0),
             };
 
-        let error = assemble_structural_system(
+        let summary = assemble_structural_system(
             &model,
             &static_excitations(&model),
             None,
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("shell proxy damping must fail until its physical operator is implemented");
-
-        assert_eq!(
-            error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::UnsupportedShellDamping {
-                element_id: "shell_1".into(),
-            })
-        );
+        .expect("physical shell damping must assemble");
+        let operators = summary.operator.operators();
+        for row in 0..summary.dof_count {
+            for column in 0..summary.dof_count {
+                assert_relative(
+                    operators.damping().get(row, column),
+                    operators.mass().get(row, column),
+                    1.0e-12,
+                );
+            }
+        }
     }
 
     #[test]
@@ -4186,6 +4179,7 @@ mod tests {
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
         .expect("shell assembly should succeed");
+        assert!(shell.operator.nullspace_evidence().is_some());
         let synthetic_model = fixture_model(FixtureId::CantileverLinearStatic);
         let synthetic = assemble_structural_system(
             &synthetic_model,
@@ -4219,8 +4213,8 @@ mod tests {
             ),
             (
                 shell,
-                StructuralOperatorImplementation::PairSpringShellProxy,
-                Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+                StructuralOperatorImplementation::MindlinReissnerTri3Shell,
+                Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
                 SourceImplementation::ExplicitRegionNodalDistribution,
                 BoundaryTransferImplementation::ExplicitRegionConnectivity,
             ),
@@ -4311,7 +4305,7 @@ mod tests {
         }
         let perturbed = perturbed.finish().unwrap();
         assert_eq!(
-            NullspaceEliminationEvidence::prove_beam(
+            NullspaceEliminationEvidence::prove_structural_frame(
                 model.structural.as_ref().unwrap(),
                 &anchored.structural_dof_layout,
                 &perturbed,
@@ -4322,7 +4316,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_proxy_cannot_use_numerical_stabilization_to_hide_missing_supports() {
+    fn unconstrained_shell_retains_its_physical_rigid_body_nullspace() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
         model.constraints.clear();
         let summary = assemble_structural_system(

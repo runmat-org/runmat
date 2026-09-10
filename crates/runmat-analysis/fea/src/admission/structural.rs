@@ -51,10 +51,10 @@ pub fn structural_exact_realization(
                 StructuralRecoveryImplementation::BeamSectionResultants,
             ),
         ),
-        StructuralOperatorImplementation::PairSpringShellProxy => (
+        StructuralOperatorImplementation::MindlinReissnerTri3Shell => (
             vec![TopologyImplementation::ExplicitStructuralConnectivityTriangularShell],
             RecoveryImplementation::Structural(
-                StructuralRecoveryImplementation::PairSpringShellDerivedResultants,
+                StructuralRecoveryImplementation::Tri3ShellStressResultants,
             ),
         ),
         StructuralOperatorImplementation::SyntheticDiagonalChain => (
@@ -218,7 +218,7 @@ fn validate_projection_evidence(
             SourceImplementation::UniformNodeDistribution,
         ],
         StructuralOperatorImplementation::EulerBernoulliBeam3d
-        | StructuralOperatorImplementation::PairSpringShellProxy => &[
+        | StructuralOperatorImplementation::MindlinReissnerTri3Shell => &[
             SourceImplementation::NotApplicable,
             SourceImplementation::ExplicitRegionNodalDistribution,
             SourceImplementation::BoundaryResultantMomentProjection,
@@ -234,7 +234,7 @@ fn validate_projection_evidence(
             BoundaryTransferImplementation::CanonicalBoundaryProjection
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d
-        | StructuralOperatorImplementation::PairSpringShellProxy => {
+        | StructuralOperatorImplementation::MindlinReissnerTri3Shell => {
             BoundaryTransferImplementation::ExplicitRegionConnectivity
         }
         StructuralOperatorImplementation::SyntheticDiagonalChain => {

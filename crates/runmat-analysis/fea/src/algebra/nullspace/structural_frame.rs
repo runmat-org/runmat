@@ -12,12 +12,12 @@ use super::{
     RealSparseMatrix,
 };
 
-const TOPOLOGY_DOMAIN: &str = "fea-explicit-beam-topology";
-const NODE_DOMAIN: &str = "fea-explicit-beam-node";
-const CONSTRAINT_DOMAIN: &str = "fea-explicit-beam-constraint-state";
+const TOPOLOGY_DOMAIN: &str = "fea-explicit-structural-frame-topology";
+const NODE_DOMAIN: &str = "fea-explicit-structural-frame-node";
+const CONSTRAINT_DOMAIN: &str = "fea-explicit-structural-frame-constraint-state";
 const RIGID_MODE_COUNT: usize = 6;
 
-pub(super) fn prove_beam(
+pub(super) fn prove(
     structural: &StructuralModel,
     layout: &StructuralDofLayout,
     operator: &RealSparseMatrix,
@@ -29,10 +29,12 @@ pub(super) fn prove_beam(
         || operator.rows() != operator.columns()
         || constrained_dofs.len() != operator.rows()
         || layout.reference_point_count() != 0
-        || structural
-            .elements
-            .iter()
-            .any(|element| !matches!(element.kind, StructuralElementKind::Beam(_)))
+        || structural.elements.iter().any(|element| {
+            !matches!(
+                element.kind,
+                StructuralElementKind::Beam(_) | StructuralElementKind::Shell(_)
+            )
+        })
     {
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
@@ -51,7 +53,7 @@ pub(super) fn prove_beam(
     if node_by_id.len() != structural.nodes.len() {
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
-    let components = beam_components(structural, &node_by_id)?;
+    let components = structural_frame_components(structural, &node_by_id)?;
     let component_by_node = components
         .iter()
         .enumerate()
@@ -123,7 +125,7 @@ pub(super) fn prove_beam(
         })
         .collect::<Result<Vec<_>, NullspaceEvidenceError>>()?;
     NullspaceEliminationEvidence::new(
-        NullspaceKind::BeamRigidBody3d,
+        NullspaceKind::StructuralFrameRigidBody3d,
         digest(TOPOLOGY_DOMAIN, &(&structural.nodes, &structural.elements))?,
         operator,
         digest(CONSTRAINT_DOMAIN, &constrained_dofs)?,
@@ -132,25 +134,31 @@ pub(super) fn prove_beam(
     )
 }
 
-fn beam_components(
+fn structural_frame_components(
     structural: &StructuralModel,
     node_by_id: &BTreeMap<u32, usize>,
 ) -> Result<Vec<Vec<usize>>, NullspaceEvidenceError> {
     let mut neighbors = vec![BTreeSet::<usize>::new(); structural.nodes.len()];
     for element in &structural.elements {
-        let StructuralElementKind::Beam(beam) = &element.kind else {
-            return Err(NullspaceEvidenceError::DimensionMismatch);
+        let node_ids: &[u32] = match &element.kind {
+            StructuralElementKind::Beam(beam) => &beam.node_ids,
+            StructuralElementKind::Shell(shell) => &shell.node_ids,
         };
-        let left = node_by_id
-            .get(&beam.node_ids[0])
-            .copied()
-            .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-        let right = node_by_id
-            .get(&beam.node_ids[1])
-            .copied()
-            .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-        neighbors[left].insert(right);
-        neighbors[right].insert(left);
+        let nodes = node_ids
+            .iter()
+            .map(|node_id| {
+                node_by_id
+                    .get(node_id)
+                    .copied()
+                    .ok_or(NullspaceEvidenceError::DimensionMismatch)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for left in 0..nodes.len() {
+            for right in left + 1..nodes.len() {
+                neighbors[nodes[left]].insert(nodes[right]);
+                neighbors[nodes[right]].insert(nodes[left]);
+            }
+        }
     }
     let mut seen = vec![false; structural.nodes.len()];
     let mut components = Vec::new();

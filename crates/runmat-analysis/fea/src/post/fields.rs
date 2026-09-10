@@ -19,11 +19,14 @@ use crate::{
     algebra::apply_k,
     assembly::{
         dofs::StructuralDofKind,
-        elements::beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
+        elements::{
+            beam::{local_stiffness_matrix, BEAM_ELEMENT_DOF_COUNT},
+            shell::{recover_resultants as recover_shell_resultants, SHELL_ELEMENT_DOF_COUNT},
+        },
         AssemblySummary, BeamRecoveryElementSummary, ShellRecoveryElementSummary,
         StructuralMaterialSummary,
     },
-    post::solid::{recover_solid_fields, SolidFieldRecoveryError},
+    post::{error::StructuralFieldRecoveryError, solid::recover_solid_fields},
     results::field::{
         RecoveredField, RecoveredFieldDefinition, RecoveredFieldError,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
@@ -37,7 +40,7 @@ const TENSOR_COMPONENT_COUNT: usize = 6;
 pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
-) -> Result<Vec<AnalysisField>, SolidFieldRecoveryError> {
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
     if solve_result.solution.is_empty()
         || solve_result.solution.iter().any(|value| !value.is_finite())
     {
@@ -164,7 +167,7 @@ pub fn recover_result_fields(
     if let Some(beam_fields) = recover_beam_result_fields(summary, &solve_result.solution) {
         fields.extend(beam_fields);
     }
-    if let Some(shell_fields) = recover_shell_result_fields(summary, &solve_result.solution) {
+    if let Some(shell_fields) = recover_shell_result_fields(summary, &solve_result.solution)? {
         fields.extend(shell_fields);
     }
     Ok(fields)
@@ -275,7 +278,7 @@ pub struct StructuralFieldRecoveryMetrics {
 pub fn structural_field_recovery_metrics(
     summary: &AssemblySummary,
     displacement: &[f64],
-) -> Result<StructuralFieldRecoveryMetrics, SolidFieldRecoveryError> {
+) -> Result<StructuralFieldRecoveryMetrics, StructuralFieldRecoveryError> {
     let recovery_edges = structural_recovery_edges(summary);
     let strain_recovery = recover_structural_strain(summary, displacement)?;
     let active_stiffness_edge_count = recovery_edges.len();
@@ -465,7 +468,7 @@ fn structural_recovery_edges_including_constraints(
 fn recover_structural_strain(
     summary: &AssemblySummary,
     displacement: &[f64],
-) -> Result<StructuralStrainRecovery, SolidFieldRecoveryError> {
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
     if !summary.structural_solid_recovery.is_empty() {
         let recovered = recover_solid_fields(&summary.structural_solid_recovery, displacement)?;
         let basis = if summary.structural_solid_recovery.iter().all(|element| {
@@ -817,13 +820,13 @@ struct ShellResultValues {
 fn recover_shell_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
-) -> Option<Vec<AnalysisField>> {
+) -> Result<Option<Vec<AnalysisField>>, StructuralFieldRecoveryError> {
     if summary.structural_shell_recovery.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let values = recover_shell_result_values(summary, solution);
+    let values = recover_shell_result_values(summary, solution)?;
     let element_count = summary.structural_shell_recovery.len();
-    Some(vec![
+    Ok(Some(vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
             vec![element_count, 3],
@@ -844,10 +847,13 @@ fn recover_shell_result_fields(
             vec![element_count],
             values.von_mises,
         ),
-    ])
+    ]))
 }
 
-fn recover_shell_result_values(summary: &AssemblySummary, solution: &[f64]) -> ShellResultValues {
+fn recover_shell_result_values(
+    summary: &AssemblySummary,
+    solution: &[f64],
+) -> Result<ShellResultValues, StructuralFieldRecoveryError> {
     let mut membrane_force = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
     let mut bending_moment = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
     let mut transverse_shear = Vec::with_capacity(summary.structural_shell_recovery.len() * 2);
@@ -855,54 +861,30 @@ fn recover_shell_result_values(summary: &AssemblySummary, solution: &[f64]) -> S
 
     for shell in &summary.structural_shell_recovery {
         let q = shell_node_values(summary, solution, shell);
-        let edge_scale = shell_area_scale(shell.area_m2);
-        let t = shell.section.thickness_m.max(1.0e-12);
-        let e = shell.material.youngs_modulus_pa;
-        let g = shell.material.shear_modulus_pa;
-        let nu = shell.material.poisson_ratio;
-        let membrane_stiffness = e * t / (1.0 - nu * nu).max(1.0e-9);
-        let bending_stiffness = e * t.powi(3) / (12.0 * (1.0 - nu * nu).max(1.0e-9));
-        let shear_stiffness = g * t * shell.section.shear_correction;
-
-        let ex = component_spread(&q, 0) * edge_scale;
-        let ey = component_spread(&q, 1) * edge_scale;
-        let gamma_xy = (component_spread(&q, 0) + component_spread(&q, 1)) * 0.5 * edge_scale;
-        let kx = component_spread(&q, 3) * edge_scale;
-        let ky = component_spread(&q, 4) * edge_scale;
-        let kxy = component_spread(&q, 5) * edge_scale;
-        let qx =
-            shear_stiffness * (component_spread(&q, 2) * edge_scale + average_component(&q, 4));
-        let qy =
-            shear_stiffness * (component_spread(&q, 2) * edge_scale + average_component(&q, 3));
-
-        let nx = membrane_stiffness * (ex + nu * ey);
-        let ny = membrane_stiffness * (ey + nu * ex);
-        let nxy = g * t * gamma_xy;
-        let mx = bending_stiffness * (kx + nu * ky);
-        let my = bending_stiffness * (ky + nu * kx);
-        let mxy = g * t.powi(3) * kxy / 12.0;
-        let membrane_vm = (nx.powi(2) - nx * ny + ny.powi(2) + 3.0 * nxy.powi(2))
-            .abs()
-            .sqrt()
-            / t;
-        let bending_vm = 6.0
-            * (mx.powi(2) - mx * my + my.powi(2) + 3.0 * mxy.powi(2))
-                .abs()
-                .sqrt()
-            / t.powi(2);
-
-        membrane_force.extend([nx, ny, nxy]);
-        bending_moment.extend([mx, my, mxy]);
-        transverse_shear.extend([qx, qy]);
-        von_mises.push(membrane_vm + bending_vm);
+        let global_displacement =
+            std::array::from_fn::<_, SHELL_ELEMENT_DOF_COUNT, _>(|index| q[index / 6][index % 6]);
+        let result = recover_shell_resultants(
+            shell.section,
+            shell.material,
+            shell.geometry,
+            global_displacement,
+        )
+        .map_err(|source| StructuralFieldRecoveryError::Shell {
+            element_id: shell.element_id.clone(),
+            source,
+        })?;
+        membrane_force.extend(result.membrane_force_n_per_m);
+        bending_moment.extend(result.bending_moment_n);
+        transverse_shear.extend(result.transverse_shear_n_per_m);
+        von_mises.push(result.surface_von_mises_pa);
     }
 
-    ShellResultValues {
+    Ok(ShellResultValues {
         membrane_force,
         bending_moment,
         transverse_shear,
         von_mises,
-    }
+    })
 }
 
 fn shell_node_values(
@@ -921,26 +903,6 @@ fn shell_node_values(
         }
     }
     out
-}
-
-fn shell_area_scale(area_m2: f64) -> f64 {
-    1.0 / area_m2.max(1.0e-18).sqrt()
-}
-
-fn component_spread(values: &[[f64; 6]; 3], component: usize) -> f64 {
-    let min = values
-        .iter()
-        .map(|value| value[component])
-        .fold(f64::INFINITY, f64::min);
-    let max = values
-        .iter()
-        .map(|value| value[component])
-        .fold(f64::NEG_INFINITY, f64::max);
-    max - min
-}
-
-fn average_component(values: &[[f64; 6]; 3], component: usize) -> f64 {
-    values.iter().map(|value| value[component]).sum::<f64>() / values.len() as f64
 }
 
 fn recover_reaction_force(

@@ -17,7 +17,7 @@ pub enum StructuralOperatorImplementation {
     Tet4LinearElasticity,
     Tet10LinearElasticity,
     EulerBernoulliBeam3d,
-    PairSpringShellProxy,
+    MindlinReissnerTri3Shell,
     SyntheticDiagonalChain,
 }
 
@@ -81,7 +81,7 @@ pub enum StructuralRecoveryImplementation {
     Tet4ConstantStrain,
     Tet10VolumeAverageStrain,
     BeamSectionResultants,
-    PairSpringShellDerivedResultants,
+    Tri3ShellStressResultants,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

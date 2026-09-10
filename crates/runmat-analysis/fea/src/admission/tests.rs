@@ -128,8 +128,8 @@ fn structural_assembly_realizations() -> Vec<StructuralFormulationRealization> {
             Some(StructuralRecoveryImplementation::BeamSectionResultants),
         ),
         StructuralFormulationRealization::new(
-            StructuralOperatorImplementation::PairSpringShellProxy,
-            Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            StructuralOperatorImplementation::MindlinReissnerTri3Shell,
+            Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
         ),
         StructuralFormulationRealization::new(
             StructuralOperatorImplementation::SyntheticDiagonalChain,
@@ -276,10 +276,10 @@ fn structural_exact_identity_distinguishes_operator_topology_and_recovery() {
             ),
         ),
         (
-            StructuralOperatorImplementation::PairSpringShellProxy,
+            StructuralOperatorImplementation::MindlinReissnerTri3Shell,
             TopologyImplementation::ExplicitStructuralConnectivityTriangularShell,
             RecoveryImplementation::Structural(
-                StructuralRecoveryImplementation::PairSpringShellDerivedResultants,
+                StructuralRecoveryImplementation::Tri3ShellStressResultants,
             ),
         ),
         (

@@ -35,7 +35,7 @@ const NULL_MODE_RELATIVE_TOLERANCE: f64 = 1.0e-9;
 pub enum NullspaceKind {
     ScalarConstantPerComponent,
     SolidRigidBody3d,
-    BeamRigidBody3d,
+    StructuralFrameRigidBody3d,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -132,13 +132,13 @@ impl NullspaceEliminationEvidence {
         solid::prove(mesh, layout, plan, constraints, operator, constrained_dofs)
     }
 
-    pub fn prove_beam(
+    pub fn prove_structural_frame(
         structural: &runmat_analysis_core::StructuralModel,
         layout: &StructuralDofLayout,
         operator: &RealSparseMatrix,
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
-        structural_frame::prove_beam(structural, layout, operator, constrained_dofs)
+        structural_frame::prove(structural, layout, operator, constrained_dofs)
     }
 
     pub(super) fn new(
@@ -313,7 +313,7 @@ fn anchoring_matches(component: &NullspaceComponentEvidence, kind: NullspaceKind
         ) => *prescribed_count > 0 && *robin_count > 0,
         (
             NullspaceAnchoring::ConstraintRowSpace,
-            NullspaceKind::SolidRigidBody3d | NullspaceKind::BeamRigidBody3d,
+            NullspaceKind::SolidRigidBody3d | NullspaceKind::StructuralFrameRigidBody3d,
         ) => true,
         _ => false,
     }

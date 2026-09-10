@@ -287,8 +287,8 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
             Some(StructuralRecoveryImplementation::BeamSectionResultants),
         ),
         (
-            StructuralOperatorImplementation::PairSpringShellProxy,
-            Some(StructuralRecoveryImplementation::PairSpringShellDerivedResultants),
+            StructuralOperatorImplementation::MindlinReissnerTri3Shell,
+            Some(StructuralRecoveryImplementation::Tri3ShellStressResultants),
         ),
         (
             StructuralOperatorImplementation::SyntheticDiagonalChain,

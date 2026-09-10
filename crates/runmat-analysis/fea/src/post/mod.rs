@@ -1,4 +1,5 @@
+mod error;
 pub mod fields;
 mod solid;
 
-pub use solid::SolidFieldRecoveryError;
+pub use error::StructuralFieldRecoveryError;
