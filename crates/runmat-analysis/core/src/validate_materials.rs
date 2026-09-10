@@ -82,6 +82,23 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
             "Poisson ratio must be finite and in (-1, 0.5)",
         ));
     }
+    if let crate::MechanicalDampingModel::Rayleigh {
+        mass_coefficient,
+        stiffness_coefficient,
+    } = mechanical.damping
+    {
+        if !mass_coefficient.is_finite()
+            || !stiffness_coefficient.is_finite()
+            || mass_coefficient.per_second < 0.0
+            || stiffness_coefficient.seconds < 0.0
+            || (mass_coefficient.per_second == 0.0 && stiffness_coefficient.seconds == 0.0)
+        {
+            return Err(invalid_material(
+                material,
+                "Rayleigh damping coefficients must be finite and non-negative, with at least one positive coefficient",
+            ));
+        }
+    }
 
     let thermal = &material.thermal;
     require_nonnegative(
@@ -265,6 +282,7 @@ mod tests {
     use super::*;
     use crate::{
         EvidenceConfidence, MaterialElectricalModel, MaterialMechanicalModel, MaterialThermalModel,
+        MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
     };
 
     fn material() -> MaterialModel {
@@ -275,6 +293,7 @@ mod tests {
                 youngs_modulus_pa: 200.0e9,
                 poisson_ratio: 0.3,
                 density_kg_per_m3: 7850.0,
+                damping: MechanicalDampingModel::Undamped,
             },
             thermal: MaterialThermalModel::default(),
             acoustic: None,
@@ -309,6 +328,23 @@ mod tests {
         let mut auxetic = material();
         auxetic.mechanical.poisson_ratio = -0.25;
         validate_materials(&[auxetic], &[]).expect("finite auxetic material should be valid");
+
+        let mut damped = material();
+        damped.mechanical.damping = MechanicalDampingModel::Rayleigh {
+            mass_coefficient: RayleighMassCoefficient::new(0.0),
+            stiffness_coefficient: RayleighStiffnessCoefficient::new(0.0),
+        };
+        assert!(matches!(
+            validate_materials(&[damped], &[]),
+            Err(AnalysisValidationError::InvalidMaterial { .. })
+        ));
+
+        let mut damped = material();
+        damped.mechanical.damping = MechanicalDampingModel::Rayleigh {
+            mass_coefficient: RayleighMassCoefficient::new(0.25),
+            stiffness_coefficient: RayleighStiffnessCoefficient::new(1.0e-5),
+        };
+        validate_materials(&[damped], &[]).expect("positive Rayleigh damping should be valid");
     }
 
     #[test]

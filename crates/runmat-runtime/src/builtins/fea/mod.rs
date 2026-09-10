@@ -10,13 +10,13 @@ use runmat_analysis_core::{
     FrictionCoefficient, HeatFlux, HeatTransferCoefficient, MagneticConstraint,
     MagneticConstraintKind, MagneticVectorPotential, MassDensity, MaterialAcousticModel,
     MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialPlasticModel, MaterialThermalModel, PairedConstraint, PairingPolicy,
-    PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint, PhysicalSignal,
-    PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
-    RegionTarget, Rotation, RotationDofValue, SolutionSpace, SpecificAcousticImpedance,
-    StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
-    StructuralTranslationDof, Temperature, TemperatureDifference, ThermalConstraint,
-    ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
+    MaterialPlasticModel, MaterialThermalModel, MechanicalDampingModel, PairedConstraint,
+    PairingPolicy, PeriodicConstraint, PeriodicTransform, PhaseShiftedPeriodicConstraint,
+    PhysicalSignal, PhysicsFamily, PrescribedStructuralDofs, PrescribedValue, Pressure,
+    ProcedureStep, RegionTarget, Rotation, RotationDofValue, SolutionSpace,
+    SpecificAcousticImpedance, StructuralConstraint, StructuralConstraintKind,
+    StructuralRotationDof, StructuralTranslationDof, Temperature, TemperatureDifference,
+    ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
 use runmat_builtins::{
@@ -61,6 +61,7 @@ pub(crate) mod activations;
 pub(crate) mod boundaries;
 pub(crate) mod classes;
 pub(crate) mod constraints;
+pub(crate) mod damping;
 pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
@@ -114,6 +115,7 @@ pub(crate) fn ensure_value_classes_registered() {
     activations::ensure_activation_classes_registered();
     accuracy::ensure_accuracy_classes_registered();
     constraints::ensure_constraint_support_classes_registered();
+    damping::ensure_damping_class_registered();
     execution::ensure_execution_classes_registered();
     generator_policies::ensure_generator_policy_classes_registered();
     values::ensure_quantity_classes_registered();
@@ -2882,8 +2884,10 @@ fn sanitize_id(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::fea::damping::mechanical_damping_rayleigh_builtin;
     use crate::builtins::fea::values::{
         dynamic_viscosity_builtin, frequency_builtin, mass_density_builtin,
+        rayleigh_mass_coefficient_builtin, rayleigh_stiffness_coefficient_builtin,
         temperature_kelvin_builtin, turbulence_intensity_builtin,
     };
     use futures::executor::block_on;
@@ -3377,6 +3381,48 @@ mod tests {
             let material: MaterialModel = object_payload(&material);
             assert_eq!(material.mechanical.youngs_modulus_pa, expected);
         }
+    }
+
+    #[test]
+    fn fea_material_preserves_typed_rayleigh_damping() {
+        let mass =
+            block_on(rayleigh_mass_coefficient_builtin(Value::Num(0.2))).expect("mass coefficient");
+        let stiffness = block_on(rayleigh_stiffness_coefficient_builtin(Value::Num(0.003)))
+            .expect("stiffness coefficient");
+        let damping = block_on(mechanical_damping_rayleigh_builtin(mass, stiffness))
+            .expect("Rayleigh damping");
+        let material = block_on(fea_material_builtin(vec![
+            Value::String("steel".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(210.0e9),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+            Value::String("Damping".into()),
+            damping,
+        ]))
+        .expect("material");
+        let material: MaterialModel = object_payload(&material);
+        assert_eq!(
+            material.mechanical.damping,
+            MechanicalDampingModel::Rayleigh {
+                mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.2),
+                stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(
+                    0.003
+                ),
+            }
+        );
+
+        let error = block_on(fea_material_builtin(vec![
+            Value::String("steel".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(210.0e9),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+            Value::String("Damping".into()),
+            Value::String("rayleigh".into()),
+        ]))
+        .expect_err("untyped damping must be rejected");
+        assert!(error.message().contains("typed fea.MechanicalDamping"));
     }
 
     #[test]

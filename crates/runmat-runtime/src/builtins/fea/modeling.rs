@@ -535,6 +535,16 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
     }
     let material_id = scalar_string(&args[0], MATERIAL_NAME, &ERROR_INPUT)?;
     let mut fields = json_fields_from_name_values(MATERIAL_NAME, &args[1..])?;
+    let mut authored_damping = None;
+    for pair in expect_name_value_tail(MATERIAL_NAME, &args[1..])? {
+        let raw_name = scalar_string(pair.name, MATERIAL_NAME, &ERROR_INPUT)?;
+        if canonical_field_name(&raw_name) == "damping" {
+            authored_damping = Some(super::damping::mechanical_damping_from_value(
+                MATERIAL_NAME,
+                pair.value,
+            )?);
+        }
+    }
     let name = fields
         .remove("name")
         .map(json_to_string)
@@ -547,10 +557,13 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
         let poisson = remove_required_f64(&mut fields, MATERIAL_NAME, "poisson_ratio")?;
         let density =
             remove_optional_f64(&mut fields, MATERIAL_NAME, "density_kg_per_m3")?.unwrap_or(7850.0);
+        fields.remove("damping");
+        let damping = authored_damping.unwrap_or_default();
         MaterialMechanicalModel {
             youngs_modulus_pa: youngs,
             poisson_ratio: poisson,
             density_kg_per_m3: density,
+            damping,
         }
     };
     let thermal = if let Some(value) = fields.remove("thermal") {

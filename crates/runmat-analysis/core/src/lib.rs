@@ -71,6 +71,7 @@ pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
     ConductivityFrequencyPoint, MaterialAcousticModel, MaterialElectricalModel,
     MaterialMechanicalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    MechanicalDampingModel,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
@@ -82,9 +83,10 @@ pub use problem::quantity::{
     ComplexPhase, Damping, Displacement, DynamicViscosity, ElectricCharge, ElectricChargeDensity,
     ElectricCurrent, ElectricCurrentDensity, ElectricPotential, Force, Frequency,
     FrictionCoefficient, HeatFlux, HeatGenerationDensity, HeatTransferCoefficient, Length,
-    MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure, Rotation,
-    SpecificAcousticImpedance, Stiffness, Temperature, TemperatureDifference,
-    ThermalContactResistance, Traction, Translation, TurbulenceIntensity, Velocity,
+    MagneticVectorPotential, MassDensity, MassFlowRate, Moment, Position, Pressure,
+    RayleighMassCoefficient, RayleighStiffnessCoefficient, Rotation, SpecificAcousticImpedance,
+    Stiffness, Temperature, TemperatureDifference, ThermalContactResistance, Traction, Translation,
+    TurbulenceIntensity, Velocity,
 };
 pub use problem::reference_point::ReferencePoint;
 pub use problem::region_resolution::{
@@ -169,6 +171,7 @@ mod tests {
                     youngs_modulus_pa: 200e9,
                     poisson_ratio: 0.3,
                     density_kg_per_m3: 7850.0,
+                    damping: MechanicalDampingModel::Undamped,
                 },
                 thermal: MaterialThermalModel::default(),
                 acoustic: None,

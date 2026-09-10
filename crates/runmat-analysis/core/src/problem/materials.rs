@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::quantity::{RayleighMassCoefficient, RayleighStiffnessCoefficient};
+
 fn default_reference_temperature_k() -> f64 {
     293.15
 }
@@ -69,6 +71,19 @@ pub struct MaterialMechanicalModel {
     pub poisson_ratio: f64,
     #[serde(default = "default_mechanical_density_kg_per_m3")]
     pub density_kg_per_m3: f64,
+    #[serde(default)]
+    pub damping: MechanicalDampingModel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MechanicalDampingModel {
+    #[default]
+    Undamped,
+    Rayleigh {
+        mass_coefficient: RayleighMassCoefficient,
+        stiffness_coefficient: RayleighStiffnessCoefficient,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

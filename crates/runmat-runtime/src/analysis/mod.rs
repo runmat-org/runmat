@@ -7085,6 +7085,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
                 youngs_modulus_pa,
                 poisson_ratio,
                 density_kg_per_m3: 7850.0,
+                damping: Default::default(),
             },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
@@ -7105,6 +7106,7 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
                 density_kg_per_m3: 7850.0,
+                damping: Default::default(),
             },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,

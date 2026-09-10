@@ -255,6 +255,7 @@ fn sample_model() -> AnalysisModel {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
                 density_kg_per_m3: 7850.0,
+                damping: Default::default(),
             },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
@@ -360,6 +361,7 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
             youngs_modulus_pa: 3.2e9,
             poisson_ratio: 0.37,
             density_kg_per_m3: 1150.0,
+            damping: Default::default(),
         },
         thermal: MaterialThermalModel {
             reference_temperature_k: 293.15,
@@ -7464,6 +7466,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
             youngs_modulus_pa: 5.0e9,
             poisson_ratio: 0.33,
             density_kg_per_m3: 1800.0,
+            damping: Default::default(),
         },
         thermal: MaterialThermalModel {
             reference_temperature_k: 293.15,

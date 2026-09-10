@@ -28,6 +28,8 @@ pub(super) const FREQUENCY_CLASS: &str = "fea.Frequency";
 pub(super) const MASS_DENSITY_CLASS: &str = "fea.MassDensity";
 pub(super) const DYNAMIC_VISCOSITY_CLASS: &str = "fea.DynamicViscosity";
 pub(super) const TURBULENCE_INTENSITY_CLASS: &str = "fea.TurbulenceIntensity";
+pub(super) const RAYLEIGH_MASS_COEFFICIENT_CLASS: &str = "fea.RayleighMassCoefficient";
+pub(super) const RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS: &str = "fea.RayleighStiffnessCoefficient";
 
 const METERS: &[&str] = &["meters"];
 const RADIANS: &[&str] = &["radians"];
@@ -45,6 +47,8 @@ const RATIO: &[&str] = &["ratio"];
 const HERTZ: &[&str] = &["hertz"];
 const KILOGRAMS_PER_CUBIC_METER: &[&str] = &["kilograms_per_cubic_meter"];
 const PASCAL_SECONDS: &[&str] = &["pascal_seconds"];
+const PER_SECOND: &[&str] = &["per_second"];
+const SECONDS: &[&str] = &["seconds"];
 
 const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "value",
@@ -228,6 +232,30 @@ scalar_quantity_builtin!(
     "Create a turbulence intensity ratio in the closed interval [0, 1].",
     TURBULENCE_INTENSITY_CLASS,
     "ratio",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    rayleigh_mass_coefficient_builtin,
+    RAYLEIGH_MASS_COEFFICIENT_DESCRIPTOR,
+    RAYLEIGH_MASS_COEFFICIENT_SIGNATURES,
+    "fea.RayleighMassCoefficient.perSecond",
+    "coefficient = fea.RayleighMassCoefficient.perSecond(value)",
+    "Create a non-negative Rayleigh mass-proportional damping coefficient.",
+    RAYLEIGH_MASS_COEFFICIENT_CLASS,
+    "per_second",
+    1.0,
+    0.0
+);
+scalar_quantity_builtin!(
+    rayleigh_stiffness_coefficient_builtin,
+    RAYLEIGH_STIFFNESS_COEFFICIENT_DESCRIPTOR,
+    RAYLEIGH_STIFFNESS_COEFFICIENT_SIGNATURES,
+    "fea.RayleighStiffnessCoefficient.seconds",
+    "coefficient = fea.RayleighStiffnessCoefficient.seconds(value)",
+    "Create a non-negative Rayleigh stiffness-proportional damping coefficient.",
+    RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
+    "seconds",
     1.0,
     0.0
 );
@@ -591,7 +619,7 @@ pub(super) fn ensure_quantity_classes_registered() {
     });
 }
 
-fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 22] {
+fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]); 24] {
     [
         (DISPLACEMENT_CLASS, "runmat.fea.displacement", METERS),
         (ROTATION_CLASS, "runmat.fea.rotation", RADIANS),
@@ -662,6 +690,16 @@ fn quantity_schemas() -> [(&'static str, &'static str, &'static [&'static str]);
             TURBULENCE_INTENSITY_CLASS,
             "runmat.fea.turbulence-intensity",
             RATIO,
+        ),
+        (
+            RAYLEIGH_MASS_COEFFICIENT_CLASS,
+            "runmat.fea.rayleigh-mass-coefficient",
+            PER_SECOND,
+        ),
+        (
+            RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
+            "runmat.fea.rayleigh-stiffness-coefficient",
+            SECONDS,
         ),
     ]
 }
@@ -753,6 +791,12 @@ fn quantity_methods(class_name: &str) -> HashMap<String, crate::class_registry::
         )],
         DYNAMIC_VISCOSITY_CLASS => &[("pascalSeconds", "fea.DynamicViscosity.pascalSeconds")],
         TURBULENCE_INTENSITY_CLASS => &[("ratio", "fea.TurbulenceIntensity.ratio")],
+        RAYLEIGH_MASS_COEFFICIENT_CLASS => {
+            &[("perSecond", "fea.RayleighMassCoefficient.perSecond")]
+        }
+        RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS => {
+            &[("seconds", "fea.RayleighStiffnessCoefficient.seconds")]
+        }
         _ => unreachable!("quantity schemas contain only known classes"),
     };
     names
@@ -803,6 +847,8 @@ fn validate_quantity_range(class_name: &str, value: f64) -> Result<(), String> {
         | HEAT_TRANSFER_COEFFICIENT_CLASS
         | THERMAL_CONTACT_RESISTANCE_CLASS
         | FRICTION_COEFFICIENT_CLASS
+        | RAYLEIGH_MASS_COEFFICIENT_CLASS
+        | RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS
             if value < 0.0 =>
         {
             Err(format!("{class_name} cannot be negative"))

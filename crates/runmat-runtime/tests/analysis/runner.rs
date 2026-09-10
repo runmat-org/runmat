@@ -1231,6 +1231,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     youngs_modulus_pa: 1.0,
                     poisson_ratio: 0.0,
                     density_kg_per_m3: 1.225,
+                    damping: Default::default(),
                 },
                 thermal: runmat_analysis_core::MaterialThermalModel::default(),
                 acoustic: Some(runmat_analysis_core::MaterialAcousticModel {
@@ -1604,6 +1605,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         youngs_modulus_pa: 110e9,
                         poisson_ratio: 0.31,
                         density_kg_per_m3: 7850.0,
+                        damping: Default::default(),
                     },
                     thermal: runmat_analysis_core::MaterialThermalModel::default(),
                     acoustic: None,
