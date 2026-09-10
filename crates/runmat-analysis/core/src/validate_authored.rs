@@ -295,6 +295,27 @@ fn validate_connectors(values: &[AnalysisConnector]) -> Result<(), AnalysisValid
                 }
             })?;
         }
+        match (&connector.kind, &connector.secondary) {
+            (ConnectorKind::ElasticFoundation { .. }, Some(_)) => {
+                return Err(AnalysisValidationError::InvalidConnector {
+                    connector_id: connector.connector_id.clone(),
+                    detail: "an elastic foundation is attached to ground and cannot have a secondary target"
+                        .to_string(),
+                });
+            }
+            (
+                ConnectorKind::TranslationalSpring { .. }
+                | ConnectorKind::TranslationalDashpot { .. },
+                Some(secondary),
+            ) if secondary == &connector.primary => {
+                return Err(AnalysisValidationError::InvalidConnector {
+                    connector_id: connector.connector_id.clone(),
+                    detail: "a two-ended connector requires distinct primary and secondary targets"
+                        .to_string(),
+                });
+            }
+            _ => {}
+        }
         let valid = match connector.kind {
             ConnectorKind::TranslationalSpring { stiffness }
             | ConnectorKind::ElasticFoundation { stiffness } => {
@@ -436,6 +457,65 @@ mod interface_tests {
         assert!(matches!(
             validate_interfaces(&[invalid]),
             Err(AnalysisValidationError::InvalidInterface { .. })
+        ));
+    }
+}
+
+#[cfg(test)]
+mod connector_tests {
+    use super::*;
+    use crate::{Damping, RegionTarget, Stiffness};
+
+    fn connector(kind: ConnectorKind, secondary: Option<&str>) -> AnalysisConnector {
+        AnalysisConnector {
+            connector_id: "connector".into(),
+            primary: RegionTarget::point("node:1"),
+            secondary: secondary.map(RegionTarget::point),
+            kind,
+        }
+    }
+
+    #[test]
+    fn connector_attachment_semantics_are_unambiguous() {
+        validate_connectors(&[connector(
+            ConnectorKind::TranslationalSpring {
+                stiffness: Stiffness::new(1.0),
+            },
+            Some("node:2"),
+        )])
+        .expect("distinct two-ended spring");
+        validate_connectors(&[connector(
+            ConnectorKind::TranslationalDashpot {
+                damping: Damping::new(1.0),
+            },
+            None,
+        )])
+        .expect("ground dashpot");
+        validate_connectors(&[connector(
+            ConnectorKind::ElasticFoundation {
+                stiffness: Stiffness::new(1.0),
+            },
+            None,
+        )])
+        .expect("ground foundation");
+
+        assert!(matches!(
+            validate_connectors(&[connector(
+                ConnectorKind::TranslationalSpring {
+                    stiffness: Stiffness::new(1.0),
+                },
+                Some("node:1"),
+            )]),
+            Err(AnalysisValidationError::InvalidConnector { .. })
+        ));
+        assert!(matches!(
+            validate_connectors(&[connector(
+                ConnectorKind::ElasticFoundation {
+                    stiffness: Stiffness::new(1.0),
+                },
+                Some("node:2"),
+            )]),
+            Err(AnalysisValidationError::InvalidConnector { .. })
         ));
     }
 }

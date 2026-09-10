@@ -873,6 +873,48 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
 }
 
 #[test]
+fn grounded_explicit_spring_changes_the_completed_physical_solution() {
+    let mut baseline_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    replace_fixture_excitations(
+        &mut baseline_model,
+        vec![FixtureExcitation {
+            id: "tip_force".into(),
+            region_id: "node:2".into(),
+            kind: FixtureExcitationKind::Force([0.0, -100.0, 0.0]),
+        }],
+    );
+    let baseline = crate::run_linear_static_with_options(
+        &baseline_model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("baseline beam solve");
+
+    let mut supported_model = baseline_model;
+    supported_model.connectors = vec![runmat_analysis_core::AnalysisConnector {
+        connector_id: "tip_support_spring".into(),
+        primary: runmat_analysis_core::RegionTarget::point("node:2"),
+        secondary: None,
+        kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+            stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
+        },
+    }];
+    let supported = crate::run_linear_static_with_options(
+        &supported_model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("spring-supported beam solve");
+
+    let baseline_displacement = host_field(&baseline, FEA_FIELD_STRUCTURAL_DISPLACEMENT)[4].abs();
+    let supported_displacement = host_field(&supported, FEA_FIELD_STRUCTURAL_DISPLACEMENT)[4].abs();
+    assert!(
+        supported_displacement < baseline_displacement,
+        "supported={supported_displacement} baseline={baseline_displacement}"
+    );
+}
+
+#[test]
 fn thermo_mechanical_linear_static_emits_coupled_fields() {
     let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
     configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
