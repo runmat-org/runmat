@@ -615,6 +615,9 @@ fn exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability() {
                 .to_string()
                 .contains("selected adapter does not expose SHADER_F64") =>
         {
+            if std::env::var_os("RUNMAT_REQUIRE_WGPU_F64").is_some() {
+                panic!("required exact-f64 WGPU adapter is unavailable: {error}");
+            }
             eprintln!("exact-f64 WGPU qualification: {error}");
             return;
         }

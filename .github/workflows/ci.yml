@@ -386,6 +386,12 @@ jobs:
       - name: Run FEA package tests
         run: cargo test -p runmat-analysis-core -p runmat-analysis-fea -p runmat-analysis-execution
 
+      - name: Qualify exact-f64 resident sparse execution
+        env:
+          RUNMAT_REQUIRE_WGPU_SPARSE: "1"
+          RUNMAT_REQUIRE_WGPU_F64: "1"
+        run: cargo test -p runmat-accelerate --all-features --lib exact_f64_sparse_cg_is_executed_or_rejected_by_adapter_capability -- --test-threads=1 --nocapture
+
       - name: Run FEA execution placement conformance
         run: cargo test -p runmat-execution-runner-native --test analysis_process_conformance
 
