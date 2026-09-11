@@ -234,8 +234,9 @@ function writeProducerArtifact(output, role, contents) {
 }
 
 function compiledCheck(gate, authorityValue) {
-  if (gate === "catalog-contract") return authorityValue.catalog_entries.length === 1;
-  if (gate === "runtime-binding") return authorityValue.runtime_bindings.length > 0 && authorityValue.implementation_provenance.some((entry) => entry.authority === "canonical_binding");
+  if (gate === "catalog-contract") return authorityValue.catalog_entries.length === 1 || authorityValue.constants.length > 0;
+  if (gate === "runtime-binding") return authorityValue.runtime_constants.length > 0
+    || (authorityValue.runtime_bindings.length > 0 && authorityValue.implementation_provenance.some((entry) => entry.authority === "canonical_binding"));
   return false;
 }
 
@@ -243,6 +244,8 @@ function authority(compiled, identity) {
   const matches = (rows, selector = (entry) => entry.name) => rows.filter((entry) => selector(entry).toLowerCase() === identity.toLowerCase());
   return {
     catalog_entries: matches(compiled.snapshot.declared.catalog_entries, (entry) => entry.identity.name),
+    constants: matches(compiled.snapshot.declared.constants),
+    runtime_constants: matches(compiled.snapshot.observed.runtime_constants),
     runtime_bindings: matches(compiled.snapshot.observed.runtime_bindings),
     implementation_provenance: matches(compiled.snapshot.observed.implementation_provenance),
   };

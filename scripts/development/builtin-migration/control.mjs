@@ -125,7 +125,11 @@ function parseIdentity(id, value, bundles, cohorts) {
   const publicSpelling = identity(value.public_spelling, `${id} public spelling`);
   if (publicSpelling.toLowerCase() !== normalized) throw new Error(`${id}: public spelling must case-fold to the identity key`);
   if (value.runtime_owner === null) {
-    if (value.disposition.kind === "canonical") throw new Error(`${id}: canonical identity requires a runtime owner`);
+    if (value.disposition.kind === "canonical"
+      && (value.expected_authorities.runtime_bindings.length > 0
+        || value.expected_authorities.runtime_constants.length === 0)) {
+      throw new Error(`${id}: canonical callable identity requires a runtime owner`);
+    }
   } else repositoryPath(value.runtime_owner, `${id} runtime owner`);
   nonempty(value.owner, `${id} owner`);
   parseReview(value.review, `${id} review`);
@@ -161,9 +165,10 @@ function parseMaturity(value, id) {
 }
 
 function parseAuthorities(value, id) {
-  exact(value, ["catalog_package", "catalog_entry_count", "documentation", "runtime_bindings", "native_link", "wasm_registry"], `${id} expected authorities`);
+  exact(value, ["catalog_package", "catalog_entry_count", "catalog_constant_count", "documentation", "runtime_bindings", "runtime_constants", "native_link", "wasm_registry"], `${id} expected authorities`);
   if (value.catalog_package !== null) repositoryPath(value.catalog_package, `${id} catalog package`);
   integer(value.catalog_entry_count, `${id} catalog entry count`);
+  integer(value.catalog_constant_count, `${id} catalog constant count`);
   enumValue(value.documentation, ["catalog", "alias", "none"], `${id} documentation authority`);
   array(value.runtime_bindings, `${id} runtime bindings`, { empty: true }).forEach((entry) => {
     exact(entry, ["path", "function", "variant"], `${id} runtime binding`);
@@ -171,6 +176,11 @@ function parseAuthorities(value, id) {
     nonempty(entry.function, `${id} runtime binding function`);
     nonempty(entry.variant, `${id} runtime binding variant`);
   });
+  const constants = uniqueStrings(value.runtime_constants, `${id} runtime constants`, { empty: true });
+  constants.forEach((entry) => identity(entry, `${id} runtime constant`));
+  if (JSON.stringify(constants) !== JSON.stringify([...constants].sort())) {
+    throw new Error(`${id}: runtime constants must use canonical order`);
+  }
   enumValue(value.native_link, ["required", "not-applicable"], `${id} native link`);
   enumValue(value.wasm_registry, ["required", "not-applicable"], `${id} wasm registry`);
 }

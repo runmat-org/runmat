@@ -115,6 +115,10 @@ function auditIdentity(repository, identity, baseline, current, controlled) {
   const authority = current.semantic_authority;
   if (controlled.disposition.kind === "canonical") {
     if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push("catalog authority count differs from review");
+    if (authority.constants.length !== controlled.expected_authorities.catalog_constant_count) failures.push("catalog constant authority count differs from review");
+    const actualConstants = authority.runtime_constants.map((entry) => entry.name).sort(compareCodePoint);
+    const expectedConstants = [...controlled.expected_authorities.runtime_constants].sort(compareCodePoint);
+    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push("runtime constant set differs from review");
     if (authority.legacy_functions.length) failures.push("legacy function authority remains");
     if (authority.legacy_documentation.length) failures.push("legacy documentation authority remains");
     if (current.ownership.sidecars.length) failures.push("legacy documentation sidecar remains");
