@@ -1,4 +1,5 @@
 import { contentDigest } from "./evidence.mjs";
+import { compareCodePoint } from "./constants.mjs";
 import { catalogEntry, catalogProvenance, constant, legacyDocumentation, legacyFunction, sortedBy, uniqueBy } from "./compiled-schema.mjs";
 import { fusionSpec, gpuSpec, implementationProvenance, runtimeBinding, runtimeConstant, validateObservedOrdering, validation } from "./compiled-runtime-schema.mjs";
 import { SAFE_IDENTITY, array, enumValue, exact, identity, kind, nonempty, object, uniqueStrings } from "./schema.mjs";
@@ -132,6 +133,21 @@ export function authorityFor(compiled, identityName) {
     gpu_specs: ownedSpecs(compiled.snapshot.observed.gpu_specs), fusion_specs: ownedSpecs(compiled.snapshot.observed.fusion_specs),
     migration_findings: compiled.findings.filter((entry) => entry.identity.toLowerCase() === id),
   };
+}
+
+export function publicSpellingsFor(compiled, identityName) {
+  const authority = authorityFor(compiled, identityName);
+  const callable = [
+    ...authority.catalog_entries.map((entry) => entry.identity.name),
+    ...authority.legacy_functions.map((entry) => entry.name),
+    ...authority.legacy_documentation.map((entry) => entry.name),
+    ...authority.runtime_bindings.map((entry) => entry.name),
+    ...authority.implementation_provenance.map((entry) => entry.name),
+  ];
+  const candidates = callable.length
+    ? callable
+    : [...authority.constants, ...authority.runtime_constants].map((entry) => entry.name);
+  return [...new Set(candidates)].sort(compareCodePoint);
 }
 
 function sortedUnique(value, key, label) { sortedBy(value, key, label); uniqueBy(value, key, label); }
