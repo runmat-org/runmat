@@ -72,12 +72,21 @@ pub(super) fn assign_logical(
     let replacements = match rhs {
         Value::Bool(value) => vec![u8::from(*value); plan.indices.len()],
         Value::LogicalArray(value) if value.data.len() == plan.indices.len() => value.data.to_vec(),
-        _ => {
-            return Err(semantic_error(
-                "AssignmentTypeMismatch",
-                "logical assignment requires a logical scalar or matching logical array",
-            ))
+        Value::Num(value) => vec![u8::from(*value != 0.0); plan.indices.len()],
+        Value::Int(value) => vec![u8::from(value.to_f64() != 0.0); plan.indices.len()],
+        Value::Tensor(value) if value.len() == 1 => {
+            let scalar = value.numeric_value_at(0).ok_or_else(|| {
+                semantic_error(
+                    "AssignmentTypeMismatch",
+                    "logical assignment requires a numeric or logical value",
+                )
+            })?;
+            vec![u8::from(scalar.materialize_f64() != 0.0); plan.indices.len()]
         }
+        _ => return Err(semantic_error(
+            "AssignmentTypeMismatch",
+            "logical assignment requires a numeric or logical scalar, or a matching logical array",
+        )),
     };
     for (index, replacement) in plan.indices.iter().zip(replacements) {
         let index = usize::try_from(*index).map_err(|_| index_out_of_bounds())?;

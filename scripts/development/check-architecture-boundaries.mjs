@@ -2803,6 +2803,55 @@ enforceMigratedBuiltinFamily({
   obsoletePaths: ["crates/runmat-runtime/src/builtins/structs/core/rmfield.rs"],
   testLineCeiling: 160,
 });
+for (const identity of ["getfield", "setfield"]) {
+  enforceMigratedBuiltinFamily({
+    name: `${identity} catalog`,
+    roots: [`crates/runmat-builtins/src/catalog/entries/structs/core/${identity}`],
+    compositionFiles: [
+      `crates/runmat-builtins/src/catalog/entries/structs/core/${identity}/mod.rs`,
+      `crates/runmat-builtins/src/catalog/entries/structs/core/${identity}/contract/mod.rs`,
+      `crates/runmat-builtins/src/catalog/entries/structs/core/${identity}/inference/mod.rs`,
+    ],
+    obsoletePaths: [
+      `docs/builtins/reference/${identity}.json`,
+      `crates/runmat-runtime/src/builtins/builtins-json/${identity}.json`,
+    ],
+    testLineCeiling: 160,
+  });
+  enforceMigratedBuiltinFamily({
+    name: `${identity} runtime`,
+    roots: [`crates/runmat-runtime/src/builtins/structs/core/${identity}`],
+    compositionFiles: [
+      `crates/runmat-runtime/src/builtins/structs/core/${identity}/mod.rs`,
+      `crates/runmat-runtime/src/builtins/structs/core/${identity}/tests/mod.rs`,
+    ],
+    obsoletePaths: [
+      `crates/runmat-runtime/src/builtins/structs/core/${identity}.rs`,
+    ],
+    testLineCeiling: 160,
+  });
+  const runtimeRegistration = read(
+    `crates/runmat-runtime/src/builtins/structs/core/${identity}/mod.rs`
+  );
+  if (
+    /\b(?:category|summary|keywords|accel|type_resolver|descriptor|extensions|integer_(?:audit|capabilities))\s*=/.test(
+      runtimeRegistration
+    )
+  ) {
+    fail(`${identity} runtime registration duplicates catalog-owned contracts`);
+  }
+}
+enforceMigratedBuiltinFamily({
+  name: "functional field-path runtime service",
+  roots: ["crates/runmat-runtime/src/builtins/structs/core/field_path"],
+  compositionFiles: [
+    "crates/runmat-runtime/src/builtins/structs/core/field_path/mod.rs",
+  ],
+  obsoletePaths: [
+    "crates/runmat-runtime/src/builtins/structs/core/field_path.rs",
+  ],
+  testLineCeiling: 160,
+});
 enforceMigratedBuiltinFamily({
   name: "structure field-name representation service",
   roots: ["crates/runmat-runtime/src/builtins/structs/field_name"],
@@ -2846,7 +2895,7 @@ const structfunRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(structfunRuntimeMacro)) {
   fail("structfun runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\bstructfun_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\bstructfun_type\b/.test(text))) {
   fail("structfun must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const fieldnamesRuntimeMacro = read(
@@ -2855,7 +2904,7 @@ const fieldnamesRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_audit)\s*=/.test(fieldnamesRuntimeMacro)) {
   fail("fieldnames runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\bfieldnames_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\bfieldnames_type\b/.test(text))) {
   fail("fieldnames must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const isfieldRuntimeMacro = read(
@@ -2864,7 +2913,7 @@ const isfieldRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|integer_audit)\s*=/.test(isfieldRuntimeMacro)) {
   fail("isfield runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\bisfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\bisfield_type\b/.test(text))) {
   fail("isfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const rmfieldRuntimeMacro = read(
@@ -2873,7 +2922,7 @@ const rmfieldRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(rmfieldRuntimeMacro)) {
   fail("rmfield runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\brmfield_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\brmfield_type\b/.test(text))) {
   fail("rmfield must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 const orderfieldsRuntimeMacro = read(
@@ -2882,7 +2931,7 @@ const orderfieldsRuntimeMacro = read(
 if (/\b(?:type_resolver|descriptor|extensions|integer_capabilities)\s*=/.test(orderfieldsRuntimeMacro)) {
   fail("orderfields runtime registration must not duplicate catalog-owned contracts");
 }
-if (/\borderfields_type\b/.test(read("crates/runmat-runtime/src/builtins/structs/type_resolvers.rs"))) {
+if (allRust.some(({ text }) => /\borderfields_type\b/.test(text))) {
   fail("orderfields must use its catalog-owned inference rule rather than a legacy runtime resolver");
 }
 for (const obsoletePath of [
@@ -2924,7 +2973,15 @@ for (const entryPath of [
     fail(`${entryPath} must not depend on count-proportional cell inference enums`);
   }
 }
-for (const identity of ["fieldnames", "isfield", "orderfields", "rmfield", "structfun"]) {
+for (const identity of [
+  "fieldnames",
+  "getfield",
+  "isfield",
+  "orderfields",
+  "rmfield",
+  "setfield",
+  "structfun",
+]) {
   const entryPath = `crates/runmat-builtins/src/catalog/entries/structs/core/${identity}/entry.rs`;
   const entrySource = read(entryPath);
   if (!/BuiltinInferenceRule::Identity\(IdentityInferenceRule::new\(super::infer\)\)/.test(entrySource)) {

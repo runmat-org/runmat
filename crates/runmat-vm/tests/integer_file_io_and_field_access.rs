@@ -67,11 +67,10 @@ fn compiled_integer_inapplicable_inputs_reject_without_coercion() {
     }
     let error = execute_source("value = getenv(uint8(1));")
         .expect_err("integer environment name must reject");
-    assert!(
-        error
-            .to_string()
-            .contains("NAME must be a character vector"),
-        "{error}"
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:getenv:InvalidName"),
+        "integer environment names must use the catalog-owned diagnostic"
     );
 }
 
