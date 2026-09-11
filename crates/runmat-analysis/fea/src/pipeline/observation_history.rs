@@ -11,11 +11,13 @@ use crate::{
             RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation, RecoveredFieldSample,
         },
         observation::{
-            evaluate_observation_sample, evaluate_structural_observation_sample,
+            evaluate_observation_event_sample, evaluate_observation_sample,
+            evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
             exact_scheduled_coordinates, reduce_observation_history, resolve_observation_plan,
             resolve_structural_observation_plan, sample_matches_policy, BoundedObservationHistory,
-            ObservationError, ObservationExecutionPolicy, ObservationHistory, ObservationLimits,
-            SeriesReductionResult, StructuralObservationTopology,
+            ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
+            ObservationHistory, ObservationLimits, SeriesReductionResult,
+            StructuralObservationTopology,
         },
     },
     topology::AnalysisProjection,
@@ -113,11 +115,7 @@ fn required_history_coordinates(
                     "adaptive history sampling requires response-aware sample selection",
                 ));
             }
-            SamplingPolicy::Event(_) => {
-                return Err(ObservationError::Unsupported(
-                    "event histories require solver-attributed event coordinates",
-                ));
-            }
+            SamplingPolicy::Event(_) => {}
             SamplingPolicy::Final => {
                 return Err(ObservationError::Invalid(
                     "history requests require a sampled series rather than one final state".into(),
@@ -192,6 +190,7 @@ pub(crate) fn evaluate_field_histories(
     step: &ProcedureStep,
     topology: HistoryTopology<'_>,
     coordinates: &[RecoveredFieldSample],
+    events: Option<&[ObservationEventAttribution]>,
     series: &[HistoryFieldSeries<'_>],
 ) -> Result<EvaluatedObservationHistories, ObservationError> {
     let mut history_step = step.clone();
@@ -204,6 +203,22 @@ pub(crate) fn evaluate_field_histories(
             series_reductions: Vec::new(),
         });
     }
+    if events.is_none()
+        && history_step.observations.iter().any(|request| {
+            matches!(
+                request,
+                ObservationRequest::History(runmat_analysis_core::ObservationSpec {
+                    sampling: SamplingPolicy::Event(_),
+                    ..
+                })
+            )
+        })
+    {
+        return Err(ObservationError::Unsupported(
+            "this solver pipeline does not own an event detector for the requested history",
+        ));
+    }
+    let events = events.unwrap_or_default();
     if coordinates.is_empty()
         || series.is_empty()
         || series
@@ -213,6 +228,20 @@ pub(crate) fn evaluate_field_histories(
         return Err(ObservationError::Invalid(
             "history source series do not cover the accepted solver coordinates".into(),
         ));
+    }
+    for (index, attribution) in events.iter().copied().enumerate() {
+        attribution.validate()?;
+        if !coordinates.contains(&attribution.sample()) {
+            return Err(ObservationError::Invalid(
+                "event attribution names a state absent from the accepted solver coordinates"
+                    .into(),
+            ));
+        }
+        if events[..index].contains(&attribution) {
+            return Err(ObservationError::Invalid(
+                "event attribution inventory contains a duplicate event occurrence".into(),
+            ));
+        }
     }
 
     let definitions = series
@@ -289,29 +318,53 @@ pub(crate) fn evaluate_field_histories(
                 .ok_or(ObservationError::Identity(
                     "history builder is absent from its resolved plan",
                 ))?;
-            if !sample_matches_policy(&observation.spec.sampling, coordinate)? {
-                continue;
-            }
-            let result = match topology {
-                HistoryTopology::Solid(projection) => evaluate_observation_sample(
-                    &plan,
-                    observation_id,
-                    projection,
-                    &catalog,
-                    coordinate,
-                )?,
-                HistoryTopology::Structural { model, mesh } => {
-                    evaluate_structural_observation_sample(
+            if let SamplingPolicy::Event(expected_event) = &observation.spec.sampling {
+                for attribution in events.iter().copied().filter(|attribution| {
+                    attribution.sample() == coordinate && attribution.event() == *expected_event
+                }) {
+                    let sample = match topology {
+                        HistoryTopology::Solid(projection) => evaluate_observation_event_sample(
+                            &plan,
+                            observation_id,
+                            projection,
+                            &catalog,
+                            attribution,
+                        )?,
+                        HistoryTopology::Structural { model, mesh } => {
+                            evaluate_structural_observation_event_sample(
+                                &plan,
+                                observation_id,
+                                model,
+                                mesh,
+                                &catalog,
+                                attribution,
+                            )?
+                        }
+                    };
+                    history.push_event(sample)?;
+                }
+            } else if sample_matches_policy(&observation.spec.sampling, coordinate)? {
+                let result = match topology {
+                    HistoryTopology::Solid(projection) => evaluate_observation_sample(
                         &plan,
                         observation_id,
-                        model,
-                        mesh,
+                        projection,
                         &catalog,
                         coordinate,
-                    )?
-                }
-            };
-            history.push(coordinate, result)?;
+                    )?,
+                    HistoryTopology::Structural { model, mesh } => {
+                        evaluate_structural_observation_sample(
+                            &plan,
+                            observation_id,
+                            model,
+                            mesh,
+                            &catalog,
+                            coordinate,
+                        )?
+                    }
+                };
+                history.push(coordinate, result)?;
+            }
         }
     }
 

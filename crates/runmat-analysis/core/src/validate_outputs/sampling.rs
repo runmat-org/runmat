@@ -225,6 +225,17 @@ pub(super) fn validate_reduction(
             "trapezoidal series weighting requires a continuous independent domain",
         );
     }
+    if matches!(spec.sampling, SamplingPolicy::Event(_))
+        && spec
+            .reduction
+            .as_ref()
+            .is_some_and(|value| value.series != SeriesReduction::None)
+    {
+        return observation_error(
+            request,
+            "series reductions require a history with a guaranteed nonempty sample inventory",
+        );
+    }
     match request {
         ObservationRequest::Reduction(_) if !has_reduction => observation_error(
             request,

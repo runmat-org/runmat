@@ -333,6 +333,13 @@ fn validate_supported_spec(
         _ => {}
     }
     if let Some(reduction) = &spec.reduction {
+        if matches!(spec.sampling, SamplingPolicy::Event(_))
+            && reduction.series != SeriesReduction::None
+        {
+            return Err(ObservationError::Invalid(
+                "event histories may be empty, so they cannot request a series reduction".into(),
+            ));
+        }
         if reduction.series != SeriesReduction::None
             && !matches!(request, ObservationRequest::History(_))
         {

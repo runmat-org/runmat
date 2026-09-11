@@ -915,6 +915,68 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
 }
 
 #[test]
+fn event_histories_may_finish_empty_but_cannot_request_series_statistics() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "structural.displacement.optional_event",
+        ObservationQuantity::Displacement,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec("optional_first_yield", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Displacement;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.sampling =
+        SamplingPolicy::Event(ObservationEvent::Solver(SolverObservationEvent::FirstYield));
+    request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut step = ProcedureStep::structural_nonlinear("optional-event-history");
+    step.accuracy.resources.maximum_samples = 4;
+    step.observations = vec![ObservationRequest::History(request.clone())];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let history =
+        BoundedObservationHistory::new(&plan, &ObservationId("optional_first_yield".into()))
+            .unwrap()
+            .finish()
+            .unwrap();
+    assert!(history.samples().is_empty());
+    assert_eq!(
+        ObservationHistory::from_canonical_bytes(&history.canonical_bytes().unwrap()).unwrap(),
+        history
+    );
+
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::None,
+        series: SeriesReduction::Mean {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    step.observations = vec![ObservationRequest::History(request)];
+    assert!(resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .is_err());
+}
+
+#[test]
 fn complex_frequency_histories_preserve_exact_phasors_and_derived_views() {
     let projection = projection(ElementOrder::Tet4);
     let definition = complex_pressure_definition();

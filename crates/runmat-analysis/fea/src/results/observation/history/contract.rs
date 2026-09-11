@@ -253,7 +253,7 @@ impl ObservationHistoryManifest {
             || self.maximum_retained_samples > self.maximum_produced_samples
             || self.maximum_produced_samples != expected_bounds.maximum_produced_samples
             || self.maximum_retained_samples != expected_bounds.maximum_retained_samples
-            || self.samples.is_empty()
+            || (self.samples.is_empty() && !matches!(self.sampling, SamplingPolicy::Event(_)))
             || self.samples.len() > self.maximum_retained_samples
             || self.observed_sample_count < retained_count
         {

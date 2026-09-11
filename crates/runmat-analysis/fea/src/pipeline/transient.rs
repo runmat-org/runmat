@@ -452,6 +452,7 @@ pub fn run_transient_with_options(
                 mesh: options.solver_mesh.as_ref(),
             },
             &coordinates,
+            None,
             &[
                 HistoryFieldSeries {
                     quantity: runmat_analysis_core::ObservationQuantity::Displacement,

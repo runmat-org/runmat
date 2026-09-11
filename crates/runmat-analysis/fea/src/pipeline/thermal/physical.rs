@@ -215,6 +215,7 @@ pub(super) fn run(
             thermal_step,
             HistoryTopology::Solid(&initial_assembly.projection),
             &coordinates,
+            None,
             &[
                 HistoryFieldSeries {
                     quantity: runmat_analysis_core::ObservationQuantity::Temperature,

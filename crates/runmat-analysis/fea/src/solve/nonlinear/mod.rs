@@ -20,6 +20,10 @@ use crate::{
     ComputeBackend, FeaContactInterfaceContext, FeaPlasticityConstitutiveContext,
 };
 
+mod events;
+
+pub(crate) use events::{detect_completed_nonlinear_events, nonlinear_solver_content_digest};
+
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
 
@@ -65,8 +69,12 @@ impl Default for NonlinearSolveOptions {
 pub struct NonlinearSolveResult {
     pub converged_increments: usize,
     pub total_increments: usize,
+    pub initial_load_factor: f64,
     pub load_factors: Vec<f64>,
     pub initial_displacement: Vec<f64>,
+    pub initial_equivalent_plastic_strain: Vec<f64>,
+    pub initial_contact_pressure: Vec<f64>,
+    pub initial_contact_gap: Vec<f64>,
     pub displacement_snapshots: Vec<Vec<f64>>,
     pub von_mises_snapshots: Vec<Vec<f64>>,
     pub plastic_strain_snapshots: Vec<Vec<f64>>,
@@ -113,9 +121,13 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
         return NonlinearSolveResult {
             converged_increments: 0,
             total_increments: options.increment_count,
+            initial_load_factor: load_factor_start,
             load_factors: Vec::new(),
             initial_displacement: vec![0.0; summary.dof_count],
-            displacement_snapshots: vec![vec![0.0; summary.dof_count]],
+            initial_equivalent_plastic_strain: Vec::new(),
+            initial_contact_pressure: Vec::new(),
+            initial_contact_gap: Vec::new(),
+            displacement_snapshots: Vec::new(),
             von_mises_snapshots: Vec::new(),
             plastic_strain_snapshots: Vec::new(),
             equivalent_plastic_strain_snapshots: Vec::new(),
@@ -256,6 +268,15 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
     let recovery_topology = nonlinear_recovery_topology(summary);
     let element_count = recovery_topology.element_count;
     let contact_count = contact_entity_count(contact_context);
+    let initial_recovered_state = recover_increment_state(
+        &initial_displacement,
+        load_factor_start,
+        &recovery_topology,
+        &summary.structural_material,
+        plasticity_context,
+        contact_context,
+        contact_count,
+    );
     let mut max_equivalent_plastic_strain = 0.0_f64;
     let mut plastic_active_element_count = 0usize;
     let mut max_contact_pressure = 0.0_f64;
@@ -665,8 +686,12 @@ pub(crate) fn solve_nonlinear_system_at_boundaries(
     NonlinearSolveResult {
         converged_increments,
         total_increments: increment_count,
+        initial_load_factor: load_factor_start,
         load_factors,
         initial_displacement,
+        initial_equivalent_plastic_strain: initial_recovered_state.equivalent_plastic_strain,
+        initial_contact_pressure: initial_recovered_state.contact_pressure,
+        initial_contact_gap: initial_recovered_state.contact_gap,
         displacement_snapshots,
         von_mises_snapshots,
         plastic_strain_snapshots,

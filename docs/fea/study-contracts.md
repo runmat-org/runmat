@@ -263,7 +263,14 @@ frequency, or load-factor samples, mode indices, typed solver, derived-series, o
 or a bounded adaptive policy. Event attribution is separate from the physical time, frequency,
 load-factor, mode, or study-parameter coordinate: a solver event names its completed result or
 failed attempt, a derived-series event names its source history, and an accuracy event names its
-source report.
+source report. A solver-owned nonlinear `firstYield` or `contactStatusChange` sample is detected
+from the accepted constitutive or contact state and names that completed solver result. A
+`convergenceFailure` sample can only name a failed attempt; rejected increments inside an otherwise
+completed solve are not relabeled as failed solves. If the requested event never occurs, RunMat
+publishes a valid history with zero samples. That distinction lets callers tell “observed no event”
+from “the observation did not run.” For example, use
+`fea.SamplingPolicy.event(fea.ObservationEvent.firstYield())` as the sampling argument of a
+nonlinear displacement history.
 `fea.ReductionPolicy.none()` preserves the requested data. `fea.ReductionPolicy.new(...)` combines
 a typed spatial reduction, series reduction, and extrema-tie policy. Spatial minimum and maximum
 results retain the canonical node, element, or interpolated path position where the value occurs.
@@ -279,7 +286,7 @@ typed pair of lower and upper fields; it is not a plotting instruction. Exact ti
 Mean, root-mean-square, and population variance require an explicit weighting policy:
 
 - `fea.SeriesWeighting.uniformSamples()` gives every retained sample equal weight. This is useful
-  for modes, event inventories, and genuinely uniform sample grids.
+  for modes and genuinely uniform sample grids.
 - `fea.SeriesWeighting.trapezoidalIndependentDomain()` integrates piecewise linearly over physical
   time, frequency, load factor, or a named study parameter. It preserves nonuniform sample spacing
   and is rejected for static and discrete mode domains.
@@ -314,9 +321,11 @@ tip_history = fea.Observation.history( ...
 
 A series reduction requires every produced sample. A history retained with `latestSamples(...)`
 cannot be reduced after older samples have been discarded; RunMat rejects it rather than reporting
-a statistic over an accidental suffix. Complex means are evaluated component-wise on the complex
-values. Other complex statistics and extrema require an explicit real, imaginary, magnitude, or
-phase view so their ordering and output domain are unambiguous.
+a statistic over an accidental suffix. Event histories cannot request a series reduction because
+their inventory is allowed to be empty; callers can explicitly handle the event inventory and then
+reduce a separately defined, nonempty history. Complex means are evaluated component-wise on the
+complex values. Other complex statistics and extrema require an explicit real, imaginary,
+magnitude, or phase view so their ordering and output domain are unambiguous.
 
 Storage declares precision, compression, retention, and partial-access behavior. Retention may be
 canonical, bounded to the latest or an explicit maximum number of samples, or last until dependent

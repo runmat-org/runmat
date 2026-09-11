@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use runmat_analysis_core::{
-    IndependentDomain, ObservationId, ObservationValueShape, RetentionPolicy,
+    IndependentDomain, ObservationId, ObservationValueShape, RetentionPolicy, SamplingPolicy,
 };
 use runmat_execution::Digest;
 
@@ -143,7 +143,9 @@ impl BoundedObservationHistory {
     }
 
     pub fn finish(self) -> Result<ObservationHistory, ObservationError> {
-        if self.samples.is_empty() {
+        if self.samples.is_empty()
+            && !matches!(self.observation.spec.sampling, SamplingPolicy::Event(_))
+        {
             return Err(ObservationError::Invalid(
                 "history publication requires at least one retained sample".into(),
             ));
@@ -159,6 +161,16 @@ impl BoundedObservationHistory {
             }
         }
         let samples = self.samples.into_iter().collect::<Vec<_>>();
+        let value_shape = samples.first().map_or_else(
+            || {
+                if self.observation.result_component_count == 1 {
+                    ObservationValueShape::Scalar
+                } else {
+                    self.observation.spec.value_shape.clone()
+                }
+            },
+            |sample| sample.result.value_shape.clone(),
+        );
         let mut manifest = ObservationHistoryManifest {
             schema_version: 1,
             identity: ObservationHistoryIdentity(Digest::sha256([])),
@@ -168,7 +180,7 @@ impl BoundedObservationHistory {
             observation_id: self.observation.spec.observation_id,
             quantity: self.observation.spec.quantity,
             location: self.observation.spec.output_location,
-            value_shape: samples[0].result.value_shape.clone(),
+            value_shape,
             complex_representation: self.observation.spec.complex_representation,
             sampling: self.observation.spec.sampling,
             retention: self.observation.spec.storage.retention,

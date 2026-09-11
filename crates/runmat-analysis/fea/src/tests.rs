@@ -2182,6 +2182,40 @@ fn transient_every_accepted_increment_history_tracks_the_solver_grid() {
 }
 
 #[test]
+fn solver_pipeline_without_an_event_detector_rejects_event_histories() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_transient("unsupported_transient_event");
+    step.observations = vec![nodal_history_observation(
+        "transient_first_yield",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::Event(
+            runmat_analysis_core::ObservationEvent::Solver(
+                runmat_analysis_core::SolverObservationEvent::FirstYield,
+            ),
+        ),
+    )];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let error = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            interval_count: 2,
+            min_time_step_s: 0.5,
+            max_time_step_s: 0.5,
+            adaptive_time_step: false,
+            solver_mesh: Some(mesh),
+            ..experimental_transient_options()
+        },
+    )
+    .expect_err("a pipeline cannot publish an empty history for a detector it did not run");
+    assert!(error
+        .to_string()
+        .contains("does not own an event detector"));
+}
+
+#[test]
 fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_state() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_nonlinear("nonlinear_history");
@@ -2243,6 +2277,102 @@ fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_sta
             result.displacement_snapshots[snapshot_index].as_host_f64()
         );
     }
+}
+
+#[test]
+fn nonlinear_solver_events_publish_exact_attribution_and_valid_empty_histories() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_nonlinear("nonlinear_events");
+    step.accuracy.resources.maximum_samples = 32;
+    step.observations = vec![
+        nodal_history_observation(
+            "first_yield_displacement",
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::SamplingPolicy::Event(
+                runmat_analysis_core::ObservationEvent::Solver(
+                    runmat_analysis_core::SolverObservationEvent::FirstYield,
+                ),
+            ),
+        ),
+        nodal_history_observation(
+            "convergence_failure_displacement",
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::SamplingPolicy::Event(
+                runmat_analysis_core::ObservationEvent::Solver(
+                    runmat_analysis_core::SolverObservationEvent::ConvergenceFailure,
+                ),
+            ),
+        ),
+    ];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            increment_count: 2,
+            solver_mesh: Some(mesh),
+            plasticity_context: Some(crate::FeaPlasticityConstitutiveContext {
+                enabled: true,
+                yield_strain: 0.0,
+                hardening_modulus_ratio: 0.1,
+                saturation_exponent: 2.0,
+            }),
+            ..experimental_nonlinear_options()
+        },
+    )
+    .expect("nonlinear event histories should evaluate from accepted solver states");
+
+    let yield_history = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| history.manifest().observation_id.0 == "first_yield_displacement")
+        .expect("first-yield history should be published");
+    assert_eq!(yield_history.samples().len(), 1);
+    let attribution = yield_history.samples()[0]
+        .event_attribution
+        .expect("yield sample should retain its source attribution");
+    assert_eq!(
+        attribution.event(),
+        runmat_analysis_core::ObservationEvent::Solver(
+            runmat_analysis_core::SolverObservationEvent::FirstYield,
+        )
+    );
+    assert_eq!(attribution.occurrence_index(), 0);
+    assert!(matches!(
+        attribution,
+        crate::results::observation::ObservationEventAttribution::Solver(
+            crate::results::observation::SolverEventAttribution {
+                source: crate::results::observation::SolverEventSource::CompletedResult { .. },
+                ..
+            }
+        )
+    ));
+    assert_eq!(
+        crate::results::observation::ObservationHistory::from_canonical_bytes(
+            &yield_history.canonical_bytes().unwrap(),
+        )
+        .unwrap(),
+        *yield_history
+    );
+
+    let failure_history = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| history.manifest().observation_id.0 == "convergence_failure_displacement")
+        .expect("convergence-failure history should be published");
+    assert!(failure_history.samples().is_empty());
+    assert_eq!(failure_history.manifest().observed_sample_count, 0);
+    assert_eq!(
+        crate::results::observation::ObservationHistory::from_canonical_bytes(
+            &failure_history.canonical_bytes().unwrap(),
+        )
+        .unwrap(),
+        *failure_history
+    );
 }
 
 #[test]
