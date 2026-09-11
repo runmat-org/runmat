@@ -5,8 +5,6 @@ import {
   array, digest, enumValue, exact, identity, kind, nonempty, stableId, uniqueStrings,
 } from "./schema.mjs";
 
-const DOMAIN_PATH = /^[a-z][a-z0-9_]*(?:\/[a-z][a-z0-9_]*)*$/;
-
 export function compileDispositionReview(value, inventoryValue) {
   const review = parseDispositionReview(value, inventoryValue);
   const rows = new Map();
@@ -19,8 +17,8 @@ export function compileDispositionReview(value, inventoryValue) {
       rows.set(builtin, {
         disposition: group.disposition,
         canonical,
-        domain: group.domain,
-        family: group.family,
+        domain: null,
+        family: null,
         reason: group.disposition === "internal" ? group.reason : null,
         review: {
           status: "reviewed",
@@ -89,15 +87,12 @@ export function parseDispositionReview(value, inventoryValue) {
 
 function parseGroup(value) {
   exact(value, [
-    "id", "disposition", "identities", "alias_targets", "domain", "family", "reason",
-    "evidence", "review",
+    "id", "disposition", "identities", "alias_targets", "reason", "evidence", "review",
   ], "disposition review group");
   const id = stableId(value.id, "disposition review group id");
   const disposition = enumValue(value.disposition, ["canonical", "alias", "internal"], `${id} disposition`);
   const identities = uniqueStrings(value.identities, `${id} identities`, { lower: true });
   assertCanonicalOrder(identities, `${id} identities`);
-  const domain = pathComponent(value.domain, `${id} domain`);
-  const family = pathComponent(value.family, `${id} family`);
   const evidence = uniqueStrings(value.evidence, `${id} evidence`);
   parseReview(value.review, `${id} review`);
 
@@ -126,19 +121,13 @@ function parseGroup(value) {
 
   if (disposition === "internal") nonempty(value.reason, `${id} internal reason`);
   else if (value.reason !== null) throw new Error(`${id}: only internal groups may declare a reason`);
-  return { id, disposition, identities, alias_targets: aliases, domain, family, reason: value.reason, evidence, review: value.review };
+  return { id, disposition, identities, alias_targets: aliases, reason: value.reason, evidence, review: value.review };
 }
 
 function parseReview(value, label) {
   exact(value, ["status", "evidence"], `${label} review`);
   if (value.status !== "reviewed") throw new Error(`${label} must be reviewed`);
   uniqueStrings(value.evidence, `${label} review evidence`);
-}
-
-function pathComponent(value, label) {
-  const result = nonempty(value, label);
-  if (!DOMAIN_PATH.test(result)) throw new Error(`${label} must be a lowercase path of Rust identifiers`);
-  return result;
 }
 
 function assertCanonicalOrder(values, label) {
