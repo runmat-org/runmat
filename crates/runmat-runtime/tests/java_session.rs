@@ -11,7 +11,7 @@ use runmat_runtime::context::{
 };
 use runmat_runtime::execution::RuntimeExecutionService;
 use runmat_runtime::foreign::{ForeignPlatform, ForeignRuntime, JavaAdapter};
-use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
+use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value, ValueSequence};
 
 #[derive(Default)]
 struct IncrementingCallService {
@@ -26,13 +26,17 @@ impl RuntimeCallService for IncrementingCallService {
     fn invoke(
         &self,
         request: RuntimeCallRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, runmat_runtime::RuntimeError>> + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, runmat_runtime::RuntimeError>> + 'static>>
+    {
         let result = match request.arguments.as_slice() {
             [Value::Int(IntValue::I32(value))] => Value::Int(IntValue::I32(value + 2)),
             _ => Value::Num(f64::NAN),
         };
         self.requests.borrow_mut().push(request);
-        Box::pin(async move { Ok(result) })
+        Box::pin(async move {
+            ValueSequence::single(result)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+        })
     }
 }
 
@@ -70,7 +74,7 @@ fn invoke(
         .require_foreign(symbol)
         .expect("foreign service")
         .clone();
-    futures::executor::block_on(context.scope(service.invoke(
+    let sequence = futures::executor::block_on(context.scope(service.invoke(
         context.clone(),
         ForeignCall {
             adapter: JAVA_ADAPTER_ID.into(),
@@ -79,7 +83,14 @@ fn invoke(
             requested_outputs: 1,
         },
     )))
-    .map_err(Box::new)
+    .map_err(Box::new)?;
+    let mut values = runmat_runtime::sequence::ResolveValueSequence::resolve(
+        sequence,
+        runmat_types::SequenceUse::RequireSingle,
+        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    )
+    .map_err(Box::new)?;
+    Ok(values.pop().expect("RequireSingle returned one Java value"))
 }
 
 #[test]

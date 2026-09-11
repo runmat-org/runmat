@@ -6,12 +6,12 @@ use std::{
 
 use runmat_runtime::user_functions;
 use runmat_types::ProgramFunctionId;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 use crate::ExecutableUnit;
 
 pub(crate) struct NativeExecution {
-    pub value: Value,
+    pub outputs: ValueSequence,
     pub loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub osr_entry: Option<runmat_types::ProgramPointId>,
     pub vectorized_regions: u64,
@@ -218,7 +218,7 @@ pub(crate) async fn invoke(
                 )
                 .await?;
                 Ok(runmat_runtime::call::lexical::LexicalCallResult {
-                    value: normalize_outputs(execution.outputs, call.requested_outputs)?,
+                    outputs: normalize_outputs(execution.outputs, call.requested_outputs)?,
                     captures: execution.captures,
                 })
             })
@@ -281,7 +281,7 @@ pub(crate) async fn invoke(
     drop(invoker);
     let execution = execution?;
     Ok(NativeExecution {
-        value: normalize_outputs(execution.outputs, requested_outputs)?,
+        outputs: normalize_outputs(execution.outputs, requested_outputs)?,
         loop_backedges: execution.loop_backedges,
         osr_entry: execution.osr_entry,
         vectorized_regions: execution.vectorized_regions,
@@ -308,9 +308,9 @@ fn isolated_procedure_runtime(
 }
 
 fn normalize_outputs(
-    mut outputs: Vec<Value>,
+    outputs: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, runmat_runtime::RuntimeError> {
+) -> Result<ValueSequence, runmat_runtime::RuntimeError> {
     if outputs.len() != requested_outputs {
         return Err(super::error::stage(
             "NativeOutputArity",
@@ -320,9 +320,16 @@ fn normalize_outputs(
             ),
         ));
     }
-    Ok(match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        1 => outputs.remove(0),
-        _ => Value::OutputList(outputs),
+    Ok(if requested_outputs == 1 {
+        ValueSequence::single(
+            outputs
+                .into_iter()
+                .next()
+                .expect("one output was validated"),
+        )
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?
+    } else {
+        ValueSequence::comma_separated(outputs)
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?
     })
 }

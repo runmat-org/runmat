@@ -671,7 +671,7 @@ fn host_response_rejects_missing_roots_and_wrong_authority() {
     else {
         panic!("successful stage returned a failure response")
     };
-    result_objects.retain(|object| object != &root);
+    result_objects.retain(|object| object != root.as_ref());
     let missing = MeshingHostResponse::Validated {
         schema_version,
         stage_manifest_digest,

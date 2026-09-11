@@ -274,7 +274,7 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
             },
         )));
 
@@ -339,7 +339,9 @@ mod tests {
             })));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
-                Box::pin(async move { Ok(Value::Int(IntValue::I32(-1))) })
+                Box::pin(async move {
+                    crate::sequence::single_value_sequence(Value::Int(IntValue::I32(-1)))
+                })
             },
         )));
 
@@ -362,7 +364,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_function, _args, _requested_outputs| {
-                    Box::pin(async move { Ok(Value::Num(-1.0)) })
+                    Box::pin(
+                        async move { crate::sequence::single_value_sequence(Value::Num(-1.0)) },
+                    )
                 }),
             ));
             let times = [0.0, 0.1];
@@ -418,7 +422,9 @@ mod tests {
             })));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, _args, _requested_outputs| {
-                Box::pin(async move { Ok(Value::Num(f64::NAN)) })
+                Box::pin(
+                    async move { crate::sequence::single_value_sequence(Value::Num(f64::NAN)) },
+                )
             },
         )));
 
@@ -446,7 +452,7 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
             },
         )));
 

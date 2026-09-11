@@ -7,7 +7,7 @@ pub fn gather_member(array: StructArray, field: &str) -> Result<ValueSequence, R
     let values = array
         .remove_field(field)
         .ok_or_else(|| RuntimeError::from(format!("Undefined field '{field}'")))?;
-    Ok(ValueSequence::comma_separated(values))
+    ValueSequence::comma_separated(values).map_err(crate::sequence::sequence_error_to_runtime)
 }
 
 pub fn assign_member_values<OnWrite>(

@@ -1,5 +1,6 @@
 use runmat_mir::{MirSubscriptChain, MirSubscriptStep};
 use runmat_runtime::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 use super::operand::materialize_operand;

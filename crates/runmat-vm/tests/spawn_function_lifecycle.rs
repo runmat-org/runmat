@@ -8,6 +8,7 @@ mod tests {
     use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
+    use runmat_runtime::sequence::ResolveValueSequence;
     use runmat_runtime::RuntimeError;
     use runmat_value::Value;
     use runmat_vm::{compile_semantic_function_registry, Bytecode};
@@ -116,12 +117,21 @@ mod tests {
         let registry = runmat_vm::FunctionRegistry::new(
             compile_semantic_function_registry(&hir.assembly, &mir).map_err(RuntimeError::from)?,
         );
-        block_on(runmat_vm::invoke_semantic_function_value(
+        let sequence = block_on(runmat_vm::invoke_semantic_function_value(
             function_id.0,
             &[],
             1,
             &registry,
-        ))
+        ))?;
+        resolve_single_output(sequence)
+    }
+
+    fn resolve_single_output(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+        let mut values = sequence.resolve(
+            runmat_types::SequenceUse::RequireSingle,
+            runmat_runtime::sequence::SequenceResolutionContext::default(),
+        )?;
+        Ok(values.remove(0))
     }
 
     #[test]
@@ -438,6 +448,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async spawn/await function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -534,6 +545,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async struct helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -580,6 +592,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async cell helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -629,6 +642,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async multi-output helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -677,6 +691,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async varargout helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -725,6 +740,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic async nested varargout helper flow should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),
@@ -783,6 +799,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic parallel async function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert!(
             value_matches_handle(&result, &handle_a),
             "parallel async flow should preserve retained first awaited handle as output"
@@ -850,6 +867,7 @@ mod tests {
             &registry,
         ))
         .expect("semantic parallel async drop-both function should run via semantic invoker");
+        let result = resolve_single_output(result).expect("one semantic function output");
         assert_eq!(
             result,
             Value::Num(0.0),

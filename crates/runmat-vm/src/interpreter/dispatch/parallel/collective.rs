@@ -1,5 +1,6 @@
 use crate::bytecode::program::ExecutionContext;
 use runmat_runtime::execution::value_codec::encode_inline_value;
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -11,7 +12,7 @@ pub(super) async fn execute(
     operation: crate::BytecodeCollectiveOp,
     arguments: Vec<Value>,
     execution: &ExecutionContext,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let contract = bytecode
         .collective_contracts
         .iter()
@@ -234,14 +235,15 @@ async fn collective_response(
     response: runmat_execution::CollectiveResponse,
     operation: crate::BytecodeCollectiveOp,
     function_registry: &crate::FunctionRegistry,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     use runmat_execution::CollectiveResponse;
 
     match response {
-        CollectiveResponse::Complete => Ok(empty_value()),
+        CollectiveResponse::Complete => single_output(empty_value()),
         CollectiveResponse::Value { value } => {
             runmat_runtime::execution::value_codec::decode_inline_value(&value)
                 .map_err(value_codec_error)
+                .and_then(single_output)
         }
         CollectiveResponse::Received { value, source, tag } => {
             let value = runmat_runtime::execution::value_codec::decode_inline_value(&value)
@@ -254,13 +256,14 @@ async fn collective_response(
                 _ => 1,
             };
             if requested_outputs == 1 {
-                Ok(value)
+                single_output(value)
             } else {
                 let mut outputs = vec![value, Value::Num(f64::from(source.0))];
                 if requested_outputs == 3 {
                     outputs.push(Value::Int(runmat_value::IntValue::U64(tag.0)));
                 }
-                Ok(Value::OutputList(outputs))
+                runmat_value::ValueSequence::comma_separated(outputs)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
             }
         }
         CollectiveResponse::Values { values } => {
@@ -275,6 +278,7 @@ async fn collective_response(
                 .map_err(|error| {
                     runmat_runtime::runtime_error::semantic_error("RunMat:CollectiveResult", error)
                 })
+                .and_then(single_output)
         }
         CollectiveResponse::ReductionInputs { operator, values } => {
             let mut values = values
@@ -297,12 +301,13 @@ async fn collective_response(
                 )
                 .await?;
             }
-            Ok(accumulator)
+            single_output(accumulator)
         }
         CollectiveResponse::ConcatenationInputs { dimension, values } => {
             if values.len() == 1 {
                 return runmat_runtime::execution::value_codec::decode_inline_value(&values[0])
-                    .map_err(value_codec_error);
+                    .map_err(value_codec_error)
+                    .and_then(single_output);
             }
             let mut arguments = Vec::with_capacity(values.len() + 1);
             arguments.push(Value::Int(runmat_value::IntValue::U32(dimension)));
@@ -347,13 +352,18 @@ async fn collective_response(
                         1,
                         function_registry,
                     );
-                accumulator =
+                let mut outputs =
                     runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
-                        .await?;
+                        .await?
+                        .resolve(
+                            runmat_types::SequenceUse::RequireSingle,
+                            runmat_runtime::sequence::SequenceResolutionContext::default(),
+                        )?;
+                accumulator = outputs.remove(0);
             }
-            Ok(accumulator)
+            single_output(accumulator)
         }
-        CollectiveResponse::Probe { available } => Ok(Value::Bool(available)),
+        CollectiveResponse::Probe { available } => single_output(Value::Bool(available)),
         CollectiveResponse::Agreement { .. } | CollectiveResponse::DistributedBuild { .. } => {
             Err(crate::interpreter::errors::mex(
                 "CollectiveContract",
@@ -361,6 +371,11 @@ async fn collective_response(
             ))
         }
     }
+}
+
+fn single_output(value: Value) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    runmat_value::ValueSequence::single(value)
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }
 
 fn receive_source(

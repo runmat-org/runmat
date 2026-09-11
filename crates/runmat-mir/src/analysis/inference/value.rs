@@ -25,28 +25,23 @@ pub(crate) fn infer_rvalue(
             requested_outputs,
             ..
         } => {
-            let output = summaries
-                .get(function)
-                .map_or_else(dynamic_value, |summary| {
-                    if requested_outputs
-                        .known_count()
-                        .is_none_or(|count| count <= 1)
-                    {
-                        summary
-                            .outputs
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(dynamic_value)
-                    } else {
-                        ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
-                            outputs: summary.outputs.clone(),
-                            variadic: summary.variadic_outputs,
-                        }))
+            let output = summaries.get(function).map_or_else(
+                runmat_types::ValueSequenceFact::dynamic,
+                |summary| {
+                    let mut outputs = summary.outputs.clone();
+                    if let Some(count) = requested_outputs.known_count() {
+                        outputs.truncate(count);
                     }
-                });
+                    runmat_types::ValueSequenceFact {
+                        outputs,
+                        variadic: requested_outputs.known_count().is_none()
+                            && summary.variadic_outputs,
+                    }
+                },
+            );
             ValueFact::scalar(ValueKindFact::Execution(
                 runmat_types::ExecutionFact::Future {
-                    output: Box::new(output),
+                    output,
                     state: runmat_types::FutureStateFact::Lazy,
                 },
             ))
@@ -57,7 +52,7 @@ pub(crate) fn infer_rvalue(
                     output, ..
                 })
                 | ValueKindFact::Execution(runmat_types::ExecutionFact::Task { output, .. }) => {
-                    *output
+                    output.first_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
                 }
                 ValueKindFact::Callable(callable) => callable
                     .outputs
@@ -68,7 +63,7 @@ pub(crate) fn infer_rvalue(
             };
             ValueFact::scalar(ValueKindFact::Execution(
                 runmat_types::ExecutionFact::Task {
-                    output: Box::new(output),
+                    output: runmat_types::ValueSequenceFact::single(output),
                     spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 },
             ))
@@ -122,6 +117,34 @@ pub(crate) fn infer_rvalue(
     }
 }
 
+pub(crate) fn infer_expansion_sequence(
+    source: &crate::MirExpansionSource,
+    state: &FlowState,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> runmat_types::SequenceFactInference {
+    match source {
+        crate::MirExpansionSource::SubscriptChain(chain) => {
+            crate::analysis::dataflow::infer_subscript_chain_sequence(chain, &state.value_facts())
+        }
+        crate::MirExpansionSource::CellContents { base, indexing } => {
+            runmat_types::infer_index_sequence(
+                &operand_fact_with_summaries(base, state, summaries),
+                indexing.kind,
+                &crate::analysis::dataflow::index_selectors(indexing, &state.value_facts()),
+                indexing.result_context,
+            )
+        }
+        crate::MirExpansionSource::Member { base, member } => runmat_types::infer_member_sequence(
+            &operand_fact_with_summaries(base, state, summaries),
+            member,
+        ),
+        crate::MirExpansionSource::DynamicMember { .. }
+        | crate::MirExpansionSource::ReturnedOutputs(_) => {
+            runmat_types::SequenceFactInference::exact(runmat_types::ValueSequenceFact::dynamic())
+        }
+    }
+}
+
 pub(crate) fn infer_rvalue_outputs(
     value: &MirRvalue,
     state: &FlowState,
@@ -130,6 +153,11 @@ pub(crate) fn infer_rvalue_outputs(
     span: Span,
     diagnostics: &mut Vec<crate::MirDiagnostic>,
 ) -> Vec<ValueFact> {
+    if let MirRvalue::Distributed(operation) = value {
+        if let Some(sequence) = super::distributed_output_sequence(operation) {
+            return sequence.outputs;
+        }
+    }
     if let MirRvalue::Index { base, .. } = value {
         if let ValueKindFact::Callable(callable) =
             operand_fact_with_summaries(base, state, summaries).kind
@@ -189,12 +217,19 @@ pub(crate) fn infer_rvalue_outputs(
         .filter_map(|argument| argument.operand())
         .map(|operand| operand_literal(operand, state))
         .collect::<Vec<_>>();
-    let inference = infer_mir_call(call, &state.value_facts(), &literals, summaries, selection);
+    let inference = infer_mir_call(
+        call,
+        &state.value_facts(),
+        state.sequence_facts(),
+        &literals,
+        summaries,
+        selection,
+    );
     append_inference_diagnostics(&inference.diagnostics, span, "call-contract", diagnostics);
     inference.outputs
 }
 
-fn append_inference_diagnostics(
+pub(crate) fn append_inference_diagnostics(
     inferred: &[runmat_types::InferenceDiagnostic],
     span: Span,
     category: &'static str,

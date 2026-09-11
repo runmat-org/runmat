@@ -4,13 +4,12 @@ use runmat_execution::{ExecutionScopeId, FutureId, TaskId};
 use runmat_execution_artifact::ProgramExecutionRequest;
 use runmat_execution_runner::Driver;
 use runmat_runtime::execution::{DeferredCall, ExecutionServiceError};
-use runmat_value::Value;
 
 pub(super) enum FutureState {
     Deferred(Box<DeferredCall>),
     ExecutingInCaller,
     Scheduled(TaskId),
-    Completed(Result<Value, ExecutionServiceError>),
+    Completed(Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>),
     Cancelled,
 }
 

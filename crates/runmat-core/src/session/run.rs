@@ -55,7 +55,7 @@ async fn load_dynamic_function(
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     environment: DynamicFunctionEnvironment,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
     #[cfg(target_arch = "wasm32")]
     let _ = &runtime;
     let DynamicFunctionEnvironment {
@@ -505,7 +505,7 @@ impl RunMatSession {
                 identity: source_identity,
             },
             result: result
-                .map(|outcome| apply_requested_output_policy(outcome, &requested_outputs)),
+                .and_then(|outcome| apply_requested_output_policy(outcome, &requested_outputs)),
         }
     }
 
@@ -1292,6 +1292,8 @@ impl RunMatSession {
                         continue;
                     }
                     let value_clone = self.variable_array[var_id].clone();
+                    runmat_runtime::execution::validate_storable_value(&value_clone)
+                        .map_err(RunError::Runtime)?;
                     if previous_workspace.get(name) != Some(&value_clone) {
                         changed_names.insert(name.clone());
                     }
@@ -1325,6 +1327,8 @@ impl RunMatSession {
                         continue;
                     }
                     let value_clone = self.variable_array[*var_id].clone();
+                    runmat_runtime::execution::validate_storable_value(&value_clone)
+                        .map_err(RunError::Runtime)?;
                     if previous_workspace.get(name) != Some(&value_clone) {
                         changed_names.insert(name.clone());
                     }
@@ -1357,6 +1361,8 @@ impl RunMatSession {
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {
+                runmat_runtime::execution::validate_storable_value(&value)
+                    .map_err(RunError::Runtime)?;
                 self.bind_workspace_slot("ans".to_string(), var_id);
                 self.workspace_values.insert("ans".to_string(), value);
                 if debug_trace {
@@ -1635,52 +1641,58 @@ impl RunMatSession {
 fn apply_requested_output_policy(
     mut outcome: crate::abi::ExecutionOutcome,
     requested_outputs: &runmat_hir::RequestedOutputCount,
-) -> crate::abi::ExecutionOutcome {
+) -> Result<crate::abi::ExecutionOutcome, RunError> {
     use crate::abi::RuntimeFlow;
     use runmat_hir::RequestedOutputCount;
+    use runmat_value::{ValueSequence, ValueSequenceKind};
+
+    let flow = match outcome.flow {
+        RuntimeFlow::DynamicList(handle) => {
+            outcome.flow = match requested_outputs {
+                RequestedOutputCount::Zero | RequestedOutputCount::Exactly(0) => {
+                    RuntimeFlow::NoValue
+                }
+                _ => RuntimeFlow::DynamicList(handle),
+            };
+            return Ok(outcome);
+        }
+        RuntimeFlow::NoValue => Ok(ValueSequence::empty()),
+        RuntimeFlow::Single(value) => ValueSequence::single(value),
+        RuntimeFlow::OutputList(values) => ValueSequence::comma_separated(values),
+    }
+    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+    .map_err(RunError::Runtime)?;
 
     outcome.flow = match requested_outputs {
         RequestedOutputCount::Zero => RuntimeFlow::NoValue,
-        RequestedOutputCount::One => match outcome.flow {
-            RuntimeFlow::OutputList(mut values) => {
-                if values.is_empty() {
-                    RuntimeFlow::NoValue
-                } else {
-                    RuntimeFlow::Single(values.remove(0))
-                }
-            }
-            flow => flow,
-        },
+        RequestedOutputCount::One => first_runtime_flow_value(flow),
         RequestedOutputCount::Exactly(count) => {
             if *count == 0 {
                 RuntimeFlow::NoValue
             } else if *count == 1 {
-                match outcome.flow {
-                    RuntimeFlow::OutputList(mut values) => {
-                        if values.is_empty() {
-                            RuntimeFlow::NoValue
-                        } else {
-                            RuntimeFlow::Single(values.remove(0))
-                        }
-                    }
-                    flow => flow,
-                }
+                first_runtime_flow_value(flow)
             } else {
-                match outcome.flow {
-                    RuntimeFlow::NoValue => RuntimeFlow::OutputList(Vec::new()),
-                    RuntimeFlow::Single(value) => RuntimeFlow::OutputList(vec![value]),
-                    RuntimeFlow::OutputList(mut values) => {
-                        values.truncate(*count);
-                        RuntimeFlow::OutputList(values)
-                    }
-                    RuntimeFlow::DynamicList(handle) => RuntimeFlow::DynamicList(handle),
-                }
+                let mut values = flow.into_values();
+                values.truncate(*count);
+                RuntimeFlow::OutputList(values)
             }
         }
         RequestedOutputCount::CurrentFunctionNargout
-        | RequestedOutputCount::DestinationSequenceCardinality => outcome.flow,
+        | RequestedOutputCount::DestinationSequenceCardinality => match flow.kind() {
+            ValueSequenceKind::Single => first_runtime_flow_value(flow),
+            ValueSequenceKind::CommaSeparated => RuntimeFlow::OutputList(flow.into_values()),
+        },
     };
-    outcome
+    Ok(outcome)
+}
+
+fn first_runtime_flow_value(sequence: runmat_value::ValueSequence) -> crate::abi::RuntimeFlow {
+    sequence
+        .into_values()
+        .into_iter()
+        .next()
+        .map(crate::abi::RuntimeFlow::Single)
+        .unwrap_or(crate::abi::RuntimeFlow::NoValue)
 }
 
 fn resolve_source_identity(
@@ -1952,20 +1964,80 @@ async fn resolve_path_source_input(
 
 #[cfg(test)]
 mod tests {
+    use super::apply_requested_output_policy;
     #[cfg(not(target_arch = "wasm32"))]
     use super::discover_known_project_symbols;
     #[cfg(not(target_arch = "wasm32"))]
     use super::source_input_text;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::abi::SourceInput;
+    use crate::abi::{ExecutionOutcome, RuntimeFlow};
     #[cfg(not(target_arch = "wasm32"))]
     use crate::RunError;
+    use runmat_hir::RequestedOutputCount;
+    use runmat_value::Value;
     #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
     use std::path::{Path, PathBuf};
     #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Arc;
+
+    #[test]
+    fn requested_output_policy_maps_checked_zero_one_and_many_results() {
+        let outcome = |flow| ExecutionOutcome {
+            flow,
+            ..ExecutionOutcome::default()
+        };
+
+        let zero = apply_requested_output_policy(
+            outcome(RuntimeFlow::OutputList(vec![Value::Num(1.0)])),
+            &RequestedOutputCount::Zero,
+        )
+        .unwrap();
+        assert!(matches!(zero.flow, RuntimeFlow::NoValue));
+
+        let one = apply_requested_output_policy(
+            outcome(RuntimeFlow::OutputList(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ])),
+            &RequestedOutputCount::One,
+        )
+        .unwrap();
+        assert!(matches!(one.flow, RuntimeFlow::Single(Value::Num(1.0))));
+
+        let many = apply_requested_output_policy(
+            outcome(RuntimeFlow::Single(Value::Num(1.0))),
+            &RequestedOutputCount::Exactly(3),
+        )
+        .unwrap();
+        assert!(matches!(
+            many.flow,
+            RuntimeFlow::OutputList(ref values) if values == &[Value::Num(1.0)]
+        ));
+    }
+
+    #[test]
+    fn requested_output_policy_rejects_legacy_sequences_at_any_depth() {
+        for flow in [
+            RuntimeFlow::Single(Value::OutputList(vec![Value::Num(1.0)])),
+            RuntimeFlow::OutputList(vec![Value::OutputList(vec![Value::Num(1.0)])]),
+        ] {
+            let error = apply_requested_output_policy(
+                ExecutionOutcome {
+                    flow,
+                    ..ExecutionOutcome::default()
+                },
+                &RequestedOutputCount::Zero,
+            )
+            .unwrap_err();
+            let RunError::Runtime(error) = error else {
+                panic!("expected runtime error");
+            };
+            assert_eq!(error.identifier(), Some("RunMat:NestedLegacyOutputList"));
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     struct CwdGuard {

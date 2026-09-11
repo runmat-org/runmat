@@ -105,3 +105,62 @@ impl Trace for Value {
         }
     }
 }
+
+impl Trace for ValueSequence {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        for value in self.iter() {
+            value.trace(tracer);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr::NonNull;
+
+    use runmat_types::ClassIdentity;
+
+    use super::*;
+
+    struct RecordingTracer(Vec<runmat_gc_api::GcHandle>);
+
+    impl Tracer for RecordingTracer {
+        fn mark(&mut self, handle: runmat_gc_api::GcHandle) {
+            self.0.push(handle);
+        }
+    }
+
+    #[test]
+    fn sequence_traces_handles_reachable_from_every_output() {
+        let first_raw = Box::into_raw(Box::new(1_u8));
+        let second_raw = Box::into_raw(Box::new(2_u8));
+        let first = unsafe {
+            runmat_gc_api::GcHandle::from_ptr_unchecked(
+                NonNull::new(first_raw.cast()).expect("test pointer"),
+            )
+        };
+        let second = unsafe {
+            runmat_gc_api::GcHandle::from_ptr_unchecked(
+                NonNull::new(second_raw.cast()).expect("test pointer"),
+            )
+        };
+        let make_handle = |target| {
+            Value::HandleObject(HandleRef {
+                class_name: ClassIdentity::from("SequenceTestHandle"),
+                target,
+                valid: true,
+            })
+        };
+        let sequence =
+            ValueSequence::comma_separated(vec![make_handle(first), make_handle(second)]).unwrap();
+
+        let mut tracer = RecordingTracer(Vec::new());
+        sequence.trace(&mut tracer);
+        assert_eq!(tracer.0, vec![first, second]);
+
+        unsafe {
+            drop(Box::from_raw(first_raw));
+            drop(Box::from_raw(second_raw));
+        }
+    }
+}

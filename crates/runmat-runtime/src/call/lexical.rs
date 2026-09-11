@@ -1,5 +1,5 @@
 use runmat_types::BindingId;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 /// One binding-keyed value shared with a lexically nested function.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +20,6 @@ pub struct LexicalCall {
 /// Nested-function result plus the final value of every shared binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LexicalCallResult {
-    pub value: Value,
+    pub outputs: ValueSequence,
     pub captures: Vec<LexicalCapture>,
 }

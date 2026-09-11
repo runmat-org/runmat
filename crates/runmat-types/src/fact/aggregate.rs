@@ -53,9 +53,6 @@ impl StructFact {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OutputListFact {
-    pub outputs: Vec<ValueFact>,
-    pub variadic: bool,
-}
+/// Legacy callable-inference spelling. New sequence analysis uses
+/// [`super::ValueSequenceFact`] directly and never stores it in a value fact.
+pub type OutputListFact = super::ValueSequenceFact;

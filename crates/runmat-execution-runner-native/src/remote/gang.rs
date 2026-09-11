@@ -11,7 +11,7 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::{AttemptSuccess, DriverCommand, TaskSubmission};
 use runmat_types::{LabRank, ParallelRegionId};
@@ -64,14 +64,14 @@ impl RemotePoolDriver {
             };
             let request = ProgramExecutionRequest::from_parts(
                 ProgramExecutionDescriptor {
-                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                     recipe: program.recipe.clone(),
                     artifact: program.artifact.clone(),
                     callable: callable.clone(),
                     requested_outputs: program.requested_outputs,
                 },
                 ProgramExecutionInputs {
-                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                    schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                     context: context.clone(),
                     arguments: program.captures.clone(),
                 },

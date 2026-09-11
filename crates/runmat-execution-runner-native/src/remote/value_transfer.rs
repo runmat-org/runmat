@@ -60,7 +60,7 @@ fn visit(value: &ValuePayload, references: &mut Vec<ValueRef>) {
         ValuePayload::Object(reference) => references.push((**reference).clone()),
         ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {}
         ValuePayload::Inline(value) => match value.as_ref() {
-            InlineValue::Cell { values, .. } | InlineValue::OutputList(values) => {
+            InlineValue::Cell { values, .. } => {
                 values.iter().for_each(|value| visit(value, references));
             }
             InlineValue::Struct(fields) => fields
@@ -103,7 +103,7 @@ fn materialize_inner(
         ValuePayload::Inline(inline) => {
             let mut inline = (**inline).clone();
             match &mut inline {
-                InlineValue::Cell { values, .. } | InlineValue::OutputList(values) => {
+                InlineValue::Cell { values, .. } => {
                     for value in values {
                         *value = materialize_inner(value, objects, active, depth + 1)?;
                     }

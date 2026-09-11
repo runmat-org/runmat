@@ -720,6 +720,28 @@ fn verify_instruction(
                 "legacy MIR binding places must be canonicalized to locals before Native IR",
             ));
         }
+        if let NativeOperation::Rvalue {
+            result: NativeRvalueResult::MultiAssignment(targets),
+            ..
+        } = &instruction.operation
+        {
+            let Some(runmat_mir::MirStmtKind::MultiAssign {
+                targets: statement_targets,
+                ..
+            }) = containing_statement
+            else {
+                return Err(error(
+                    "native.ir.multi_assignment_owner",
+                    "multi-assignment rvalue is not owned by a multi-assignment statement",
+                ));
+            };
+            if targets != statement_targets {
+                return Err(error(
+                    "native.ir.multi_assignment_owner",
+                    "multi-assignment rvalue targets differ from its owning statement",
+                ));
+            }
+        }
         let (declared_effects, declared_capabilities) =
             runmat_mir::rvalue_declared_requirements(value);
         if !declared_effects.0.is_subset(&instruction.effects.0)
@@ -1124,6 +1146,14 @@ fn rvalue_output_locals(
             .map(checked_native_local)
             .transpose()
             .map(|local| vec![local]),
+        MirStmtKind::MultiAssign { targets, .. }
+            if targets
+                .targets
+                .iter()
+                .any(|target| matches!(target, MirOutputTarget::Sequence(_))) =>
+        {
+            Ok(Vec::new())
+        }
         MirStmtKind::MultiAssign { targets, .. } => targets
             .targets
             .iter()
@@ -1213,20 +1243,38 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
             },
         ) => Ok(1),
         (NativeSitePhase::Rvalue, NativeOperation::Rvalue { value, result }) => {
-            let arity = match result {
-                NativeRvalueResult::Assignment => 1,
-                NativeRvalueResult::MultiAssignment(arity) => *arity as usize,
-                NativeRvalueResult::SequenceAssignment(_) => 0,
-                NativeRvalueResult::Expression => 1,
-                NativeRvalueResult::Discard => 0,
-                NativeRvalueResult::Terminator => {
-                    return Err(NativeCodegenError::new(
-                        "native.ir.operation_phase",
-                        "terminator rvalue role appears at a statement site",
-                    ))
-                }
-            };
-            if !matches!(result, NativeRvalueResult::SequenceAssignment(_)) {
+            let arity =
+                match result {
+                    NativeRvalueResult::Assignment => 1,
+                    NativeRvalueResult::MultiAssignment(targets) => {
+                        if targets.targets.iter().any(|target| {
+                            matches!(target, runmat_mir::MirOutputTarget::Sequence(_))
+                        }) {
+                            0
+                        } else {
+                            targets.targets.len()
+                        }
+                    }
+                    NativeRvalueResult::SequenceAssignment(_) => 0,
+                    NativeRvalueResult::Expression => 1,
+                    NativeRvalueResult::Discard => 0,
+                    NativeRvalueResult::Terminator => {
+                        return Err(NativeCodegenError::new(
+                            "native.ir.operation_phase",
+                            "terminator rvalue role appears at a statement site",
+                        ))
+                    }
+                };
+            let runtime_cardinality = matches!(result, NativeRvalueResult::SequenceAssignment(_))
+                || matches!(
+                    result,
+                    NativeRvalueResult::MultiAssignment(targets)
+                        if targets.targets.iter().any(|target| matches!(
+                            target,
+                            runmat_mir::MirOutputTarget::Sequence(_)
+                        ))
+                );
+            if !runtime_cardinality {
                 if let runmat_mir::MirRvalue::Call(call) = value {
                     let Some(requested) = call.requested_outputs.known_count() else {
                         return Err(NativeCodegenError::new(

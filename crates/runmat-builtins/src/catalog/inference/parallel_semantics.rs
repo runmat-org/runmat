@@ -3,7 +3,7 @@ use crate::{BuiltinCatalogEntry, BuiltinInferenceRule, ParallelInferenceRule};
 use runmat_types::{
     codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
     DynamicReason, ExecutionFact, FutureStateFact, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, OutputListFact, ShapeFact, ValueFact, ValueKindFact,
+    NumericFact, ShapeFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer_parallel_data(
@@ -132,7 +132,7 @@ pub(super) fn infer_parallel_future(
     let output_count_index = callable_index + 1;
     let output = scheduled_callable_output(request, callable_index, output_count_index);
     let future = ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Future {
-        output: Box::new(output),
+        output,
         state: FutureStateFact::Unknown,
     }));
     finish_fixed(entry, request, future, Vec::new())
@@ -142,11 +142,11 @@ fn scheduled_callable_output(
     request: &CallRequest,
     callable_index: usize,
     output_count_index: usize,
-) -> ValueFact {
+) -> runmat_types::ValueSequenceFact {
     let Some(ValueKindFact::Callable(callable)) =
         request.arguments.get(callable_index).map(|fact| &fact.kind)
     else {
-        return ValueFact::unknown(DynamicReason::UnresolvedCallable);
+        return runmat_types::ValueSequenceFact::dynamic();
     };
     let Some(output_count) = request
         .literals
@@ -154,10 +154,10 @@ fn scheduled_callable_output(
         .get(output_count_index)
         .and_then(literal_output_count)
     else {
-        return ValueFact::unknown(DynamicReason::RuntimeValue);
+        return runmat_types::ValueSequenceFact::dynamic();
     };
     if output_count == 0 {
-        return ValueFact::scalar(ValueKindFact::Void);
+        return runmat_types::ValueSequenceFact::fixed(Vec::new());
     }
     let outputs = (0..output_count)
         .map(|index| {
@@ -168,16 +168,9 @@ fn scheduled_callable_output(
                 .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
         })
         .collect::<Vec<_>>();
-    if output_count == 1 {
-        outputs
-            .into_iter()
-            .next()
-            .expect("one requested output was materialized")
-    } else {
-        ValueFact::scalar(ValueKindFact::OutputList(OutputListFact {
-            outputs,
-            variadic: !callable.outputs_complete || callable.variadic_outputs,
-        }))
+    runmat_types::ValueSequenceFact {
+        outputs,
+        variadic: !callable.outputs_complete || callable.variadic_outputs,
     }
 }
 
@@ -195,23 +188,14 @@ pub(super) fn infer_parallel_fetch(
     include_index: bool,
 ) -> CallInference {
     let payload = match request.arguments.first().map(|fact| &fact.kind) {
-        Some(ValueKindFact::Execution(ExecutionFact::Future { output, .. })) => {
-            output.as_ref().clone()
-        }
-        _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+        Some(ValueKindFact::Execution(ExecutionFact::Future { output, .. })) => output.clone(),
+        _ => runmat_types::ValueSequenceFact::dynamic(),
     };
     let mut outputs = Vec::new();
     if include_index {
         outputs.push(default_double_scalar());
     }
-    match payload.kind {
-        ValueKindFact::OutputList(OutputListFact {
-            outputs: payload_outputs,
-            ..
-        }) => outputs.extend(payload_outputs),
-        ValueKindFact::Void => {}
-        _ => outputs.push(payload),
-    }
+    outputs.extend(payload.outputs);
     let mut contract = CallContract::fixed(outputs);
     contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();

@@ -1,3 +1,4 @@
+use crate::sequence::ResolveValueSequence;
 use crate::{build_runtime_error, create_class_object, make_cell_with_shape, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::builtin_functions;
@@ -8,6 +9,14 @@ use std::cell::RefCell;
 
 thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };
+}
+
+fn resolve_single_sequence(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -198,13 +207,10 @@ fn gather_if_needed_async_impl<'a>(
                 }
                 Ok(Value::Closure(cloned))
             }
-            Value::OutputList(values) => {
-                let mut gathered = Vec::with_capacity(values.len());
-                for value in values {
-                    gathered.push(gather_if_needed_async_impl(value).await?);
-                }
-                Ok(Value::OutputList(gathered))
-            }
+            Value::OutputList(_) => Err(crate::runtime_error::semantic_error(
+                "TransientSequenceBelowDispatch",
+                "legacy output-list carrier reached scalar gather dispatch",
+            )),
             other => Ok(other.clone()),
         }
     })
@@ -474,6 +480,7 @@ async fn try_distributed_builtin(
                     ),
                 })
                 .await
+                .map(crate::call::arguments::project_legacy_builtin_value_abi)
                 .map(Some)
         }
     }
@@ -689,7 +696,12 @@ pub(crate) async fn try_call_registered_instance_method(
         && method.function_name != method_name
     {
         let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
-        return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
+        return finalize_instance_method_result(
+            &method_identity,
+            receiver,
+            result.and_then(crate::call::arguments::adapt_legacy_builtin_result),
+        )
+        .map(Some);
     }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
@@ -706,7 +718,12 @@ pub(crate) async fn try_call_registered_instance_method(
             && owner_qualified != method_name
         {
             let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
-            return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
+            return finalize_instance_method_result(
+                &method_identity,
+                receiver,
+                result.and_then(crate::call::arguments::adapt_legacy_builtin_result),
+            )
+            .map(Some);
         }
     }
     Ok(None)
@@ -715,9 +732,9 @@ pub(crate) async fn try_call_registered_instance_method(
 fn finalize_instance_method_result(
     method_name: &runmat_types::MethodName,
     receiver: &Value,
-    result: Result<Value, RuntimeError>,
+    result: Result<runmat_value::ValueSequence, RuntimeError>,
 ) -> Result<Value, RuntimeError> {
-    let result = result?;
+    let result = resolve_single_sequence(result?)?;
     const DELETE_METHOD: runmat_types::StaticMethodName =
         runmat_types::StaticMethodName::new("delete");
     if DELETE_METHOD.is(method_name) {
@@ -768,7 +785,7 @@ async fn try_call_registered_static_method(
     )
     .await
     {
-        return result.map(Some);
+        return result.and_then(resolve_single_sequence).map(Some);
     }
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
@@ -786,7 +803,7 @@ async fn try_call_registered_static_method(
         )
         .await
         {
-            return result.map(Some);
+            return result.and_then(resolve_single_sequence).map(Some);
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
@@ -848,7 +865,7 @@ async fn call_registered_class_constructor(
         )
         .await
         {
-            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+            return Ok::<Option<Value>, RuntimeError>(Some(resolve_single_sequence(result?)?));
         }
         if runmat_builtins::builtin_name_is_known(&ctor.function_name)
             && ctor.function_name != class_name
@@ -863,7 +880,7 @@ async fn call_registered_class_constructor(
         )
         .await
         {
-            return Ok::<Option<Value>, RuntimeError>(Some(result?));
+            return Ok::<Option<Value>, RuntimeError>(Some(resolve_single_sequence(result?)?));
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified) && owner_qualified != class_name
         {
@@ -1350,7 +1367,7 @@ mod tests {
     }
 
     #[test]
-    fn gather_if_needed_reports_provider_unavailable_for_nested_output_list_gpu() {
+    fn gather_if_needed_rejects_nested_output_list_before_provider_access() {
         runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::OutputList(vec![Value::GpuTensor(GpuTensorHandle {
@@ -1361,8 +1378,11 @@ mod tests {
             descriptor: Default::default(),
         })]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
-            .expect_err("missing provider should fail nested output-list gather");
-        assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
+            .expect_err("transient sequence must fail before provider access");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:TransientSequenceBelowDispatch")
+        );
     }
 
     #[test]
@@ -1401,7 +1421,7 @@ mod tests {
                 assert_eq!(requested_outputs, 1);
                 let mut sv = StructValue::new();
                 sv.fields.insert("x".to_string(), Value::Num(12.0));
-                Box::pin(async move { Ok(Value::Struct(sv)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Struct(sv)) })
             }),
         ));
 
@@ -1529,7 +1549,7 @@ mod tests {
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 20202);
                 assert_eq!(requested_outputs, 1);
-                Box::pin(async { Ok(Value::Num(77.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(77.0)) })
             }),
         ));
 

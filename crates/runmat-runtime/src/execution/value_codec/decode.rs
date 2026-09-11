@@ -104,13 +104,6 @@ fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> 
             }
             Ok(Value::Struct(value))
         }
-        InlineValue::OutputList(values) => Ok(Value::OutputList(
-            values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| decode(value, &format!("{path}[{index}]")))
-                .collect::<Result<_, _>>()?,
-        )),
         InlineValue::Exception(value) => decode_exception(value, path),
         InlineValue::Callable(value) => decode_callable(value, path),
         InlineValue::ImmutableValueClass(value) => {

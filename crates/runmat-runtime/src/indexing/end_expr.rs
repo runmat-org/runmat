@@ -128,12 +128,16 @@ where
                         *fallback_policy,
                         crate::call::descriptor::CallableCallKind::EndExpr,
                     );
-                    let value =
+                    let sequence =
                         crate::call::descriptor::execute_callable_descriptor(descriptor).await?;
-                    let value = match value {
-                        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
-                        value => value,
-                    };
+                    let mut values = crate::sequence::ResolveValueSequence::resolve(
+                        sequence,
+                        runmat_types::SequenceUse::RequireSingle,
+                        crate::sequence::SequenceResolutionContext::default(),
+                    )?;
+                    let value = values.pop().ok_or_else(|| {
+                        invalid("UnsupportedIndexType", "end call must return scalar")
+                    })?;
                     value_to_f64(&value)
                         .map_err(|_| invalid("UnsupportedIndexType", "end call must return scalar"))
                 }

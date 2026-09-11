@@ -225,7 +225,7 @@ impl RuntimeDistributedService for CoreDistributedService {
     fn invoke(
         &self,
         request: RuntimeDistributedCallRequest,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<runmat_value::ValueSequence, RuntimeError>> {
         let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&request.builtin.0) else {
             return Box::pin(async {
                 Err(error(
@@ -236,7 +236,11 @@ impl RuntimeDistributedService for CoreDistributedService {
         if entry.placement.distributed
             == runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype
         {
-            return invoke_scalar_like_prototype(Rc::clone(&self.store), request, entry);
+            let result = invoke_scalar_like_prototype(Rc::clone(&self.store), request, entry);
+            return Box::pin(async move {
+                runmat_value::ValueSequence::single(result.await?)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+            });
         }
         if !matches!(
             entry.placement.distributed,
@@ -380,10 +384,8 @@ impl RuntimeDistributedService for CoreDistributedService {
                 }
                 values.push(Value::Distributed(Box::new(handle)));
             }
-            Ok(match values.len() {
-                1 => values.pop().expect("one distributed output was created"),
-                _ => Value::OutputList(values),
-            })
+            runmat_value::ValueSequence::comma_separated(values)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
         })
     }
 
@@ -759,18 +761,17 @@ fn split_partition_outputs(
     value: Value,
     requested_outputs: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
-    match (requested_outputs, value) {
-        (0, _) => Ok(Vec::new()),
-        (1, Value::OutputList(mut values)) if values.len() == 1 => Ok(vec![values.remove(0)]),
-        (1, value) => Ok(vec![value]),
-        (count, Value::OutputList(values)) if values.len() == count => Ok(values),
-        (count, Value::OutputList(values)) => Err(error(format!(
-            "partition-local builtin returned {} outputs for {count} requested outputs",
+    if requested_outputs == 0 {
+        return Ok(Vec::new());
+    }
+    let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_values();
+    if values.len() == requested_outputs {
+        Ok(values)
+    } else {
+        Err(error(format!(
+            "partition-local builtin returned {} outputs for {requested_outputs} requested outputs",
             values.len()
-        ))),
-        (count, _) => Err(error(format!(
-            "partition-local builtin returned one value for {count} requested outputs"
-        ))),
+        )))
     }
 }
 

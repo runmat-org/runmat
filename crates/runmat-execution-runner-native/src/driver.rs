@@ -12,7 +12,7 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionDescriptor,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -339,7 +339,7 @@ impl LocalDriver {
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
         let callable = &submission.request.callable.program;
         ProgramExecutionDescriptor {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),

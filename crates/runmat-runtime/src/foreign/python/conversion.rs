@@ -96,6 +96,16 @@ fn copy_pointer_bytes(address: usize, length: usize) -> Vec<u8> {
 }
 
 pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError> {
+    runmat_value::validate_no_transient_sequence(&value).map_err(|_| {
+        crate::runtime_error::semantic_error(
+            "TransientSequenceNotPortable",
+            "transient output sequences cannot cross the Python value boundary",
+        )
+    })?;
+    value_to_python_inner(value)
+}
+
+fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(PythonValue::Bool(value)),
         Value::Num(value) => Ok(PythonValue::Float(value)),
@@ -171,14 +181,14 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
             value
                 .data
                 .into_iter()
-                .map(value_to_python)
+                .map(value_to_python_inner)
                 .collect::<Result<_, _>>()?,
         )),
         Value::Struct(value) => Ok(PythonValue::Dict(
             value
                 .fields
                 .into_iter()
-                .map(|(name, value)| Ok((PythonValue::String(name), value_to_python(value)?)))
+                .map(|(name, value)| Ok((PythonValue::String(name), value_to_python_inner(value)?)))
                 .collect::<Result<_, RuntimeError>>()?,
         )),
         Value::StructArray(_) => Err(invalid_conversion(
@@ -234,7 +244,7 @@ fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, Ru
             .map(|(name, value)| {
                 let name = String::try_from(name)
                     .map_err(|_| invalid_conversion("pyargs names must be text"))?;
-                Ok((name, value_to_python(value.clone())?))
+                Ok((name, value_to_python_inner(value.clone())?))
             })
             .collect::<Result<_, RuntimeError>>()?,
     ))
@@ -586,7 +596,6 @@ fn value_kind(value: &Value) -> &'static str {
         Value::GpuTensor(_) => "GPU-resident",
         Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_) => "object",
         Value::Listener(_) => "listener",
-        Value::OutputList(_) => "output-list",
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -602,6 +611,19 @@ fn value_kind(value: &Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_conversion_rejects_nested_transient_sequences_before_recursion() {
+        let nested = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::OutputList(Vec::new())], 1, 1)
+                .expect("nested cell"),
+        );
+        let error = value_to_python(nested).expect_err("transient sequence must not cross Python");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotPortable")
+        );
+    }
 
     #[test]
     fn python_conversion_rejects_typed_structure_arrays_without_reclassifying_cells() {

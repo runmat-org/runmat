@@ -1,8 +1,38 @@
 use runmat_types::SequenceUse;
 use runmat_value::Value;
+use std::future::Future;
+use std::pin::Pin;
+
+pub use runmat_value::ValueSequence;
 
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
+
+pub fn sequence_error_to_runtime(error: runmat_value::ValueSequenceError) -> RuntimeError {
+    let identifier = match error {
+        runmat_value::ValueSequenceError::TooManyOutputs { .. } => "OutputSequenceLimitExceeded",
+        runmat_value::ValueSequenceError::TransientValue(_) => "NestedLegacyOutputList",
+    };
+    semantic_error(identifier, error.to_string())
+}
+
+/// Constructs the checked one-value result used by runtime call boundaries.
+///
+/// Keeping this fallible prevents fixtures and adapters from bypassing the
+/// same transient-value validation applied to multi-output sequences.
+pub fn single_value_sequence(value: Value) -> Result<ValueSequence, RuntimeError> {
+    ValueSequence::single(value).map_err(sequence_error_to_runtime)
+}
+
+/// Adapts a scalar-result future at an explicitly single-valued call boundary.
+pub fn single_value_future<F>(
+    future: F,
+) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>>>>
+where
+    F: Future<Output = Result<Value, RuntimeError>> + 'static,
+{
+    Box::pin(async move { single_value_sequence(future.await?) })
+}
 
 pub(crate) mod destination;
 
@@ -11,14 +41,6 @@ pub use destination::{
     PreparedSequenceDestination, PreparedSequenceEndpoint, SequenceDestinationBuilder,
     SequenceEndpointSpec,
 };
-
-/// A source-level value sequence before its surrounding expression context
-/// selects, expands, or discards entries.
-#[derive(Debug)]
-pub enum ValueSequence {
-    Single(Value),
-    CommaSeparated(Vec<Value>),
-}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SequenceResolutionContext {
@@ -50,27 +72,18 @@ impl SequenceResolutionContext {
     }
 }
 
-impl ValueSequence {
-    pub fn single(value: Value) -> Self {
-        Self::Single(value)
-    }
+pub trait ResolveValueSequence {
+    /// Applies the language-level selection required by the surrounding
+    /// expression context.
+    fn resolve(
+        self,
+        use_context: SequenceUse,
+        context: SequenceResolutionContext,
+    ) -> Result<Vec<Value>, RuntimeError>;
+}
 
-    pub fn comma_separated(values: Vec<Value>) -> Self {
-        Self::CommaSeparated(values)
-    }
-
-    /// Adapt the legacy callable return carrier exactly once at the execution
-    /// boundary. `OutputList` must never escape this conversion as a language
-    /// value or be stored in a local/workspace slot.
-    pub(crate) fn from_callable_result(value: Value, requested_outputs: usize) -> Self {
-        match value {
-            Value::OutputList(values) => Self::CommaSeparated(values),
-            _ if requested_outputs == 0 => Self::CommaSeparated(Vec::new()),
-            value => Self::Single(value),
-        }
-    }
-
-    pub fn resolve(
+impl ResolveValueSequence for ValueSequence {
+    fn resolve(
         self,
         use_context: SequenceUse,
         context: SequenceResolutionContext,
@@ -78,8 +91,8 @@ impl ValueSequence {
         match use_context {
             SequenceUse::Discard => Ok(Vec::new()),
             SequenceUse::ExpandAll => Ok(self.into_values()),
-            SequenceUse::RequireSingle => self.select_prefix(1, true),
-            SequenceUse::SelectPrefix { count } => self.select_prefix(count, false),
+            SequenceUse::RequireSingle => select_prefix(self, 1, true),
+            SequenceUse::SelectPrefix { count } => select_prefix(self, count, false),
             SequenceUse::SelectCurrentFunctionOutputs => {
                 let count = context.current_function_outputs.ok_or_else(|| {
                     semantic_error(
@@ -87,7 +100,7 @@ impl ValueSequence {
                         "the current function output count is unavailable for this value sequence",
                     )
                 })?;
-                self.select_prefix(count, false)
+                select_prefix(self, count, false)
             }
             SequenceUse::SelectDestinationCardinality => {
                 let count = context.destination_cardinality.ok_or_else(|| {
@@ -96,45 +109,39 @@ impl ValueSequence {
                         "the destination cardinality is unavailable for this value sequence",
                     )
                 })?;
-                self.select_prefix(count, false)
+                select_prefix(self, count, false)
             }
         }
     }
+}
 
-    fn into_values(self) -> Vec<Value> {
-        match self {
-            Self::Single(value) => vec![value],
-            Self::CommaSeparated(values) => values,
-        }
+fn select_prefix(
+    sequence: ValueSequence,
+    count: usize,
+    require_exact_single: bool,
+) -> Result<Vec<Value>, RuntimeError> {
+    runmat_value::validate_output_count(count).map_err(sequence_error_to_runtime)?;
+    let mut values = sequence.into_values();
+    if require_exact_single && values.len() != 1 {
+        return Err(semantic_error(
+            "CommaSeparatedListRequiresSingleValue",
+            format!(
+                "this expression requires one value, but the comma-separated list contains {}",
+                values.len()
+            ),
+        ));
     }
-
-    fn select_prefix(
-        self,
-        count: usize,
-        require_exact_single: bool,
-    ) -> Result<Vec<Value>, RuntimeError> {
-        let mut values = self.into_values();
-        if require_exact_single && values.len() != 1 {
-            return Err(semantic_error(
-                "CommaSeparatedListRequiresSingleValue",
-                format!(
-                    "this expression requires one value, but the comma-separated list contains {}",
-                    values.len()
-                ),
-            ));
-        }
-        if values.len() < count {
-            return Err(semantic_error(
-                "CommaSeparatedListOutputShortage",
-                format!(
-                    "the comma-separated list contains {} values, but {count} were requested",
-                    values.len()
-                ),
-            ));
-        }
-        values.truncate(count);
-        Ok(values)
+    if values.len() < count {
+        return Err(semantic_error(
+            "CommaSeparatedListOutputShortage",
+            format!(
+                "the comma-separated list contains {} values, but {count} were requested",
+                values.len()
+            ),
+        ));
     }
+    values.truncate(count);
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -144,6 +151,7 @@ mod tests {
     #[test]
     fn selection_rejects_plain_nonsingleton_and_selects_requested_prefix() {
         let error = ValueSequence::comma_separated(vec![Value::Num(1.0), Value::Num(2.0)])
+            .unwrap()
             .resolve(
                 SequenceUse::RequireSingle,
                 SequenceResolutionContext::default(),
@@ -155,6 +163,7 @@ mod tests {
             ValueSequence::comma_separated(
                 vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0),]
             )
+            .unwrap()
             .resolve(
                 SequenceUse::SelectPrefix { count: 2 },
                 SequenceResolutionContext::default(),
@@ -166,22 +175,38 @@ mod tests {
 
     #[test]
     fn empty_and_zero_output_contexts_are_deterministic() {
-        assert!(ValueSequence::comma_separated(Vec::new())
+        assert!(ValueSequence::empty()
             .resolve(SequenceUse::Discard, SequenceResolutionContext::default())
             .unwrap()
             .is_empty());
-        assert!(ValueSequence::comma_separated(Vec::new())
+        assert!(ValueSequence::empty()
             .resolve(
                 SequenceUse::SelectPrefix { count: 0 },
                 SequenceResolutionContext::default(),
             )
             .unwrap()
             .is_empty());
-        assert!(ValueSequence::comma_separated(Vec::new())
+        assert!(ValueSequence::empty()
             .resolve(
                 SequenceUse::RequireSingle,
                 SequenceResolutionContext::default()
             )
             .is_err());
+    }
+
+    #[test]
+    fn selection_rejects_output_counts_outside_the_artifact_domain() {
+        let error = ValueSequence::empty()
+            .resolve(
+                SequenceUse::SelectPrefix {
+                    count: runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
+                },
+                SequenceResolutionContext::default(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:OutputSequenceLimitExceeded")
+        );
     }
 }

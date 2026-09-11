@@ -24,6 +24,21 @@ pub fn clear_value_excluding(current: &Value, incoming: &Value) -> Result<(), St
 }
 
 #[cfg(feature = "native-accel")]
+pub fn clear_value_excluding_values(current: &Value, live: &[Value]) -> Result<(), String> {
+    runmat_accelerate::ensure_residency_hooks();
+    let mut keep_handles = HashSet::new();
+    for value in live {
+        collect_gpu_handle_identities(value, &mut keep_handles)?;
+    }
+    clear_handles_in_value_excluding(current, &keep_handles)
+}
+
+#[cfg(not(feature = "native-accel"))]
+pub fn clear_value_excluding_values(_current: &Value, _live: &[Value]) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(feature = "native-accel")]
 fn clear_handles_in_value(value: &Value) -> Result<(), String> {
     clear_handles_in_value_excluding(value, &HashSet::new())
 }

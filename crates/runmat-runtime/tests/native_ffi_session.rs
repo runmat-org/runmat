@@ -45,6 +45,22 @@ fn invoke(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+    let mut outputs = invoke_outputs(context, symbol, arguments, requested_outputs)?;
+    if outputs.len() != 1 {
+        return Err(Box::new(runmat_runtime::RuntimeError::new(format!(
+            "test helper expected one output, received {}",
+            outputs.len()
+        ))));
+    }
+    Ok(outputs.pop().expect("one output"))
+}
+
+fn invoke_outputs(
+    context: &RuntimeContext,
+    symbol: &str,
+    arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
     let service = context
         .service_ports()
         .require_foreign(symbol)
@@ -59,6 +75,7 @@ fn invoke(
             requested_outputs,
         },
     )))
+    .map(runmat_value::ValueSequence::into_values)
     .map_err(Box::new)
 }
 
@@ -118,7 +135,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         "#include <stdint.h>\nint32_t fixture_add(int32_t left, int32_t right);\nint32_t fixture_absent(int32_t value);\n",
     )
     .unwrap();
-    let report = invoke(
+    let report = invoke_outputs(
         &context,
         "load_report",
         vec![
@@ -129,9 +146,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         2,
     )
     .expect("legacy load report");
-    let Value::OutputList(report) = report else {
-        panic!("legacy load report must contain two outputs");
-    };
+    assert_eq!(report.len(), 2);
     let Value::Cell(notfound) = &report[0] else {
         panic!("missing functions must be reported as a cell array");
     };

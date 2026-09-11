@@ -9,7 +9,9 @@ use crate::replay::limits::ReplayLimits;
 use crate::runtime_error::{replay_error, replay_error_with_source, ReplayErrorKind};
 use crate::{BuiltinResult, RuntimeError};
 
-const WORKSPACE_SCHEMA_VERSION: u32 = 1;
+#[cfg(test)]
+const WORKSPACE_SCHEMA_V1: u32 = 1;
+const WORKSPACE_SCHEMA_VERSION: u32 = 2;
 const WORKSPACE_KIND: &str = "workspace-state";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +66,9 @@ pub async fn encode_workspace_payload_with_limits(
     limits: ReplayLimits,
 ) -> BuiltinResult<Vec<u8>> {
     validate_workspace_mode(mode)?;
+    for (_, value) in entries {
+        crate::execution::validate_storable_value(value)?;
+    }
     if entries.len() > limits.max_workspace_variables {
         return Err(replay_error(
             ReplayErrorKind::ImportRejected,
@@ -193,6 +198,9 @@ pub fn decode_workspace_payload_with_limits(
             err,
         )
     })?;
+    for (_, value) in &entries {
+        crate::execution::validate_storable_value(value)?;
+    }
     if entries.len() > limits.max_workspace_variables {
         return Err(replay_error(
             ReplayErrorKind::ImportRejected,
@@ -239,6 +247,37 @@ mod tests {
         assert_eq!(
             err.identifier(),
             Some(ReplayErrorKind::UnsupportedSchema.identifier())
+        );
+    }
+
+    #[test]
+    fn frozen_workspace_v1_rejects_before_mat_payload_decode() {
+        let payload = serde_json::json!({
+            "schemaVersion": WORKSPACE_SCHEMA_V1,
+            "kind": WORKSPACE_KIND,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "mode": "auto",
+            "matBase64": "not-valid-base64"
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let error =
+            decode_workspace_payload_with_limits(&bytes, ReplayLimits::default()).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some(ReplayErrorKind::UnsupportedSchema.identifier())
+        );
+    }
+
+    #[test]
+    fn workspace_export_rejects_nested_transient_sequences_before_encoding() {
+        let value = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::OutputList(Vec::new())], 1, 1).unwrap(),
+        );
+        let error =
+            block_on(encode_workspace_payload(&[("entry".into(), value)], "auto")).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotStorable")
         );
     }
 

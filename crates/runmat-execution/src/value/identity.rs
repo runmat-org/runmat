@@ -194,13 +194,6 @@ fn encode_inline(
             }
             Ok(())
         }
-        InlineValue::OutputList(values) => {
-            encoder
-                .array(2)
-                .and_then(|encoder| encoder.u8(20))
-                .map_err(encoding)?;
-            encode_payloads(encoder, values)
-        }
         InlineValue::Exception(value) => encode_exception(encoder, value),
         InlineValue::Callable(value) => {
             encoder

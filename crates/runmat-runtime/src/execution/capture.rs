@@ -7,6 +7,7 @@ use crate::RuntimeError;
 
 /// Validate values captured by a lazy future before they can cross a spawn boundary.
 pub fn validate_spawn_capture(value: &Value) -> Result<(), RuntimeError> {
+    super::storable::validate_storable_value(value)?;
     for_each_gpu_handle(value, &mut |handle| {
         let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
             crate::runtime_error::semantic_error(
@@ -34,6 +35,15 @@ pub fn validate_spawn_capture(value: &Value) -> Result<(), RuntimeError> {
         }
         Ok(())
     })
+}
+
+/// Validate an aggregate capture without manufacturing a language value to
+/// represent the executor-owned collection.
+pub fn validate_spawn_captures(values: &[Value]) -> Result<(), RuntimeError> {
+    for value in values {
+        validate_spawn_capture(value)?;
+    }
+    Ok(())
 }
 
 fn for_each_gpu_handle(
@@ -74,7 +84,7 @@ fn visit_gpu_handles(
         }
         Value::ObjectArray(value) => visit_values(value.data(), operation, visited_handles),
         Value::Closure(value) => visit_values(&value.captures, operation, visited_handles),
-        Value::OutputList(values) => visit_values(values, operation, visited_handles),
+        Value::OutputList(_) => unreachable!("storable validation rejects transient sequences"),
         Value::HandleObject(handle) => {
             let address = runmat_gc::gc_handle_addr(&handle.target);
             if visited_handles.insert(address) {
@@ -214,6 +224,30 @@ mod tests {
         let _guard = ThreadProviderGuard::set(None);
         let error = validate_spawn_capture(&gpu(99, 13)).expect_err("missing provider");
         assert_eq!(error.identifier(), Some("RunMat:SpawnProviderUnavailable"));
+    }
+
+    #[test]
+    fn spawn_capture_rejects_transient_sequences_before_recursive_traversal() {
+        let nested = Value::Cell(
+            CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1)
+                .expect("nested capture"),
+        );
+        let error = validate_spawn_capture(&nested).expect_err("transient capture must fail");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotStorable")
+        );
+
+        let closure = Value::Closure(runmat_value::Closure {
+            function_name: "capture_target".into(),
+            bound_function: None,
+            captures: vec![Value::OutputList(Vec::new())],
+        });
+        let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotStorable")
+        );
     }
 
     #[test]

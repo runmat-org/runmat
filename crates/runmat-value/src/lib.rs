@@ -6,8 +6,10 @@ mod exception;
 mod foreign;
 mod numeric;
 mod object;
+mod sequence;
 pub mod symbolic;
 mod trace;
+mod transient;
 mod value;
 
 pub use aggregate::{
@@ -30,5 +32,10 @@ pub use numeric::{
 };
 pub use object::{DynamicPropertyDef, HandleRef, Listener, ObjectArray, ObjectInstance};
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
+pub use sequence::{
+    validate_output_count, ValueSequence, ValueSequenceError, ValueSequenceKind,
+    MAX_VALUE_SEQUENCE_OUTPUTS,
+};
 pub use symbolic::{SymbolicExpr, SymbolicFunction};
+pub use transient::{validate_no_transient_sequence, TransientValueError};
 pub use value::Value;

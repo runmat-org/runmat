@@ -9,6 +9,9 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
 
+mod prepared_multi;
+pub(super) use prepared_multi::PreparedMultiAssignment;
+
 #[derive(Clone)]
 enum PlaceSegment {
     Member(String),
@@ -104,6 +107,29 @@ pub(super) fn execute(
         }
         MirStmtKind::MultiAssign { targets, .. } => {
             state.pending_place_mutation = None;
+            if targets
+                .targets
+                .iter()
+                .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
+            {
+                let prepared = state.prepared_multi_assignment.take().ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native sequence-target multi-assignment has no prepared values".into(),
+                    )
+                })?;
+                prepared.commit(state)?;
+                let places = targets
+                    .targets
+                    .iter()
+                    .filter_map(|target| match target {
+                        MirOutputTarget::Place(place) => Some(place),
+                        MirOutputTarget::Sequence(target) => Some(target.base()),
+                        MirOutputTarget::Discard => None,
+                    })
+                    .collect::<Vec<_>>();
+                publish_roots_from_refs(state, instruction, &places)?;
+                return Ok(true);
+            }
             if instruction.inputs.len() < targets.targets.len() {
                 return Err(NativeExecutorError::Host(
                     "native multi-assignment result window is incomplete".into(),
@@ -236,16 +262,30 @@ fn assign_place(
     delete: bool,
     allow_init: bool,
 ) -> NativeExecutorResult<()> {
+    if let MirPlace::Local(local) = place {
+        let reference = state.arena.insert(rhs);
+        return state.set_local(local.0, reference);
+    }
+    let root = root_local_value(state, place)?;
+    let (local, updated) = assign_place_to_root(state, place, root, rhs, delete, allow_init)?;
+    let reference = state.arena.insert(updated);
+    state.set_local(local.0, reference)
+}
+
+pub(super) fn assign_place_to_root(
+    state: &mut HostState,
+    place: &MirPlace,
+    root_value: Value,
+    rhs: Value,
+    delete: bool,
+    allow_init: bool,
+) -> NativeExecutorResult<(runmat_mir::MirLocalId, Value)> {
     let mut segments = Vec::new();
     let root = flatten_place(place, &mut segments)?;
     if segments.is_empty() {
-        let reference = state.arena.insert(rhs);
-        return state.set_local(root.0, reference);
+        return Ok((root, rhs));
     }
-    let root_reference = state.locals.get(root.0).copied().ok_or_else(|| {
-        NativeExecutorError::Host("assignment root local is out of bounds".into())
-    })?;
-    let mut current = state.arena.get(root_reference)?.clone();
+    let mut current = root_value;
     let mut parents = Vec::with_capacity(segments.len().saturating_sub(1));
     for segment in &segments[..segments.len() - 1] {
         let child = read_segment(state, current.clone(), segment)?;
@@ -263,8 +303,16 @@ fn assign_place(
     for (parent, segment) in parents.into_iter().rev() {
         updated = write_segment(state, parent, &segment, updated, false, true)?;
     }
-    let reference = state.arena.insert(updated);
-    state.set_local(root.0, reference)
+    Ok((root, updated))
+}
+
+pub(super) fn root_local_value(state: &HostState, place: &MirPlace) -> NativeExecutorResult<Value> {
+    let mut segments = Vec::new();
+    let root = flatten_place(place, &mut segments)?;
+    let reference = state.locals.get(root.0).copied().ok_or_else(|| {
+        NativeExecutorError::Host("assignment root local is out of bounds".into())
+    })?;
+    state.arena.get(reference).cloned()
 }
 
 fn flatten_place(

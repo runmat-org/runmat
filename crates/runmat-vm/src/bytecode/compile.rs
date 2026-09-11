@@ -991,13 +991,126 @@ mod tests {
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
-        MirAggregateKind, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand,
-        MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+        MirAggregateKind, MirBody, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan,
+        MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirSubscriptChain,
+        MirSubscriptStep, MirTerminatorKind,
     };
     use runmat_value::Value;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn mutate_assignment_place(
+        body: &mut MirBody,
+        mut mutation: impl FnMut(&mut MirPlace) -> bool,
+    ) -> bool {
+        for block in &mut body.blocks {
+            for statement_index in 0..block.statements.len() {
+                let (original, replacement) = {
+                    let MirStmtKind::Assign { place, .. } =
+                        &mut block.statements[statement_index].kind
+                    else {
+                        continue;
+                    };
+                    let original = place.clone();
+                    if !mutation(place) {
+                        continue;
+                    }
+                    (original, place.clone())
+                };
+                if let Some(previous) = statement_index
+                    .checked_sub(1)
+                    .and_then(|index| block.statements.get_mut(index))
+                {
+                    if let MirStmtKind::PlaceMutation(annotation) = &mut previous.kind {
+                        if annotation.place == original {
+                            annotation.place = replacement;
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    fn mutate_first_subscript_chain(
+        body: &mut MirBody,
+        mut mutation: impl FnMut(&mut MirSubscriptChain),
+    ) -> bool {
+        for block in &mut body.blocks {
+            for statement in &mut block.statements {
+                let value = match &mut statement.kind {
+                    MirStmtKind::Assign { value, .. }
+                    | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::SequenceAssign { value, .. }
+                    | MirStmtKind::Expr(value) => value,
+                    MirStmtKind::CaptureSequence { .. }
+                    | MirStmtKind::PlaceMutation(_)
+                    | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::EnvironmentEffect(_) => continue,
+                };
+                if let MirRvalue::SubscriptChain(chain) = value {
+                    mutation(chain);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn mutate_first_call(body: &mut MirBody, mut mutation: impl FnMut(&mut runmat_mir::MirCall)) {
+        for block in &mut body.blocks {
+            for statement in &mut block.statements {
+                let value = match &mut statement.kind {
+                    MirStmtKind::Assign { value, .. }
+                    | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::Expr(value) => value,
+                    _ => continue,
+                };
+                if let MirRvalue::Call(call) = value {
+                    call.syntax = runmat_hir::CallSyntax::Method;
+                    call.callee =
+                        MirCallee::Static(CallableIdentity::Method(MethodId("method".to_owned())));
+                    call.fallback_policy = CallableFallbackPolicy::ObjectDispatch;
+                    mutation(call);
+                    return;
+                }
+            }
+        }
+        panic!("expected call in lowered MIR");
+    }
+
+    fn mutate_assignment_index_context(
+        body: &mut MirBody,
+        kind: runmat_hir::IndexKind,
+        context: IndexResultContext,
+    ) -> bool {
+        fn mutate_nested(
+            place: &mut MirPlace,
+            kind: runmat_hir::IndexKind,
+            context: IndexResultContext,
+        ) -> bool {
+            match place {
+                MirPlace::Index(base, indexing) => {
+                    if mutate_nested(base, kind, context) {
+                        return true;
+                    }
+                    if indexing.kind == kind {
+                        indexing.result_context = context;
+                        return true;
+                    }
+                    false
+                }
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    mutate_nested(base, kind, context)
+                }
+                MirPlace::Local(_) | MirPlace::Binding(_) => false,
+            }
+        }
+
+        mutate_assignment_place(body, |place| mutate_nested(place, kind, context))
+    }
 
     fn unique_csv_temp_path(prefix: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
@@ -3026,7 +3139,6 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
-
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
@@ -3055,7 +3167,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_invalid_slice_index_plan_with_identifier() {
+    fn contextual_end_read_accepts_slice_plan() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3082,11 +3194,15 @@ mod tests {
         }
         assert!(patched, "expected indexed assignment in lowered MIR");
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirSliceIndexPlanInvalid")
-        );
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let output = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+        let values = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(values[output.slot.0], Value::Num(3.0));
     }
 
     #[test]
@@ -3168,7 +3284,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_scalar_plan_with_range_expr_component_with_identifier() {
+    fn contextual_end_range_accepts_scalar_plan() {
         let ast = runmat_parser::parse("x = [1 2 3 4]; y = x(1:end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3195,15 +3311,22 @@ mod tests {
         }
         assert!(patched, "expected indexed assignment in lowered MIR");
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirScalarIndexPlanInvalid")
-        );
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let output = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+        let values = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(value) = &values[output.slot.0] else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(value.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
-    fn compile_rejects_slice_plan_with_range_expr_component_with_identifier() {
+    fn contextual_end_range_accepts_slice_plan() {
         let ast = runmat_parser::parse("x = [1 2 3 4]; y = x(1:end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3230,11 +3353,18 @@ mod tests {
         }
         assert!(patched, "expected indexed assignment in lowered MIR");
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirSliceIndexPlanInvalid")
-        );
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let output = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+        let values = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(value) = &values[output.slot.0] else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(value.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]
@@ -3281,23 +3411,13 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Index(_, indexing),
-                    ..
-                } = &mut stmt.kind
-                {
-                    indexing.result_context = IndexResultContext::ReadSingle;
-                    patched = true;
-                    break;
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_place(body, |place| {
+            let MirPlace::Index(_, indexing) = place else {
+                return false;
+            };
+            indexing.result_context = IndexResultContext::ReadSingle;
+            true
+        });
         assert!(patched, "expected indexed assignment place in lowered MIR");
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
@@ -3316,23 +3436,13 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Index(_, indexing),
-                    ..
-                } = &mut stmt.kind
-                {
-                    indexing.result_context = IndexResultContext::DeletionTarget;
-                    patched = true;
-                    break;
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_place(body, |place| {
+            let MirPlace::Index(_, indexing) = place else {
+                return false;
+            };
+            indexing.result_context = IndexResultContext::DeletionTarget;
+            true
+        });
         assert!(patched, "expected indexed assignment place in lowered MIR");
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
@@ -3381,18 +3491,22 @@ mod tests {
     }
 
     #[test]
-    fn compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier() {
+    fn contextual_end_expression_expands_in_call_arguments() {
         let ast = runmat_parser::parse("c = {10, 20, 30, 40}; x = feval(@max, c{end/2}, 0);")
             .expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
 
-        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirCellExpandPlanInvalid")
-        );
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let output = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let values = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(values[output.slot.0], Value::Num(20.0));
     }
 
     #[test]
@@ -3439,25 +3553,16 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Index(_, indexing),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                        indexing.components = vec![MirIndexComponent::Colon];
-                        patched = true;
-                        break;
-                    }
-                }
+        let patched = mutate_assignment_place(body, |place| {
+            let MirPlace::Index(_, indexing) = place else {
+                return false;
+            };
+            if !matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                return false;
             }
-            if patched {
-                break;
-            }
-        }
+            indexing.components = vec![MirIndexComponent::Colon];
+            true
+        });
         assert!(
             patched,
             "expected brace index assignment place in lowered MIR"
@@ -3493,25 +3598,16 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Index(_, indexing),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                        indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                        patched = true;
-                        break;
-                    }
-                }
+        let patched = mutate_assignment_place(body, |place| {
+            let MirPlace::Index(_, indexing) = place else {
+                return false;
+            };
+            if !matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                return false;
             }
-            if patched {
-                break;
-            }
-        }
+            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+            true
+        });
         assert!(
             patched,
             "expected brace index assignment place in lowered MIR"
@@ -3533,27 +3629,11 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Member(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Brace,
+            IndexResultContext::ReadSingle,
+        );
         assert!(
             patched,
             "expected member-over-brace assignment in lowered MIR"
@@ -3575,28 +3655,11 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Member(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.result_context =
-                                runmat_hir::IndexResultContext::DeletionTarget;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Brace,
+            IndexResultContext::DeletionTarget,
+        );
         assert!(
             patched,
             "expected member-over-brace assignment in lowered MIR"
@@ -3618,27 +3681,11 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Member(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Paren,
+            IndexResultContext::ReadSingle,
+        );
         assert!(
             patched,
             "expected member-over-paren assignment in lowered MIR"
@@ -3660,28 +3707,11 @@ mod tests {
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Member(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                            indexing.result_context =
-                                runmat_hir::IndexResultContext::DeletionTarget;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Paren,
+            IndexResultContext::DeletionTarget,
+        );
         assert!(
             patched,
             "expected member-over-paren assignment in lowered MIR"
@@ -4093,27 +4123,11 @@ y = x^[1 2; 3 4];\n",
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::DynamicMember(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Paren,
+            IndexResultContext::ReadSingle,
+        );
         assert!(
             patched,
             "expected dynamic-member-over-paren assignment in lowered MIR"
@@ -4136,28 +4150,11 @@ y = x^[1 2; 3 4];\n",
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::DynamicMember(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                            indexing.result_context =
-                                runmat_hir::IndexResultContext::DeletionTarget;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Paren,
+            IndexResultContext::DeletionTarget,
+        );
         assert!(
             patched,
             "expected dynamic-member-over-paren assignment in lowered MIR"
@@ -4202,27 +4199,11 @@ y = x^[1 2; 3 4];\n",
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::DynamicMember(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Brace,
+            IndexResultContext::ReadSingle,
+        );
         assert!(
             patched,
             "expected dynamic-member-over-brace assignment in lowered MIR"
@@ -4245,28 +4226,11 @@ y = x^[1 2; 3 4];\n",
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::DynamicMember(base, _),
-                    ..
-                } = &mut stmt.kind
-                {
-                    if let MirPlace::Index(_, indexing) = base.as_mut() {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.result_context =
-                                runmat_hir::IndexResultContext::DeletionTarget;
-                            patched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
+        let patched = mutate_assignment_index_context(
+            body,
+            runmat_hir::IndexKind::Brace,
+            IndexResultContext::DeletionTarget,
+        );
         assert!(
             patched,
             "expected dynamic-member-over-brace assignment in lowered MIR"
@@ -4544,10 +4508,10 @@ y = x^[1 2; 3 4];\n",
         assert!(patched, "expected indexed delete assignment in lowered MIR");
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
-        assert_eq!(
-            err.identifier.as_deref(),
-            Some("RunMat:MirDeleteAssignmentPlaceMismatch")
-        );
+        assert_eq!(err.identifier, None);
+        assert!(err
+            .message
+            .contains("place mutation annotation must be followed by its exact assignment"));
     }
 
     #[test]
@@ -4712,23 +4676,13 @@ y = x^[1 2; 3 4];\n",
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched_assign = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                if let MirStmtKind::Assign {
-                    place: MirPlace::Index(_, indexing),
-                    ..
-                } = &mut stmt.kind
-                {
-                    indexing.result_context = IndexResultContext::DeletionTarget;
-                    patched_assign = true;
-                    break;
-                }
-            }
-            if patched_assign {
-                break;
-            }
-        }
+        let patched_assign = mutate_assignment_place(body, |place| {
+            let MirPlace::Index(_, indexing) = place else {
+                return false;
+            };
+            indexing.result_context = IndexResultContext::DeletionTarget;
+            true
+        });
         assert!(
             patched_assign,
             "expected indexed non-delete assign stmt in lowered MIR"
@@ -5758,40 +5712,16 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                let maybe_call = match &mut stmt.kind {
-                    MirStmtKind::Assign {
-                        value: MirRvalue::Call(call),
-                        ..
-                    }
-                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
-                    _ => None,
-                };
-                if let Some(call) = maybe_call {
-                    if matches!(
-                        call.syntax,
-                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
-                    ) {
-                        call.fallback_policy = CallableFallbackPolicy::ExternalBoundary;
-                        patched = true;
-                        break;
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
-        assert!(patched, "expected method call assignment in lowered MIR");
+        mutate_first_call(body, |call| {
+            call.fallback_policy = CallableFallbackPolicy::ExternalBoundary;
+        });
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(
@@ -5802,40 +5732,14 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_missing_mir_method_call_receiver_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
 
-        let mut patched = false;
-        for block in &mut body.blocks {
-            for stmt in &mut block.statements {
-                let maybe_call = match &mut stmt.kind {
-                    MirStmtKind::Assign {
-                        value: MirRvalue::Call(call),
-                        ..
-                    }
-                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
-                    _ => None,
-                };
-                if let Some(call) = maybe_call {
-                    if matches!(
-                        call.syntax,
-                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
-                    ) {
-                        call.args.clear();
-                        patched = true;
-                        break;
-                    }
-                }
-            }
-            if patched {
-                break;
-            }
-        }
-        assert!(patched, "expected method call in lowered MIR");
+        mutate_first_call(body, |call| call.args.clear());
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(
@@ -5846,12 +5750,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_invalid_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -5892,12 +5797,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_imported_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -5943,12 +5849,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("[a, b] = max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -5985,12 +5892,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("[a, b] = max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -6032,12 +5940,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_multisegment_external_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -6080,12 +5989,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_empty_method_name_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -6125,12 +6035,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -6171,12 +6082,13 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier() {
-        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let ast = runmat_parser::parse("max(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let function = hir.assembly.entrypoints[0].target;
         let body = mir.bodies.get_mut(&function).expect("entry body");
+        mutate_first_call(body, |_| {});
 
         let mut patched = false;
         for block in &mut body.blocks {
@@ -6240,13 +6152,88 @@ y = x^[1 2; 3 4];\n",
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            Instr::CallMethodOrMemberIndexMulti {
-                fallback_policy: CallableFallbackPolicy::ObjectDispatch,
-                ..
-            }
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ReadSubscriptPath { steps, .. }
+                if matches!(
+                    steps.as_slice(),
+                    [crate::bytecode::BytecodeSubscriptStep::DottedInvoke {
+                        member,
+                        arguments,
+                    }] if member.0 == "method"
+                        && arguments
+                            == &[crate::bytecode::BytecodeSubscriptSelector::Value]
+                )
         )));
+    }
+
+    #[test]
+    fn compile_rejects_malformed_typed_dotted_invoke_chains() {
+        type MalformedChainCase = (&'static str, fn(&mut MirSubscriptChain), &'static str);
+
+        fn empty(chain: &mut MirSubscriptChain) {
+            chain.steps.clear();
+        }
+        fn braces(chain: &mut MirSubscriptChain) {
+            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
+                panic!("expected dotted invocation step");
+            };
+            indexing.kind = runmat_hir::IndexKind::Brace;
+        }
+        fn assignment_context(chain: &mut MirSubscriptChain) {
+            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
+                panic!("expected dotted invocation step");
+            };
+            indexing.result_context = IndexResultContext::AssignmentTarget;
+        }
+        fn cell_plan(chain: &mut MirSubscriptChain) {
+            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
+                panic!("expected dotted invocation step");
+            };
+            indexing.plan = MirIndexPlan::Cell;
+        }
+        fn expand_all(chain: &mut MirSubscriptChain) {
+            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
+                panic!("expected dotted invocation step");
+            };
+            indexing.cell_expand_all = true;
+        }
+
+        let cases: &[MalformedChainCase] = &[
+            ("empty", empty, "RunMat:MirSubscriptChainInvalid"),
+            ("braces", braces, "RunMat:MirParenCellPlanInvalid"),
+            (
+                "assignment context",
+                assignment_context,
+                "RunMat:MirIndexContextInvalid",
+            ),
+            ("cell plan", cell_plan, "RunMat:MirParenCellPlanInvalid"),
+            ("expand all", expand_all, "RunMat:MirCellExpandPlanInvalid"),
+        ];
+
+        for (label, mutation, expected_identifier) in cases {
+            let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+            let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+            let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+            let entrypoint = hir.assembly.entrypoints[0].id;
+            let function = hir.assembly.entrypoints[0].target;
+            assert!(
+                mutate_first_subscript_chain(
+                    mir.bodies.get_mut(&function).expect("entry body"),
+                    *mutation,
+                ),
+                "expected typed dotted invocation for {label}"
+            );
+            let error = match compile(&hir.assembly, &mir, entrypoint) {
+                Err(error) => error,
+                Ok(_) => panic!("{label} chain should fail compilation"),
+            };
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some(*expected_identifier),
+                "unexpected identifier for {label}"
+            );
+        }
     }
 
     #[test]
@@ -6359,7 +6346,7 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn contextual_end_consumes_prepared_prefix_before_final_path() {
-        let ast = runmat_parser::parse("obj = 1; y = obj.field(end).next;").expect("parse");
+        let ast = runmat_parser::parse("obj = 1; y = obj.field{end}.next;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let bytecode =
@@ -6386,7 +6373,7 @@ y = x^[1 2; 3 4];\n",
         assert!(matches!(
             final_steps.map(Vec::as_slice),
             Some([
-                crate::bytecode::BytecodeSubscriptStep::Parentheses { .. },
+                crate::bytecode::BytecodeSubscriptStep::Braces { .. },
                 crate::bytecode::BytecodeSubscriptStep::Member(member),
             ]) if member.0 == "next"
         ));
@@ -6417,6 +6404,88 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
+    fn variadic_scalar_cell_rhs_does_not_use_sequence_register() {
+        let ast = runmat_parser::parse(
+            "function [fixed, varargout] = nativeVariadicAbi(x, varargin)\n\
+             fixed = nargin;\n\
+             varargout{1} = x;\n\
+             varargout{2} = varargin{1};\n\
+             end\n",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let function_id = hir
+            .assembly
+            .functions
+            .iter()
+            .find(|function| function.name.0 == "nativeVariadicAbi")
+            .map(|function| function.id)
+            .expect("variadic semantic function");
+        let registry = super::compile_semantic_function_registry(&hir.assembly, &mir)
+            .expect("compile semantic functions");
+        let function = registry
+            .get(&function_id)
+            .expect("compiled variadic semantic function");
+        assert!(function
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, Instr::IndexCell { .. })));
+        assert!(!function
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, Instr::IndexCellList { .. })));
+    }
+
+    #[test]
+    fn prepared_cell_destination_consumes_cell_sequence_immediately() {
+        let ast =
+            runmat_parser::parse("dst = {0, 0}; src = {1, 2}; [dst{:}] = src{:};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function_id = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get(&function_id).expect("entrypoint MIR body");
+        assert!(body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .any(|statement| matches!(
+                &statement.kind,
+                MirStmtKind::MultiAssign { targets, value }
+                    if targets.targets.iter().any(|target| matches!(
+                        target,
+                        MirOutputTarget::Sequence(
+                            runmat_mir::MirSequenceTarget::CellContents { .. }
+                        )
+                    )) && matches!(
+                        value,
+                        MirRvalue::Index { indexing, .. }
+                            if indexing.kind == runmat_hir::IndexKind::Brace
+                                && indexing.result_context
+                                    == IndexResultContext::ReadCommaList
+                    )
+            )));
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let cell_sequence_producers = bytecode
+            .instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(pc, instruction)| {
+                matches!(instruction, Instr::IndexCellList { .. }).then_some(pc)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(cell_sequence_producers.len(), 1);
+        for producer in cell_sequence_producers {
+            assert!(matches!(
+                bytecode.instructions.get(producer + 1),
+                Some(Instr::CommitPreparedOutputTargets { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn compile_uses_contextual_cell_end_selector_for_reads() {
         let ast = runmat_parser::parse("c = {1, 2, 3}; x = c{end};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6434,10 +6503,15 @@ y = x^[1 2; 3 4];\n",
         assert!(bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
-        assert!(bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            Instr::IndexCell { num_indices: 1 } | Instr::IndexCellList { num_indices: 1 }
+            .any(|instr| matches!(instr, Instr::LoadSubscriptEnd { component: 0, .. })));
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ReadSubscriptPath { steps, .. }
+                if matches!(
+                    steps.as_slice(),
+                    [crate::bytecode::BytecodeSubscriptStep::Braces { selectors }]
+                        if selectors == &[crate::bytecode::BytecodeSubscriptSelector::Value]
+                )
         )));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
@@ -6494,7 +6568,7 @@ y = x^[1 2; 3 4];\n",
         assert!(function
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+            .any(|instr| matches!(instr, Instr::LoadSubscriptEnd { component: 0, .. })));
 
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
@@ -6551,7 +6625,7 @@ y = x^[1 2; 3 4];\n",
         assert!(bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::LoadContextualIndexEnd { component: 0 })));
+            .any(|instr| matches!(instr, Instr::LoadSubscriptEnd { component: 0, .. })));
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports
@@ -6998,7 +7072,10 @@ y = x^[1 2; 3 4];\n",
                 assert_eq!(function, 9001);
                 assert_eq!(args, &[Value::Num(2.0)]);
                 assert_eq!(requested_outputs, 1);
-                Box::pin(async move { Ok(Value::Num(3.0)) })
+                Box::pin(async move {
+                    runmat_value::ValueSequence::single(Value::Num(3.0))
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                })
             })),
         );
 
@@ -7046,7 +7123,10 @@ y = x^[1 2; 3 4];\n",
                 assert_eq!(call.function, 9001);
                 assert_eq!(call.arguments, [Value::Num(2.0)]);
                 assert_eq!(call.requested_outputs, 1);
-                Box::pin(async move { Ok(Value::Num(3.0)) })
+                Box::pin(async move {
+                    runmat_value::ValueSequence::single(Value::Num(3.0))
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                })
             })),
         );
 

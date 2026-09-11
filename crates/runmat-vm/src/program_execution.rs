@@ -4,7 +4,7 @@ use runmat_execution::{
 };
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_runtime::execution::{DeferredCall, DeferredInvocation, ExecutionServiceError};
 use runmat_value::Value;
@@ -110,7 +110,7 @@ pub fn materialize_deferred_call(
 pub async fn execute_deferred_program_in_context(
     call: DeferredCall,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<Value, ExecutionServiceError> {
+) -> Result<runmat_value::ValueSequence, ExecutionServiceError> {
     let requested_outputs = u16::try_from(call.invocation.requested_outputs())
         .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
     let output_contract = OutputContract { requested_outputs };
@@ -120,7 +120,7 @@ pub async fn execute_deferred_program_in_context(
         runmat_execution_artifact::ProgramTarget::portable("vm-parallel-region-v1"),
     )?;
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable,
@@ -134,8 +134,13 @@ pub async fn execute_deferred_program_in_context(
         .validate_for_portable_host()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     match execute_program_request_with_context(request, runtime).await {
-        ProgramExecutionResponse::Success { value } => {
-            runmat_runtime::execution::value_codec::decode_inline_value(&value)
+        ProgramExecutionResponse::Success { outputs } => {
+            let outputs = outputs
+                .iter()
+                .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+            runmat_value::ValueSequence::comma_separated(outputs)
                 .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
         }
         ProgramExecutionResponse::Failure { message } => {
@@ -587,7 +592,9 @@ async fn execute_parallel_region_request(
     });
     match result {
         Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-            Ok(value) => ProgramExecutionResponse::Success { value },
+            Ok(value) => ProgramExecutionResponse::Success {
+                outputs: vec![value],
+            },
             Err(error) => ProgramExecutionResponse::Failure {
                 message: format!("worker could not transfer its parallel task result: {error}"),
             },
@@ -782,8 +789,12 @@ async fn execute_function_request(
         }
     };
     match result {
-        Ok(value) => match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-            Ok(value) => ProgramExecutionResponse::Success { value },
+        Ok(sequence) => match sequence
+            .iter()
+            .map(runmat_runtime::execution::value_codec::encode_inline_value)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(outputs) => ProgramExecutionResponse::Success { outputs },
             Err(error) => ProgramExecutionResponse::Failure {
                 message: format!("worker could not transfer its result: {error}"),
             },
@@ -813,7 +824,9 @@ async fn execute_unit_script(
                 .and_then(|slot| values.get(slot).cloned())
                 .unwrap_or(runmat_value::Value::Num(0.0));
             match runmat_runtime::execution::value_codec::encode_inline_value(&value) {
-                Ok(value) => ProgramExecutionResponse::Success { value },
+                Ok(value) => ProgramExecutionResponse::Success {
+                    outputs: vec![value],
+                },
                 Err(error) => ProgramExecutionResponse::Failure {
                     message: format!("worker could not transfer its result: {error}"),
                 },
@@ -838,8 +851,7 @@ async fn execute_script_request(
     request: ProgramExecutionRequest,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {
-    let bytecode: crate::Bytecode = match serde_json::from_slice(&request.artifact.executable_bytes)
-    {
+    let bytecode = match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
         Ok(bytecode) => bytecode,
         Err(error) => {
             return ProgramExecutionResponse::Failure {
@@ -860,8 +872,9 @@ mod tests {
     };
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
+    use runmat_value::Value;
 
     use super::{execute_program_request, recipe_supports_capabilities};
     use crate::{Bytecode, Instr};
@@ -895,7 +908,7 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(&recipe, form, executable_bytes).unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -930,7 +943,7 @@ mod tests {
             ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes.to_vec())
                 .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -986,7 +999,7 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -996,7 +1009,13 @@ mod tests {
                 arguments: Vec::new(),
                 requested_outputs: 1,
             }));
-        assert!(matches!(response, ProgramExecutionResponse::Success { .. }));
+        let ProgramExecutionResponse::Success { outputs } = response else {
+            panic!("expected exact script execution to succeed");
+        };
+        assert_eq!(outputs.len(), 1);
+        let output = runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
+            .expect("script output remains a valid inline value");
+        assert_eq!(output, Value::Num(42.0));
     }
 
     #[test]
@@ -1112,7 +1131,7 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(ProgramFunctionId(0), None),

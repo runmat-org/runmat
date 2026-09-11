@@ -345,14 +345,14 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::ValueRefKind;
 
     use super::*;
 
     fn reference(bytes: &[u8]) -> ValueRef {
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"remote-object", bytes]),
             logical_digest: Digest::sha256(bytes),
             encoded_length: bytes.len() as u64,

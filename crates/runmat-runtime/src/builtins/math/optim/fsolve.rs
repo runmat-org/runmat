@@ -698,7 +698,9 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x * x + 1.0)) })
+                Box::pin(
+                    async move { crate::sequence::single_value_sequence(Value::Num(x * x + 1.0)) },
+                )
             },
         )));
         let _outputs = crate::output_count::push_output_count(Some(3));
@@ -729,7 +731,7 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     _ => panic!("expected tensor input"),
                 };
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(Value::Tensor(
                         Tensor::new(
                             vec![x[0] * x[0] + x[1] * x[1] - 4.0, x[0] * x[1] - 1.0],
@@ -778,7 +780,7 @@ mod tests {
                 };
                 assert_eq!(shape, vec![1, 2]);
                 seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(Value::Tensor(
                         Tensor::new(vec![x[0] - 3.0, x[1] - 4.0], shape).unwrap(),
                     ))
@@ -819,7 +821,7 @@ mod tests {
                 };
                 assert_eq!(shape, vec![2, 2]);
                 seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(Value::Tensor(
                         Tensor::new(vec![x[0] - 1.0, x[1] - 2.0, x[2] - 3.0, x[3] - 4.0], shape)
                             .unwrap(),
@@ -857,7 +859,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x - 3.0)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 3.0)) })
             },
         )));
         let root = block_on(fsolve_builtin(

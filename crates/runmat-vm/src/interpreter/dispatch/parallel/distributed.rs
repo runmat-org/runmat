@@ -37,7 +37,7 @@ pub(super) async fn execute(
     operation: &crate::BytecodeDistributedOp,
     arguments: Vec<Value>,
     execution: &ExecutionContext,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     use crate::BytecodeDistributedOp as Op;
 
     let service = execution
@@ -47,7 +47,21 @@ pub(super) async fn execute(
         .map_err(super::capability_error)?
         .clone();
     let constructor = construction::Executor::new(&*service, bytecode, execution);
-    match operation {
+    if let Op::GlobalIndices {
+        has_lab,
+        requested_outputs,
+    } = operation
+    {
+        return indices::execute(
+            &*service,
+            *has_lab,
+            *requested_outputs,
+            arguments,
+            execution,
+        )
+        .await;
+    }
+    let value = match operation {
         Op::Create { id, owner, scheme } => {
             constructor
                 .create(*id, *owner, scheme.clone(), arguments)
@@ -127,19 +141,7 @@ pub(super) async fn execute(
                 &handle.global_shape,
             )
         }
-        Op::GlobalIndices {
-            has_lab,
-            requested_outputs,
-        } => {
-            indices::execute(
-                &*service,
-                *has_lab,
-                *requested_outputs,
-                arguments,
-                execution,
-            )
-            .await
-        }
+        Op::GlobalIndices { .. } => unreachable!("handled before scalar distributed operations"),
         Op::Redistribute => {
             let [input, codistributor] = arguments::decode(arguments)?;
             let Value::Distributed(handle) = input else {
@@ -159,5 +161,7 @@ pub(super) async fn execute(
                 .await
                 .map(|handle| Value::Distributed(Box::new(handle)))
         }
-    }
+    }?;
+    runmat_value::ValueSequence::single(value)
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }

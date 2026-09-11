@@ -309,11 +309,23 @@ impl PythonAdapter {
         &self,
         context: &RuntimeContext,
         call: ForeignCall,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         match call.symbol.as_str() {
-            "status" => return self.status_value(),
-            "configure" => return self.configure_value(call.arguments),
-            "terminate" => return self.terminate_value(),
+            "status" => {
+                return self
+                    .status_value()
+                    .and_then(super::super::single_output_sequence)
+            }
+            "configure" => {
+                return self
+                    .configure_value(call.arguments)
+                    .and_then(super::super::single_output_sequence)
+            }
+            "terminate" => {
+                return self
+                    .terminate_value()
+                    .and_then(super::super::single_output_sequence)
+            }
             _ => {}
         }
         let session = self.ensure_session()?;
@@ -354,23 +366,19 @@ impl PythonAdapter {
             },
             "get_item" => PythonCall::GetItem {
                 receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
-                index: python_indices(arguments.next())?,
+                index: python_indices(arguments.collect())?,
             },
-            "set_item" => PythonCall::SetItem {
-                receiver: {
-                    let reference = foreign_argument(arguments.next())?;
-                    let receiver = self.python_handle(&reference)?;
-                    assigned_receiver = Some(reference);
-                    receiver
-                },
-                index: python_indices(arguments.next())?,
-                value: self.argument_to_python(
-                    context,
-                    arguments
-                        .next()
-                        .ok_or_else(|| invalid_call("Python item assignment requires a value"))?,
-                )?,
-            },
+            "set_item" => {
+                let reference = foreign_argument(arguments.next())?;
+                let receiver = self.python_handle(&reference)?;
+                let (indices, value) = split_item_assignment_arguments(arguments.collect())?;
+                assigned_receiver = Some(reference);
+                PythonCall::SetItem {
+                    receiver,
+                    index: python_indices(indices)?,
+                    value: self.argument_to_python(context, value)?,
+                }
+            }
             "iterate" => PythonCall::Iterate {
                 receiver: self.python_handle(&foreign_argument(arguments.next())?)?,
             },
@@ -408,17 +416,19 @@ impl PythonAdapter {
             })
             .map_err(python_runtime_error)?;
         if let Some(reference) = assigned_receiver {
-            return Ok(Value::Foreign(reference));
+            return super::super::single_output_sequence(Value::Foreign(reference));
         }
         let values = values
             .into_iter()
             .map(|value| self.result_from_python(&session, value))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(match values.len() {
-            0 => Value::OutputList(Vec::new()),
-            1 if call.requested_outputs <= 1 => values.into_iter().next().expect("one value"),
-            _ => Value::OutputList(values),
-        })
+        if values.len() == 1 && call.requested_outputs <= 1 {
+            return super::super::single_output_sequence(
+                values.into_iter().next().expect("one Python output"),
+            );
+        }
+        runmat_value::ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)
     }
 
     fn argument_to_python(
@@ -569,8 +579,17 @@ impl PythonAdapter {
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
         let request = foreign_callback_request(&registration.callback, arguments, 1)
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
-        let value = pollster::block_on(invoke_foreign_callback(context.clone(), request))
+        let sequence = pollster::block_on(invoke_foreign_callback(context.clone(), request))
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
+        let value = crate::sequence::ResolveValueSequence::resolve(
+            sequence,
+            runmat_types::SequenceUse::SelectPrefix { count: 1 },
+            crate::sequence::SequenceResolutionContext::default(),
+        )
+        .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
+        .into_iter()
+        .next()
+        .expect("one Python callback output was selected");
         self.argument_to_python(&context, value)
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))
     }
@@ -751,19 +770,21 @@ async fn invoke_isolated(
     state: IsolatedPythonState,
     context: RuntimeContext,
     call: ForeignCall,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if state.call_active.replace(true) {
+        let requested_outputs = call.requested_outputs;
         let (reply, response) = tokio::sync::oneshot::channel();
         state
             .nested_calls
             .borrow_mut()
             .push_back(NestedPythonCall { call, reply });
-        return response.await.map_err(|_| {
+        let outputs = response.await.map_err(|_| {
             foreign_error(
                 ForeignErrorKind::HostUnavailable,
                 "isolated Python callback ended before its nested call completed",
             )
-        })?;
+        })??;
+        return isolated_outputs(outputs, requested_outputs);
     }
     let result = async {
         let mut client = state.client.borrow_mut().take();
@@ -778,6 +799,7 @@ async fn invoke_isolated(
         }
         let mut client = client.expect("isolated Python client initialized");
         let released = take_releases(&state.released)?;
+        let requested_outputs = call.requested_outputs;
         let outcome = client
             .invoke(
                 context,
@@ -787,7 +809,8 @@ async fn invoke_isolated(
                 released,
                 &state.nested_calls,
             )
-            .await;
+            .await
+            .and_then(|outputs| isolated_outputs(outputs, requested_outputs));
         let terminal = outcome.as_ref().err().is_some_and(|error| {
             matches!(
                 error.identifier(),
@@ -810,6 +833,20 @@ async fn invoke_isolated(
     .await;
     state.call_active.set(false);
     result
+}
+
+fn isolated_outputs(
+    mut outputs: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    match (requested_outputs, outputs.len()) {
+        (1, 1) => {
+            runmat_value::ValueSequence::single(outputs.pop().expect("one isolated Python output"))
+                .map_err(|error| invalid_call(error.to_string()))
+        }
+        _ => runmat_value::ValueSequence::comma_separated(outputs)
+            .map_err(|error| invalid_call(error.to_string())),
+    }
 }
 
 async fn terminate_isolated(state: IsolatedPythonState) -> Result<Value, RuntimeError> {
@@ -891,7 +928,12 @@ impl ForeignAdapter for PythonAdapter {
             return Box::pin(async move { result });
         }
         if call.symbol == "terminate" {
-            return Box::pin(terminate_isolated(self.isolated_state()));
+            let state = self.isolated_state();
+            return Box::pin(async move {
+                terminate_isolated(state)
+                    .await
+                    .and_then(super::super::single_output_sequence)
+            });
         }
         Box::pin(invoke_isolated(self.isolated_state(), context, call))
     }
@@ -1004,11 +1046,7 @@ fn python_index(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
     Ok(PythonValue::Unsigned(one_based as u64 - 1))
 }
 
-fn python_indices(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
-    let values = match value {
-        Some(Value::OutputList(values)) => values,
-        value => return python_index(value),
-    };
+fn python_indices(values: Vec<Value>) -> Result<PythonValue, RuntimeError> {
     if values.is_empty() {
         return Err(invalid_call("Python indexing requires at least one index"));
     }
@@ -1021,6 +1059,18 @@ fn python_indices(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
     } else {
         Ok(PythonValue::Tuple(indices))
     }
+}
+
+fn split_item_assignment_arguments(
+    mut arguments: Vec<Value>,
+) -> Result<(Vec<Value>, Value), RuntimeError> {
+    let value = arguments
+        .pop()
+        .ok_or_else(|| invalid_call("Python item assignment requires a value"))?;
+    if arguments.is_empty() {
+        return Err(invalid_call("Python indexing requires at least one index"));
+    }
+    Ok((arguments, value))
 }
 
 fn parse_version_pair(value: &str) -> Result<(u16, u16), RuntimeError> {
@@ -1074,6 +1124,40 @@ mod tests {
     use crate::execution::RuntimeExecutionService;
     use crate::foreign::{ForeignPlatform, ForeignRuntime};
 
+    fn only_output(sequence: runmat_value::ValueSequence) -> Value {
+        let [value] = sequence.into_values().try_into().expect("one output");
+        value
+    }
+
+    #[test]
+    fn flattened_item_arguments_preserve_selector_and_value_boundaries() {
+        assert!(matches!(
+            python_indices(vec![Value::Num(2.0)]).expect("one index"),
+            PythonValue::Unsigned(1)
+        ));
+        let PythonValue::Tuple(indices) =
+            python_indices(vec![Value::Num(2.0), Value::Num(4.0)]).expect("two indices")
+        else {
+            panic!("multiple indices must remain a tuple");
+        };
+        assert!(matches!(
+            indices.as_slice(),
+            [PythonValue::Unsigned(1), PythonValue::Unsigned(3)]
+        ));
+        assert!(python_indices(Vec::new()).is_err());
+
+        let (indices, assigned) = split_item_assignment_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(4.0),
+            Value::String("assigned".into()),
+        ])
+        .expect("assignment arguments");
+        assert_eq!(indices, vec![Value::Num(2.0), Value::Num(4.0)]);
+        assert_eq!(assigned, Value::String("assigned".into()));
+        assert!(split_item_assignment_arguments(Vec::new()).is_err());
+        assert!(split_item_assignment_arguments(vec![Value::Num(1.0)]).is_err());
+    }
+
     fn context(foreign: Rc<ForeignRuntime>) -> RuntimeContext {
         RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
             crate::context::RuntimeServicePorts::default().with_foreign(foreign),
@@ -1098,17 +1182,19 @@ mod tests {
             return;
         };
         let context = context(foreign);
-        let object = adapter
-            .invoke_now(
-                &context,
-                ForeignCall {
-                    adapter: PYTHON_ADAPTER_ID.into(),
-                    symbol: "invoke_qualified".into(),
-                    arguments: vec![Value::String("py.types.SimpleNamespace".into())],
-                    requested_outputs: 1,
-                },
-            )
-            .expect("construct Python object");
+        let object = only_output(
+            adapter
+                .invoke_now(
+                    &context,
+                    ForeignCall {
+                        adapter: PYTHON_ADAPTER_ID.into(),
+                        symbol: "invoke_qualified".into(),
+                        arguments: vec![Value::String("py.types.SimpleNamespace".into())],
+                        requested_outputs: 1,
+                    },
+                )
+                .expect("construct Python object"),
+        );
         let Value::Foreign(reference) = object else {
             panic!("expected Python foreign reference");
         };
@@ -1127,17 +1213,19 @@ mod tests {
                 },
             )
             .expect("set Python attribute");
-        let answer = adapter
-            .invoke_now(
-                &context,
-                ForeignCall {
-                    adapter: PYTHON_ADAPTER_ID.into(),
-                    symbol: "get_member".into(),
-                    arguments: vec![Value::Foreign(reference), Value::String("answer".into())],
-                    requested_outputs: 1,
-                },
-            )
-            .expect("get Python attribute");
+        let answer = only_output(
+            adapter
+                .invoke_now(
+                    &context,
+                    ForeignCall {
+                        adapter: PYTHON_ADAPTER_ID.into(),
+                        symbol: "get_member".into(),
+                        arguments: vec![Value::Foreign(reference), Value::String("answer".into())],
+                        requested_outputs: 1,
+                    },
+                )
+                .expect("get Python attribute"),
+        );
         assert_eq!(answer, Value::Int(runmat_value::IntValue::I64(42)));
     }
 

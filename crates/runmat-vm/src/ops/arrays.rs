@@ -265,31 +265,12 @@ where
 }
 
 pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
-    let value = stack
-        .pop()
-        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-    match value {
-        Value::OutputList(values) => {
-            if values.len() < out_count {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced {} output value(s)",
-                    values.len()
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            for v in values.into_iter().take(out_count) {
-                stack.push(v);
-            }
-        }
-        other => {
-            if out_count > 1 {
-                let message = format!(
-                    "Requested {out_count} outputs but call produced a single output value"
-                );
-                return Err(mex("TooManyOutputs", &message));
-            }
-            stack.push(other);
-        }
+    let _ = stack;
+    if out_count > 1 {
+        return Err(mex(
+            "TooManyOutputs",
+            &format!("Requested {out_count} outputs from a scalar expression"),
+        ));
     }
     Ok(())
 }

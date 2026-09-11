@@ -83,12 +83,12 @@ fn registered_fields_are_validated_without_projecting_live_values() {
 #[test]
 fn resident_values_require_and_bind_a_worker_fence() {
     let mut reference = ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"value"]),
         logical_digest: Digest::sha256(b"value"),
         encoded_length: 1,
         media_type: "application/runmat-value".into(),
-        value_schema: "runmat-value/v1".into(),
+        value_schema: "runmat-value/v2".into(),
         encryption_context: Digest::sha256(b"context"),
         kind: ValueRefKind::ResidentObject,
         authorization_scope: "scope".into(),
@@ -178,12 +178,12 @@ fn logical_identity_is_independent_of_inline_or_object_placement() {
     let inline = ValuePayload::Inline(Box::new(InlineValue::String("payload".into())));
     let logical_digest = inline.logical_digest().unwrap();
     let reference = ValuePayload::Object(Box::new(ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"value"]),
         logical_digest,
         encoded_length: 1024,
         media_type: "application/runmat-value".into(),
-        value_schema: "runmat-value/v1".into(),
+        value_schema: "runmat-value/v2".into(),
         encryption_context: Digest::sha256(b"context"),
         kind: ValueRefKind::ResultObject,
         authorization_scope: "scope".into(),
@@ -191,10 +191,42 @@ fn logical_identity_is_independent_of_inline_or_object_placement() {
     }));
     assert_eq!(reference.logical_digest().unwrap(), logical_digest);
 
-    let nested_inline = ValuePayload::Inline(Box::new(InlineValue::OutputList(vec![inline])));
-    let nested_reference = ValuePayload::Inline(Box::new(InlineValue::OutputList(vec![reference])));
+    let nested_inline = ValuePayload::Inline(Box::new(InlineValue::Cell {
+        shape: vec![1, 1],
+        values: vec![inline],
+    }));
+    let nested_reference = ValuePayload::Inline(Box::new(InlineValue::Cell {
+        shape: vec![1, 1],
+        values: vec![reference],
+    }));
     assert_eq!(
         nested_inline.logical_digest().unwrap(),
         nested_reference.logical_digest().unwrap()
     );
+}
+
+#[test]
+fn frozen_value_payload_v1_reference_is_rejected_before_use() {
+    let reference = ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        id: ValueId::derive(&[b"stale-value"]),
+        logical_digest: Digest::sha256(b"stale-value"),
+        encoded_length: 1,
+        media_type: "application/runmat-value".into(),
+        value_schema: "runmat-value/v1".into(),
+        encryption_context: Digest::sha256(b"stale-context"),
+        kind: ValueRefKind::ResultObject,
+        authorization_scope: "scope".into(),
+        resident_fence: None,
+    };
+    let error = ValuePayload::Object(Box::new(reference))
+        .validate(ValueLimits::default())
+        .expect_err("value payload v1 must require re-encoding");
+    assert!(matches!(
+        error,
+        runmat_execution::ContractError::UnsupportedSchema {
+            actual: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            supported: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
+        }
+    ));
 }

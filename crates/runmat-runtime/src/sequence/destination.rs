@@ -138,6 +138,12 @@ mod tests {
         let error = layout
             .distribute(vec![Value::Num(1.0), Value::Num(2.0)])
             .unwrap_err();
-        assert!(error.to_string().contains("3 destination values"));
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:CommaSeparatedListOutputShortage")
+        );
+        assert!(error
+            .to_string()
+            .contains("exactly one value per destination element (expected 3, received 2)"));
     }
 }

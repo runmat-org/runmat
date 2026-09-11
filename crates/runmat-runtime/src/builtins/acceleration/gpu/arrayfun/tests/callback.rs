@@ -29,7 +29,9 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(async move { Ok(Value::Num(value + 10.0)) })
+            Box::pin(
+                async move { crate::sequence::single_value_sequence(Value::Num(value + 10.0)) },
+            )
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
@@ -63,7 +65,9 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(async move { Ok(Value::Num(value + 20.0)) })
+            Box::pin(
+                async move { crate::sequence::single_value_sequence(Value::Num(value + 20.0)) },
+            )
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
@@ -103,7 +107,9 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(async move { Ok(Value::Num(value + 30.0)) })
+            Box::pin(
+                async move { crate::sequence::single_value_sequence(Value::Num(value + 30.0)) },
+            )
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");

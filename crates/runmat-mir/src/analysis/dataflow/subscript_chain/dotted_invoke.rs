@@ -1,9 +1,13 @@
 use crate::{MirIndexComponent, MirIndexing};
-use runmat_types::{DynamicReason, ValueFact, ValueKindFact};
+use runmat_types::{
+    DynamicReason, SequenceFactInference, ValueFact, ValueKindFact, ValueSequenceFact,
+};
 
 use super::{index_selectors, simple_operand_fact};
 
-pub(super) fn infer(
+/// Compatibility adapter for value-only inference callers. New sequence-aware
+/// MIR analysis must use [`infer_sequence`] and retain the sequence fact.
+pub(super) fn infer_legacy_value(
     member: &ValueFact,
     indexing: &MirIndexing,
     sequence_use: runmat_types::SequenceUse,
@@ -13,17 +17,36 @@ pub(super) fn infer(
     runmat_types::EffectSet,
     runmat_types::CapabilitySet,
 ) {
+    let (inferred, effects, capabilities) = infer_sequence(member, indexing, sequence_use, facts);
+    let fact = legacy_selected_fact(&inferred.sequence, sequence_use);
+    (
+        runmat_types::FactInference {
+            fact,
+            diagnostics: inferred.diagnostics,
+        },
+        effects,
+        capabilities,
+    )
+}
+
+pub(super) fn infer_sequence(
+    member: &ValueFact,
+    indexing: &MirIndexing,
+    sequence_use: runmat_types::SequenceUse,
+    facts: &[Option<ValueFact>],
+) -> (
+    SequenceFactInference,
+    runmat_types::EffectSet,
+    runmat_types::CapabilitySet,
+) {
     let ValueKindFact::Callable(callable) = &member.kind else {
-        return (
-            runmat_types::infer_index(
-                member,
-                indexing.kind,
-                &index_selectors(indexing, facts),
-                indexing.result_context,
-            ),
-            Default::default(),
-            Default::default(),
+        let inference = runmat_types::infer_index_sequence(
+            member,
+            indexing.kind,
+            &index_selectors(indexing, facts),
+            indexing.result_context,
         );
+        return (inference, Default::default(), Default::default());
     };
     let request = runmat_types::CallRequest {
         arguments: indexing
@@ -43,22 +66,34 @@ pub(super) fn infer(
         &callable.call_contract(DynamicReason::DynamicDispatch),
         &request,
     );
-    let fact = match inferred.outputs.as_slice() {
-        [] => ValueFact::unknown(DynamicReason::DynamicDispatch),
-        [fact] => fact.clone(),
-        outputs => ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
-            outputs: outputs.to_vec(),
-            variadic: inferred.dynamic_outputs,
-        })),
+    let sequence = ValueSequenceFact {
+        outputs: inferred.outputs,
+        variadic: inferred.dynamic_outputs,
     };
     (
-        runmat_types::FactInference {
-            fact,
+        SequenceFactInference {
+            sequence,
             diagnostics: inferred.diagnostics,
         },
         inferred.effects,
         inferred.capabilities,
     )
+}
+
+fn legacy_selected_fact(
+    sequence: &ValueSequenceFact,
+    sequence_use: runmat_types::SequenceUse,
+) -> ValueFact {
+    match sequence_use {
+        runmat_types::SequenceUse::Discard => ValueFact::scalar(ValueKindFact::Void),
+        runmat_types::SequenceUse::RequireSingle => {
+            sequence.first_or_else(|| ValueFact::unknown(DynamicReason::DynamicDispatch))
+        }
+        _ => ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
+            outputs: sequence.outputs.clone(),
+            variadic: sequence.variadic,
+        })),
+    }
 }
 
 fn requested_outputs(use_: runmat_types::SequenceUse) -> runmat_types::RequestedOutputCount {

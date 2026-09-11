@@ -10,10 +10,11 @@ fn passes_requested_output_count_to_bound_callbacks() {
                 panic!("expected numeric field")
             };
             Box::pin(async move {
-                Ok(Value::OutputList(vec![
+                crate::sequence::ValueSequence::comma_separated(vec![
                     Value::Num(value),
                     Value::Num(value + 10.0),
-                ]))
+                ])
+                .map_err(crate::sequence::sequence_error_to_runtime)
             })
         },
     )));
@@ -62,7 +63,7 @@ fn error_handler_receives_the_original_callback_identity() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             let context = arguments.first().cloned();
-            Box::pin(async move {
+            crate::sequence::single_value_future(async move {
                 match function {
                     101 => Err(crate::build_runtime_error("field callback failed")
                         .with_identifier("RunMat:Test:OriginalCallback")

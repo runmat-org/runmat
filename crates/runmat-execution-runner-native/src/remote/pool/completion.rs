@@ -7,6 +7,12 @@ use runmat_execution_runner::{AttemptReport, DriverCommand};
 
 use super::RemotePoolDriver;
 
+type PendingTaskResolution = (
+    tokio::sync::oneshot::Sender<(u64, super::CompletionResult)>,
+    u64,
+    super::CompletionResult,
+);
+
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
         let task_id = report.task_id;
@@ -73,7 +79,11 @@ impl RemotePoolDriver {
                     )))
                 }
             };
-            self.resolve_task(task_id, outcome);
+            // Reserve the originating task's deterministic completion order,
+            // then fence its peers before making that completion observable.
+            // Otherwise the gang waiter can cancel a blocked peer before the
+            // collective broker has released it.
+            let resolution = self.take_task_resolution(task_id, outcome);
             if let Some(task) = spmd_task {
                 if matches!(
                     state,
@@ -84,7 +94,10 @@ impl RemotePoolDriver {
                     self.collectives
                         .fail_gang(&task.gang, "an SPMD peer terminated");
                 }
+                Self::publish_task_resolution(resolution);
                 self.collectives.rank_terminated(&task.gang, task.rank);
+            } else {
+                Self::publish_task_resolution(resolution);
             }
         }
     }
@@ -117,11 +130,14 @@ impl RemotePoolDriver {
                 TaskState::Indeterminate => crate::NativeProgramFailure::WorkerLost(message),
                 _ => crate::NativeProgramFailure::Execution(message),
             };
-            self.resolve_task(task_id, Err(failure));
+            let resolution = self.take_task_resolution(task_id, Err(failure));
             if let Some(task) = spmd_task {
                 self.collectives
                     .fail_gang(&task.gang, "an SPMD peer terminated");
+                Self::publish_task_resolution(resolution);
                 self.collectives.rank_terminated(&task.gang, task.rank);
+            } else {
+                Self::publish_task_resolution(resolution);
             }
         }
     }
@@ -141,15 +157,23 @@ impl RemotePoolDriver {
     }
 
     fn resolve_task(&self, task_id: runmat_execution::TaskId, outcome: super::CompletionResult) {
-        if let Some(sender) = self
+        Self::publish_task_resolution(self.take_task_resolution(task_id, outcome));
+    }
+
+    fn take_task_resolution(
+        &self,
+        task_id: runmat_execution::TaskId,
+        outcome: super::CompletionResult,
+    ) -> Option<PendingTaskResolution> {
+        let resolution = self
             .completions
             .lock()
             .expect("remote completion registry poisoned")
             .remove(&task_id)
-        {
-            let order = self.completion_sequence.fetch_add(1, Ordering::AcqRel);
-            let _ = sender.send((order, outcome));
-        }
+            .map(|sender| {
+                let order = self.completion_sequence.fetch_add(1, Ordering::AcqRel);
+                (sender, order, outcome)
+            });
         self.programs
             .lock()
             .expect("remote program catalog poisoned")
@@ -158,5 +182,12 @@ impl RemotePoolDriver {
             .lock()
             .expect("remote progress registry poisoned")
             .remove(&task_id);
+        resolution
+    }
+
+    fn publish_task_resolution(resolution: Option<PendingTaskResolution>) {
+        if let Some((sender, order, outcome)) = resolution {
+            let _ = sender.send((order, outcome));
+        }
     }
 }

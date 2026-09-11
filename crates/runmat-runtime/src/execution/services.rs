@@ -128,7 +128,7 @@ pub enum AwaitAction {
         handle: FutureHandle,
         call: Box<DeferredCall>,
     },
-    Completed(Value),
+    Completed(runmat_value::ValueSequence),
 }
 
 pub trait RuntimeExecutionServices {
@@ -217,7 +217,7 @@ pub trait RuntimeExecutionServices {
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<Value, ExecutionServiceError>,
+        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError>;
     fn cancel(
         &self,
@@ -231,7 +231,7 @@ pub trait RuntimeExecutionServices {
 enum FutureState {
     Deferred(Box<DeferredCall>),
     Running,
-    Completed(Result<Value, ExecutionServiceError>),
+    Completed(Result<super::RootedValueSequence, ExecutionServiceError>),
     Cancelled,
 }
 
@@ -517,7 +517,10 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
 
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
         if let Value::Job(handle) = &value {
-            return self.await_job(handle).map(AwaitAction::Completed);
+            let value = self.await_job(handle)?;
+            let sequence = runmat_value::ValueSequence::single(value)
+                .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+            return Ok(AwaitAction::Completed(sequence));
         }
         let future = match value {
             Value::Future(handle) => handle,
@@ -562,7 +565,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             )),
             FutureState::Completed(result) => {
                 let result = result.clone();
-                result.map(AwaitAction::Completed)
+                result.map(|value| AwaitAction::Completed(value.value().clone()))
             }
             FutureState::Cancelled => Err(ExecutionServiceError::Cancelled),
         }
@@ -571,7 +574,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<Value, ExecutionServiceError>,
+        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.lock().expect("execution service state poisoned");
@@ -582,7 +585,10 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         if !matches!(record, FutureState::Running) {
             return Err(ExecutionServiceError::UnknownHandle);
         }
-        *record = FutureState::Completed(result);
+        *record = FutureState::Completed(match result {
+            Ok(value) => super::RootedValueSequence::new(value),
+            Err(error) => Err(error),
+        });
         record_completion(&mut state, future.id);
         Ok(())
     }
@@ -738,12 +744,90 @@ mod tests {
             })
         ));
         service
-            .complete_future(&future, Ok(Value::Num(9.0)))
+            .complete_future(
+                &future,
+                Ok(runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()),
+            )
             .unwrap();
         assert_eq!(
             service.begin_await(Value::Task(task)),
-            Ok(AwaitAction::Completed(Value::Num(9.0)))
+            Ok(AwaitAction::Completed(
+                runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()
+            ))
         );
+    }
+
+    #[test]
+    fn completed_future_preserves_zero_one_and_many_output_cardinalities() {
+        for values in [
+            Vec::new(),
+            vec![Value::Num(1.0)],
+            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+        ] {
+            let service = RuntimeExecutionService::new();
+            let future = service
+                .create_future(deferred_call(1, Vec::new()))
+                .expect("create future");
+            let action = service
+                .begin_await(Value::Future(future.clone()))
+                .expect("start future");
+            assert!(matches!(action, AwaitAction::ExecuteFuture { .. }));
+            service
+                .complete_future(
+                    &future,
+                    Ok(runmat_value::ValueSequence::comma_separated(values.clone()).unwrap()),
+                )
+                .expect("complete future");
+            let AwaitAction::Completed(sequence) = service
+                .begin_await(Value::Future(future))
+                .expect("consume completion")
+            else {
+                panic!("expected completed future");
+            };
+            assert_eq!(sequence.into_values(), values);
+        }
+    }
+
+    #[test]
+    fn completed_future_state_roots_handle_outputs_until_service_discard() {
+        runmat_gc::gc_test_context(|| {
+            let service = RuntimeExecutionService::new();
+            let future = service
+                .create_future(deferred_call(1, Vec::new()))
+                .expect("create future");
+            assert!(matches!(
+                service
+                    .begin_await(Value::Future(future.clone()))
+                    .expect("start future"),
+                AwaitAction::ExecuteFuture { .. }
+            ));
+
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("retained".into()))
+                .expect("allocate rooted payload");
+            let handle = initial.handle();
+            let output = Value::HandleObject(runmat_value::HandleRef {
+                class_name: "CompletionHandle".into(),
+                target: handle,
+                valid: true,
+            });
+            service
+                .complete_future(
+                    &future,
+                    Ok(runmat_value::ValueSequence::single(output).expect("valid output")),
+                )
+                .expect("complete future");
+            initial.unroot().expect("transfer root to service state");
+
+            runmat_gc::gc_collect_major().expect("collect with stored completion");
+            assert_eq!(
+                runmat_gc::gc_clone_value(&handle).expect("service retains completion root"),
+                Value::String("retained".into())
+            );
+
+            drop(service);
+            runmat_gc::gc_collect_major().expect("collect after service discard");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
     }
 
     #[test]

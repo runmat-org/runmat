@@ -33,7 +33,7 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct NestedPythonCall {
     pub call: ForeignCall,
-    pub reply: oneshot::Sender<Result<Value, RuntimeError>>,
+    pub reply: oneshot::Sender<Result<Vec<Value>, RuntimeError>>,
 }
 
 pub type NestedPythonQueue = Rc<RefCell<VecDeque<NestedPythonCall>>>;
@@ -146,7 +146,7 @@ impl IsolatedPythonClient {
         host_identity: &str,
         released_local_handles: Vec<u64>,
         nested: &NestedPythonQueue,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Vec<Value>, RuntimeError> {
         let request = self
             .request(call, released_local_handles)
             .await
@@ -191,7 +191,7 @@ impl IsolatedPythonClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
         nested: &NestedPythonQueue,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Vec<Value>, RuntimeError> {
         loop {
             if runtime.cancellation().load(Ordering::Relaxed) {
                 let _ = self.child.terminate_tree().await;
@@ -207,9 +207,9 @@ impl IsolatedPythonClient {
             .map_err(runtime_error)?;
             match message {
                 PythonHostMessage::Invocation(result) if result.request_id == request_id => {
-                    let value = result.outcome.map_err(runtime_error)?;
+                    let values = result.outcome.map_err(runtime_error)?;
                     return self
-                        .decode_driver_value(value, handles, host_identity)
+                        .decode_driver_outputs(values, handles, host_identity)
                         .map_err(runtime_error);
                 }
                 PythonHostMessage::Callback(callback) if callback.request_id == request_id => {
@@ -257,7 +257,7 @@ impl IsolatedPythonClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
         nested: &NestedPythonQueue,
-    ) -> Result<PythonWireValue, RuntimeError> {
+    ) -> Result<Vec<PythonWireValue>, RuntimeError> {
         let callable = self
             .callbacks
             .get(&callback.callback_id)
@@ -275,10 +275,16 @@ impl IsolatedPythonClient {
                     .map_err(runtime_error)?,
             );
         }
-        let request = foreign_callback_request(&callable, arguments, 1)?;
+        let requested_outputs = usize::try_from(callback.requested_outputs).map_err(|_| {
+            runtime_error(wire_error(
+                "RunMat:Python:CallbackProtocol",
+                "Python callback output count is not representable",
+            ))
+        })?;
+        let request = foreign_callback_request(&callable, arguments, requested_outputs)?;
         let callback_future = invoke_foreign_callback(runtime.clone(), request);
         tokio::pin!(callback_future);
-        let value = loop {
+        let sequence = loop {
             tokio::select! {
                 result = &mut callback_future => break result?,
                 _ = tokio::time::sleep(Duration::from_millis(1)) => {
@@ -292,10 +298,23 @@ impl IsolatedPythonClient {
                 }
             }
         };
-        let gathered = crate::gather_if_needed_async(&value).await?;
-        self.encode_driver_value(&gathered)
-            .await
-            .map_err(runtime_error)
+        let values = crate::sequence::ResolveValueSequence::resolve(
+            sequence,
+            runmat_types::SequenceUse::SelectPrefix {
+                count: requested_outputs,
+            },
+            crate::sequence::SequenceResolutionContext::default(),
+        )?;
+        let mut encoded = Vec::with_capacity(values.len());
+        for value in values {
+            let gathered = crate::gather_if_needed_async(&value).await?;
+            encoded.push(
+                self.encode_driver_value(&gathered)
+                    .await
+                    .map_err(runtime_error)?,
+            );
+        }
+        Ok(encoded)
     }
 
     async fn invoke_nested(
@@ -305,7 +324,7 @@ impl IsolatedPythonClient {
         handles: &ForeignHandleRegistry,
         host_identity: &str,
         nested: &NestedPythonQueue,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Vec<Value>, RuntimeError> {
         let request = self
             .request(call, Vec::new())
             .await
@@ -350,13 +369,10 @@ impl IsolatedPythonClient {
                     lifetime: reference.lifetime,
                 }))
             }
-            Value::OutputList(values) => {
-                let mut encoded = Vec::with_capacity(values.len());
-                for value in values {
-                    encoded.push(Box::pin(self.encode_driver_value(value)).await?);
-                }
-                Ok(PythonWireValue::OutputList(encoded))
-            }
+            Value::OutputList(_) => Err(wire_error(
+                "RunMat:TransientSequenceNotPortable",
+                "transient output sequences cannot be encoded as nested Python values",
+            )),
             _ => {
                 let host = crate::gather_if_needed_async(value)
                     .await
@@ -406,16 +422,23 @@ impl IsolatedPythonClient {
                 };
                 Ok(Value::Foreign(reference))
             }
-            PythonWireValue::OutputList(values) => values
-                .into_iter()
-                .map(|value| self.decode_driver_value(value, handles, host_identity))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::OutputList),
             PythonWireValue::Callback { .. } => Err(wire_error(
                 "RunMat:Python:HostProtocol",
                 "host returned a callback token as a value",
             )),
         }
+    }
+
+    fn decode_driver_outputs(
+        &mut self,
+        values: Vec<PythonWireValue>,
+        handles: &ForeignHandleRegistry,
+        host_identity: &str,
+    ) -> Result<Vec<Value>, PythonWireError> {
+        values
+            .into_iter()
+            .map(|value| self.decode_driver_value(value, handles, host_identity))
+            .collect()
     }
 
     fn translate_releases(&mut self, local_handles: Vec<u64>) -> Vec<u64> {

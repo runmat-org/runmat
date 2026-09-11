@@ -55,15 +55,16 @@ impl MexHostServices for RuntimeMexHostServices {
             requested_outputs,
         )))
         .map_err(runtime_diagnostic)?;
-        match (requested_outputs, value) {
-            (0, _) => Ok(Vec::new()),
-            (_, Value::OutputList(values)) => Ok(values),
-            (1, value) => Ok(vec![value]),
-            (count, _) => Err(MexDiagnostic {
-                identifier: Some("RunMat:MEX:CallbackOutputs".into()),
-                message: format!("callback did not produce the requested {count} outputs"),
-            }),
-        }
+        let sequence = crate::call::arguments::adapt_legacy_builtin_result(value)
+            .map_err(runtime_diagnostic)?;
+        crate::sequence::ResolveValueSequence::resolve(
+            sequence,
+            runmat_types::SequenceUse::SelectPrefix {
+                count: requested_outputs,
+            },
+            crate::sequence::SequenceResolutionContext::default(),
+        )
+        .map_err(runtime_diagnostic)
     }
 
     fn call_captured(

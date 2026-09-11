@@ -45,6 +45,24 @@ mod tests {
     }
 
     #[test]
+    fn transient_output_sequences_are_rejected_at_every_portable_value_depth() {
+        let direct = encode_inline_value(&Value::OutputList(vec![Value::Num(1.0)])).unwrap_err();
+        assert!(matches!(
+            direct,
+            ValueCodecError::TransientSequenceNotPortable { ref path } if path == "$"
+        ));
+
+        let nested = Value::Cell(
+            CellArray::new(vec![Value::OutputList(vec![Value::Num(2.0)])], 1, 1).unwrap(),
+        );
+        let error = encode_inline_value(&nested).unwrap_err();
+        assert!(matches!(
+            error,
+            ValueCodecError::TransientSequenceNotPortable { ref path } if path == "$[0]"
+        ));
+    }
+
+    #[test]
     fn stable_immutable_runtime_forms_round_trip_exactly() {
         let mut structure = StructValue::new();
         structure.insert(

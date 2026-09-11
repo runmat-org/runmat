@@ -88,6 +88,7 @@ impl MxValueContext {
         mode: MxApiMode,
         interface: MxBoundaryInterface,
     ) -> Result<MxArray, MxConversionError> {
+        validate_portable_value(value)?;
         value_to_mx_for_interface_in_context(value, mode, interface, Some(self))
     }
 
@@ -136,7 +137,16 @@ impl fmt::Display for MxConversionError {
 impl std::error::Error for MxConversionError {}
 
 pub fn value_to_mx(value: &Value, mode: MxApiMode) -> Result<MxArray, MxConversionError> {
+    validate_portable_value(value)?;
     value_to_mx_for_interface_in_context(value, mode, MxBoundaryInterface::CMatrix, None)
+}
+
+fn validate_portable_value(value: &Value) -> Result<(), MxConversionError> {
+    runmat_value::validate_no_transient_sequence(value).map_err(|_| {
+        MxConversionError::new(
+            "TransientSequenceNotPortable: transient output sequences cannot cross the MEX value boundary",
+        )
+    })
 }
 
 pub(crate) fn value_to_mx_for_interface_in_context(
@@ -914,7 +924,6 @@ fn value_kind(value: &Value) -> &'static str {
         Value::GpuTensor(_) => "GPU-resident",
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
-        Value::OutputList(_) => "output-list",
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -932,6 +941,17 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn mex_conversion_rejects_nested_transient_sequences_before_recursion() {
+        let nested = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::OutputList(Vec::new())], 1, 1)
+                .expect("nested cell"),
+        );
+        let error = value_to_mx(&nested, MxApiMode::SeparateComplex)
+            .expect_err("transient sequence must not cross MEX");
+        assert!(error.to_string().contains("TransientSequenceNotPortable"));
+    }
 
     #[test]
     fn all_numeric_classes_round_trip_exactly_including_wide_uint64() {

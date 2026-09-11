@@ -6,7 +6,7 @@ use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -179,7 +179,7 @@ impl WorkerBackend for RemoteTestBackend {
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
             let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
                 callable: runmat_execution::ProgramCallable::semantic(
@@ -190,7 +190,7 @@ impl WorkerBackend for RemoteTestBackend {
             })
             .map_err(protocol)?;
             let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: Vec::new(),
             })
@@ -244,8 +244,11 @@ impl WorkerBackend for RemoteTestBackend {
                 .lock()
                 .expect("remote test session poisoned") = None;
             match response? {
-                ProgramExecutionResponse::Success { value } => {
-                    decode_execution(&value).map_err(protocol)
+                ProgramExecutionResponse::Success { outputs } => {
+                    let [value] = outputs.as_slice() else {
+                        return Err(protocol("test execution returned an invalid output count"));
+                    };
+                    decode_execution(value).map_err(protocol)
                 }
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => Err(BackendError::new(
                     BackendErrorKind::Crashed,

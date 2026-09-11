@@ -8,7 +8,9 @@ use runmat_execution_transport_native::transfer::ObjectChunk;
 
 use super::{RemoteAttempt, RemoteBundleReceipt};
 
-pub const REMOTE_WORKER_PROTOCOL_V4: u16 = 4;
+#[cfg(test)]
+use super::protocol_schema::REMOTE_WORKER_PROTOCOL_V4;
+pub use super::protocol_schema::REMOTE_WORKER_PROTOCOL_VERSION;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -17,6 +19,18 @@ pub struct RemoteWorkerRequest {
     pub correlation_id: String,
     pub driver_fence: u64,
     pub command: RemoteWorkerCommand,
+}
+
+impl RemoteWorkerRequest {
+    pub fn validate_schema(&self) -> Result<(), String> {
+        if self.schema_version != REMOTE_WORKER_PROTOCOL_VERSION {
+            return Err(format!(
+                "unsupported remote worker protocol {}; expected {}; rebuild or upgrade the remote worker",
+                self.schema_version, REMOTE_WORKER_PROTOCOL_VERSION
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -118,6 +132,19 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn frozen_remote_worker_v4_request_is_rejected_before_dispatch() {
+        let request = RemoteWorkerRequest {
+            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            correlation_id: "stale-request".into(),
+            driver_fence: 1,
+            command: RemoteWorkerCommand::Drain,
+        };
+        let error = request.validate_schema().unwrap_err();
+        assert!(error.contains("unsupported remote worker protocol 4; expected 5"));
+        assert!(error.contains("rebuild or upgrade"));
+    }
+
     fn context() -> SpmdTaskContext {
         let scope_id = ExecutionScopeId::derive(&[b"scope"]);
         let region = ParallelRegionId(RegionId {
@@ -149,7 +176,7 @@ mod tests {
             ordinal: 13,
         };
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: "collective-completion".into(),
             driver_fence: 19,
             command: RemoteWorkerCommand::CompleteCollective {
@@ -191,7 +218,7 @@ mod tests {
     fn collective_completion_rejects_unknown_wire_fields() {
         let context = context();
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: "collective-completion".into(),
             driver_fence: 19,
             command: RemoteWorkerCommand::CompleteCollective {
@@ -222,7 +249,7 @@ mod tests {
         const PRIVATE_VALUE: &str = "private-rank-value-6f7acb";
         let context = context();
         let reply = RemoteWorkerReply {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: "collective-request".into(),
             outcome: RemoteWorkerOutcome::CollectiveRequest {
                 attempt_id: AttemptId::derive(&[b"attempt"]),

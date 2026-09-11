@@ -14,6 +14,7 @@ use crate::object::indexing::{
 };
 use crate::runtime_error::semantic_error;
 use crate::sequence::destination::PreparedSequenceEndpoint;
+use crate::sequence::ResolveValueSequence;
 use crate::RuntimeError;
 
 pub(super) async fn prepare_step(
@@ -146,7 +147,7 @@ async fn read_parentheses(
         resolution,
         crate::object::protocol::ProtocolResolution::Method(_)
     ) {
-        return invoke_resolved_object_index_path_method(
+        let sequence = invoke_resolved_object_index_path_method(
             &resolution,
             base,
             ObjectSubscriptPath::single(ObjectSubscript::parentheses(
@@ -156,7 +157,12 @@ async fn read_parentheses(
             )),
             1,
         )
-        .await;
+        .await?;
+        let mut values = sequence.resolve(
+            runmat_types::SequenceUse::RequireSingle,
+            crate::sequence::SequenceResolutionContext::default(),
+        )?;
+        return Ok(values.remove(0));
     }
     crate::indexing::value::read_with_plan(base, plan)
 }

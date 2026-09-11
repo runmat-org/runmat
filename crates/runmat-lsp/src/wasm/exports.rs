@@ -556,16 +556,16 @@ mod tests {
                 identifier: Some("RunMat:test".to_string()),
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 state: runmat_types::FutureStateFact::Lazy,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
                 spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
             }),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Pool),
             ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
-                output: Box::new(unknown()),
+                output: runmat_types::ValueSequenceFact::single(unknown()),
             }),
             ValueKindFact::Distributed(runmat_types::DistributedFact {
                 id: runmat_types::DistributedValueId {

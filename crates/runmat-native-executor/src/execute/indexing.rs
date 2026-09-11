@@ -96,7 +96,8 @@ pub(super) fn assign(
                     &method,
                     base,
                     path,
-                    vec![rhs],
+                    runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?
+                        .into_values(),
                 ),
                 "object indexed assignment",
             );
@@ -282,6 +283,33 @@ fn materialize_selectors(
     })
 }
 
+pub(super) fn materialize_index_components(
+    state: &mut HostState,
+    base: &Value,
+    indexing: &MirIndexing,
+) -> NativeExecutorResult<Vec<ObjectIndexComponent>> {
+    let selectors = materialize_selectors(state, base, indexing)?;
+    let mut values = selectors.positional.into_iter();
+    indexing
+        .components
+        .iter()
+        .map(|component| match component {
+            MirIndexComponent::Colon => {
+                let _ = values.next();
+                Ok(ObjectIndexComponent::Colon)
+            }
+            MirIndexComponent::Expr(_) | MirIndexComponent::ContextualExpr(_) => values
+                .next()
+                .map(ObjectIndexComponent::Value)
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "materialized index component is missing its value".into(),
+                    )
+                }),
+        })
+        .collect()
+}
+
 pub(super) fn materialize_cell_expansion_source(
     state: &mut HostState,
     base: Value,
@@ -411,7 +439,7 @@ fn read_paren(
                 ),
                 "object indexed read",
             )?;
-            return normalize_outputs(value, requested_outputs);
+            return normalize_sequence_outputs(value, requested_outputs);
         }
     }
     let plan = super::sync::complete(
@@ -521,10 +549,20 @@ fn assign_brace(
         &cell,
         &selectors.positional,
     )?;
-    let values = match rhs {
-        Value::OutputList(values) => values,
-        value if positions.len() == 1 => vec![value],
-        value => vec![value; positions.len()],
+    let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
+    let kind = sequence.kind();
+    let values = match kind {
+        runmat_value::ValueSequenceKind::CommaSeparated => sequence.into_values(),
+        runmat_value::ValueSequenceKind::Single if positions.len() == 1 => sequence.into_values(),
+        runmat_value::ValueSequenceKind::Single => {
+            let value = sequence.into_values().pop().ok_or_else(|| {
+                semantic_error(
+                    "CellAssignmentArityMismatch",
+                    "single cell assignment value is missing",
+                )
+            })?;
+            vec![value; positions.len()]
+        }
     };
     runmat_runtime::object::cell::assign_cell_value_multi(cell, &positions, &values, |_, _| {})
         .map_err(NativeExecutorError::from)
@@ -669,14 +707,27 @@ fn gather<T: Clone>(data: &[T], plan: &IndexPlan, kind: &str) -> NativeExecutorR
 }
 
 fn normalize_outputs(value: Value, requested_outputs: usize) -> NativeExecutorResult<Vec<Value>> {
-    match (requested_outputs, value) {
+    let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_values();
+    normalize_output_values(values, requested_outputs)
+}
+
+fn normalize_sequence_outputs(
+    sequence: runmat_value::ValueSequence,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    normalize_output_values(sequence.into_values(), requested_outputs)
+}
+
+fn normalize_output_values(
+    values: Vec<Value>,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    match (requested_outputs, values.len()) {
         (0, _) => Ok(Vec::new()),
-        (1, Value::OutputList(mut values)) if values.len() == 1 => Ok(vec![values.remove(0)]),
-        (1, value) => Ok(vec![value]),
-        (expected, Value::OutputList(values)) if values.len() == expected => Ok(values),
-        (expected, value) => Err(NativeExecutorError::from(semantic_error(
+        (expected, actual) if expected == actual => Ok(values),
+        (expected, actual) => Err(NativeExecutorError::from(semantic_error(
             "OutputArityMismatch",
-            format!("indexing produced one value for {expected} outputs: {value:?}"),
+            format!("indexing produced {actual} values for {expected} outputs"),
         ))),
     }
 }

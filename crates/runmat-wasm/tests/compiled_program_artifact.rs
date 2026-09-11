@@ -7,7 +7,7 @@ use runmat_execution::{OutputContract, ProgramCallable, ProgramFunctionId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -55,7 +55,7 @@ async fn request_with_contract(
     )
     .unwrap();
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(
@@ -90,13 +90,13 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
             .await
             .unwrap();
     let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
-    let ProgramExecutionResponse::Success {
-        value: ValuePayload::Inline(value),
-    } = response
-    else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("browser rejected an exact portable program artifact");
     };
-    assert_eq!(*value, InlineValue::F64Bits(42.0_f64.to_bits()));
+    let [ValuePayload::Inline(value)] = outputs.as_slice() else {
+        panic!("browser returned an invalid output vector");
+    };
+    assert_eq!(**value, InlineValue::F64Bits(42.0_f64.to_bits()));
 }
 
 #[wasm_bindgen_test]

@@ -240,6 +240,31 @@ fn execute_instruction(
     match &instruction.operation {
         NativeOperation::Rvalue {
             value,
+            result: runmat_native_codegen::NativeRvalueResult::MultiAssignment(targets),
+        } if targets
+            .targets
+            .iter()
+            .any(|target| matches!(target, runmat_mir::MirOutputTarget::Sequence(_))) =>
+        {
+            let prepared = match state.prepared_multi_assignment.take() {
+                Some(prepared) => prepared,
+                None => super::mutation::PreparedMultiAssignment::prepare(state, targets)?,
+            };
+            let results = match evaluate_rvalue(state, value, prepared.cardinality(), None) {
+                Ok(results) => results,
+                Err(error) => {
+                    // A suspending RHS resumes this exact rvalue site. Retain the
+                    // already-materialized targets so selector and protocol
+                    // preparation is never replayed before completion routing.
+                    state.prepared_multi_assignment = Some(prepared);
+                    return Err(error);
+                }
+            };
+            let prepared = prepared.bind_values(state, results)?;
+            state.prepared_multi_assignment = Some(prepared);
+        }
+        NativeOperation::Rvalue {
+            value,
             result: runmat_native_codegen::NativeRvalueResult::SequenceAssignment(target),
         } => {
             if state.sequence_assignment_register.is_some() {
@@ -607,6 +632,7 @@ pub(super) fn redirect_exception(
     exception: runmat_runtime::native::NativeException,
 ) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteRequest>> {
     state.sequence_assignment_register = None;
+    state.prepared_multi_assignment = None;
     state.captured_sequences.clear();
     state.finish_contextual_site();
     let Some(handler) = state.take_exception_handler() else {

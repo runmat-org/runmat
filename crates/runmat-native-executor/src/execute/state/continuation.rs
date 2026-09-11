@@ -15,6 +15,15 @@ impl HostState {
                 });
             }
         }
+        if let Some(assignment) = &self.prepared_multi_assignment {
+            for (slot, value) in assignment.root_references() {
+                self.roots.push(NativeRoot {
+                    value,
+                    kind: NativeRootKind::TEMPORARY,
+                    slot,
+                });
+            }
+        }
         let contextual_roots = self.contextual_region_roots().collect::<Vec<_>>();
         for value in contextual_roots {
             let slot = u32::try_from(self.roots.len())
@@ -132,6 +141,7 @@ impl HostState {
             || self.completed_call.is_some()
             || self.pending_place_mutation.is_some()
             || self.sequence_assignment_register.is_some()
+            || self.prepared_multi_assignment.is_some()
             || !self.captured_sequences.is_empty()
             || self.has_contextual_progress()
     }

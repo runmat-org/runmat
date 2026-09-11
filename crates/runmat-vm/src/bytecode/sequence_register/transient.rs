@@ -56,6 +56,7 @@ fn is_producer(instruction: &Instr) -> bool {
         instruction,
         Instr::LoadMemberSequenceUsingOutputSlot { .. }
             | Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. }
+            | Instr::IndexCellList { .. }
             | Instr::ReadSubscriptPath {
                 to_sequence_register: true,
                 ..

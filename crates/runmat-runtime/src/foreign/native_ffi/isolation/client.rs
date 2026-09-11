@@ -144,7 +144,7 @@ impl IsolatedNativeFfiClient {
         host_identity: &str,
         released_local_handles: Vec<u64>,
         timeout: Option<Duration>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Vec<Value>, RuntimeError> {
         let request_id = self.take_request_id().map_err(runtime_error)?;
         let releases = self.translate_releases(released_local_handles);
         let mut callbacks = BTreeMap::new();
@@ -215,7 +215,7 @@ impl IsolatedNativeFfiClient {
         callbacks: BTreeMap<u64, Value>,
         handles: &ForeignHandleRegistry,
         host_identity: &str,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Vec<Value>, RuntimeError> {
         loop {
             if runtime.cancellation().load(Ordering::Relaxed) {
                 return Err(runtime_error(wire_error(
@@ -233,9 +233,9 @@ impl IsolatedNativeFfiClient {
             };
             match message {
                 NativeHostMessage::Invocation(result) if result.request_id == request_id => {
-                    let value = result.outcome.map_err(runtime_error)?;
+                    let values = result.outcome.map_err(runtime_error)?;
                     return self
-                        .decode_driver_value(value, handles, host_identity)
+                        .decode_driver_outputs(values, handles, host_identity)
                         .map_err(runtime_error);
                 }
                 NativeHostMessage::Callback(callback) if callback.request_id == request_id => {
@@ -297,7 +297,9 @@ impl IsolatedNativeFfiClient {
             let host_value = crate::gather_if_needed_async(&result)
                 .await
                 .map_err(|error| wire_error("RunMat:NativeFFI:ValueGather", error.to_string()))?;
-            encode_portable(&host_value, &self.snapshots).map(NativeWireValue::Portable)
+            encode_portable(&host_value, &self.snapshots)
+                .map(NativeWireValue::Portable)
+                .map(|value| vec![value])
         }
         .await;
         NativeCallbackResult {
@@ -343,13 +345,10 @@ impl IsolatedNativeFfiClient {
                     lifetime: reference.lifetime,
                 }))
             }
-            Value::OutputList(values) => {
-                let mut encoded = Vec::with_capacity(values.len());
-                for value in values {
-                    encoded.push(Box::pin(self.encode_driver_value(value, callbacks)).await?);
-                }
-                Ok(NativeWireValue::OutputList(encoded))
-            }
+            Value::OutputList(_) => Err(wire_error(
+                "RunMat:TransientSequenceNotPortable",
+                "transient output sequences cannot be encoded as nested native FFI values",
+            )),
             _ => {
                 let host_value = crate::gather_if_needed_async(value)
                     .await
@@ -404,16 +403,23 @@ impl IsolatedNativeFfiClient {
                 };
                 Ok(Value::Foreign(reference))
             }
-            NativeWireValue::OutputList(values) => values
-                .into_iter()
-                .map(|value| self.decode_driver_value(value, handles, host_identity))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::OutputList),
             NativeWireValue::Callback { .. } => Err(wire_error(
                 "RunMat:NativeFFI:HostProtocol",
                 "host returned a callback token as a value",
             )),
         }
+    }
+
+    fn decode_driver_outputs(
+        &mut self,
+        values: Vec<NativeWireValue>,
+        handles: &ForeignHandleRegistry,
+        host_identity: &str,
+    ) -> Result<Vec<Value>, NativeWireError> {
+        values
+            .into_iter()
+            .map(|value| self.decode_driver_value(value, handles, host_identity))
+            .collect()
     }
 
     fn translate_releases(&mut self, local_handles: Vec<u64>) -> Vec<u64> {

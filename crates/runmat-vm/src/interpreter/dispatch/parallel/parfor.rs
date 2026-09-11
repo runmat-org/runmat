@@ -237,7 +237,7 @@ async fn execute_parfor_tasks(
         arguments.push(iteration_argument);
         arguments.extend(inputs.iter().cloned());
         let task_randomness = slice_randomness(&randomness, chunk)?;
-        runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(arguments.clone()))?;
+        runmat_runtime::execution::validate_spawn_captures(&arguments)?;
         let future = context
             .runtime
             .execution()

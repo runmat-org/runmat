@@ -1812,7 +1812,11 @@ mod tests {
                 assert_eq!(requested_outputs, 1);
                 let x = table_scalar_arg(args, "x");
                 let y = table_scalar_arg(args, "y");
-                Box::pin(async move { Ok(Value::Num((x - 0.25).powi(2) + (y + 0.5).powi(2))) })
+                Box::pin(async move {
+                    crate::sequence::single_value_sequence(Value::Num(
+                        (x - 0.25).powi(2) + (y + 0.5).powi(2),
+                    ))
+                })
             },
         )));
         let result = block_on(bayesopt_builtin(
@@ -1862,7 +1866,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, _requested_outputs| {
                 let x = table_scalar_arg(args, "x");
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     if function == 2 {
                         Ok(Value::Bool(x >= 0.0))
                     } else {
@@ -1903,7 +1907,7 @@ mod tests {
             |_function, args, _requested_outputs| {
                 let n = table_scalar_arg(args, "n");
                 let family = table_string_arg(args, "family");
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     let mut out = StructValue::new();
                     let family_penalty = if family == "rbf" { 0.0 } else { 1.0 };
                     out.insert("Objective", Value::Num((n - 2.0).powi(2) + family_penalty));
@@ -1947,7 +1951,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, _requested_outputs| {
                 let x = table_scalar_arg(args, "x");
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     if function == 11 {
                         return Ok(poisoned_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]));
                     }

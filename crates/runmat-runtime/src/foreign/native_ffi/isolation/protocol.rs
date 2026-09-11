@@ -9,7 +9,10 @@ pub const NATIVE_FFI_HOST_FRONTEND_ENV: &str = "RUNMAT_NATIVE_FFI_HOST_FRONTEND"
 pub const NATIVE_FFI_HOST_PROTOCOL: &str = "runmat.native-ffi-host";
 pub const NATIVE_FFI_HOST_SECRET_ENV: &str = "RUNMAT_NATIVE_FFI_HOST_SECRET";
 pub const NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_NATIVE_FFI_SNAPSHOT_ROOT";
-pub const NATIVE_FFI_HOST_SCHEMA_VERSION: u16 = 1;
+#[cfg(test)]
+pub const NATIVE_FFI_HOST_SCHEMA_V1: u16 = 1;
+pub const NATIVE_FFI_HOST_SCHEMA_V2: u16 = 2;
+pub const NATIVE_FFI_HOST_SCHEMA_VERSION: u16 = NATIVE_FFI_HOST_SCHEMA_V2;
 pub const NATIVE_FFI_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const NATIVE_FFI_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const NATIVE_FFI_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -51,7 +54,6 @@ pub enum NativeWireValue {
     Portable(NativeValueTransfer),
     Foreign(NativeRemoteReference),
     Callback { id: u64 },
-    OutputList(Vec<NativeWireValue>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -94,7 +96,7 @@ pub struct NativeInvocationRequest {
 #[serde(deny_unknown_fields)]
 pub struct NativeInvocationResult {
     pub request_id: u64,
-    pub outcome: Result<NativeWireValue, NativeWireError>,
+    pub outcome: Result<Vec<NativeWireValue>, NativeWireError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -111,7 +113,7 @@ pub struct NativeCallbackRequest {
 pub struct NativeCallbackResult {
     pub request_id: u64,
     pub callback_id: u64,
-    pub outcome: Result<NativeWireValue, NativeWireError>,
+    pub outcome: Result<Vec<NativeWireValue>, NativeWireError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -176,7 +178,7 @@ impl NativeInvocationResult {
     fn validate(&self) -> Result<(), String> {
         validate_id(self.request_id, "request")?;
         match &self.outcome {
-            Ok(value) => value.validate(0),
+            Ok(values) => validate_outputs(values),
             Err(error) => error.validate(),
         }
     }
@@ -204,7 +206,7 @@ impl NativeCallbackResult {
         validate_id(self.request_id, "request")?;
         validate_id(self.callback_id, "callback")?;
         match &self.outcome {
-            Ok(value) => value.validate(0),
+            Ok(values) => validate_outputs(values),
             Err(error) => error.validate(),
         }
     }
@@ -252,17 +254,15 @@ impl NativeWireValue {
                 validate_text(&reference.type_identity.name, "foreign type name")
             }
             Self::Callback { id } => validate_id(*id, "callback"),
-            Self::OutputList(values) => {
-                if values.len() > NATIVE_FFI_HOST_MAX_OUTPUTS {
-                    return Err("native FFI output list exceeds the protocol limit".into());
-                }
-                for value in values {
-                    value.validate(depth + 1)?;
-                }
-                Ok(())
-            }
         }
     }
+}
+
+fn validate_outputs(values: &[NativeWireValue]) -> Result<(), String> {
+    if values.len() > NATIVE_FFI_HOST_MAX_OUTPUTS {
+        return Err("native FFI output count exceeds the protocol limit".into());
+    }
+    values.iter().try_for_each(|value| value.validate(0))
 }
 
 fn validate_releases(releases: &[u64]) -> Result<(), String> {
@@ -316,5 +316,53 @@ mod tests {
         let encoded =
             r#"{"operation":"shutdown","payload":{"request_id":1,"releases":[],"extra":true}}"#;
         assert!(serde_json::from_str::<NativeDriverMessage>(encoded).is_err());
+    }
+
+    #[test]
+    fn frozen_v1_nested_output_list_is_not_a_v2_wire_value() {
+        assert_eq!(NATIVE_FFI_HOST_SCHEMA_V1, 1);
+        assert_eq!(NATIVE_FFI_HOST_SCHEMA_VERSION, 2);
+        let frozen = r#"{"kind":"output_list","value":[]}"#;
+        let current = runmat_process_host::ipc::HostHandshake::new(
+            NATIVE_FFI_HOST_PROTOCOL,
+            NATIVE_FFI_HOST_SCHEMA_VERSION,
+            NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+        );
+        let stale = runmat_process_host::ipc::HostHandshake::new(
+            NATIVE_FFI_HOST_PROTOCOL,
+            NATIVE_FFI_HOST_SCHEMA_V1,
+            NATIVE_FFI_HOST_MAX_MESSAGE_BYTES,
+        );
+        assert!(runmat_process_host::ipc::negotiate_handshake(&current, &stale).is_err());
+        assert!(serde_json::from_str::<NativeWireValue>(frozen).is_err());
+    }
+
+    #[test]
+    fn top_level_output_vectors_are_bounded() {
+        let result = NativeInvocationResult {
+            request_id: 1,
+            outcome: Ok(vec![
+                NativeWireValue::Callback { id: 1 };
+                NATIVE_FFI_HOST_MAX_OUTPUTS + 1
+            ]),
+        };
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn current_top_level_output_vectors_preserve_zero_one_and_many_values() {
+        for count in [0, 1, 3] {
+            let result = NativeInvocationResult {
+                request_id: 1,
+                outcome: Ok((1..=count)
+                    .map(|id| NativeWireValue::Callback { id })
+                    .collect()),
+            };
+            result.validate().expect("valid output vector");
+            let encoded = serde_json::to_vec(&result).expect("encode output vector");
+            let decoded: NativeInvocationResult =
+                serde_json::from_slice(&encoded).expect("decode output vector");
+            assert_eq!(decoded, result);
+        }
     }
 }

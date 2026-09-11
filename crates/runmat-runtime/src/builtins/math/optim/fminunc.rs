@@ -1390,7 +1390,7 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     let target = [1.0, 2.0, 3.0];
                     let f = x
                         .iter()
@@ -1417,7 +1417,7 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     let a = x[0];
                     let b = x[1];
                     Ok(Value::Num(100.0 * (b - a * a).powi(2) + (1.0 - a).powi(2)))
@@ -1436,7 +1436,7 @@ mod tests {
             |_function, args, requested_outputs| {
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     let f = x
                         .iter()
                         .enumerate()
@@ -1477,10 +1477,11 @@ mod tests {
                         .zip(target.iter())
                         .map(|(xi, ti)| (xi - ti).powi(2))
                         .sum::<f64>();
-                    Ok(Value::OutputList(vec![
+                    crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(f),
                         Value::Tensor(Tensor::new(grad, vec![3, 1]).unwrap()),
-                    ]))
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)
                 })
             },
         )));
@@ -1544,10 +1545,11 @@ mod tests {
             |_function, _args, requested_outputs| {
                 assert_eq!(requested_outputs, 2);
                 Box::pin(async {
-                    Ok(Value::OutputList(vec![
+                    crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(1.0),
                         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-                    ]))
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)
                 })
             },
         )));
@@ -1572,7 +1574,9 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num((x - 4.0).powi(2))) })
+                Box::pin(async move {
+                    crate::sequence::single_value_sequence(Value::Num((x - 4.0).powi(2)))
+                })
             },
         )));
         let result =

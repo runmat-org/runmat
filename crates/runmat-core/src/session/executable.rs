@@ -68,7 +68,7 @@ impl RunMatSession {
         preferred_function: Option<&str>,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<Value, RuntimeError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         let published = self
             .generic_native_cache
             .resolve_or_compile(unit, preferred_function)?;
@@ -88,7 +88,7 @@ impl RunMatSession {
             },
         )
         .await
-        .map(|execution| execution.value)
+        .map(|execution| execution.outputs)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -218,7 +218,7 @@ impl RunMatSession {
     async fn invoke_tiered_entrypoint(
         &mut self,
         unit: &crate::ExecutableUnit,
-    ) -> std::result::Result<Value, RuntimeError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
             return self.invoke_entrypoint_interpreted(unit).await;
         }
@@ -259,7 +259,7 @@ impl RunMatSession {
                 .await;
                 match execution {
                     Ok(execution) => (
-                        Ok(execution.value),
+                        Ok(execution.outputs),
                         execution.loop_backedges,
                         execution.osr_entry,
                         execution.vectorized_regions,
@@ -307,7 +307,7 @@ impl RunMatSession {
         name: &str,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<Value, RuntimeError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
             return self
                 .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
@@ -352,7 +352,7 @@ impl RunMatSession {
                 .await;
                 match execution {
                     Ok(execution) => (
-                        Ok(execution.value),
+                        Ok(execution.outputs),
                         execution.loop_backedges,
                         execution.osr_entry,
                         execution.vectorized_regions,
@@ -400,7 +400,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<(Value, crate::CoverageFragment), RunError> {
+    ) -> std::result::Result<(runmat_value::ValueSequence, crate::CoverageFragment), RunError> {
         let coverage = runmat_runtime::coverage::CoverageSession::start(&self.runtime_context);
         let value = self.invoke_executable(unit, invocation, control).await?;
         let program_revision = unit.revision().program_revision.canonical_identity();
@@ -421,7 +421,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<Value, RunError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         self.configure_runtime_context();
         let runtime = self
             .runtime_context
@@ -437,7 +437,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<Value, RunError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
@@ -529,12 +529,9 @@ impl RunMatSession {
                 .await
             }
         };
-        let mut value = result.map_err(RunError::Runtime)?;
+        let outputs = result.map_err(RunError::Runtime)?;
         ensure_invocation_allowed(control)?;
-        if invocation.requested_outputs == 0 {
-            value = Value::OutputList(Vec::new());
-        }
-        Ok(value)
+        Ok(outputs)
     }
 
     fn configure_executable_runtime(&self) {
@@ -549,7 +546,7 @@ impl RunMatSession {
     async fn invoke_entrypoint_interpreted(
         &mut self,
         unit: &crate::ExecutableUnit,
-    ) -> std::result::Result<Value, RuntimeError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         let mut variables = vec![Value::Num(0.0); unit.bytecode().var_count];
         match runmat_vm::interpret_with_vars_in_context(
             unit.bytecode(),
@@ -561,11 +558,7 @@ impl RunMatSession {
         )
         .await?
         {
-            runmat_vm::InterpreterOutcome::Completed(completion) => Ok(completion
-                .values
-                .into_iter()
-                .last()
-                .unwrap_or(Value::OutputList(Vec::new()))),
+            runmat_vm::InterpreterOutcome::Completed(_) => Ok(runmat_value::ValueSequence::empty()),
         }
     }
 
@@ -575,7 +568,7 @@ impl RunMatSession {
         function: runmat_hir::FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
-    ) -> std::result::Result<Value, RuntimeError> {
+    ) -> std::result::Result<runmat_value::ValueSequence, RuntimeError> {
         runmat_vm::invoke_semantic_function_value_in_context(
             function.0,
             &arguments,

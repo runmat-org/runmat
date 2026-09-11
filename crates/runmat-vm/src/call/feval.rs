@@ -4,7 +4,7 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 pub enum FevalDispatch {
-    Completed(Value),
+    Completed(runmat_value::ValueSequence),
 }
 
 pub async fn execute_feval(

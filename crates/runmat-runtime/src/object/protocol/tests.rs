@@ -4,7 +4,7 @@ use runmat_value::{StructValue, Tensor, Value};
 
 use super::*;
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
-use crate::sequence::{SequenceResolutionContext, ValueSequence};
+use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
 
 fn single(sequence: ValueSequence) -> Value {
     sequence

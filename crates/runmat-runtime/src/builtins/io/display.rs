@@ -453,7 +453,7 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom display");
-                    Ok(empty_return_value())
+                    Ok(crate::sequence::ValueSequence::empty())
                 })
             },
         )));
@@ -502,7 +502,7 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISP_FALLBACK_OBJECT))
                     );
                     record_console_line(ConsoleStream::Stdout, "custom disp");
-                    Ok(empty_return_value())
+                    Ok(crate::sequence::ValueSequence::empty())
                 })
             },
         )));
@@ -556,7 +556,7 @@ mod tests {
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_CHILD))
                     );
                     record_console_line(ConsoleStream::Stdout, "inherited display");
-                    Ok(empty_return_value())
+                    Ok(crate::sequence::ValueSequence::empty())
                 })
             },
         )));

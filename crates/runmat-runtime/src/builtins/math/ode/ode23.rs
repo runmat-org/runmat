@@ -271,7 +271,7 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
             },
         )));
 
@@ -301,7 +301,7 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-y)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
             },
         )));
 

@@ -11,8 +11,28 @@ use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V6;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_538;
+
+#[derive(Deserialize)]
+struct ProgramExecutionSchemaHeader {
+    schema_version: u16,
+}
+
+pub fn admit_program_execution_request_bytes(bytes: &[u8]) -> ArtifactResult<()> {
+    let header: ProgramExecutionSchemaHeader = serde_json::from_slice(bytes).map_err(|error| {
+        ArtifactError::Invalid(format!("invalid program request envelope: {error}"))
+    })?;
+    if header.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
+        return Err(ArtifactError::Invalid(format!(
+            "unsupported program execution request schema {}; expected {}; rebuild the request with the current value-payload codec",
+            header.schema_version, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
+        )));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,7 +47,7 @@ pub struct ProgramExecutionDescriptor {
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
             || self.callable.validate().is_err()
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
@@ -35,6 +55,14 @@ impl ProgramExecutionDescriptor {
             return Err(ArtifactError::Invalid(
                 "program descriptor has an inconsistent callable or output contract".into(),
             ));
+        }
+        if let Some(admission) = self.artifact.executable_unit_admission()? {
+            if self.callable.semantic_function() != Some(admission.identity.entrypoint_function) {
+                return Err(ArtifactError::Invalid(
+                    "program descriptor callable does not match its executable-unit entrypoint"
+                        .into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -55,7 +83,7 @@ pub struct ProgramExecutionInputs {
 
 impl ProgramExecutionInputs {
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
         {
             return Err(ArtifactError::Invalid(
@@ -97,7 +125,7 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
             callable: descriptor.callable,
@@ -112,7 +140,7 @@ impl ProgramExecutionRequest {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V5 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
@@ -127,12 +155,8 @@ impl ProgramExecutionRequest {
             || !entrypoint_matches(self.artifact.form, &self.callable, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
-            || (matches!(
-                self.artifact.form,
-                ExecutableForm::InterpreterScriptV1
-                    | ExecutableForm::InterpreterScriptV2
-                    | ExecutableForm::TestAttemptV1
-            ) && !self.arguments.is_empty())
+            || (artifact_form_requires_argument_free_entrypoint(self.artifact.form, &self.callable)
+                && !self.arguments.is_empty())
         {
             return Err(ArtifactError::Invalid(
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
@@ -172,6 +196,14 @@ fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoi
         ExecutableForm::InterpreterBytecodeV1 | ExecutableForm::InterpreterBytecodeV2 => {
             callable.recipe_entrypoint() == entrypoint
         }
+        ExecutableForm::InterpreterScriptV2
+            if matches!(
+                callable,
+                ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+            ) =>
+        {
+            callable.recipe_entrypoint() == entrypoint
+        }
         ExecutableForm::InterpreterScriptV1 | ExecutableForm::InterpreterScriptV2 => {
             callable
                 .semantic_function()
@@ -190,9 +222,26 @@ fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoi
                 .is_some_and(|function| function.0 == 0)
                 && entrypoint == "meshing_workload"
         }
-        ExecutableForm::ExecutableUnitV3 | ExecutableForm::NativeObjectV1 => {
-            callable.recipe_entrypoint() == entrypoint
-        }
+        ExecutableForm::ExecutableUnitV3 => true,
+        ExecutableForm::NativeObjectV1 => callable.recipe_entrypoint() == entrypoint,
+    }
+}
+
+fn artifact_form_requires_argument_free_entrypoint(
+    form: ExecutableForm,
+    callable: &ProgramCallable,
+) -> bool {
+    match form {
+        ExecutableForm::InterpreterScriptV1 | ExecutableForm::TestAttemptV1 => true,
+        ExecutableForm::InterpreterScriptV2 => !matches!(
+            callable,
+            ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+        ),
+        ExecutableForm::InterpreterBytecodeV1
+        | ExecutableForm::InterpreterBytecodeV2
+        | ExecutableForm::MeshingWorkload
+        | ExecutableForm::ExecutableUnitV3
+        | ExecutableForm::NativeObjectV1 => false,
     }
 }
 
@@ -200,7 +249,7 @@ fn entrypoint_matches(form: ExecutableForm, callable: &ProgramCallable, entrypoi
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProgramExecutionResponse {
     Success {
-        value: ValuePayload,
+        outputs: Vec<ValuePayload>,
     },
     ExternalizedSuccess {
         outputs: Vec<ValuePayload>,
@@ -224,15 +273,13 @@ impl ProgramExecutionResponse {
     pub fn validate_against(&self, request: &ProgramExecutionRequest) -> ArtifactResult<()> {
         request.validate()?;
         match self {
-            Self::Success { value } => {
-                if request.requested_outputs != 1 {
+            Self::Success { outputs } => {
+                if outputs.len() != usize::from(request.requested_outputs) {
                     return Err(ArtifactError::Invalid(
-                        "single-value response differs from its output contract".into(),
+                        "program response differs from its output contract".into(),
                     ));
                 }
-                value
-                    .validate(ValueLimits::default())
-                    .map_err(|error| ArtifactError::Invalid(error.to_string()))
+                validate_output_payloads(outputs)
             }
             Self::ExternalizedSuccess {
                 outputs,
@@ -268,6 +315,15 @@ impl ProgramExecutionResponse {
     }
 }
 
+fn validate_output_payloads(outputs: &[ValuePayload]) -> ArtifactResult<()> {
+    for output in outputs {
+        output
+            .validate(ValueLimits::default())
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+    }
+    Ok(())
+}
+
 fn validate_externalized_success(
     request: &ProgramExecutionRequest,
     outputs: &[ValuePayload],
@@ -281,11 +337,7 @@ fn validate_externalized_success(
             "externalized program response exceeds its output or object inventory contract".into(),
         ));
     }
-    for output in outputs {
-        output
-            .validate(ValueLimits::default())
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
-    }
+    validate_output_payloads(outputs)?;
     let mut value_ids = BTreeSet::new();
     let mut logical_digests = BTreeSet::new();
     for object in result_objects {
@@ -318,7 +370,7 @@ fn validate_externalized_success(
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::{AttemptId, ValueId, WorkerId};
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::{
         Digest, ExecutionScopeId, JobId, OutputContract, PoolBackend, PoolId, ProgramEnvironment,
         ProgramExecutionAssignment, ProgramFunctionId, ProgramRevision, TaskId,
@@ -364,7 +416,7 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(7), Some("test_function".into())),
@@ -376,10 +428,55 @@ mod tests {
         }
     }
 
+    fn executable_unit_request() -> ProgramExecutionRequest {
+        let bytes = include_bytes!(
+            "../../../runmat-execution/tests/fixtures/executable-unit-stale-components.json"
+        )
+        .to_vec();
+        let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes)
+            .expect("frozen executable-unit fixture remains canonical");
+        let identity = &envelope.manifest.identity;
+        let recipe = ProgramBuildRecipe {
+            schema_version: crate::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+            program_revision: identity.program.clone(),
+            entrypoint: identity.entrypoint.clone(),
+            outputs: OutputContract {
+                requested_outputs: 1,
+            },
+            execution_mode: "interpreter".into(),
+            target: crate::ProgramTarget::portable("portable-executable-unit-test"),
+            interop: envelope.manifest.interop.clone(),
+            accelerators: Vec::new(),
+            features: Default::default(),
+            compile_options: Default::default(),
+            source_objects: Vec::new(),
+            expected_artifact_id: None,
+        };
+        let artifact =
+            ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes).unwrap();
+        ProgramExecutionRequest {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            recipe,
+            artifact,
+            callable: ProgramCallable::semantic(identity.entrypoint_function, Some("main".into())),
+            context: ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
+            arguments: Vec::new(),
+            requested_outputs: 1,
+        }
+    }
+
+    fn inline_argument(value: &str) -> ValuePayload {
+        ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::String(
+            value.into(),
+        )))
+    }
+
     fn result_reference(bytes: &[u8]) -> ValueRef {
         let logical_digest = Digest::sha256(bytes);
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"program-response-test", logical_digest.bytes()]),
             logical_digest,
             encoded_length: bytes.len() as u64,
@@ -405,12 +502,25 @@ mod tests {
 
     #[test]
     fn exact_program_request_rejects_unknown_schemas_and_output_drift() {
+        let mut stale = request();
+        stale.schema_version = PROGRAM_EXECUTION_REQUEST_SCHEMA_V5;
+        assert!(stale.validate().is_err());
         let mut unknown = request();
         unknown.schema_version += 1;
         assert!(unknown.validate().is_err());
         let mut outputs = request();
         outputs.requested_outputs = 2;
         assert!(outputs.validate().is_err());
+    }
+
+    #[test]
+    fn frozen_v5_request_is_rejected_before_payload_deserialization() {
+        let frozen = br#"{"schema_version":5,"arguments":[{"form":"inline","value":{"type":"output_list","value":[]}}]}"#;
+        let error = admit_program_execution_request_bytes(frozen).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsupported program execution request schema 5; expected 6"));
+        assert!(serde_json::from_slice::<ProgramExecutionRequest>(frozen).is_err());
     }
 
     #[test]
@@ -461,6 +571,106 @@ mod tests {
     }
 
     #[test]
+    fn named_executable_unit_binds_recipe_name_and_typed_function_identity() {
+        let request = executable_unit_request();
+        assert_eq!(request.recipe.entrypoint, "main");
+        request.validate().unwrap();
+
+        let mut wrong_function = request.clone();
+        wrong_function.callable =
+            ProgramCallable::semantic(ProgramFunctionId(1), Some("main".into()));
+        let error = wrong_function.validate().unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("executable unit request does not match its declared entrypoint"));
+
+        let mut wrong_name = request.recipe.clone();
+        wrong_name.entrypoint = "different_entrypoint".into();
+        let error = ProgramArtifact::materialize(
+            &wrong_name,
+            ExecutableForm::ExecutableUnitV3,
+            request.artifact.executable_bytes.clone(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("entrypoint"));
+    }
+
+    #[test]
+    fn compiler_bound_script_regions_accept_arguments_but_top_level_scripts_do_not() {
+        let region = runmat_types::ParallelRegionId(runmat_types::RegionId {
+            function: runmat_types::ProgramFunctionId(7),
+            ordinal: 3,
+        });
+        let mut parallel = request();
+        parallel.callable = ProgramCallable::parallel_region(region);
+        parallel.context = ProgramInvocationContext::ParallelTask {
+            task: runmat_execution::ParallelTaskContext {
+                region,
+                chunk: runmat_execution::ParallelChunk {
+                    ordinal: 0,
+                    start: 0,
+                    len: 1,
+                },
+                randomness: runmat_execution::ParallelRandomnessContext::Inherit,
+            },
+        };
+        parallel.recipe.entrypoint = parallel.callable.recipe_entrypoint();
+        parallel.artifact = ProgramArtifact::materialize(
+            &parallel.recipe,
+            ExecutableForm::InterpreterScriptV2,
+            b"compiler-bound-parallel-region".to_vec(),
+        )
+        .unwrap();
+        parallel.arguments = vec![inline_argument("parallel capture")];
+        parallel.validate().unwrap();
+
+        let scope_id = ExecutionScopeId::derive(&[b"script-region-scope"]);
+        let pool = runmat_execution::PoolHandle {
+            id: PoolId::derive(&[b"script-region-pool"]),
+            scope_id,
+            generation: 1,
+        };
+        let gang = runmat_execution::GangHandle {
+            id: runmat_execution::GangId::derive(&[b"script-region-gang"]),
+            scope_id,
+            generation: 1,
+            pool,
+            labs: runmat_types::LabCount(2),
+        };
+        let mut spmd = request();
+        spmd.callable = ProgramCallable::spmd_region(region);
+        spmd.context = ProgramInvocationContext::SpmdTask {
+            task: runmat_execution::SpmdTaskContext {
+                gang,
+                region,
+                rank: runmat_types::LabRank(1),
+            },
+        };
+        spmd.recipe.entrypoint = spmd.callable.recipe_entrypoint();
+        spmd.artifact = ProgramArtifact::materialize(
+            &spmd.recipe,
+            ExecutableForm::InterpreterScriptV2,
+            b"compiler-bound-spmd-region".to_vec(),
+        )
+        .unwrap();
+        spmd.arguments = vec![inline_argument("spmd capture")];
+        spmd.validate().unwrap();
+
+        let mut top_level = request();
+        top_level.recipe.entrypoint = "script".into();
+        top_level.callable = ProgramCallable::semantic(ProgramFunctionId(0), None);
+        top_level.artifact = ProgramArtifact::materialize(
+            &top_level.recipe,
+            ExecutableForm::InterpreterScriptV2,
+            b"top-level-script".to_vec(),
+        )
+        .unwrap();
+        top_level.validate().unwrap();
+        top_level.arguments = vec![inline_argument("unexpected")];
+        assert!(top_level.validate().is_err());
+    }
+
+    #[test]
     fn externalized_response_requires_a_complete_unique_result_inventory() {
         let request = request();
         let root = result_reference(b"root");
@@ -481,6 +691,25 @@ mod tests {
             result_objects: vec![root.clone(), root],
         };
         assert!(duplicate.validate_against(&request).is_err());
+    }
+
+    #[test]
+    fn inline_response_uses_a_bounded_output_vector() {
+        let request = request();
+        let response = ProgramExecutionResponse::Success {
+            outputs: vec![ValuePayload::Inline(Box::new(
+                runmat_execution::value::InlineValue::F64Bits(3.0_f64.to_bits()),
+            ))],
+        };
+        response.validate_against(&request).unwrap();
+
+        let wrong_count = ProgramExecutionResponse::Success {
+            outputs: Vec::new(),
+        };
+        assert!(wrong_count.validate_against(&request).is_err());
+
+        let frozen_v5 = r#"{"outcome":"success","value":{"form":"inline","value":{"type":"logical","value":true}}}"#;
+        assert!(serde_json::from_str::<ProgramExecutionResponse>(frozen_v5).is_err());
     }
 
     #[test]

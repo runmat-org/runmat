@@ -115,7 +115,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .await
             .expect("installed artifact resolves")
             .expect("embedded artifact executes");
-        assert_eq!(value, runmat_value::Value::Num(42.0));
+        assert_eq!(value.into_values(), vec![runmat_value::Value::Num(42.0)]);
         drop(installed);
     }
 }

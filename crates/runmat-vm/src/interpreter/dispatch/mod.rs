@@ -1,5 +1,6 @@
 mod arithmetic;
 mod arrays;
+mod call_output_sequence;
 mod calls;
 mod control_flow;
 mod exceptions;
@@ -91,6 +92,7 @@ pub struct SequenceRegister {
 #[derive(Default)]
 pub struct SequenceState {
     pub assignment: Option<SequenceRegister>,
+    call_outputs: Option<SequenceRegister>,
     captures: BTreeMap<usize, SequenceRegister>,
     output_targets: Vec<PreparedOutputTarget>,
     expected_output_targets: Option<usize>,
@@ -415,6 +417,9 @@ impl SequenceState {
         if let Some(window) = self.assignment.take() {
             windows.push(window);
         }
+        if let Some(window) = self.call_outputs.take() {
+            windows.push(window);
+        }
         windows.sort_by_key(|window| std::cmp::Reverse(window.start));
         for window in windows {
             if let Some(end) = window.start.checked_add(window.len) {
@@ -618,9 +623,7 @@ fn clear_popped_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    if let Err(err) =
-        crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live))
-    {
+    if let Err(err) = crate::accel::residency::clear_value_excluding_values(popped, &live) {
         log::warn!("failed to clear popped GPU residency: {err}");
     }
 }
@@ -636,9 +639,7 @@ fn clear_scope_value_residency_excluding_live_values(
     live.extend(stack.iter().cloned());
     live.extend(vars.iter().cloned());
     live.extend(context.locals.iter().cloned());
-    if let Err(err) =
-        crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live))
-    {
+    if let Err(err) = crate::accel::residency::clear_value_excluding_values(dropped_local, &live) {
         log::warn!("failed to clear dropped local GPU residency: {err}");
     }
 }
@@ -659,9 +660,7 @@ fn clear_overwritten_var_residency_excluding_live_values(
         }
     }
     live.extend(context.locals.iter().cloned());
-    if let Err(err) =
-        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
-    {
+    if let Err(err) = crate::accel::residency::clear_value_excluding_values(overwritten, &live) {
         log::warn!("failed to clear overwritten variable GPU residency: {err}");
     }
 }
@@ -682,9 +681,7 @@ fn clear_overwritten_local_residency_excluding_live_values(
             live.push(value.clone());
         }
     }
-    if let Err(err) =
-        crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live))
-    {
+    if let Err(err) = crate::accel::residency::clear_value_excluding_values(overwritten, &live) {
         log::warn!("failed to clear overwritten local GPU residency: {err}");
     }
 }
@@ -718,7 +715,7 @@ pub async fn dispatch_instruction(
         pc,
     } = state;
     let DispatchHooks {
-        clear_value_residency,
+        clear_value_residency: _fallback_clear_value_residency,
         store_var_before_overwrite,
         store_var_after_store,
         store_local_before_local_overwrite,
@@ -766,7 +763,7 @@ pub async fn dispatch_instruction(
             function_registry,
             *pc,
             &context.runtime,
-            &mut *clear_value_residency,
+            sequence_register,
         )
         .await? =>
         {
@@ -1107,7 +1104,7 @@ pub async fn dispatch_instruction(
                     #[cfg(feature = "native-accel")]
                     clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
                     #[cfg(not(feature = "native-accel"))]
-                    clear_value_residency(&value);
+                    _fallback_clear_value_residency(&value);
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1298,7 +1295,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                BuiltinHandling::Completed => {}
+                BuiltinHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, *out_count)?;
+                }
                 BuiltinHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1335,7 +1334,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                BuiltinHandling::Completed => {}
+                BuiltinHandling::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                }
                 BuiltinHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1361,7 +1362,11 @@ pub async fn dispatch_instruction(
                 args,
             )
             .await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(
+                stack,
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
+                *out_count,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1382,7 +1387,11 @@ pub async fn dispatch_instruction(
                 args,
             )
             .await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(
+                stack,
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
+                *out_count,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1398,8 +1407,8 @@ pub async fn dispatch_instruction(
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
-                crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(calls::normalize_requested_outputs(result, *out_count));
+                crate::call::feval::FevalDispatch::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, *out_count)?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1418,8 +1427,8 @@ pub async fn dispatch_instruction(
             match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
                 .await?
             {
-                crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(calls::normalize_requested_outputs(result, out_count));
+                crate::call::feval::FevalDispatch::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1439,8 +1448,8 @@ pub async fn dispatch_instruction(
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
-                crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(calls::normalize_requested_outputs(result, *out_count));
+                crate::call::feval::FevalDispatch::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, *out_count)?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1461,8 +1470,8 @@ pub async fn dispatch_instruction(
             match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
                 .await?
             {
-                crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(calls::normalize_requested_outputs(result, out_count));
+                crate::call::feval::FevalDispatch::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1492,7 +1501,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1528,7 +1539,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1577,7 +1590,7 @@ pub async fn dispatch_instruction(
             if captures_updated {
                 refresh_workspace_state(vars);
             }
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1620,7 +1633,7 @@ pub async fn dispatch_instruction(
             if captures_updated {
                 refresh_workspace_state(vars);
             }
-            stack.push(calls::normalize_requested_outputs(result, out_count));
+            sequence_register.stage_call_output_sequence(stack, result)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1653,7 +1666,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1694,7 +1709,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1740,7 +1757,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1787,7 +1806,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1806,7 +1827,11 @@ pub async fn dispatch_instruction(
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result =
                 runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(
+                stack,
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
+                *out_count,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1831,7 +1856,11 @@ pub async fn dispatch_instruction(
                 args,
             )
             .await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(
+                stack,
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
+                *out_count,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1858,7 +1887,11 @@ pub async fn dispatch_instruction(
                 args,
             )
             .await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(
+                stack,
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
+                *out_count,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1898,7 +1931,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -1950,7 +1985,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -2003,7 +2040,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    sequence_register.stage_call_output_sequence(stack, sequence)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -2045,7 +2084,9 @@ pub async fn dispatch_instruction(
             )
             .await?
             {
-                UserCallHandling::Completed => {}
+                UserCallHandling::Completed(sequence) => {
+                    calls::publish_fixed_outputs(stack, sequence, out_count)?;
+                }
                 UserCallHandling::Caught => {
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::ContinueLoop,
@@ -2095,7 +2136,7 @@ pub async fn dispatch_instruction(
             if captures_updated {
                 refresh_workspace_state(vars);
             }
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            calls::publish_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -2106,7 +2147,7 @@ pub async fn dispatch_instruction(
             arg_count,
             out_count,
         } => {
-            handle_method_or_member_index_multi_call(
+            let handling = handle_method_or_member_index_multi_call(
                 stack,
                 identity.clone(),
                 *fallback_policy,
@@ -2115,6 +2156,9 @@ pub async fn dispatch_instruction(
                 current_function_name,
             )
             .await?;
+            if let calls::MethodHandling::Outputs(sequence) = handling {
+                calls::publish_fixed_outputs(stack, sequence, *out_count)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -2125,7 +2169,7 @@ pub async fn dispatch_instruction(
             specs,
             out_count,
         } => {
-            handle_method_or_member_index_expand_multi_call(
+            let handling = handle_method_or_member_index_expand_multi_call(
                 stack,
                 sequence_register,
                 calls::MethodExpandCallContext {
@@ -2138,6 +2182,9 @@ pub async fn dispatch_instruction(
                 },
             )
             .await?;
+            if let calls::MethodHandling::Outputs(sequence) = handling {
+                calls::publish_fixed_outputs(stack, sequence, *out_count)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

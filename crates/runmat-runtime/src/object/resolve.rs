@@ -12,6 +12,7 @@ use crate::object::dispatch::{
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
 };
 use crate::object::indexing::ObjectIndexOp;
+use crate::sequence::ResolveValueSequence;
 use crate::RuntimeError;
 use runmat_types::ClassIdentity;
 use runmat_value::{Closure, StructValue, Tensor, Value};
@@ -21,6 +22,14 @@ const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
 fn mex(identifier: &str, message: &str) -> RuntimeError {
     crate::runtime_error::semantic_error(identifier, message)
+}
+
+fn require_single_sequence(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
 }
 
 fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<ClassIdentity> {
@@ -100,12 +109,16 @@ pub async fn read_member_sequence_with_context(
                 )?;
                 values.push(selected.pop().expect("single sequence resolution"));
             }
-            Ok(crate::sequence::ValueSequence::comma_separated(values))
+            crate::sequence::ValueSequence::comma_separated(values)
+                .map_err(crate::sequence::sequence_error_to_runtime)
         }
         base => {
             load_scalar_member_with_context(context, base, field, allow_init, caller_function_name)
                 .await
-                .map(crate::sequence::ValueSequence::single)
+                .and_then(|value| {
+                    crate::sequence::ValueSequence::single(value)
+                        .map_err(crate::sequence::sequence_error_to_runtime)
+                })
         }
     }
 }
@@ -144,7 +157,8 @@ async fn load_scalar_member_with_context(
                     path,
                     1,
                 )
-                .await;
+                .await
+                .and_then(require_single_sequence);
             }
             if let Some((p, owner)) = crate::class_registry::lookup_property(
                 &obj.class_name,
@@ -178,7 +192,8 @@ async fn load_scalar_member_with_context(
                             &field,
                             1,
                         )
-                        .await;
+                        .await
+                        .and_then(require_single_sequence);
                     }
                 }
             }
@@ -238,7 +253,8 @@ async fn load_scalar_member_with_context(
                     path,
                     1,
                 )
-                .await;
+                .await
+                .and_then(require_single_sequence);
             }
             crate::builtins::structs::core::getfield::get_member_value(
                 Value::HandleObject(handle),
@@ -464,7 +480,8 @@ where
                             rhs.clone(),
                             1,
                         )
-                        .await;
+                        .await
+                        .and_then(require_single_sequence);
                     }
                 }
                 if let Some(oldv) = obj.properties.get(&field) {
@@ -756,6 +773,8 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::sequence::ResolveValueSequence;
+
     use super::{
         is_possible_graphics_handle_value, load_member, load_static_member,
         read_member_sequence_with_context, store_member,

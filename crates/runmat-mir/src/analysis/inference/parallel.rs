@@ -86,18 +86,14 @@ pub(crate) fn distributed_fact(
                 class: NumericClass::UInt64,
                 domain: NumericDomain::Real,
             });
-            if *requested_outputs == 1 {
+            if *requested_outputs == 0 {
+                ValueFact::scalar(ValueKindFact::Void)
+            } else {
                 ValueFact::proven(
                     kind,
                     ShapeFact::from(vec![Some(1), None]),
                     StorageFact::Dense,
                 )
-            } else {
-                let index = ValueFact::scalar(kind);
-                ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
-                    outputs: vec![index.clone(), index],
-                    variadic: false,
-                }))
             }
         }
         MirDistributedOp::Redistribute { value, .. } => {
@@ -113,6 +109,24 @@ pub(crate) fn distributed_fact(
             }))
         }
     }
+}
+
+pub(crate) fn distributed_output_sequence(
+    operation: &crate::parallel::MirDistributedOp,
+) -> Option<runmat_types::ValueSequenceFact> {
+    let crate::parallel::MirDistributedOp::GlobalIndices {
+        requested_outputs, ..
+    } = operation
+    else {
+        return None;
+    };
+    let index = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    }));
+    Some(runmat_types::ValueSequenceFact::fixed(
+        (0..*requested_outputs).map(|_| index.clone()).collect(),
+    ))
 }
 
 pub(crate) fn collective_fact(

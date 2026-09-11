@@ -7,7 +7,7 @@ use runmat_types::{
     BuiltinId, CallableFallbackPolicy, CallableIdentity, DistributedValueContract,
     DistributionScheme, LabRank, SourceId,
 };
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -27,7 +27,7 @@ pub trait RuntimeCallService {
     fn invoke(
         &self,
         request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>>;
 
     fn source_functions(&self, _source_id: SourceId) -> Vec<(String, usize)> {
         Vec::new()
@@ -49,7 +49,7 @@ impl RuntimeCallService for RuntimeCallRouter {
     fn invoke(
         &self,
         request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
         let fallback_policy = match &request.identity {
             CallableIdentity::DynamicName(_)
             | CallableIdentity::Imported(_)
@@ -174,7 +174,7 @@ pub trait RuntimeForeignService {
         &self,
         context: super::RuntimeContext,
         call: ForeignCall,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<runmat_value::ValueSequence, RuntimeError>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,7 +397,7 @@ pub trait RuntimeDistributedService {
     fn invoke(
         &self,
         request: RuntimeDistributedCallRequest,
-    ) -> RuntimeServiceFuture<Result<Value, RuntimeError>>;
+    ) -> RuntimeServiceFuture<Result<runmat_value::ValueSequence, RuntimeError>>;
 
     fn composite_entry(
         &self,

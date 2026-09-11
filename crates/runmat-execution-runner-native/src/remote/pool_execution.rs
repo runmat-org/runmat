@@ -180,16 +180,9 @@ pub(super) async fn execute(
                         outputs,
                         result_objects,
                     }) if result_objects.is_empty() => {
-                        match outputs.as_slice() {
-                            [value] => Ok(RemotePoolExecutionOutcome::Completed(
-                                ProgramExecutionResponse::Success {
-                                    value: value.clone(),
-                                },
-                            )),
-                            _ => Err(protocol(
-                                "remote worker returned an invalid inline output count",
-                            )),
-                        }
+                        Ok(RemotePoolExecutionOutcome::Completed(
+                            ProgramExecutionResponse::Success { outputs },
+                        ))
                     }
                     Ok(runmat_execution_runner::AttemptSuccess::Values {
                         outputs,

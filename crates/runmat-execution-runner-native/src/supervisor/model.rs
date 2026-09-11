@@ -4,7 +4,7 @@ use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -112,7 +112,7 @@ impl ProgramBatchSubmission {
 
     pub fn program_request(&self) -> ProgramExecutionRequest {
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe: self.recipe.clone(),
             artifact: self.artifact.clone(),
             callable: self.callable.clone(),

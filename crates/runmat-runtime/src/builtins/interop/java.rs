@@ -1,5 +1,7 @@
 //! Java interoperability builtins backed by the session foreign runtime.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sequence::ResolveValueSequence;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
@@ -115,7 +117,7 @@ async fn invoke_java(operation: &str, arguments: Vec<Value>) -> BuiltinResult<Va
             .require_foreign(operation)
             .map_err(|error| error.into_runtime_error())?
             .clone();
-        context
+        let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
@@ -125,7 +127,12 @@ async fn invoke_java(operation: &str, arguments: Vec<Value>) -> BuiltinResult<Va
                     requested_outputs: 1,
                 },
             ))
-            .await
+            .await?;
+        let mut values = sequence.resolve(
+            runmat_types::SequenceUse::RequireSingle,
+            crate::sequence::SequenceResolutionContext::default(),
+        )?;
+        Ok(values.remove(0))
     }
 }
 

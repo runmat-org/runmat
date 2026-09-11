@@ -2,7 +2,7 @@ use super::{
     DenseValue, ExceptionValue, InlineValue, RegisteredData, StructField, ValueLimits,
     ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
-use crate::{schema::VALUE_PAYLOAD_SCHEMA_V1, ContractError};
+use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 
 pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<(), ContractError> {
     ValidationBudget {
@@ -126,12 +126,6 @@ impl ValidationBudget<'_> {
                     self.payload(value, depth + 1)?;
                 }
             }
-            InlineValue::OutputList(values) => {
-                self.elements(values.len() as u64)?;
-                for value in values {
-                    self.payload(value, depth + 1)?;
-                }
-            }
             InlineValue::Struct(fields) => self.fields(fields, depth)?,
             InlineValue::Symbolic(value) | InlineValue::ImmutableValueClass(value) => {
                 self.registered(value, depth)?;
@@ -237,10 +231,10 @@ impl ValidationBudget<'_> {
     }
 
     fn reference(&mut self, reference: &ValueRef) -> Result<(), ContractError> {
-        if reference.schema_version != VALUE_PAYLOAD_SCHEMA_V1 {
+        if reference.schema_version != VALUE_PAYLOAD_SCHEMA_VERSION {
             return Err(ContractError::UnsupportedSchema {
                 actual: reference.schema_version,
-                supported: VALUE_PAYLOAD_SCHEMA_V1,
+                supported: VALUE_PAYLOAD_SCHEMA_VERSION,
             });
         }
         self.text(&reference.media_type)?;

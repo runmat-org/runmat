@@ -5,7 +5,7 @@ use runmat_types::{
     ForeignAffinityFact, ForeignFact, ForeignLifetimeFact, ForeignOwnershipFact, InvalidationCause,
     InvalidationVector, LayoutFact, MutationFact, NumericClass, NumericDomain, NumericFact,
     OutputListFact, ParallelRegionId, ProgramFunctionId, RegionId, ResidencyFact, ShapeFact,
-    StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ViewFact,
+    StorageFact, StructFact, SymbolName, ValueFact, ValueKindFact, ValueSequenceFact, ViewFact,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -108,7 +108,7 @@ fn representative_facts() -> Vec<ValueFact> {
     });
     let mut future = numeric(NumericClass::Double);
     future.kind = ValueKindFact::Execution(ExecutionFact::Future {
-        output: Box::new(numeric(NumericClass::UInt32)),
+        output: ValueSequenceFact::single(numeric(NumericClass::UInt32)),
         state: runmat_types::FutureStateFact::Lazy,
     });
     future.alias = AliasFact::Identity;

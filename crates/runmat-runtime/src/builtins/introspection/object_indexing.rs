@@ -1,3 +1,4 @@
+use crate::sequence::ResolveValueSequence;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -665,13 +666,13 @@ async fn dispatch_num_arguments_overload(
     )? {
         crate::object::protocol::ProtocolResolution::DefaultIndexing => Ok(None),
         crate::object::protocol::ProtocolResolution::Method(method) => {
-            crate::object::protocol::invoke_resolved_object_method(
+            let sequence = crate::object::protocol::invoke_resolved_object_method(
                 &method,
                 vec![target, subscript, indexing_context],
                 1,
             )
-            .await
-            .map(Some)
+            .await?;
+            Ok(Some(require_single_sequence(sequence)?))
         }
     }
 }
@@ -828,7 +829,7 @@ pub async fn object_path_cardinality(
         )
         .await?;
         return Ok(PreparedObjectAssignmentCardinality {
-            count: exact_output_count(&value)?,
+            count: exact_output_count(&require_single_sequence(value)?)?,
             method: Some(method),
         });
     }
@@ -905,6 +906,14 @@ fn exact_output_count(value: &Value) -> crate::BuiltinResult<usize> {
         ));
     }
     Ok(numeric as usize)
+}
+
+fn require_single_sequence(sequence: runmat_value::ValueSequence) -> crate::BuiltinResult<Value> {
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
 }
 
 fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {

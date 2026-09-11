@@ -287,16 +287,30 @@ async fn call_extension_handler(extension: &str, path: &Path) -> BuiltinResult<O
     else {
         return Ok(None);
     };
-    result.map(Some).map_err(|err| {
-        let message = format!("{handler_name}: {}", err.message());
-        let mut builder = build_runtime_error(message)
-            .with_builtin(BUILTIN_NAME)
-            .with_source(err);
-        if let Some(identifier) = OPEN_ERROR_HANDLER.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        builder.build()
-    })
+    result
+        .and_then(|sequence| {
+            let mut values = sequence.into_values();
+            match values.len() {
+                0 => Ok(None),
+                1 => Ok(values.pop()),
+                count => Err(crate::runtime_error::semantic_error(
+                    "RunMat:OpenHandlerOutputCount",
+                    format!(
+                        "{handler_name} returned {count} outputs where at most one was requested"
+                    ),
+                )),
+            }
+        })
+        .map_err(|err| {
+            let message = format!("{handler_name}: {}", err.message());
+            let mut builder = build_runtime_error(message)
+                .with_builtin(BUILTIN_NAME)
+                .with_source(err);
+            if let Some(identifier) = OPEN_ERROR_HANDLER.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })
 }
 
 async fn try_open_runmat_figure_scene(path: &Path) -> BuiltinResult<Option<u32>> {
@@ -522,7 +536,9 @@ mod tests {
                     panic!("expected handler path argument");
                 };
                 *seen_for_resolver.lock().unwrap() = path.clone();
-                Box::pin(async { Ok(Value::String("handled".to_string())) })
+                Box::pin(async {
+                    crate::sequence::single_value_sequence(Value::String("handled".to_string()))
+                })
             },
         )));
 
@@ -552,7 +568,9 @@ mod tests {
                     panic!("expected handler path argument");
                 };
                 assert!(path.ends_with("events.log"));
-                Box::pin(async { Ok(Value::String("handled".to_string())) })
+                Box::pin(async {
+                    crate::sequence::single_value_sequence(Value::String("handled".to_string()))
+                })
             },
         )));
 

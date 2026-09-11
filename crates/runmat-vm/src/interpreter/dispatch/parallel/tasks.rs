@@ -1,10 +1,10 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::FunctionRegistry;
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 use super::{execution_error, pop};
-use crate::interpreter::dispatch::calls;
 
 pub(super) fn schedule_feval(
     stack: &mut Vec<Value>,
@@ -108,7 +108,7 @@ pub(super) fn create_future(
     descriptor: runmat_runtime::call::descriptor::CallableDescriptor,
     function_registry: &FunctionRegistry,
 ) -> Result<runmat_execution::FutureHandle, RuntimeError> {
-    runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(descriptor.args.clone()))?;
+    runmat_runtime::execution::validate_spawn_captures(&descriptor.args)?;
     let program = context
         .runtime
         .execution()
@@ -241,6 +241,19 @@ pub(super) async fn await_value(
     context: &ExecutionContext,
     value: Value,
 ) -> Result<Value, RuntimeError> {
+    use runmat_runtime::sequence::ResolveValueSequence;
+
+    let mut values = await_sequence(context, value).await?.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
+}
+
+async fn await_sequence(
+    context: &ExecutionContext,
+    value: Value,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     use runmat_runtime::execution::AwaitAction;
 
     let mut value = runmat_runtime::parallel::future::execution_value(&value)
@@ -253,13 +266,16 @@ pub(super) async fn await_value(
             .begin_await(value)
             .map_err(execution_error)?
         {
-            AwaitAction::Passthrough(value) | AwaitAction::Completed(value) => return Ok(value),
+            AwaitAction::Passthrough(value) => {
+                return runmat_value::ValueSequence::single(value)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+            }
+            AwaitAction::Completed(sequence) => return Ok(sequence),
             AwaitAction::Pending(pending) => {
                 yield_once().await;
                 value = pending;
             }
             AwaitAction::ExecuteFuture { handle, call } => {
-                let requested_outputs = call.invocation.requested_outputs();
                 let result = match &call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
                         runmat_runtime::call::descriptor::execute_callable_descriptor(
@@ -272,8 +288,7 @@ pub(super) async fn await_value(
                             .await
                             .map_err(execution_error)
                     }
-                }
-                .map(|value| calls::normalize_requested_outputs(value, requested_outputs));
+                };
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {
                     runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
                 });
@@ -293,7 +308,7 @@ pub(super) async fn fetch_next(
     futures: &Value,
     timeout_seconds: Option<f64>,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     use runmat_execution::TaskResultClaim;
 
     let tasks = runmat_runtime::parallel::future::tasks(futures).ok_or_else(|| {
@@ -329,14 +344,14 @@ pub(super) async fn fetch_next(
                         "fetchNext output count must match the selected future",
                     ));
                 }
-                let result = await_value(context, Value::Task(task.clone())).await;
+                let result = await_sequence(context, Value::Task(task.clone())).await;
                 context
                     .runtime
                     .execution()
                     .mark_task_result_read(task)
                     .map_err(execution_error)?;
                 let result = result?;
-                return Ok(fetch_next_outputs(index, result, requested_outputs));
+                return fetch_next_outputs(index, result, requested_outputs);
             }
             TaskResultClaim::Exhausted => {
                 return Err(crate::interpreter::errors::mex(
@@ -347,7 +362,7 @@ pub(super) async fn fetch_next(
             TaskResultClaim::Pending => {
                 if timeout_seconds.is_some_and(|timeout| started.elapsed().as_secs_f64() >= timeout)
                 {
-                    return Ok(empty_output_list(requested_outputs));
+                    return empty_outputs(requested_outputs);
                 }
                 yield_once().await;
             }
@@ -360,7 +375,7 @@ pub(super) async fn fetch_outputs(
     futures: &Value,
     requested_outputs: usize,
     uniform_output: bool,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let tasks = runmat_runtime::parallel::future::output_tasks(futures).ok_or_else(|| {
         crate::interpreter::errors::mex(
             "InvalidFuture",
@@ -368,7 +383,7 @@ pub(super) async fn fetch_outputs(
         )
     })?;
     if tasks.is_empty() {
-        return Ok(empty_output_list(requested_outputs));
+        return empty_outputs(requested_outputs);
     }
     let mut worker_outputs = Vec::with_capacity(tasks.len());
     for task in &tasks {
@@ -378,7 +393,7 @@ pub(super) async fn fetch_outputs(
                 "each future must provide at least the requested number of outputs",
             ));
         }
-        let result = await_value(context, Value::Task(task.clone())).await;
+        let result = await_sequence(context, Value::Task(task.clone())).await;
         context
             .runtime
             .execution()
@@ -388,11 +403,11 @@ pub(super) async fn fetch_outputs(
         worker_outputs.push(split_outputs(result, requested_outputs)?);
     }
     if tasks.len() == 1 {
-        return Ok(join_outputs(
+        return join_outputs(
             worker_outputs
                 .pop()
                 .expect("one task produced one output row"),
-        ));
+        );
     }
     let mut combined = Vec::with_capacity(requested_outputs);
     for output_index in 0..requested_outputs {
@@ -408,9 +423,14 @@ pub(super) async fn fetch_outputs(
                 runmat_hir::CallableFallbackPolicy::None,
                 runmat_runtime::call::descriptor::CallableCallKind::Direct,
             );
-            combined.push(
-                runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor).await?,
-            );
+            let mut values =
+                runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
+                    .await?
+                    .resolve(
+                        runmat_types::SequenceUse::RequireSingle,
+                        runmat_runtime::sequence::SequenceResolutionContext::default(),
+                    )?;
+            combined.push(values.remove(0));
         } else {
             combined.push(Value::Cell(
                 runmat_value::CellArray::new_with_shape(values, vec![tasks.len(), 1])
@@ -418,7 +438,7 @@ pub(super) async fn fetch_outputs(
             ));
         }
     }
-    Ok(join_outputs(combined))
+    join_outputs(combined)
 }
 
 pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, RuntimeError> {
@@ -453,28 +473,40 @@ pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, Runtime
     Ok(uniform_output)
 }
 
-fn split_outputs(value: Value, count: usize) -> Result<Vec<Value>, RuntimeError> {
+fn split_outputs(
+    sequence: runmat_value::ValueSequence,
+    count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
     match count {
         0 => Ok(Vec::new()),
-        1 => Ok(vec![value]),
-        _ => match value {
-            Value::OutputList(values) if values.len() >= count => {
-                Ok(values.into_iter().take(count).collect())
-            }
-            _ => Err(crate::interpreter::errors::mex(
-                "OutputCountMismatch",
-                "future result does not contain the requested number of outputs",
-            )),
-        },
+        1 => sequence.resolve(
+            runmat_types::SequenceUse::SelectPrefix { count: 1 },
+            runmat_runtime::sequence::SequenceResolutionContext::default(),
+        ),
+        _ => sequence
+            .resolve(
+                runmat_types::SequenceUse::SelectPrefix { count },
+                runmat_runtime::sequence::SequenceResolutionContext::default(),
+            )
+            .map_err(|_| {
+                crate::interpreter::errors::mex(
+                    "OutputCountMismatch",
+                    "future result does not contain the requested number of outputs",
+                )
+            }),
     }
 }
 
-fn join_outputs(outputs: Vec<Value>) -> Value {
-    match outputs.len() {
-        0 => Value::OutputList(Vec::new()),
-        1 => outputs.into_iter().next().expect("one output is present"),
-        _ => Value::OutputList(outputs),
-    }
+fn join_outputs(outputs: Vec<Value>) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    Ok(match outputs.len() {
+        0 => runmat_value::ValueSequence::empty(),
+        1 => runmat_value::ValueSequence::single(
+            outputs.into_iter().next().expect("one output is present"),
+        )
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        _ => runmat_value::ValueSequence::comma_separated(outputs)
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+    })
 }
 
 pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
@@ -492,36 +524,43 @@ pub(super) fn timeout_seconds(value: Value) -> Result<f64, RuntimeError> {
     Ok(seconds)
 }
 
-fn fetch_next_outputs(index: usize, result: Value, requested_outputs: usize) -> Value {
+fn fetch_next_outputs(
+    index: usize,
+    result: runmat_value::ValueSequence,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if requested_outputs == 0 {
-        return Value::OutputList(Vec::new());
+        return Ok(runmat_value::ValueSequence::empty());
     }
     if requested_outputs == 1 {
-        return Value::Num((index + 1) as f64);
+        return runmat_value::ValueSequence::single(Value::Num((index + 1) as f64))
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime);
     }
     let mut outputs = Vec::with_capacity(requested_outputs);
     outputs.push(Value::Num((index + 1) as f64));
     if requested_outputs > 1 {
-        match result {
-            Value::OutputList(values) => outputs.extend(values),
-            value => outputs.push(value),
-        }
+        outputs.extend(result.into_values());
     }
-    Value::OutputList(outputs)
+    runmat_value::ValueSequence::comma_separated(outputs)
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }
 
-fn empty_output_list(requested_outputs: usize) -> Value {
+fn empty_outputs(requested_outputs: usize) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let empty = || {
         Value::Tensor(
             runmat_value::Tensor::new(Vec::new(), vec![0, 0])
                 .expect("the canonical empty tensor shape is valid"),
         )
     };
-    match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        1 => empty(),
-        count => Value::OutputList((0..count).map(|_| empty()).collect()),
-    }
+    Ok(match requested_outputs {
+        0 => runmat_value::ValueSequence::empty(),
+        1 => runmat_value::ValueSequence::single(empty())
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+        count => {
+            runmat_value::ValueSequence::comma_separated((0..count).map(|_| empty()).collect())
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?
+        }
+    })
 }
 
 pub(super) async fn yield_once() {

@@ -271,7 +271,9 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-15.0 * y)) })
+                Box::pin(
+                    async move { crate::sequence::single_value_sequence(Value::Num(-15.0 * y)) },
+                )
             },
         )));
 
@@ -307,7 +309,9 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-1000.0 * y)) })
+                Box::pin(
+                    async move { crate::sequence::single_value_sequence(Value::Num(-1000.0 * y)) },
+                )
             },
         )));
         let mut options = StructValue::new();
@@ -346,7 +350,9 @@ mod tests {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(-15.0 * y)) })
+                Box::pin(
+                    async move { crate::sequence::single_value_sequence(Value::Num(-15.0 * y)) },
+                )
             },
         )));
 

@@ -127,13 +127,13 @@ pub(crate) fn simple_rvalue_inference(
         }
         MirRvalue::Future { .. } => runmat_types::FactInference::exact(scalar_fact(
             ValueKindFact::Execution(ExecutionFact::Future {
-                output: Box::new(dynamic_value()),
+                output: runmat_types::ValueSequenceFact::single(dynamic_value()),
                 state: FutureStateFact::Lazy,
             }),
         )),
         MirRvalue::Spawn(_) => runmat_types::FactInference::exact(scalar_fact(
             ValueKindFact::Execution(ExecutionFact::Task {
-                output: Box::new(dynamic_value()),
+                output: runmat_types::ValueSequenceFact::single(dynamic_value()),
                 spawn_safety: SpawnSafetyFact::RequiresIsolation,
             }),
         )),
@@ -186,6 +186,20 @@ pub(crate) fn simple_rvalue_inference(
             };
             infer_range(numeric_operand(start), step, numeric_operand(end))
         }
+        MirRvalue::Index { base, indexing }
+            if matches!(
+                indexing.result_context,
+                runmat_types::IndexResultContext::ReadCommaList
+                    | runmat_types::IndexResultContext::FunctionArgumentExpansion
+            ) =>
+        {
+            legacy_sequence_as_value_inference(runmat_types::infer_index_sequence(
+                &simple_operand_fact(base, facts),
+                indexing.kind,
+                &index_selectors(indexing, facts),
+                indexing.result_context,
+            ))
+        }
         MirRvalue::Index { base, indexing } => infer_index(
             &simple_operand_fact(base, facts),
             indexing.kind,
@@ -196,7 +210,17 @@ pub(crate) fn simple_rvalue_inference(
             base,
             member,
             sequence_use,
-        } => infer_member_read(&simple_operand_fact(base, facts), member, *sequence_use),
+        } if *sequence_use == runmat_types::SequenceUse::RequireSingle => {
+            infer_member_read(&simple_operand_fact(base, facts), member, *sequence_use)
+        }
+        MirRvalue::Member { base, member, .. } => legacy_sequence_as_value_inference(
+            runmat_types::infer_member_sequence(&simple_operand_fact(base, facts), member),
+        ),
+        MirRvalue::SubscriptChain(chain)
+            if chain.sequence_use != runmat_types::SequenceUse::RequireSingle =>
+        {
+            legacy_sequence_as_value_inference(infer_subscript_chain_sequence(chain, facts))
+        }
         MirRvalue::SubscriptChain(chain) => infer_subscript_chain(chain, facts),
         MirRvalue::DynamicMember { .. }
         | MirRvalue::WorkspaceFirstStaticProperty { .. }
@@ -213,6 +237,28 @@ pub(crate) fn simple_rvalue_inference(
     }
 }
 
+/// Defensive fallback for old serialized MIR. Current lowering represents
+/// every non-single sequence expression with `CaptureSequence`, so a value
+/// rvalue cannot carry the sequence fact forward.
+fn legacy_sequence_as_value_inference(
+    inference: runmat_types::SequenceFactInference,
+) -> runmat_types::FactInference {
+    let fact = if !inference.sequence.variadic && inference.sequence.outputs.len() == 1 {
+        inference
+            .sequence
+            .outputs
+            .into_iter()
+            .next()
+            .expect("one sequence output was established")
+    } else {
+        ValueFact::unknown(DynamicReason::RuntimeValue)
+    };
+    runmat_types::FactInference {
+        fact,
+        diagnostics: inference.diagnostics,
+    }
+}
+
 pub(crate) fn infer_subscript_chain(
     chain: &crate::MirSubscriptChain,
     facts: &[Option<ValueFact>],
@@ -225,6 +271,13 @@ pub(crate) fn infer_subscript_chain_contract(
     facts: &[Option<ValueFact>],
 ) -> SubscriptChainInference {
     subscript_chain::infer(chain, facts)
+}
+
+pub(crate) fn infer_subscript_chain_sequence(
+    chain: &crate::MirSubscriptChain,
+    facts: &[Option<ValueFact>],
+) -> runmat_types::SequenceFactInference {
+    subscript_chain::infer_sequence(chain, facts)
 }
 
 fn aggregate_inference(
@@ -359,7 +412,10 @@ fn numeric_operand(operand: &MirOperand) -> Option<f64> {
     }
 }
 
-fn index_selectors(indexing: &MirIndexing, facts: &[Option<ValueFact>]) -> Vec<IndexSelectorFact> {
+pub(crate) fn index_selectors(
+    indexing: &MirIndexing,
+    facts: &[Option<ValueFact>],
+) -> Vec<IndexSelectorFact> {
     indexing
         .components
         .iter()

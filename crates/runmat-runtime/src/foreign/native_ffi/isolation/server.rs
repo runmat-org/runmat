@@ -119,7 +119,7 @@ fn invoke(
     request: NativeInvocationRequest,
     snapshots: &SharedSnapshotStore,
     resources: &mut RemoteResources,
-) -> Result<NativeWireValue, NativeWireError> {
+) -> Result<Vec<NativeWireValue>, NativeWireError> {
     resources.release(&request.releases);
     let arguments = request
         .arguments
@@ -136,7 +136,25 @@ fn invoke(
         },
     )))
     .map_err(runtime_wire_error)?;
-    encode_host_value(value, snapshots, resources)
+    encode_host_outputs(value, snapshots, resources)
+}
+
+fn encode_host_outputs(
+    sequence: runmat_value::ValueSequence,
+    snapshots: &SharedSnapshotStore,
+    resources: &mut RemoteResources,
+) -> Result<Vec<NativeWireValue>, NativeWireError> {
+    let values = sequence.into_values();
+    if values.len() > super::NATIVE_FFI_HOST_MAX_OUTPUTS {
+        return Err(wire_error(
+            "RunMat:NativeFFI:HostProtocol",
+            "native FFI output count exceeds the protocol limit",
+        ));
+    }
+    values
+        .into_iter()
+        .map(|value| encode_host_value(value, snapshots, resources))
+        .collect()
 }
 
 fn decode_host_value(
@@ -155,11 +173,6 @@ fn decode_host_value(
             })
         }
         NativeWireValue::Callback { id } => Ok(super::super::isolated_callback_value(id)),
-        NativeWireValue::OutputList(values) => values
-            .into_iter()
-            .map(|value| decode_host_value(value, snapshots, resources))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::OutputList),
     }
 }
 
@@ -199,11 +212,10 @@ fn encode_host_value(
                 lifetime: reference.lifetime,
             }))
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| encode_host_value(value, snapshots, resources))
-            .collect::<Result<Vec<_>, _>>()
-            .map(NativeWireValue::OutputList),
+        Value::OutputList(_) => Err(wire_error(
+            "RunMat:TransientSequenceNotPortable",
+            "transient output sequences cannot be encoded as nested native FFI values",
+        )),
         other => encode_portable(&other, snapshots).map(NativeWireValue::Portable),
     }
 }
@@ -306,9 +318,13 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
             if response.request_id != request_id || response.callback_id != callback_id {
                 return Err("native callback result identity does not match the request".into());
             }
-            match response.outcome.map_err(|error| error.message)? {
+            let values = response.outcome.map_err(|error| error.message)?;
+            let [value] = values.as_slice() else {
+                return Err("native callback did not return exactly one value".into());
+            };
+            match value {
                 NativeWireValue::Portable(transfer) => {
-                    decode_portable(&transfer, &self.snapshots).map_err(|error| error.message)
+                    decode_portable(transfer, &self.snapshots).map_err(|error| error.message)
                 }
                 _ => Err("native callback returned a nonportable value".into()),
             }

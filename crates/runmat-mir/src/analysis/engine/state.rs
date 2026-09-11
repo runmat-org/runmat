@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use runmat_types::{
     CapabilitySet, DistributedValueId, EffectSet, FactJoin, FactWiden, LiteralValue, ValueFact,
+    ValueSequenceFact,
 };
 
-use crate::MirBody;
+use crate::{MirBody, MirSequenceLocalId};
 
 use super::super::InitFact;
 
@@ -45,6 +46,7 @@ pub(crate) struct FlowState {
     pub effects: EffectSet,
     pub capabilities: CapabilitySet,
     pub distributed: BTreeMap<DistributedValueId, ValueFact>,
+    sequences: BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
 }
 
 impl FlowState {
@@ -54,6 +56,7 @@ impl FlowState {
             effects: EffectSet::default(),
             capabilities: CapabilitySet::default(),
             distributed: BTreeMap::new(),
+            sequences: BTreeMap::new(),
         };
         let mut parameter = 0;
         let mut capture = 0;
@@ -138,6 +141,36 @@ impl FlowState {
                 }
             }
         }
+        let sequence_ids = self
+            .sequences
+            .keys()
+            .chain(incoming.sequences.keys())
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        for id in sequence_ids {
+            match (self.sequences.get(&id), incoming.sequences.get(&id)) {
+                (Some(current), Some(next)) => {
+                    let joined = if widen {
+                        current.widen(next)
+                    } else {
+                        current.join(next)
+                    };
+                    if &joined != current {
+                        self.sequences.insert(id, joined);
+                        changed = true;
+                    }
+                }
+                (Some(current), None) if current != &ValueSequenceFact::dynamic() => {
+                    self.sequences.insert(id, ValueSequenceFact::dynamic());
+                    changed = true;
+                }
+                (None, Some(_)) => {
+                    self.sequences.insert(id, ValueSequenceFact::dynamic());
+                    changed = true;
+                }
+                (Some(_), None) | (None, None) => {}
+            }
+        }
         changed
     }
 
@@ -157,6 +190,14 @@ impl FlowState {
                 local.assignment = InitFact::DefinitelyAssigned;
             }
         }
+    }
+
+    pub fn set_sequence(&mut self, id: MirSequenceLocalId, fact: ValueSequenceFact) {
+        self.sequences.insert(id, fact);
+    }
+
+    pub fn sequence_facts(&self) -> &BTreeMap<MirSequenceLocalId, ValueSequenceFact> {
+        &self.sequences
     }
 }
 
@@ -181,5 +222,60 @@ fn join_assignment(left: InitFact, right: InitFact) -> InitFact {
             InitFact::DefinitelyAssigned
         }
         _ => InitFact::MaybeAssigned,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_hir::{FunctionAbi, FunctionId};
+    use runmat_types::{DynamicReason, NumericClass, NumericDomain, NumericFact, ValueKindFact};
+
+    fn empty_body() -> MirBody {
+        MirBody {
+            function: FunctionId(0),
+            abi: FunctionAbi {
+                fixed_inputs: Vec::new(),
+                varargin: None,
+                fixed_outputs: Vec::new(),
+                varargout: None,
+                implicit_nargin: None,
+                implicit_nargout: None,
+            },
+            locals: Vec::new(),
+            blocks: Vec::new(),
+        }
+    }
+
+    fn number() -> ValueFact {
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }))
+    }
+
+    #[test]
+    fn sequence_facts_join_exactly_only_when_all_predecessors_define_them() {
+        let body = empty_body();
+        let id = MirSequenceLocalId(3);
+        let mut left = FlowState::entry(&body, &[], &[]);
+        left.set_sequence(id, ValueSequenceFact::single(number()));
+        let right = FlowState::entry(&body, &[], &[]);
+        assert!(left.join_from(&right, false));
+        assert_eq!(
+            left.sequence_facts().get(&id),
+            Some(&ValueSequenceFact::dynamic())
+        );
+
+        let mut first = FlowState::entry(&body, &[], &[]);
+        first.set_sequence(id, ValueSequenceFact::single(number()));
+        let mut second = FlowState::entry(&body, &[], &[]);
+        second.set_sequence(
+            id,
+            ValueSequenceFact::single(ValueFact::unknown(DynamicReason::RuntimeValue)),
+        );
+        assert!(first.join_from(&second, false));
+        assert_eq!(first.sequence_facts()[&id].outputs.len(), 1);
+        assert!(!first.sequence_facts()[&id].variadic);
     }
 }

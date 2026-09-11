@@ -256,6 +256,15 @@ fn join_ordered(left: &[ValueFact], right: &[ValueFact]) -> Vec<ValueFact> {
     }
 }
 
+impl FactJoin for ValueSequenceFact {
+    fn join(&self, other: &Self) -> Self {
+        Self {
+            outputs: join_ordered(&self.outputs, &other.outputs),
+            variadic: self.variadic || other.variadic || self.outputs.len() != other.outputs.len(),
+        }
+    }
+}
+
 fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact {
     use ExecutionFact::*;
     let joined = match (left, right) {
@@ -269,7 +278,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
                 state: right_state,
             },
         ) => Future {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
             state: exact_or(left_state, right_state, FutureStateFact::Unknown),
         },
         (
@@ -282,7 +291,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
                 spawn_safety: right_safety,
             },
         ) => Task {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
             spawn_safety: exact_or(
                 left_safety,
                 right_safety,
@@ -291,7 +300,7 @@ fn join_execution(left: &ExecutionFact, right: &ExecutionFact) -> ValueKindFact 
         },
         (Pool, Pool) => Pool,
         (Job { output: left }, Job { output: right }) => Job {
-            output: Box::new(left.join(right)),
+            output: left.join(right),
         },
         _ => return ValueKindFact::Unknown,
     };

@@ -50,12 +50,17 @@ impl DurableJobBridge {
 
     pub(crate) fn await_job(&self, handle: JobHandle) -> Result<Value, ExecutionServiceError> {
         let response = self.request(|response| Command::Await { handle, response })?;
-        let ProgramExecutionResponse::Success { value: payload } = response else {
+        let ProgramExecutionResponse::Success { outputs } = response else {
             return Err(ExecutionServiceError::Failed(
                 "durable runtime value cannot consume an externalized program response".into(),
             ));
         };
-        runmat_runtime::execution::value_codec::decode_inline_value(&payload)
+        let [payload] = outputs.as_slice() else {
+            return Err(ExecutionServiceError::Failed(
+                "durable runtime value requires exactly one program output".into(),
+            ));
+        };
+        runmat_runtime::execution::value_codec::decode_inline_value(payload)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
     }
 

@@ -1124,7 +1124,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(f(x, y))) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(x, y))) })
             },
         )))
     }

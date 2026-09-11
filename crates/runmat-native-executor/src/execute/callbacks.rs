@@ -126,6 +126,10 @@ unsafe extern "C" fn execute_site(
                 }
                 Ok(())
             }
+            Err(NativeExecutorError::StaleValue) => Err(NativeExecutorError::Host(format!(
+                "native site {:?} referenced a value whose arena lifetime had ended",
+                request
+            ))),
             Err(error) => Err(error),
         }
     })

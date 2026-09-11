@@ -1,4 +1,4 @@
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
@@ -86,7 +86,7 @@ pub(crate) fn input_object_reference(
 ) -> MeshingExecutionResult<ValueRef> {
     object.validate()?;
     let reference = ValueRef {
-        schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
         id: access.value_id(object.descriptor.digest),
         logical_digest: object.descriptor.digest,
         encoded_length: object.descriptor.encoded_length,

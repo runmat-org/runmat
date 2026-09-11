@@ -196,7 +196,7 @@ impl MexRuntimeSession {
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
-    ) -> Option<Result<Value, RuntimeError>> {
+    ) -> Option<Result<runmat_value::ValueSequence, RuntimeError>> {
         if self.shutdown_in_progress.get() {
             return Some(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -468,7 +468,7 @@ impl MexRuntimeSession {
         tier: MexBinaryTier,
         runtime: RuntimeContext,
         timeout: Option<std::time::Duration>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         let mut client = self.take_isolated_module(path).await?;
         let result = client
             .invoke(arguments, requested_outputs, api, tier, runtime, timeout)
@@ -654,7 +654,7 @@ fn selected_by_request(path: &Path, request: &DynamicFunctionClearRequest) -> bo
 fn finish_invocation(
     invocation: MexInvocation,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if !invocation.console.is_empty() {
         crate::console::record_console_output(
             crate::console::ConsoleStream::Stdout,
@@ -670,15 +670,26 @@ fn finish_invocation(
             &warning.message,
         );
     }
-    Ok(match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        1 => invocation
-            .outputs
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| Value::OutputList(Vec::new())),
-        _ => Value::OutputList(invocation.outputs),
-    })
+    if invocation.outputs.len() < requested_outputs {
+        return Err(runtime_error(
+            "MEX:OutputCount",
+            format!(
+                "MEX invocation produced {} outputs, but {requested_outputs} were requested",
+                invocation.outputs.len()
+            ),
+        ));
+    }
+    let mut outputs = invocation
+        .outputs
+        .into_iter()
+        .take(requested_outputs)
+        .collect::<Vec<_>>();
+    match requested_outputs {
+        0 => Ok(runmat_value::ValueSequence::empty()),
+        1 => super::super::single_output_sequence(outputs.pop().expect("validated one MEX output")),
+        _ => runmat_value::ValueSequence::comma_separated(outputs)
+            .map_err(crate::sequence::sequence_error_to_runtime),
+    }
 }
 
 fn decode_native_invocation(

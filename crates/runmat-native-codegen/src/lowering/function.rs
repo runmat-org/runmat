@@ -290,14 +290,15 @@ pub(super) fn lower_argument_validations(
 fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueResult> {
     Ok(match statement {
         MirStmtKind::Assign { .. } => NativeRvalueResult::Assignment,
-        MirStmtKind::MultiAssign { targets, .. } => NativeRvalueResult::MultiAssignment(
-            u32::try_from(targets.targets.len()).map_err(|_| {
+        MirStmtKind::MultiAssign { targets, .. } => {
+            let _ = u32::try_from(targets.targets.len()).map_err(|_| {
                 NativeCodegenError::new(
                     "native.lowering.output_arity",
                     "MIR output arity exceeds the Native IR schema",
                 )
-            })?,
-        ),
+            })?;
+            NativeRvalueResult::MultiAssignment(targets.clone())
+        }
         MirStmtKind::SequenceAssign { target, .. } => {
             NativeRvalueResult::SequenceAssignment(target.clone())
         }
@@ -324,20 +325,26 @@ fn statement_rvalue_outputs(
         MirStmtKind::Assign { place, value } => {
             Some((value, vec![super::operation::root_local(place)]))
         }
-        MirStmtKind::MultiAssign { targets, value } => Some((
-            value,
-            targets
+        MirStmtKind::MultiAssign { targets, value } => {
+            let outputs = if targets
                 .targets
                 .iter()
-                .map(|target| match target {
-                    MirOutputTarget::Place(place) => super::operation::root_local(place),
-                    MirOutputTarget::Sequence(target) => {
-                        super::operation::root_local(target.base())
-                    }
-                    MirOutputTarget::Discard => None,
-                })
-                .collect(),
-        )),
+                .any(|target| matches!(target, MirOutputTarget::Sequence(_)))
+            {
+                Vec::new()
+            } else {
+                targets
+                    .targets
+                    .iter()
+                    .map(|target| match target {
+                        MirOutputTarget::Place(place) => super::operation::root_local(place),
+                        MirOutputTarget::Sequence(_) => None,
+                        MirOutputTarget::Discard => None,
+                    })
+                    .collect()
+            };
+            Some((value, outputs))
+        }
         MirStmtKind::SequenceAssign { value, .. } => Some((value, Vec::new())),
         MirStmtKind::Expr(value) => Some((
             value,

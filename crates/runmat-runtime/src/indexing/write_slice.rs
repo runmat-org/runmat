@@ -1,6 +1,6 @@
 use crate::builtins::common::tensor::{
-    self, complex_tensor_element_len, complex_tensor_values_complex64, is_scalar_tensor,
-    tensor_element_len, tensor_value_f64,
+    self, complex_tensor_element_len, complex_tensor_values_complex64, tensor_element_len,
+    tensor_value_f64,
 };
 use crate::indexing::integer_assignment::{
     self, ComplexIntegerAssignmentValue, IntegerAssignmentValue,
@@ -31,7 +31,7 @@ fn is_empty_delete_rhs(value: &Value) -> bool {
         value,
         Value::ComplexTensor(t)
             if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
-    ) || matches!(value, Value::OutputList(values) if values.is_empty())
+    )
 }
 
 pub(crate) fn real_tensor_to_complex(
@@ -125,38 +125,6 @@ pub(crate) fn delete_integer_complex_storage_positions(
         delete_integer_storage_positions(storage.imag, positions),
     )
     .expect("paired integer complex storage must retain matching classes and lengths")
-}
-
-fn scalar_integer_value(value: &Value) -> Result<IntegerAssignmentValue, RuntimeError> {
-    match value {
-        Value::Int(value) => Ok(IntegerAssignmentValue::Exact(value.clone())),
-        Value::Num(value) => Ok(IntegerAssignmentValue::Float(*value)),
-        Value::Bool(value) => Ok(IntegerAssignmentValue::Float(if *value {
-            1.0
-        } else {
-            0.0
-        })),
-        Value::Tensor(tensor) if is_scalar_tensor(tensor) => {
-            let value = tensor
-                .numeric_value_at(0)
-                .expect("scalar tensor must contain one numeric value");
-            Ok(match value.into_int_value() {
-                Some(value) => IntegerAssignmentValue::Exact(value),
-                None => IntegerAssignmentValue::Float(value.materialize_f64()),
-            })
-        }
-        Value::LogicalArray(array) if array.data.len() == 1 => {
-            Ok(IntegerAssignmentValue::Float(if array.data[0] == 0 {
-                0.0
-            } else {
-                1.0
-            }))
-        }
-        _ => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs must be numeric or logical",
-        )),
-    }
 }
 
 fn validated_assignment_rhs_shape(
@@ -540,15 +508,6 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
             let tensor = download_integer_tensor(handle).await?;
             materialize_integer_tensor_rhs_for_plan(&tensor, plan)
         }
-        Value::OutputList(values) => {
-            if values.len() == plan.indices.len() {
-                return values.iter().map(scalar_integer_value).collect();
-            }
-            if values.len() == 1 {
-                return Ok(vec![scalar_integer_value(&values[0])?; plan.indices.len()]);
-            }
-            Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-        }
         _ => materialize_rhs_real_for_plan(rhs, plan)
             .await
             .map(|values| {
@@ -898,10 +857,24 @@ pub async fn assign_tensor_with_plan(
         let tensor = real_tensor_to_complex(t, "slice complex promotion")?;
         return assign_complex_with_plan(tensor, plan, rhs).await;
     }
-    let shape = t.shape.clone();
-    let storage = t
+    let target_len = plan.base_shape.iter().try_fold(1usize, |len, extent| {
+        len.checked_mul(*extent).ok_or_else(|| {
+            mex(
+                "ShapeOverflow",
+                "slice assignment target shape overflows usize",
+            )
+        })
+    })?;
+    let mut storage = t
         .into_numeric_storage()
         .map_err(|error| map_slice_shape_error("slice assign", error))?;
+    if target_len < storage.len() {
+        return Err(mex(
+            "InvalidAssignmentPlan",
+            "slice assignment plan cannot shrink numeric storage",
+        ));
+    }
+    storage.resize_zeroed(target_len);
     let storage = match storage.into_integer_storage() {
         Ok(mut storage) => {
             let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
@@ -914,7 +887,7 @@ pub async fn assign_tensor_with_plan(
             storage
         }
     };
-    Tensor::from_numeric_storage(storage, shape)
+    Tensor::from_numeric_storage(storage, plan.base_shape.clone())
         .map(Value::Tensor)
         .map_err(|error| map_slice_shape_error("slice assign", error))
 }
@@ -1298,7 +1271,6 @@ pub async fn materialize_rhs_linear_real(
                 Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
-        Value::OutputList(values) => materialize_output_list_real(&values, count),
         other => Err(mex(
             "InvalidSliceAssignmentRhs",
             format!("slice assign: unsupported RHS type {:?}", other),
@@ -1374,27 +1346,6 @@ pub async fn materialize_rhs_nd_real(
                 strides,
             }
         }
-        Value::OutputList(values) => {
-            let count = selection_lengths
-                .iter()
-                .copied()
-                .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
-            let data = materialize_output_list_real(&values, count)?;
-            let shape = if selection_lengths.is_empty() {
-                vec![1]
-            } else {
-                selection_lengths.to_vec()
-            };
-            let mut strides = vec![1usize; shape.len()];
-            for d in 1..shape.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
         other => {
             return Err(mex(
                 "InvalidSliceAssignmentRhs",
@@ -1443,27 +1394,6 @@ pub async fn materialize_rhs_nd_real(
         }
     }
     Ok(out)
-}
-
-fn materialize_output_list_real(values: &[Value], count: usize) -> Result<Vec<f64>, RuntimeError> {
-    if values.len() == count {
-        values.iter().map(value_to_real_scalar).collect()
-    } else if values.len() == 1 {
-        let value = value_to_real_scalar(&values[0])?;
-        Ok(vec![value; count])
-    } else {
-        Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-    }
-}
-
-fn value_to_real_scalar(value: &Value) -> Result<f64, RuntimeError> {
-    match value {
-        Value::Num(n) => Ok(*n),
-        Value::Int(int_val) => Ok(int_val.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if is_scalar_tensor(t) => Ok(tensor_value_f64(t, 0)),
-        _ => f64::try_from(value).map_err(Into::into),
-    }
 }
 
 pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {

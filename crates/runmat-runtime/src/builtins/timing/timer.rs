@@ -1533,7 +1533,7 @@ mod tests {
                     };
                     assert!(event.fields.contains_key("Type"));
                     *invoker_calls.lock().unwrap() += 1;
-                    Ok(Value::OutputList(Vec::new()))
+                    Ok(crate::sequence::ValueSequence::empty())
                 })
             },
         )));
@@ -1622,7 +1622,7 @@ mod tests {
                 let invoker_calls = Arc::clone(&invoker_calls);
                 Box::pin(async move {
                     *invoker_calls.lock().unwrap() += 1;
-                    Ok(Value::OutputList(Vec::new()))
+                    Ok(crate::sequence::ValueSequence::empty())
                 })
             },
         )));

@@ -756,7 +756,8 @@ impl Instr {
             Instr::MemberSequenceCardinality => effect(1, 1),
             Instr::LoadMemberSequenceUsingOutputSlot { .. } => effect(1, 0),
             Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => effect(2, 0),
-            Instr::CaptureCallOutputSequence | Instr::CaptureScalarSequence => effect(1, 0),
+            Instr::CaptureCallOutputSequence => effect(0, 0),
+            Instr::CaptureScalarSequence => effect(1, 0),
             Instr::ReadSubscriptPath {
                 steps,
                 selection,
@@ -822,41 +823,59 @@ impl Instr {
             }
             Instr::CaptureMemberDynamicSequence { .. } => effect(2, 0),
             Instr::CaptureCellContentsSequence { num_indices, .. } => effect(1 + *num_indices, 0),
-            Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
-            Instr::CallBuiltinMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
-            Instr::CallSuperConstructorMulti { arg_count, .. } => effect(*arg_count, 1),
-            Instr::CallSuperMethodMulti { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallBuiltinMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallBuiltinMultiUsingOutputSlot(_, argc, _) => effect(*argc, 0),
+            Instr::CallSuperConstructorMulti {
+                arg_count,
+                out_count,
+                ..
+            }
+            | Instr::CallSuperMethodMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
             Instr::CallFunctionMulti {
                 arg_count,
                 out_count,
                 ..
             } => effect(*arg_count, *out_count),
-            Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 0),
             Instr::CallWorkspaceFirstMulti {
                 arg_count,
                 out_count,
                 ..
             } => effect(*arg_count, *out_count),
             Instr::CallWorkspaceFirstMultiUsingOutputSlot { arg_count, .. } => {
-                effect(*arg_count, 1)
+                effect(*arg_count, 0)
             }
             Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
+            Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 0),
             Instr::CallSemanticNestedFunctionMulti {
                 arg_count,
                 out_count,
                 ..
             } => effect(*arg_count, *out_count),
             Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { arg_count, .. } => {
-                effect(*arg_count, 1)
+                effect(*arg_count, 0)
             }
-            Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
-            Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
-            Instr::CallFevalMultiUsingOutputSlot(argc, _) => effect(argc + 1, 1),
+            Instr::CallMethodOrMemberIndexMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(arg_count + 1, *out_count),
+            Instr::CallFevalMulti(argc, out_count) => effect(argc + 1, *out_count),
+            Instr::CallFevalMultiUsingOutputSlot(argc, _) => effect(argc + 1, 0),
             Instr::CreateSemanticFuture(_, arg_count, _) => effect(*arg_count, 1),
             Instr::ScheduleFeval { arg_count, .. } => effect(*arg_count, 1),
-            Instr::FetchNext { has_timeout, .. } => effect(if *has_timeout { 2 } else { 1 }, 1),
-            Instr::FetchOutputs { arg_count, .. } => effect(*arg_count, 1),
+            Instr::FetchNext {
+                has_timeout,
+                requested_outputs,
+            } => effect(if *has_timeout { 2 } else { 1 }, *requested_outputs),
+            Instr::FetchOutputs {
+                arg_count,
+                requested_outputs,
+            } => effect(*arg_count, *requested_outputs),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
@@ -873,11 +892,10 @@ impl Instr {
             Instr::CreateObjectLiteral { fields, .. } => effect(fields.len(), 1),
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
-            Instr::Unpack(n) => effect(1, *n),
+            Instr::Unpack(_) => effect(0, 0),
             Instr::Index(n) => effect(n + 1, 1),
-            Instr::IndexCell { num_indices, .. } | Instr::IndexCellList { num_indices, .. } => {
-                effect(num_indices + 1, 1)
-            }
+            Instr::IndexCell { num_indices, .. } => effect(num_indices + 1, 1),
+            Instr::IndexCellList { num_indices, .. } => effect(num_indices + 1, 0),
             Instr::IndexCellExpand {
                 num_indices,
                 out_count,
@@ -917,25 +935,50 @@ impl Instr {
                 effect(0, 1)
             }
             Instr::RegisterClass { .. } => effect(0, 0),
-            Instr::CallFevalExpandMultiOutput(specs, _)
-            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
-            | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
-            | Instr::CallFunctionExpandMultiOutput { specs, .. }
-            | Instr::CallWorkspaceFirstExpandMultiOutput { specs, .. }
-            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. }
-            | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
-            | Instr::CallSemanticNestedFunctionExpandMultiOutput { specs, .. }
-            | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
-            | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }
-            | Instr::CallSuperMethodExpandMultiOutput { specs, .. }
-            | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
+            Instr::CallFevalExpandMultiOutput(specs, out_count) => {
                 let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
-                let handle = usize::from(matches!(
-                    self,
-                    Instr::CallFevalExpandMultiOutput(_, _)
-                        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
-                ));
-                effect(handle + operands, 1)
+                effect(1 + operands, *out_count)
+            }
+            Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _output_slot) => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(1 + operands, 0)
+            }
+            Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _) => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, 1)
+            }
+            Instr::CallFunctionExpandMultiOutput {
+                specs, out_count, ..
+            }
+            | Instr::CallWorkspaceFirstExpandMultiOutput {
+                specs, out_count, ..
+            }
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                specs, out_count, ..
+            }
+            | Instr::CallSuperConstructorExpandMultiOutput {
+                specs, out_count, ..
+            }
+            | Instr::CallSuperMethodExpandMultiOutput {
+                specs, out_count, ..
+            } => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, *out_count)
+            }
+            Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. } => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, 0)
+            }
+            Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
+            | Instr::CallBuiltinExpandMultiOutput(_, specs, out_count) => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, *out_count)
+            }
+            Instr::CallSemanticNestedFunctionExpandMultiOutput {
+                specs, out_count, ..
+            } => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, *out_count)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
             Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::LeaveTry(_) => {
@@ -958,8 +1001,24 @@ impl Instr {
                 ..
             } => effect(1 + usize::from(*has_maximum_workers), 0),
             Instr::ExecuteSpmd { header, .. } => effect(header.operand_count(), 0),
-            Instr::Distributed(operation) => effect(operation.operand_count(), 1),
-            Instr::Collective { operation, .. } => effect(operation.operand_count(), 1),
+            Instr::Distributed(operation) => effect(
+                operation.operand_count(),
+                match operation {
+                    BytecodeDistributedOp::GlobalIndices {
+                        requested_outputs, ..
+                    } => usize::from(*requested_outputs),
+                    _ => 1,
+                },
+            ),
+            Instr::Collective { operation, .. } => effect(
+                operation.operand_count(),
+                match operation {
+                    BytecodeCollectiveOp::Receive {
+                        requested_outputs, ..
+                    } => usize::from(*requested_outputs),
+                    _ => 1,
+                },
+            ),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V4,
+    REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::RemoteFrameRoute;
 use super::worker_protocol::{
@@ -32,6 +32,7 @@ struct WorkerState {
 
 struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
+    reply: Arc<super::attempt_reply::AttemptReply>,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     collective: Option<Arc<super::collective::RemoteCollectiveChannel>>,
     cooperative: bool,
@@ -110,15 +111,14 @@ pub(super) async fn run_worker_loop(
             ));
         }
         let plaintext = receiver.open(&frame, limits).map_err(protocol)?;
+        super::protocol_schema::admit_remote_worker_bytes(&plaintext).map_err(protocol)?;
         let request: RemoteWorkerRequest = serde_json::from_slice(&plaintext).map_err(protocol)?;
         if command_frame_kind(&request.command) != frame.kind {
             return Err(protocol(
                 "remote worker command used the wrong encrypted frame kind",
             ));
         }
-        if request.schema_version != REMOTE_WORKER_PROTOCOL_V4
-            || request.driver_fence != driver_fence
-        {
+        if request.validate_schema().is_err() || request.driver_fence != driver_fence {
             reply_kind(
                 connection.as_ref(),
                 &sender,
@@ -155,7 +155,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -184,7 +184,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -223,7 +223,7 @@ pub(super) async fn run_worker_loop(
                     &sender,
                     limits,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },
@@ -245,6 +245,13 @@ pub(super) async fn run_worker_loop(
                 let attempt = *attempt;
                 let attempt_id = attempt.scheduling.id;
                 let correlation_id = request.correlation_id;
+                let attempt_reply = super::attempt_reply::AttemptReply::spawn(
+                    Arc::clone(&connection),
+                    Arc::clone(&sender),
+                    limits,
+                    correlation_id.clone(),
+                );
+                let attempt_reply_for_task = Arc::clone(&attempt_reply);
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
                 let collective = match &attempt.program.context {
@@ -349,17 +356,7 @@ pub(super) async fn run_worker_loop(
                         }
                     };
                     let report = super::worker_execution::report(response);
-                    let _ = reply(
-                        connection.as_ref(),
-                        &sender,
-                        limits,
-                        RemoteWorkerReply {
-                            schema_version: REMOTE_WORKER_PROTOCOL_V4,
-                            correlation_id,
-                            outcome: RemoteWorkerOutcome::Attempt { report },
-                        },
-                    )
-                    .await;
+                    attempt_reply_for_task.complete(report);
                     let mut state = state_for_task.lock().await;
                     state.attempts.remove(&attempt_id);
                     if state.draining && state.attempts.is_empty() {
@@ -370,6 +367,7 @@ pub(super) async fn run_worker_loop(
                     attempt_id,
                     ActiveAttempt {
                         task,
+                        reply: attempt_reply,
                         cancellation,
                         collective,
                         cooperative,
@@ -404,11 +402,13 @@ pub(super) async fn run_worker_loop(
             }
             RemoteWorkerCommand::Cancel { attempt_id } => {
                 let mut state = state.lock().await;
+                let mut cancelled_reply = None;
                 if let Some(active) = state.attempts.get(&attempt_id) {
                     active.cancellation.cancel();
                     if !active.cooperative {
                         if let Some(active) = state.attempts.remove(&attempt_id) {
                             active.task.abort();
+                            cancelled_reply = Some(active.reply);
                         }
                     }
                 }
@@ -416,6 +416,9 @@ pub(super) async fn run_worker_loop(
                     drain_complete.notify_waiters();
                 }
                 drop(state);
+                if let Some(cancelled_reply) = cancelled_reply {
+                    cancelled_reply.complete(runmat_execution_runner::AttemptReport::Cancelled);
+                }
                 reply(
                     connection.as_ref(),
                     &sender,
@@ -451,7 +454,7 @@ pub(super) async fn run_worker_loop(
                     limits,
                     FrameKind::Artifact,
                     RemoteWorkerReply {
-                        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+                        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
                         correlation_id: request.correlation_id,
                         outcome,
                     },

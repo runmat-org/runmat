@@ -580,7 +580,7 @@ impl CompositeSnapshot {
 mod tests {
     use super::*;
     use crate::identity::ValueId;
-    use crate::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use crate::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use crate::value::{ResidentFence, ValueRefKind};
     use crate::{Digest, PoolId};
     use runmat_types::{
@@ -626,12 +626,12 @@ mod tests {
     fn value_ref(rank: u32) -> ValueRef {
         let rank_bytes = rank.to_be_bytes();
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"partition".as_slice(), rank_bytes.as_slice()]),
             logical_digest: Digest::sha256(rank.to_be_bytes()),
             encoded_length: 64,
             media_type: "application/vnd.runmat.value".into(),
-            value_schema: "runmat-value-v1".into(),
+            value_schema: "runmat-value-v2".into(),
             encryption_context: Digest::sha256(b"test-encryption-context"),
             kind: ValueRefKind::SlicedObject,
             authorization_scope: "test".into(),

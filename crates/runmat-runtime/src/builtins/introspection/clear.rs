@@ -265,7 +265,7 @@ mod tests {
             );
             assert_eq!(requested_outputs, 0);
             let counter = Arc::clone(&counter);
-            Box::pin(async move {
+            crate::sequence::single_value_future(async move {
                 *counter.lock().unwrap() += 1;
                 Ok(Value::Tensor(runmat_value::Tensor::zeros(vec![0, 0])))
             })

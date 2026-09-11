@@ -416,7 +416,7 @@ impl Fixture {
             encryption_context: Digest::sha256(b"encryption-context"),
         };
         let input = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: access.value_id(Digest::from_bytes(*input_digest.bytes())),
             logical_digest: Digest::from_bytes(*input_digest.bytes()),
             encoded_length: 512,

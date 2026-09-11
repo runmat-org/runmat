@@ -106,7 +106,7 @@ fn arrayfun_error_handler_recovers() {
             assert_eq!(function, 991);
             assert_eq!(requested_outputs, 1);
             let seed = arguments.first().cloned().expect("captured seed");
-            Box::pin(async move { Ok(seed) })
+            crate::sequence::single_value_future(async move { Ok(seed) })
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();

@@ -14,7 +14,9 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
                 panic!("expected scalar numeric argument, got {args:?}");
             };
             let value = *value;
-            Box::pin(async move { Ok(Value::Num(value + 40.0)) })
+            Box::pin(
+                async move { crate::sequence::single_value_sequence(Value::Num(value + 40.0)) },
+            )
         },
     )));
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
@@ -43,7 +45,7 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
         |function, arguments, _| {
             assert_eq!(function, 87);
             assert_eq!(arguments, &[Value::Num(4.0)]);
-            Box::pin(async { Ok(Value::Num(8.0)) })
+            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(8.0)) })
         },
     )));
     let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
@@ -64,7 +66,7 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
         |function, arguments, _| {
             assert_eq!(function, 187);
             assert_eq!(arguments, &[Value::Num(5.0), Value::Num(4.0)]);
-            Box::pin(async { Ok(Value::Num(9.0)) })
+            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
         },
     )));
     let callable = Callable::from_function(Value::Closure(Closure {
@@ -90,7 +92,7 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             assert_eq!(function, 287);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(5.0), Value::Num(4.0)]);
-            Box::pin(async { Ok(Value::Num(9.0)) })
+            Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
         },
     )));
     let callable = Callable::from_function(Value::Closure(Closure {

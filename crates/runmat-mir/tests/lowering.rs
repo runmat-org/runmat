@@ -258,12 +258,25 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
 fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
     let mir = lower_mir("obj = 1; obj.method(1);");
     let body = mir.bodies.values().next().expect("body");
-    let call = first_call(body);
+    let chain = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Expr(MirRvalue::SubscriptChain(chain)) => Some(chain),
+            _ => None,
+        })
+        .expect("method syntax lowers to an ordered subscript path");
+    let call = chain.steps.last().expect("terminal dotted invocation");
     assert!(matches!(
-        call.syntax,
-        CallSyntax::Method | CallSyntax::DottedInvoke
+        call,
+        runmat_mir::MirSubscriptStep::DottedInvoke { .. }
     ));
-    assert_eq!(call.fallback_policy, CallableFallbackPolicy::ObjectDispatch);
+    assert_eq!(call.call_syntax(), Some(CallSyntax::DottedInvoke));
+    assert_eq!(
+        call.fallback_policy(),
+        Some(CallableFallbackPolicy::ObjectDispatch)
+    );
 }
 
 #[test]
@@ -3776,7 +3789,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 57);
+    assert_eq!(MirConstructKind::ALL.len(), 58);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()
