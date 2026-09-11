@@ -108,7 +108,7 @@ function auditIdentity(repository, id, observed, controlled, gates, prepares, di
   if (legacySources && !dispositions.has(id)) failures.push(issue("source-field-disposition-missing", id));
   if (dispositions.has(id)) verifyDestinations(id, dispositions.get(id), gates, failures);
   for (const gate of requiredGateNames(controlled)) if (!gates.has(gate)) failures.push(issue("required-gate-missing", gate));
-  for (const removal of controlled.expected_removals) verifyRemoval(repository, removal, gates, failures);
+  for (const removal of controlled.expected_removals) verifyRemoval(repository, removal, failures);
   if (controlled.disposition.kind === "canonical") {
     const authority = observed.semantic_authority;
     if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push(issue("catalog-authority-count", `${authority.catalog_entries.length}:${controlled.expected_authorities.catalog_entry_count}`));
@@ -128,19 +128,8 @@ function auditIdentity(repository, id, observed, controlled, gates, prepares, di
   return identityResult(id, failures);
 }
 
-function verifyRemoval(repository, removal, gates, failures) {
-  if (removal.kind === "file") {
-    if (fs.existsSync(path.join(repository, removal.path))) failures.push(issue("expected-file-removal-present", removal.path));
-  } else {
-    const gate = gates.get("source-removal");
-    const suffix = `${removal.path}:${removal.locator.kind}:${removal.locator.name}`;
-    if (!gate) failures.push(issue("source-removal-gate-missing", suffix));
-    else {
-      const baseline = gate.checks.find((entry) => entry.id === `baseline:${suffix}` && entry.evidence_digest === removal.baseline_digest);
-      const absent = gate.checks.find((entry) => entry.id === `absent:${suffix}` && entry.result === "pass");
-      if (!baseline || !absent) failures.push(issue("source-removal-proof-incomplete", suffix));
-    }
-  }
+function verifyRemoval(repository, removal, failures) {
+  if (fs.existsSync(path.join(repository, removal.path))) failures.push(issue("expected-file-removal-present", removal.path));
 }
 
 function verifyDestinations(identity, disposition, gates, failures) {

@@ -31,6 +31,7 @@ export function buildInventory(repository, dispositionInput = emptyDispositionIn
     "Cargo.toml",
     CATALOG_ROOT, RUNTIME_ROOT, SIDECAR_ROOT, SHADOW_ROOT, WASM_REGISTRY,
     "scripts/development/builtin-migration", "scripts/development/builtin-migration-factory.mjs",
+    "scripts/development/verify-builtin-generated-products.mjs", "scripts/regenerate-wasm-registry.mjs",
     "scripts/development/check-architecture-boundaries.mjs",
   ];
   const source = sourceSnapshot(repository, generatedFrom, options.revision ?? null);

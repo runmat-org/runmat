@@ -9,16 +9,12 @@ import { contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
 import { buildDocumentationCutoverArtifact, documentationCutoverChecks, parseDocumentationCutoverArtifact } from "./documentation-cutover.mjs";
+import { generatedProductChecks, parseGeneratedProductsProof } from "./generated-products.mjs";
+import { buildInventoryDeltaProof, inventoryDeltaChecks } from "./inventory-delta.mjs";
 import { absolutePath, exact } from "./schema.mjs";
 import { sourceFieldBaselineSource } from "./source-fields.mjs";
 
 const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const UNAVAILABLE_PARSER_CONTRACTS = Object.freeze({
-  source_removal: "no repository tool emits closed syntax-aware proof for exact Rust items, macro registrations, and match arms at both the frozen baseline and current source",
-  generated_products: "no repository tool emits a closed two-run determinism report covering the bundle's exact reviewed integration outputs and their content digests",
-  inventory_delta: "no repository tool emits a closed final-versus-baseline migration inventory reconciliation with exact identity, authority, removal, and finding disposition coverage",
-});
-
 // The reviewed control owns the complete command. Callers select only a bundle
 // and gate; they cannot supply executable, argv, cwd, checks, or process facts.
 export function runGateProducer(input) {
@@ -151,8 +147,26 @@ function parserFor(kind, gate, context) {
     fs.writeFileSync(artifactOutput, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
     return documentationCutoverChecks(artifact);
   };
-  const missing = UNAVAILABLE_PARSER_CONTRACTS[kind] ?? "no reviewed authoritative machine contract is implemented";
-  throw new Error(`${gate}: reviewed parser ${kind} remains fail-closed because ${missing}`);
+  if (kind === "generated_products") return (stdout, _stderr, status, identities) => {
+    if (status !== 0) return primaryChecks(gate, identities, false);
+    const proof = parseGeneratedProductsProof(JSON.parse(stdout), {
+      integration_outputs: context.bundle.integration_outputs,
+      source_files: context.inventory.source.files,
+    });
+    return generatedProductChecks(proof, identities);
+  };
+  if (kind === "inventory_delta") return (stdout, _stderr, status, identities) => {
+    if (status !== 0) return primaryChecks(gate, identities, false);
+    const proof = buildInventoryDeltaProof(REPOSITORY, context.inventory, {
+      ...context.control,
+      active_bundle_id: context.bundle.id,
+    }, JSON.parse(stdout));
+    if (JSON.stringify(proof.identities.map((entry) => entry.identity)) !== JSON.stringify(identities)) {
+      throw new Error(`${gate}: inventory delta identity coverage differs from the reviewed bundle`);
+    }
+    return inventoryDeltaChecks(proof);
+  };
+  throw new Error(`${gate}: reviewed parser ${kind} has no authoritative machine contract`);
 }
 
 function compiledCheck(gate, authorityValue) {

@@ -10,9 +10,11 @@ import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../
 import { validateDispositionInput } from "../dispositions.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { runGateProducer } from "../gate-adapter.mjs";
+import { generatedProductChecks, parseGeneratedProductsProof } from "../generated-products.mjs";
 import { buildDocumentationCutoverArtifact, documentationCutoverChecks, parseDocumentationCutoverArtifact } from "../documentation-cutover.mjs";
 import { parseGateResult } from "../gate-result.mjs";
 import { buildInventory } from "../inventory.mjs";
+import { buildInventoryDeltaProof, inventoryDeltaChecks } from "../inventory-delta.mjs";
 import { issueLease, parseLease, parseLeaseRequest, validateLeaseDiff } from "../lease.mjs";
 import { prepareIdentity } from "../prepare.mjs";
 import { buildQueue } from "../queue.mjs";
@@ -144,7 +146,7 @@ test("reviewed control freeze binds the exact draft and baseline inventory", () 
   assert.throws(() => freezeReviewedControl(mutatedDraft, reviewed, fixture.inventory), /differ from the inventory/);
 });
 
-test("expected removals are bound to the exact baseline source bytes and locator", () => {
+test("expected file removals are bound to exact baseline bytes without a second source-item authority", () => {
   const fixture = controlledFixture({ sidecar: true });
   const value = structuredClone(fixture.controlValue);
   const source = fixture.inventory.source.files.find((entry) => entry.path === "docs/builtins/reference/foo.json");
@@ -152,7 +154,7 @@ test("expected removals are bound to the exact baseline source bytes and locator
   value.identities.foo.baseline_evidence = [{ kind: "sidecar", path: source.path, locator: null, digest: source.content_digest }];
   assert.doesNotThrow(() => parseControlManifest(value, fixture.inventory));
   value.identities.foo.baseline_evidence[0].locator = { kind: "rust-item", name: "guessed" };
-  assert.throws(() => parseControlManifest(value, fixture.inventory), /file removal baseline/);
+  assert.throws(() => parseControlManifest(value, fixture.inventory), /source-item locators are obsolete/);
 });
 
 test("internal double-underscore identities and null runtime owners are representable", () => {
@@ -195,13 +197,69 @@ test("gate producer requests cannot inject commands, results, checks, or storage
   fake.bundles[fixture.bundleId].gate_plans[0].program.path = "scripts/fake.mjs";
   assert.throws(() => parseControlManifest(fake, fixture.inventory), /absent from or differs from the frozen source snapshot/);
   fs.writeFileSync(path.join(fixture.repository, "nearby-documentation-token.json"), "{\"result\":\"pass\"}\n");
-  for (const [gateName, detail] of [
-    ["source-removal", /syntax-aware proof/],
-    ["deterministic-products", /two-run determinism report/],
-    ["inventory-delta", /final-versus-baseline migration inventory reconciliation/],
-  ]) {
-    assert.throws(() => runGateProducer({ ...request, gate: gateName }), detail);
-  }
+});
+
+test("generated product proof requires two equal runs, checked-in equality, and exact reviewed outputs", () => {
+  const fixture = controlledFixture();
+  const productPath = "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs";
+  const generatorPath = "scripts/regenerate-wasm-registry.mjs";
+  const observed = fs.readFileSync(path.join(fixture.repository, productPath));
+  const generator = fs.readFileSync(path.join(fixture.repository, generatorPath));
+  const observation = { byte_length: observed.length, content_digest: contentDigest(observed) };
+  const value = {
+    schema_version: 1,
+    kind: "runmat-builtin-generated-products-proof",
+    authority: "machine-derived-integration-evidence",
+    products: [{
+      product_id: "wasm-registry",
+      path: productPath,
+      generator: { path: generatorPath, content_digest: contentDigest(generator) },
+      checked_in: observation,
+      first: observation,
+      second: observation,
+      deterministic: true,
+      synchronized: true,
+    }],
+    result: "pass",
+  };
+  const expected = {
+    integration_outputs: fixture.control.bundles.get(fixture.bundleId).integration_outputs,
+    source_files: fixture.inventory.source.files,
+  };
+  const parsed = parseGeneratedProductsProof(value, expected);
+  assert.equal(generatedProductChecks(parsed, [fixture.id])[0].result, "pass");
+  const stale = structuredClone(value);
+  stale.products[0].checked_in = { ...observation, content_digest: `sha256:${"0".repeat(64)}` };
+  stale.products[0].synchronized = false;
+  stale.result = "fail";
+  assert.equal(parseGeneratedProductsProof(stale, expected).result, "fail");
+  const forged = structuredClone(stale);
+  forged.products[0].synchronized = true;
+  assert.throws(() => parseGeneratedProductsProof(forged, expected), /conflicts with observed digests/);
+  const extra = structuredClone(value);
+  extra.products.push({ ...structuredClone(extra.products[0]), product_id: "invented" });
+  extra.products.sort((left, right) => left.product_id.localeCompare(right.product_id));
+  assert.throws(() => parseGeneratedProductsProof(extra, expected), /reviewed integration outputs/);
+});
+
+test("inventory delta proof admits only the reviewed bundle authority and path transition", () => {
+  const fixture = controlledFixture();
+  const control = { ...fixture.control, active_bundle_id: fixture.bundleId };
+  const proof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, fixture.compiledInventory);
+  assert.equal(proof.result, "pass");
+  assert.equal(inventoryDeltaChecks(proof)[0].result, "pass");
+
+  const wrongBinding = structuredClone(fixture.compiledInventory);
+  wrongBinding.snapshot.observed.implementation_provenance[0].source_file = "crates/runmat-runtime/src/builtins/math/basic/other.rs";
+  wrongBinding.digest.value = contentDigest(Buffer.from(JSON.stringify(wrongBinding.snapshot))).slice("sha256:".length);
+  const wrongBindingProof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, wrongBinding);
+  assert.equal(wrongBindingProof.result, "fail");
+  assert.match(wrongBindingProof.identities[0].failures.join("\n"), /binding provenance differs/);
+
+  fs.appendFileSync(path.join(fixture.repository, "Cargo.toml"), "\n# unreviewed\n");
+  const escaped = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, fixture.compiledInventory);
+  assert.equal(escaped.result, "fail");
+  assert.match(escaped.failures.join("\n"), /source changed outside the reviewed bundle scopes/);
 });
 
 test("validate-control CLI requires and verifies the frozen baseline inventory", () => {

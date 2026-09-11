@@ -176,15 +176,8 @@ function parseAuthorities(value, id) {
 }
 
 function parseRemoval(value, id) {
-  object(value, `${id} removal`);
-  if (value.kind === "file") {
-    exact(value, ["kind", "path", "baseline_digest"], `${id} file removal`);
-  } else if (value.kind === "source-item") {
-    exact(value, ["kind", "path", "locator", "baseline_digest"], `${id} source-item removal`);
-    exact(value.locator, ["kind", "name"], `${id} source-item locator`);
-    enumValue(value.locator.kind, ["rust-item", "macro-registration", "match-arm"], `${id} locator kind`);
-    nonempty(value.locator.name, `${id} locator name`);
-  } else throw new Error(`${id}: unsupported removal kind`);
+  exact(value, ["kind", "path", "baseline_digest"], `${id} file removal`);
+  if (value.kind !== "file") throw new Error(`${id}: expected removals are complete files; in-file authority changes belong to compiled inventory delta evidence`);
   repositoryPath(value.path, `${id} removal path`);
   digest(value.baseline_digest, `${id} removal baseline digest`);
 }
@@ -193,11 +186,7 @@ function parseBaselineEvidence(value, id) {
   exact(value, ["kind", "path", "locator", "digest"], `${id} baseline evidence`);
   enumValue(value.kind, ["catalog", "runtime", "sidecar", "runtime-shadow", "resolver", "provider", "fusion", "test", "example"], `${id} evidence kind`);
   repositoryPath(value.path, `${id} evidence path`);
-  if (value.locator !== null) {
-    exact(value.locator, ["kind", "name"], `${id} baseline evidence locator`);
-    enumValue(value.locator.kind, ["rust-item", "macro-registration", "match-arm"], `${id} baseline locator kind`);
-    nonempty(value.locator.name, `${id} baseline locator name`);
-  }
+  if (value.locator !== null) throw new Error(`${id}: baseline source-item locators are obsolete; compiled and lexical inventory rows are the typed item authority`);
   digest(value.digest, `${id} evidence digest`);
 }
 
@@ -292,11 +281,7 @@ function validateBaseline(baseline, current, identities) {
   const sourceFiles = new Map(current.source.files.map((entry) => [entry.path, entry.content_digest]));
   for (const entry of identities.values()) for (const removal of entry.expected_removals) {
     const proof = entry.baseline_evidence.find((candidate) => candidate.path === removal.path && candidate.digest === removal.baseline_digest);
-    if (removal.kind === "file" && (proof.locator !== null || sourceFiles.get(removal.path) !== removal.baseline_digest)) throw new Error(`${entry.identity}: file removal baseline does not match the content-derived source snapshot`);
-    if (removal.kind === "source-item") {
-      if (JSON.stringify(proof.locator) !== JSON.stringify(removal.locator)) throw new Error(`${entry.identity}: source-item removal locator differs from baseline evidence`);
-      if (sourceFiles.get(removal.path) !== removal.baseline_digest) throw new Error(`${entry.identity}: source-item removal baseline does not match the content-derived source snapshot`);
-    }
+    if (proof.locator !== null || sourceFiles.get(removal.path) !== removal.baseline_digest) throw new Error(`${entry.identity}: file removal baseline does not match the content-derived source snapshot`);
   }
 }
 

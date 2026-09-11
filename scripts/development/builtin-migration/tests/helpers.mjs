@@ -13,6 +13,15 @@ export function repositoryFixture({ sidecar = false, identity = "foo" } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-factory-"));
   write(root, "Cargo.toml", "[workspace]\nresolver = \"2\"\n");
   write(root, "scripts/development/check-architecture-boundaries.mjs", "process.exit(0);\n");
+  write(root, "scripts/regenerate-wasm-registry.mjs", "// fixture generator identity\n");
+  write(root, "scripts/development/verify-builtin-generated-products.mjs", `
+import fs from "node:fs"; import crypto from "node:crypto";
+const digest = (bytes) => "sha256:" + crypto.createHash("sha256").update(bytes).digest("hex");
+const observed = fs.readFileSync("crates/runmat-runtime/src/builtins/generated_wasm_registry.rs");
+const generator = fs.readFileSync("scripts/regenerate-wasm-registry.mjs");
+const value = { schema_version: 1, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", generator: { path: "scripts/regenerate-wasm-registry.mjs", content_digest: digest(generator) }, checked_in: { byte_length: observed.length, content_digest: digest(observed) }, first: { byte_length: observed.length, content_digest: digest(observed) }, second: { byte_length: observed.length, content_digest: digest(observed) }, deterministic: true, synchronized: true }], result: "pass" };
+process.stdout.write(JSON.stringify(value) + "\\n");
+`);
   write(root, `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`, `
 #[runtime_builtin(name = "${identity}", category = "math/basic", builtin_path = "crate::builtins::math::basic::${identity}")]
 fn ${identity.replaceAll(".", "_")}_builtin() {}
@@ -94,15 +103,15 @@ function fixtureGatePlans(inventory) {
   const source = (sourcePath) => inventory.source.files.find((entry) => entry.path === sourcePath).content_digest;
   const approved = (executable) => [{ operating_system: inventory.compiled_inventory.build.operating_system, architecture: inventory.compiled_inventory.build.architecture, content_digest: contentDigest(fs.readFileSync(fs.realpathSync(executable))) }];
   const script = { kind: "repository_script", path: "scripts/development/check-architecture-boundaries.mjs", content_digest: source("scripts/development/check-architecture-boundaries.mjs"), approved_executables: approved(process.execPath) };
+  const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_executables: approved(process.execPath) };
   const cargo = { kind: "cargo_binary", package: "runmat-runtime", binary: "export_builtin_migration_inventory", manifest_path: "Cargo.toml", manifest_digest: source("Cargo.toml"), approved_executables: approved(execFileSync("/usr/bin/which", ["cargo"], { encoding: "utf8" }).trim()) };
   return [
     { gate: "architecture", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "catalog-contract", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
-    { gate: "deterministic-products", program: script, arguments: [], working_directory: "repository", parser: "generated_products", expected_artifact_roles: ["generated-products"] },
+    { gate: "deterministic-products", program: generated, arguments: [], working_directory: "repository", parser: "generated_products", expected_artifact_roles: ["generated-products"] },
     { gate: "documentation-cutover", program: script, arguments: [], working_directory: "repository", parser: "documentation_cutover", expected_artifact_roles: ["documentation-reconciliation"] },
     { gate: "inventory-delta", program: script, arguments: [], working_directory: "repository", parser: "inventory_delta", expected_artifact_roles: ["inventory-delta"] },
     { gate: "runtime-binding", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
-    { gate: "source-removal", program: script, arguments: [], working_directory: "repository", parser: "source_removal", expected_artifact_roles: ["source-removal"] },
   ];
 }
 
