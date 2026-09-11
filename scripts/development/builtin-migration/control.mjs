@@ -83,13 +83,11 @@ function parseCohorts(value) {
 
 function parseBundle(id, value, current) {
   stableId(id, "bundle id");
-  exact(value, ["id", "identities", "domain", "family", "atomic_reason", "prerequisites", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
+  exact(value, ["id", "identities", "atomic_reason", "prerequisites", "authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle`);
   if (value.id !== id) throw new Error(`${id}: bundle key and id differ`);
   const result = {
     ...value,
     identities: uniqueStrings(value.identities, `${id} identities`, { pattern: SAFE_IDENTITY, lower: true }),
-    domain: nonempty(value.domain, `${id} domain`),
-    family: nonempty(value.family, `${id} family`),
     atomic_reason: nonempty(value.atomic_reason, `${id} atomic reason`),
     prerequisites: array(value.prerequisites, `${id} prerequisites`, { empty: true }).map((entry) => parsePrerequisite(entry, id)),
     authored_write_set: array(value.authored_write_set, `${id} authored write set`).map((entry) => parseScope(entry, `${id} authored scope`)),
@@ -109,7 +107,6 @@ function parseIdentity(id, value, bundles, cohorts) {
   const bundle = bundles.get(value.bundle_id);
   if (!bundle) throw new Error(`${id}: unknown bundle ${value.bundle_id}`);
   if (!cohorts.has(value.cohort)) throw new Error(`${id}: unknown cohort ${value.cohort}`);
-  if (value.domain !== bundle.domain || value.family !== bundle.family) throw new Error(`${id}: identity domain/family must match its bundle`);
   parseDisposition(value.disposition, normalized);
   parseMaturity(value.maturity, id);
   parseAuthorities(value.expected_authorities, id);
