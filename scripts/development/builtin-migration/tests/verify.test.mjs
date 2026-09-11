@@ -8,7 +8,9 @@ import { evidenceDigest } from "../evidence.mjs";
 import { prepareIdentity } from "../prepare.mjs";
 import { sealBundle } from "../seal.mjs";
 import { verifyBatch } from "../verify.mjs";
-import { controlledFixture, digestReference, gate } from "./helpers.mjs";
+import { cleanupRepositoryFixtures, controlledFixture, digestReference, gate } from "./helpers.mjs";
+
+test.afterEach(cleanupRepositoryFixtures);
 
 function evidence() {
   const fixture = controlledFixture();

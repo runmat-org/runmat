@@ -25,7 +25,7 @@ export function sourceSnapshot(repository, roots, revision = null) {
   const canonicalRoots = [...new Set(roots)].sort(compareCodePoint);
   return {
     revision: sourceRevision,
-    dirty: repositoryDirty(repository),
+    dirty: repositoryDirty(repository, canonicalRoots),
     roots: canonicalRoots,
     files: entries,
     digest: evidenceDigest({ roots: canonicalRoots, files: entries }),
@@ -42,9 +42,10 @@ export function repositoryRevision(repository) {
   return null;
 }
 
-function repositoryDirty(repository) {
+function repositoryDirty(repository, roots) {
+  if (roots.length === 0) return false;
   try {
-    return execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+    return execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all", "--", ...roots], {
       cwd: repository, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).length > 0;
   } catch {

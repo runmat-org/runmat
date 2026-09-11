@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,8 +18,11 @@ import { buildInventoryDeltaProof, inventoryDeltaChecks } from "../inventory-del
 import { issueLease, parseLease, parseLeaseRequest, validateLeaseDiff } from "../lease.mjs";
 import { prepareIdentity } from "../prepare.mjs";
 import { buildQueue } from "../queue.mjs";
+import { sourceSnapshot } from "../snapshot.mjs";
 import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceFieldBaselineSource } from "../source-fields.mjs";
-import { compiledInventoryFixture, controlledFixture, gate, repositoryFixture, REVISION } from "./helpers.mjs";
+import { cleanupRepositoryFixtures, compiledInventoryFixture, controlledFixture, gate, repositoryFixture, REVISION } from "./helpers.mjs";
+
+test.afterEach(cleanupRepositoryFixtures);
 
 test("inventory v2 binds lexical observations to content-derived source and disposition digests", () => {
   const repository = repositoryFixture();
@@ -35,6 +38,17 @@ test("inventory v2 binds lexical observations to content-derived source and disp
   const changed = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
   assert.notEqual(changed.source.digest, first.source.digest);
   assert.notEqual(changed.digest, first.digest);
+});
+
+test("source dirty evidence is scoped to the frozen inventory roots", () => {
+  const repository = repositoryFixture();
+  execFileSync("git", ["init", "--quiet"], { cwd: repository });
+  execFileSync("git", ["add", "."], { cwd: repository });
+  execFileSync("git", ["-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid", "commit", "--quiet", "-m", "fixture"], { cwd: repository });
+  fs.writeFileSync(path.join(repository, "unrelated.tmp"), "outside snapshot\n");
+  assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, false);
+  fs.appendFileSync(path.join(repository, "Cargo.toml"), "# scoped change\n");
+  assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, true);
 });
 
 test("inventory rejects absent, future, or tampered compiled semantic authority", () => {

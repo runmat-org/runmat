@@ -8,9 +8,13 @@ import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
 
 export const REVISION = `git:${"1".repeat(40)}`;
+const fixtureRoots = new Set();
 
 export function repositoryFixture({ sidecar = false, identity = "foo" } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-factory-"));
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-factory-"));
+  fixtureRoots.add(fixtureRoot);
+  const root = path.join(fixtureRoot, "repository");
+  fs.mkdirSync(root);
   write(root, "Cargo.toml", "[workspace]\nresolver = \"2\"\n");
   write(root, "scripts/development/check-architecture-boundaries.mjs", "process.exit(0);\n");
   write(root, "scripts/regenerate-wasm-registry.mjs", "// fixture generator identity\n");
@@ -37,6 +41,11 @@ pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };`);
   if (sidecar) write(root, `docs/builtins/reference/${identity}.json`, JSON.stringify({ name: identity, summary: "Foo", examples: [{ input: `${identity}(1)` }] }));
   return root;
+}
+
+export function cleanupRepositoryFixtures() {
+  for (const fixtureRoot of fixtureRoots) fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  fixtureRoots.clear();
 }
 
 export function controlledFixture(options = {}) {
