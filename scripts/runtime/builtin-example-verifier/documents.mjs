@@ -185,7 +185,7 @@ export function matchesVerification(testCase, result, normalizedExpected, normal
                 && result?.errorIdentifier === identifier;
         }
         if ("Figure" in verification) {
-            return !hasExecutionError && Boolean(imagePath);
+            return !hasExecutionError && (Boolean(imagePath) || result?.figureVerified === true);
         }
     }
     return testCase.hasExpectedOutput ? normalizedExpected === normalizedActual : !hasExecutionError;

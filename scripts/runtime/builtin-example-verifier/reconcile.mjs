@@ -153,7 +153,7 @@ export function validateReconciliation(report) {
     exactKeys(report, ["schema", "sourceRevision", "inventoryDigest", "planDigest", "runnerDigest", "productScope", "closure", "status", "summary", "productArtifactDigests", "productProbeDigests", "shardResultDigests", "reconciliationDigest"], "reconciliation");
     gitRevision(report.sourceRevision);
     for (const [value, label] of [[report.inventoryDigest, "reconciliation inventory digest"], [report.planDigest, "reconciliation plan digest"], [report.runnerDigest, "reconciliation runner digest"], [report.reconciliationDigest, "reconciliation digest"]]) digest(value, label);
-    enumValue(report.productScope, ["all", "native-cli", "browser-wasm"], "reconciliation product scope");
+    enumValue(report.productScope, ["all", "public-products", "native-cli", "browser-wasm", "desktop-native"], "reconciliation product scope");
     if (typeof report.closure !== "boolean") throw new Error("Reconciliation closure must be a boolean");
     enumValue(report.status, ["passed", "failed"], "reconciliation status");
     exactKeys(report.summary, ["shards", "executionUnits", "byStatus"], "reconciliation summary");
@@ -190,7 +190,7 @@ export function validateReconciliation(report) {
     if (JSON.stringify(orderedProbes) !== JSON.stringify(report.productProbeDigests)) throw new Error("Reconciliation product probe digests are not in canonical order");
     if (!report.productArtifactDigests || typeof report.productArtifactDigests !== "object" || Array.isArray(report.productArtifactDigests)) throw new Error("Reconciliation product artifact digests must be an object");
     for (const [product, value] of Object.entries(report.productArtifactDigests)) {
-        enumValue(product, ["native-cli", "browser-wasm"], "reconciliation product");
+        enumValue(product, ["native-cli", "browser-wasm", "desktop-native"], "reconciliation product");
         digest(value, `reconciliation product digest ${product}`);
     }
     const orderedProducts = Object.keys(report.productArtifactDigests).sort(compareUtf8);

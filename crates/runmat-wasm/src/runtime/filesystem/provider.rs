@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use runmat_filesystem::{
-    DirEntry, FileHandle, FsMetadata, FsProvider, OpenFileDialogRequest, OpenFileDialogSelection,
-    OpenFlags, ReadManyEntry, SaveFileDialogRequest, SaveFileDialogSelection,
+    DirEntry, FileHandle, FsMetadata, FsProvider, HostDialogProvider, OpenFileDialogRequest,
+    OpenFileDialogSelection, OpenFlags, ReadManyEntry, SaveFileDialogRequest,
+    SaveFileDialogSelection,
 };
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -13,8 +14,9 @@ use super::handle::{JsFileHandle, JsFileState};
 
 pub(crate) fn install_js_fs_provider(bindings: &JsValue) -> Result<(), JsValue> {
     let funcs = JsFsFuncs::new(bindings)?;
-    let provider: Arc<dyn FsProvider> = Arc::new(JsFsProvider { funcs });
-    runmat_filesystem::set_provider(provider);
+    let provider = Arc::new(JsFsProvider { funcs });
+    runmat_filesystem::set_provider(provider.clone());
+    runmat_filesystem::set_host_dialog_provider(Some(provider));
     Ok(())
 }
 
@@ -104,7 +106,10 @@ impl FsProvider for JsFsProvider {
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         self.funcs.read_many(paths).await
     }
+}
 
+#[async_trait(?Send)]
+impl HostDialogProvider for JsFsProvider {
     async fn select_file_open(
         &self,
         request: &OpenFileDialogRequest,

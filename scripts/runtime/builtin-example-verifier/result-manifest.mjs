@@ -43,7 +43,7 @@ export function validateShardResult(manifest) {
     gitRevision(manifest.sourceRevision);
     enumValue(manifest.sourceState, ["clean", "dirty"], "shard source state");
     for (const [value, label] of [[manifest.inventoryDigest, "shard inventory digest"], [manifest.planDigest, "shard plan digest"], [manifest.runnerDigest, "shard runner digest"], [manifest.assignmentDigest, "shard assignment digest"], [manifest.shardResultDigest, "shard result digest"]]) digest(value, label);
-    enumValue(manifest.product, ["native-cli", "browser-wasm"], "shard product");
+    enumValue(manifest.product, ["native-cli", "browser-wasm", "desktop-native"], "shard product");
     if (!isExecutionLane(manifest.lane) || laneProduct(manifest.lane) !== manifest.product) throw new Error("Shard lane and product are inconsistent");
     requiredArtifactRoles(manifest.product, manifest.artifactProfile);
     if (manifest.artifactManifestDigest !== null) digest(manifest.artifactManifestDigest, "shard artifact manifest digest");

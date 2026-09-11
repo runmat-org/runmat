@@ -120,3 +120,47 @@ test("rejects isolation at the foreign-fixture level", () => {
     }
   }), /fields/u);
 });
+
+test("accepts typed desktop interactions and rejects unsafe outcomes", () => {
+  const requirements = { ...nativeRequirements, host: "DesktopHostOnly" };
+  const fixture = { DesktopHostOnly: {
+    id: { local_name: "desktop-host" },
+    entries: [
+      { Directory: { relative_path: "data" } },
+      { File: { relative_path: "data/input.csv", content: { Utf8: "value\n1\n" } } }
+    ],
+    interactions: [
+      { OpenFileDialog: {
+        request: {
+          title: "Choose data",
+          default_path: "data",
+          filters: [{ patterns: ["*.csv"], description: "CSV files" }],
+          multiselect: false
+        },
+        outcome: { Selection: { paths: ["data/input.csv"], filter_index: 0 } }
+      } },
+      { FigurePresentation: {
+        figure_ordinal: 1,
+        event: "Created",
+        snapshot: { title: "Result", axes_rows: 1, axes_cols: 1 }
+      } }
+    ]
+  } };
+  assert.equal(validateBuiltinExampleFixture(fixture, "fixture", {
+    program: "file = uigetfile('*.csv'); figure;",
+    harness: "InteractiveHost",
+    requirements
+  }), fixture);
+
+  const unsafe = structuredClone(fixture);
+  unsafe.DesktopHostOnly.interactions[0].OpenFileDialog.outcome.Selection.paths = ["../outside.csv"];
+  assert.throws(() => validateBuiltinExampleFixture(unsafe), /relative path/);
+
+  const missingSnapshot = structuredClone(fixture);
+  missingSnapshot.DesktopHostOnly.interactions[1].FigurePresentation.snapshot = null;
+  assert.throws(() => validateBuiltinExampleFixture(missingSnapshot), /requires a snapshot/);
+
+  const impossibleSelection = structuredClone(fixture);
+  impossibleSelection.DesktopHostOnly.interactions[0].OpenFileDialog.outcome.Selection.paths = ["data/missing.csv"];
+  assert.throws(() => validateBuiltinExampleFixture(impossibleSelection), /declared file/);
+});

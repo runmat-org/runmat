@@ -141,8 +141,42 @@ export interface BuiltinCliInteractionFixture {
 
 export interface BuiltinDesktopHostFixture {
   id: { local_name: string };
-  scenario: "FilePicker" | "FigureWindow" | "InteractivePrompt";
+  entries: BuiltinFilesystemFixture["entries"];
+  interactions: BuiltinDesktopHostInteraction[];
 }
+
+export type BuiltinDialogFilterExpectation = {
+  patterns: string[];
+  description: string | null;
+};
+
+export type BuiltinDesktopHostInteraction =
+  | { OpenFileDialog: {
+      request: { title: string | null; default_path: string | null; filters: BuiltinDialogFilterExpectation[]; multiselect: boolean };
+      outcome: { Selection: { paths: string[]; filter_index: number | null } } | "Cancel" | { Error: string };
+    } }
+  | { SaveFileDialog: {
+      request: { title: string | null; default_path: string | null; filters: BuiltinDialogFilterExpectation[] };
+      outcome: { Selection: { path: string; filter_index: number | null } } | "Cancel" | { Error: string };
+    } }
+  | { DirectoryDialog: {
+      request: { title: string | null; default_path: string | null };
+      outcome: { Selection: { path: string } } | "Cancel" | { Error: string };
+    } }
+  | { LineInput: {
+      prompt: string;
+      echo: boolean;
+      outcome: { Line: string } | { Error: string };
+    } }
+  | { KeyInput: {
+      prompt: string;
+      outcome: "KeyPress" | { Error: string };
+    } }
+  | { FigurePresentation: {
+      figure_ordinal: number;
+      event: "Created" | "Updated" | "Cleared" | "Closed";
+      snapshot: { title: string | null; axes_rows: number; axes_cols: number } | null;
+    } };
 
 export interface BuiltinExampleRequirements {
   host: "Any" | "NativeOnly" | "DesktopHostOnly";

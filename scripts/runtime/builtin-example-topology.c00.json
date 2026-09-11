@@ -2,6 +2,7 @@
   "schema": "runmat.builtin-examples.topology.v1",
   "products": {
     "browser-wasm": { "artifactProfile": "web" },
+    "desktop-native": { "artifactProfile": "desktop-host" },
     "native-cli": { "artifactProfile": "embedded-aot" }
   },
   "lanes": {
@@ -12,6 +13,7 @@
     "native-filesystem": { "shards": 4 },
     "native-loopback-network": { "shards": 2 },
     "native-foreign-runtime": { "shards": 2 },
-    "interactive-host": { "shards": 2 }
+    "interactive-host": { "shards": 2 },
+    "desktop-host": { "shards": 2 }
   }
 }

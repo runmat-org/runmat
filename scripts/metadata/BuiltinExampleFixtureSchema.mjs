@@ -50,11 +50,11 @@ export function validateBuiltinExampleRequirements(value, label = "example requi
   return value;
 }
 
-function filesystem(value, label) {
+function filesystem(value, label, options = {}) {
   exact(value, ["id", "root", "entries"], `${label} filesystem`);
   fixtureId(value.id, label);
   member(value.root, ["IsolatedWorkspace"], `${label} filesystem root`);
-  const entries = bounded(value.entries, 1, MAX_FILESYSTEM_ENTRIES, `${label} filesystem entries`);
+  const entries = bounded(value.entries, options.allowEmpty ? 0 : 1, MAX_FILESYSTEM_ENTRIES, `${label} filesystem entries`);
   const paths = new Set();
   const orderedPaths = [];
   let aggregateBytes = 0;
@@ -251,9 +251,129 @@ function cliInteraction(value, label) {
 }
 
 function desktopHost(value, label) {
-  exact(value, ["id", "scenario"], `${label} desktop host`);
+  exact(value, ["id", "entries", "interactions"], `${label} desktop host`);
   fixtureId(value.id, label);
-  member(value.scenario, ["FilePicker", "FigureWindow", "InteractivePrompt"], `${label} desktop scenario`);
+  filesystem({ id: value.id, root: "IsolatedWorkspace", entries: value.entries }, `${label} desktop workspace`, { allowEmpty: true });
+  const workspace = desktopWorkspacePaths(value.entries);
+  bounded(value.interactions, 1, MAX_TRANSCRIPT_STEPS, `${label} desktop interactions`)
+    .forEach((interaction) => desktopInteraction(interaction, workspace, label));
+}
+
+function desktopInteraction(value, workspace, label) {
+  const [tag, interaction] = tagged(value, ["OpenFileDialog", "SaveFileDialog", "DirectoryDialog", "LineInput", "KeyInput", "FigurePresentation"], `${label} desktop interaction`);
+  if (tag === "OpenFileDialog") {
+    exact(interaction, ["request", "outcome"], `${label} open-file interaction`);
+    desktopDialogRequest(interaction.request, label, true);
+    const [outcome, payload] = desktopOutcome(interaction.outcome, label);
+    if (outcome === "Selection") {
+      exact(payload, ["paths", "filter_index"], `${label} open-file selection`);
+      bounded(payload.paths, 1, MAX_FILESYSTEM_ENTRIES, `${label} open-file paths`).forEach((path) => relativePath(path, `${label} open-file path`));
+      if (payload.paths.some((path) => !workspace.files.has(path))) throw new Error(`${label} open-file selection must name a declared file`);
+      if (!interaction.request.multiselect && payload.paths.length !== 1) throw new Error(`${label} single-file dialog must select exactly one path`);
+      desktopFilterIndex(payload.filter_index, interaction.request.filters.length, label);
+    }
+  } else if (tag === "SaveFileDialog") {
+    exact(interaction, ["request", "outcome"], `${label} save-file interaction`);
+    desktopDialogRequest(interaction.request, label, false);
+    const [outcome, payload] = desktopOutcome(interaction.outcome, label);
+    if (outcome === "Selection") {
+      exact(payload, ["path", "filter_index"], `${label} save-file selection`);
+      relativePath(payload.path, `${label} save-file path`);
+      if (!workspace.directories.has(parentPath(payload.path))) throw new Error(`${label} save-file selection parent must exist in the fixture workspace`);
+      desktopFilterIndex(payload.filter_index, interaction.request.filters.length, label);
+    }
+  } else if (tag === "DirectoryDialog") {
+    exact(interaction, ["request", "outcome"], `${label} directory interaction`);
+    desktopDialogRequest(interaction.request, label, null);
+    const [outcome, payload] = desktopOutcome(interaction.outcome, label);
+    if (outcome === "Selection") {
+      exact(payload, ["path"], `${label} directory selection`);
+      relativePath(payload.path, `${label} directory path`);
+      if (!workspace.directories.has(payload.path)) throw new Error(`${label} directory selection must name a materialized fixture directory`);
+    }
+  } else if (tag === "LineInput") {
+    exact(interaction, ["prompt", "echo", "outcome"], `${label} line-input interaction`);
+    boundedText(interaction.prompt, `${label} line-input prompt`, true);
+    if (typeof interaction.echo !== "boolean") throw new Error(`${label} line-input echo must be a boolean`);
+    const [outcome, payload] = tagged(interaction.outcome, ["Line", "Error"], `${label} line-input outcome`);
+    boundedText(payload, `${label} line-input ${outcome.toLowerCase()}`, outcome === "Line");
+  } else if (tag === "KeyInput") {
+    exact(interaction, ["prompt", "outcome"], `${label} key-input interaction`);
+    boundedText(interaction.prompt, `${label} key-input prompt`, true);
+    if (interaction.outcome !== "KeyPress") {
+      const [outcome, payload] = tagged(interaction.outcome, ["Error"], `${label} key-input outcome`);
+      boundedText(payload, `${label} key-input ${outcome.toLowerCase()}`, false);
+    }
+  } else {
+    exact(interaction, ["figure_ordinal", "event", "snapshot"], `${label} figure interaction`);
+    integer(interaction.figure_ordinal, `${label} figure ordinal`);
+    if (interaction.figure_ordinal < 1) throw new Error(`${label} figure ordinal must be one-based`);
+    member(interaction.event, ["Created", "Updated", "Cleared", "Closed"], `${label} figure event`);
+    if (interaction.snapshot !== null) {
+      exact(interaction.snapshot, ["title", "axes_rows", "axes_cols"], `${label} figure snapshot`);
+      nullableText(interaction.snapshot.title, `${label} figure title`);
+      integer(interaction.snapshot.axes_rows, `${label} figure axes rows`);
+      integer(interaction.snapshot.axes_cols, `${label} figure axes columns`);
+    }
+    if (interaction.event === "Created" && interaction.snapshot === null) throw new Error(`${label} created figure requires a snapshot`);
+  }
+}
+
+function desktopWorkspacePaths(entries) {
+  const files = new Set();
+  const directories = new Set([""]);
+  for (const entry of entries) {
+    const [tag, inner] = tagged(entry, ["Directory", "File"], "desktop workspace entry");
+    if (tag === "File") files.add(inner.relative_path);
+    else directories.add(inner.relative_path);
+    let parent = parentPath(inner.relative_path);
+    while (parent) {
+      directories.add(parent);
+      parent = parentPath(parent);
+    }
+  }
+  return { files, directories };
+}
+
+function parentPath(path) {
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
+}
+
+function desktopDialogRequest(value, label, open) {
+  const fields = open === null ? ["title", "default_path"] : open ? ["title", "default_path", "filters", "multiselect"] : ["title", "default_path", "filters"];
+  exact(value, fields, `${label} dialog request`);
+  nullableText(value.title, `${label} dialog title`);
+  if (value.default_path !== null) relativePath(value.default_path, `${label} dialog default path`);
+  if (open === null) return;
+  bounded(value.filters, 0, 64, `${label} dialog filters`).forEach((filter) => {
+    exact(filter, ["patterns", "description"], `${label} dialog filter`);
+    bounded(filter.patterns, 1, 64, `${label} dialog filter patterns`).forEach((pattern) => boundedText(pattern, `${label} dialog filter pattern`, false));
+    nullableText(filter.description, `${label} dialog filter description`);
+  });
+  if (open && typeof value.multiselect !== "boolean") throw new Error(`${label} dialog multiselect must be a boolean`);
+}
+
+function desktopOutcome(value, label) {
+  if (value === "Cancel") return ["Cancel", null];
+  const [tag, payload] = tagged(value, ["Selection", "Error"], `${label} dialog outcome`);
+  if (tag === "Error") boundedText(payload, `${label} dialog error`, false);
+  return [tag, payload];
+}
+
+function desktopFilterIndex(value, filterCount, label) {
+  if (value === null) return;
+  integer(value, `${label} dialog filter index`);
+  if (value >= filterCount) throw new Error(`${label} dialog filter index is outside the declared filters`);
+}
+
+function nullableText(value, label) {
+  if (value !== null) boundedText(value, label, true);
+}
+
+function boundedText(value, label, allowEmpty) {
+  string(value, label);
+  if ((!allowEmpty && value.length === 0) || byteLength(value) > 64 * 1024 || value.includes("\0")) throw new Error(`${label} is invalid`);
 }
 
 function fixtureId(value, label) {

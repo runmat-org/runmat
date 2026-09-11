@@ -25,7 +25,8 @@ export const EXECUTION_LANES = Object.freeze([
     "native-filesystem",
     "native-loopback-network",
     "native-foreign-runtime",
-    "interactive-host"
+    "interactive-host",
+    "desktop-host"
 ]);
 
 const HARNESS_LANES = Object.freeze({
@@ -41,7 +42,8 @@ const HARNESS_LANES = Object.freeze({
     InteractiveHost: ["interactive-host"]
 });
 
-export function requiredExecutionLanes(harness) {
+export function requiredExecutionLanes(harness, hostRequirement = "Any") {
+    if (harness === "InteractiveHost" && hostRequirement === "DesktopHostOnly") return ["desktop-host"];
     const lanes = HARNESS_LANES[harness];
     if (!lanes) throw new Error(`Unknown builtin example harness: ${harness}`);
     return [...lanes];
@@ -54,6 +56,7 @@ export function isExecutionLane(lane) {
 export function laneProduct(lane) {
     if (!isExecutionLane(lane)) throw new Error(`Unknown builtin example execution lane: ${lane}`);
     if (lane.startsWith("browser-")) return "browser-wasm";
+    if (lane === "desktop-host") return "desktop-native";
     return "native-cli";
 }
 

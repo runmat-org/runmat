@@ -16,6 +16,7 @@ import {
     usesNativeLane
 } from "./lanes.mjs";
 import { runNativeCases } from "./native.mjs";
+import { runDesktopHostCases } from "./desktop-host.mjs";
 import {
     createInventory,
     exampleKey,
@@ -66,6 +67,7 @@ import { buildReportHtml, buildReportMarkdown, filterReportRows, formatExecution
  * @property {"unavailable"} [availability]
  * @property {string} [figurePngBase64]
  * @property {string} [figureImageError]
+ * @property {boolean} [figureVerified]
  */
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -126,6 +128,7 @@ const browserCases = cases.filter((testCase) => requestedLane
 const nativeCases = cases.filter((testCase) => requestedLane
     ? requestedLane.startsWith("native-")
     : usesNativeLane(testCase.harness));
+const desktopCases = cases.filter((testCase) => requestedLane === "desktop-host");
 const unsupportedCases = requestedLane
     ? []
     : cases.filter((testCase) => !usesBrowserLane(testCase.harness) && !usesNativeLane(testCase.harness));
@@ -150,7 +153,8 @@ const browserResults = browserCases.length > 0
     ? await runHeadlessChrome({ repoRoot, chromeWrapper, runnerHtml, casesJson, overallTimeoutMs, totalCases: browserCases.length, wasmModule, wasmBinary })
     : [];
 const nativeResults = nativeCases.length > 0 ? await runNativeCases(repoRoot, nativeCases, nativeTimeoutMs) : [];
-const results = mergeLaneResults(cases, browserResults, nativeResults, unsupportedCases);
+const desktopResults = desktopCases.length > 0 ? await runDesktopHostCases(desktopCases, nativeTimeoutMs) : [];
+const results = mergeLaneResults(cases, browserResults, [...nativeResults, ...desktopResults], unsupportedCases);
 
 const resultsById = new Map(results.map((result) => [result.id, result]));
 
@@ -173,12 +177,13 @@ const rows = cases.map((testCase) => {
         normalizedActual,
         imageRelPath,
         imageError,
+        figureVerified: result?.figureVerified === true,
         matches: matchesVerification(testCase, result, normalizedExpected, normalizedActual, hasExecutionError, imageRelPath)
     };
 });
 
 const plotImageErrors = rows
-    .filter((row) => row.testCase.isPlotExample && !row.imageRelPath)
+    .filter((row) => row.testCase.isPlotExample && !row.imageRelPath && !row.figureVerified)
     .map((row) => {
         const why = row.imageError && row.imageError.trim().length > 0 ? row.imageError.trim() : "(no error message)";
         return `#${row.testCase.id} ${row.testCase.file} example ${row.testCase.exampleIndex + 1}\n${why}`;

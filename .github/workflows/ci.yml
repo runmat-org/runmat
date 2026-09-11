@@ -18,9 +18,9 @@ concurrency:
 
 jobs:
   builtin-example-closure:
-    # Full product closure is deliberately a protected-branch integration gate:
-    # it builds native and browser products and is too expensive for every topic
-    # branch push. The reusable workflow is also available through manual dispatch.
+    # Public-product verification builds native and browser products and is too
+    # expensive for every topic branch push. Full cross-product closure, including
+    # the private Desktop product, is owned by the Desktop integration workflow.
     if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
     uses: ./.github/workflows/builtin-example-closure.yml
 

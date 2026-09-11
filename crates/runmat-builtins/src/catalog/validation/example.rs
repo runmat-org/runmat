@@ -5,6 +5,7 @@ use crate::{
 
 use super::BuiltinCatalogValidationError;
 
+mod desktop;
 mod foreign;
 mod interaction;
 mod resource;
@@ -142,6 +143,7 @@ pub(super) fn validate(
                     "desktop fixture requires the desktop-host-only boundary",
                 );
             }
+            desktop::validate(builtin, fixture, errors);
         }
     }
 }
