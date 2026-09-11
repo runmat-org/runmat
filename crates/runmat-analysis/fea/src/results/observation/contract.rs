@@ -1,7 +1,8 @@
 use runmat_analysis_core::{
-    AnalysisField, FieldLocation, IndependentDomain, ObservationCostEstimate, ObservationId,
-    ObservationQuantity, ObservationSpec, ObservationValueShape, PartialAccessPolicy,
-    ProcedureStepId, SamplingPolicy,
+    AnalysisField, ComplexRepresentation, FieldLocation, IndependentDomain, ObservationComponent,
+    ObservationCostEstimate, ObservationId, ObservationQuantity, ObservationSpec,
+    ObservationValueShape, PartialAccessPolicy, ProcedureStepId, SamplingPolicy, SignalPrecision,
+    SpatialReduction,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -268,6 +269,7 @@ pub struct ObservationResult {
     pub quantity: ObservationQuantity,
     pub location: FieldLocation,
     pub value_shape: ObservationValueShape,
+    pub complex_representation: ComplexRepresentation,
     pub entities: Vec<ObservationEntity>,
     pub field: AnalysisField,
     pub partial_access: PartialAccessPolicy,
@@ -288,6 +290,7 @@ impl ObservationResult {
                 self.quantity,
                 self.location,
                 &self.value_shape,
+                self.complex_representation,
                 &self.entities,
                 &self.field,
                 self.partial_access,
@@ -309,17 +312,12 @@ impl ObservationResult {
             .shape
             .iter()
             .try_fold(1usize, |count, extent| count.checked_mul(*extent));
-        let components = shape_component_count(&self.value_shape)?;
-        let entity_shape_is_valid = if self.entities.is_empty() {
-            self.field.shape == vec![components]
-        } else {
-            let expected_shape = if components == 1 {
-                vec![self.entities.len()]
-            } else {
-                vec![self.entities.len(), components]
-            };
-            self.field.shape == expected_shape
-        };
+        let entity_shape_is_valid = self.field.shape
+            == observation_result_storage_shape(
+                (!self.entities.is_empty()).then_some(self.entities.len()),
+                &self.value_shape,
+                self.complex_representation,
+            )?;
         let mut entity_ids = std::collections::BTreeSet::new();
         let entities_are_valid = self.entities.iter().all(|entity| {
             let (location, identity) = match entity {
@@ -393,6 +391,7 @@ struct ObservationResultWire {
     quantity: ObservationQuantity,
     location: FieldLocation,
     value_shape: ObservationValueShape,
+    complex_representation: ComplexRepresentation,
     entities: Vec<ObservationEntity>,
     field: AnalysisField,
     partial_access: PartialAccessPolicy,
@@ -413,6 +412,7 @@ impl TryFrom<ObservationResultWire> for ObservationResult {
             quantity: wire.quantity,
             location: wire.location,
             value_shape: wire.value_shape,
+            complex_representation: wire.complex_representation,
             entities: wire.entities,
             field: wire.field,
             partial_access: wire.partial_access,
@@ -796,6 +796,7 @@ fn derive_artifact_identity(
 fn validate_resolved_observation(
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
+    validate_output_numeric_contract(&observation.spec)?;
     if observation.sample_bounds.maximum_produced_samples == 0
         || observation.sample_bounds.maximum_retained_samples == 0
         || observation.sample_bounds.maximum_retained_samples
@@ -933,6 +934,49 @@ fn validate_resolved_observation(
     Ok(())
 }
 
+pub(super) fn validate_output_numeric_contract(
+    spec: &ObservationSpec,
+) -> Result<(), ObservationError> {
+    let precision_matches = match spec.complex_representation {
+        ComplexRepresentation::Complex => spec.storage.precision == SignalPrecision::Complex128,
+        _ => spec.storage.precision == SignalPrecision::Real64,
+    };
+    if !precision_matches {
+        return Err(ObservationError::Invalid(
+            "observation precision does not match its requested real or complex representation"
+                .into(),
+        ));
+    }
+    if spec.complex_representation == ComplexRepresentation::PhaseRadians
+        && spec.reduction.is_some()
+    {
+        return Err(ObservationError::Unsupported(
+            "phase requires a circular reduction rather than a linear spatial reduction",
+        ));
+    }
+    if spec.complex_representation == ComplexRepresentation::Complex
+        && spec
+            .reduction
+            .as_ref()
+            .is_some_and(|reduction| reduction.spatial == SpatialReduction::RootMeanSquare)
+    {
+        return Err(ObservationError::Unsupported(
+            "complex root-mean-square reduction requires an explicit magnitude representation",
+        ));
+    }
+    if spec.component == ObservationComponent::Magnitude
+        && matches!(
+            spec.complex_representation,
+            ComplexRepresentation::PhaseRadians | ComplexRepresentation::Complex
+        )
+    {
+        return Err(ObservationError::Unsupported(
+            "vector magnitude requires a real, imaginary, or complex-magnitude representation",
+        ));
+    }
+    Ok(())
+}
+
 fn strictly_increasing(values: &[usize]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
@@ -979,6 +1023,40 @@ pub(super) fn checked_bytes(values: usize) -> Result<u64, ObservationError> {
         .ok()
         .and_then(|count| count.checked_mul(8))
         .ok_or(ObservationError::Limit("value byte count"))
+}
+
+pub(super) fn observation_result_storage_component_count(
+    logical_component_count: usize,
+    representation: ComplexRepresentation,
+) -> Result<usize, ObservationError> {
+    match representation {
+        ComplexRepresentation::Complex => {
+            logical_component_count
+                .checked_mul(2)
+                .ok_or(ObservationError::Limit(
+                    "complex observation component count",
+                ))
+        }
+        _ => Ok(logical_component_count),
+    }
+}
+
+pub(super) fn observation_result_storage_shape(
+    entity_count: Option<usize>,
+    value_shape: &ObservationValueShape,
+    representation: ComplexRepresentation,
+) -> Result<Vec<usize>, ObservationError> {
+    let logical_components = shape_component_count(value_shape)?;
+    Ok(match (entity_count, logical_components, representation) {
+        (Some(entities), 1, ComplexRepresentation::Complex) => vec![entities, 2],
+        (Some(entities), components, ComplexRepresentation::Complex) => {
+            vec![entities, components, 2]
+        }
+        (Some(entities), 1, _) => vec![entities],
+        (Some(entities), components, _) => vec![entities, components],
+        (None, _, ComplexRepresentation::Complex) => vec![logical_components, 2],
+        (None, _, _) => vec![logical_components],
+    })
 }
 
 pub(super) fn shape_component_count(

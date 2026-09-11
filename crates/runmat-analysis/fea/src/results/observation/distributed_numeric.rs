@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{FieldLocation, SpatialReduction};
+use runmat_analysis_core::{ComplexRepresentation, FieldLocation, SpatialReduction};
 
 use crate::{results::field::RecoveredFieldPartitionSet, topology::AnalysisProjection};
 
 use super::{
-    contract::shape_component_count, topology::StructuralObservationTopology, ObservationError,
-    ObservationPartition, ObservationPartitionPayload, ObservationPartitionTarget,
-    ResolvedComponentProjection, ResolvedObservation,
+    contract::observation_result_storage_component_count, topology::StructuralObservationTopology,
+    ObservationError, ObservationPartition, ObservationPartitionPayload,
+    ObservationPartitionTarget, ResolvedComponentProjection, ResolvedObservation,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -103,15 +103,18 @@ impl CompensatedSum {
 pub(super) fn select_values(
     field: &RecoveredFieldPartitionSet,
     indices: &[usize],
-    component: ResolvedComponentProjection,
+    observation: &ResolvedObservation,
 ) -> Result<Vec<f64>, ObservationError> {
-    let components = shape_component_count(field.definition.value_shape())?;
+    let components = observation_result_storage_component_count(
+        observation.result_component_count,
+        observation.spec.complex_representation,
+    )?;
     let mut selected = Vec::with_capacity(indices.len().saturating_mul(components));
     for &index in indices {
         let value = field.value(index).ok_or(ObservationError::Identity(
             "observation source partition is missing an owned field entity",
         ))?;
-        selected.extend(project_component(value, component)?);
+        selected.extend(project_observation_value(field, value, observation)?);
     }
     Ok(selected)
 }
@@ -119,9 +122,21 @@ pub(super) fn select_values(
 fn project_component(
     value: &[f64],
     component: ResolvedComponentProjection,
+    complex_output: bool,
 ) -> Result<Vec<f64>, ObservationError> {
     match component {
         ResolvedComponentProjection::All => Ok(value.to_vec()),
+        ResolvedComponentProjection::Cartesian { axis } if complex_output => {
+            let start = axis
+                .checked_mul(2)
+                .ok_or(ObservationError::Limit("complex Cartesian component index"))?;
+            value
+                .get(start..start + 2)
+                .map(<[f64]>::to_vec)
+                .ok_or(ObservationError::Identity(
+                    "resolved component exceeds complex field shape",
+                ))
+        }
         ResolvedComponentProjection::Cartesian { axis } => value
             .get(axis)
             .copied()
@@ -129,15 +144,65 @@ fn project_component(
             .ok_or(ObservationError::Identity(
                 "resolved component exceeds field shape",
             )),
-        ResolvedComponentProjection::Magnitude3 if value.len() == 3 => Ok(vec![value
-            .iter()
-            .map(|component| component * component)
-            .sum::<f64>()
-            .sqrt()]),
+        ResolvedComponentProjection::Magnitude3 if !complex_output && value.len() == 3 => {
+            Ok(vec![value
+                .iter()
+                .map(|component| component * component)
+                .sum::<f64>()
+                .sqrt()])
+        }
         _ => Err(ObservationError::Unsupported(
             "component projection is not implemented for this recovered value shape",
         )),
     }
+}
+
+fn project_observation_value(
+    field: &RecoveredFieldPartitionSet,
+    value: &[f64],
+    observation: &ResolvedObservation,
+) -> Result<Vec<f64>, ObservationError> {
+    use crate::results::field::RecoveredFieldNumericRepresentation;
+
+    let represented = match field.definition.numeric_representation() {
+        RecoveredFieldNumericRepresentation::Real
+            if observation.spec.complex_representation == ComplexRepresentation::Real =>
+        {
+            value.to_vec()
+        }
+        RecoveredFieldNumericRepresentation::Real => {
+            return Err(ObservationError::Invalid(
+                "a real recovered field cannot provide imaginary, phase, or complex values".into(),
+            ))
+        }
+        RecoveredFieldNumericRepresentation::ComplexInterleaved => {
+            if !value.len().is_multiple_of(2) {
+                return Err(ObservationError::Identity(
+                    "complex recovered value does not contain interleaved pairs",
+                ));
+            }
+            match observation.spec.complex_representation {
+                ComplexRepresentation::Real => value.chunks_exact(2).map(|pair| pair[0]).collect(),
+                ComplexRepresentation::Imaginary => {
+                    value.chunks_exact(2).map(|pair| pair[1]).collect()
+                }
+                ComplexRepresentation::Magnitude => value
+                    .chunks_exact(2)
+                    .map(|pair| pair[0].hypot(pair[1]))
+                    .collect(),
+                ComplexRepresentation::PhaseRadians => value
+                    .chunks_exact(2)
+                    .map(|pair| pair[1].atan2(pair[0]))
+                    .collect(),
+                ComplexRepresentation::Complex => value.to_vec(),
+            }
+        }
+    };
+    project_component(
+        &represented,
+        observation.component,
+        observation.spec.complex_representation == ComplexRepresentation::Complex,
+    )
 }
 
 pub(super) fn weighted_volume_contribution(
@@ -146,7 +211,10 @@ pub(super) fn weighted_volume_contribution(
     element_indices: &[usize],
     projection: &AnalysisProjection,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
-    let mut accumulator = WeightedAccumulator::new(observation.result_component_count);
+    let mut accumulator = WeightedAccumulator::new(observation_result_storage_component_count(
+        observation.result_component_count,
+        observation.spec.complex_representation,
+    )?);
     for &element_index in element_indices {
         let element = projection.elements.get(element_index).ok_or_else(|| {
             ObservationError::Invalid("resolved element index is out of bounds".into())
@@ -160,7 +228,7 @@ pub(super) fn weighted_volume_contribution(
                         field,
                         &element.node_indices,
                         point.shape_values(),
-                        observation.component,
+                        observation,
                     ) {
                         Ok(projected) => accumulator.add(&projected, point.volume_weight_m3),
                         Err(error) => component_error = Some(error),
@@ -171,14 +239,12 @@ pub(super) fn weighted_volume_contribution(
                 }
             }
             FieldLocation::Element => {
-                let projected = project_component(
-                    field
-                        .value(element_index)
-                        .ok_or(ObservationError::Identity(
-                            "observation source partition is missing an owned element field value",
-                        ))?,
-                    observation.component,
-                )?;
+                let value = field
+                    .value(element_index)
+                    .ok_or(ObservationError::Identity(
+                        "observation source partition is missing an owned element field value",
+                    ))?;
+                let projected = project_observation_value(field, value, observation)?;
                 accumulator.add(&projected, element.signed_volume_m3);
             }
             _ => return Err(ObservationError::Unsupported("unsupported field location")),
@@ -193,7 +259,10 @@ pub(super) fn weighted_boundary_contribution(
     face_indices: &[usize],
     projection: &AnalysisProjection,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
-    let mut accumulator = WeightedAccumulator::new(observation.result_component_count);
+    let mut accumulator = WeightedAccumulator::new(observation_result_storage_component_count(
+        observation.result_component_count,
+        observation.spec.complex_representation,
+    )?);
     for &face_index in face_indices {
         let face = projection.boundary_faces.get(face_index).ok_or_else(|| {
             ObservationError::Invalid("resolved boundary-face index is out of bounds".into())
@@ -204,7 +273,7 @@ pub(super) fn weighted_boundary_contribution(
                 field,
                 &face.node_indices,
                 point.shape_values(),
-                observation.component,
+                observation,
             ) {
                 Ok(projected) => accumulator.add(&projected, point.area_weight_m2),
                 Err(error) => component_error = Some(error),
@@ -280,9 +349,12 @@ fn interpolate_and_project(
     field: &RecoveredFieldPartitionSet,
     entity_nodes: &[usize],
     shape_values: &[f64],
-    projection: ResolvedComponentProjection,
+    observation: &ResolvedObservation,
 ) -> Result<Vec<f64>, ObservationError> {
-    let components = shape_component_count(field.definition.value_shape())?;
+    let components = field
+        .definition
+        .storage_component_count()
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
     let mut interpolated = vec![0.0; components];
     for (&node, shape) in entity_nodes.iter().zip(shape_values) {
         let nodal = field.value(node).ok_or(ObservationError::Identity(
@@ -292,7 +364,7 @@ fn interpolate_and_project(
             *interpolated += nodal * shape;
         }
     }
-    project_component(&interpolated, projection)
+    project_observation_value(field, &interpolated, observation)
 }
 
 pub(super) fn reduction_operation(

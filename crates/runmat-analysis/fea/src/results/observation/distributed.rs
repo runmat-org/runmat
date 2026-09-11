@@ -19,7 +19,10 @@ use crate::{
 };
 
 use super::{
-    contract::{OBSERVATION_LIMITS, OBSERVATION_PREFIX},
+    contract::{
+        observation_result_storage_component_count, observation_result_storage_shape,
+        OBSERVATION_LIMITS, OBSERVATION_PREFIX,
+    },
     distributed_numeric::{
         reduction_operation, required_source_indices, select_values,
         weighted_boundary_contribution, weighted_volume_contribution, CompensatedSum,
@@ -566,7 +569,7 @@ pub(crate) fn evaluate_observation_partition(
                 .copied()
                 .map(ObservationEntity::Node)
                 .collect(),
-            values: select_values(field, indices, observation.component)?,
+            values: select_values(field, indices, observation)?,
         },
         ObservationPartitionTarget::Elements {
             indices,
@@ -577,7 +580,7 @@ pub(crate) fn evaluate_observation_partition(
                 .copied()
                 .map(ObservationEntity::Element)
                 .collect(),
-            values: select_values(field, indices, observation.component)?,
+            values: select_values(field, indices, observation)?,
         },
         ObservationPartitionTarget::Volume {
             element_indices, ..
@@ -713,7 +716,10 @@ pub(crate) fn combine_observation_partitions(
         }
         ObservationPartitionPayload::WeightedReduction { .. } => {
             let operation = reduction_operation(observation)?;
-            let component_count = observation.result_component_count;
+            let component_count = observation_result_storage_component_count(
+                observation.result_component_count,
+                observation.spec.complex_representation,
+            )?;
             let mut linear = vec![CompensatedSum::default(); component_count];
             let mut square = vec![CompensatedSum::default(); component_count];
             let mut measure = CompensatedSum::default();
@@ -766,18 +772,17 @@ pub(crate) fn combine_observation_partitions(
             (values, Vec::new())
         }
     };
-    let reduced = entities.is_empty();
     let components = observation.result_component_count;
-    let shape = if reduced || components == 1 {
-        vec![values.len()]
-    } else {
-        vec![values.len() / components, components]
-    };
     let value_shape = if components == 1 {
         ObservationValueShape::Scalar
     } else {
         observation.spec.value_shape.clone()
     };
+    let shape = observation_result_storage_shape(
+        (!entities.is_empty()).then_some(entities.len()),
+        &value_shape,
+        observation.spec.complex_representation,
+    )?;
     let partition_evidence = ObservationPartitionEvidence::new(
         partition_plan.identity,
         first_source,
@@ -796,6 +801,7 @@ pub(crate) fn combine_observation_partitions(
         quantity: observation.spec.quantity,
         location: observation.spec.output_location,
         value_shape,
+        complex_representation: observation.spec.complex_representation,
         entities,
         field: AnalysisField::host_f64(observation.spec.observation_id.0.clone(), shape, values),
         partial_access: observation.spec.storage.partial_access,
@@ -811,6 +817,10 @@ fn validate_contribution_payload(
     contribution: &ObservationPartitionContribution,
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
+    let storage_components = observation_result_storage_component_count(
+        observation.result_component_count,
+        observation.spec.complex_representation,
+    )?;
     match (&partition.target, &contribution.payload) {
         (
             ObservationPartitionTarget::Nodes { identities, .. },
@@ -825,7 +835,7 @@ fn validate_contribution_payload(
                 || values.len()
                     != identities
                         .len()
-                        .checked_mul(observation.result_component_count)
+                        .checked_mul(storage_components)
                         .ok_or(ObservationError::Limit("partition result value count"))?
             {
                 return Err(ObservationError::Identity(
@@ -846,7 +856,7 @@ fn validate_contribution_payload(
                 || values.len()
                     != identities
                         .len()
-                        .checked_mul(observation.result_component_count)
+                        .checked_mul(storage_components)
                         .ok_or(ObservationError::Limit("partition result value count"))?
             {
                 return Err(ObservationError::Identity(
@@ -861,8 +871,7 @@ fn validate_contribution_payload(
                 square_sum,
                 ..
             },
-        ) if linear_sum.len() == observation.result_component_count
-            && square_sum.len() == observation.result_component_count => {}
+        ) if linear_sum.len() == storage_components && square_sum.len() == storage_components => {}
         _ => {
             return Err(ObservationError::Identity(
                 "observation contribution payload differs from partition target",

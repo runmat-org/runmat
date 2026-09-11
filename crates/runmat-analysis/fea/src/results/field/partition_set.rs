@@ -245,10 +245,7 @@ pub fn reconstruct_recovered_field(
     {
         return Err(RecoveredFieldError::IdentityMismatch);
     }
-    let components = definition
-        .value_shape()
-        .component_count()
-        .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
+    let components = definition.storage_component_count()?;
     let mut values = Vec::with_capacity(entity_count.saturating_mul(components));
     for partition in &set.partitions {
         values.extend_from_slice(
@@ -258,11 +255,7 @@ pub fn reconstruct_recovered_field(
                 .ok_or(RecoveredFieldError::StorageShapeMismatch)?,
         );
     }
-    let shape = if components == 1 {
-        vec![entity_count]
-    } else {
-        vec![entity_count, components]
-    };
+    let shape = definition.storage_shape(entity_count)?;
     let field = RecoveredField::new(
         definition.clone(),
         sample,

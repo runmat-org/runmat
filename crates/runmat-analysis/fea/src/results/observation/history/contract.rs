@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    FieldLocation, IndependentDomain, ObservationId, ObservationQuantity, ObservationValueShape,
-    PartialAccessPolicy, RetentionPolicy, SamplingPolicy,
+    ComplexRepresentation, FieldLocation, IndependentDomain, ObservationId, ObservationQuantity,
+    ObservationValueShape, PartialAccessPolicy, RetentionPolicy, SamplingPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::Digest;
@@ -140,6 +140,7 @@ pub struct ObservationHistoryManifest {
     pub quantity: ObservationQuantity,
     pub location: FieldLocation,
     pub value_shape: ObservationValueShape,
+    pub complex_representation: ComplexRepresentation,
     pub sampling: SamplingPolicy,
     pub retention: RetentionPolicy,
     pub partial_access: PartialAccessPolicy,
@@ -161,6 +162,7 @@ struct ObservationHistoryManifestWire {
     quantity: ObservationQuantity,
     location: FieldLocation,
     value_shape: ObservationValueShape,
+    complex_representation: ComplexRepresentation,
     sampling: SamplingPolicy,
     retention: RetentionPolicy,
     partial_access: PartialAccessPolicy,
@@ -184,6 +186,7 @@ impl TryFrom<ObservationHistoryManifestWire> for ObservationHistoryManifest {
             quantity: wire.quantity,
             location: wire.location,
             value_shape: wire.value_shape,
+            complex_representation: wire.complex_representation,
             sampling: wire.sampling,
             retention: wire.retention,
             partial_access: wire.partial_access,
@@ -401,6 +404,7 @@ fn validate_sample_against_manifest(
         || sample.result.quantity != manifest.quantity
         || sample.result.location != manifest.location
         || sample.result.value_shape != manifest.value_shape
+        || sample.result.complex_representation != manifest.complex_representation
         || sample.result.partial_access != manifest.partial_access
         || !sample_matches_policy(&manifest.sampling, sample.coordinate)?
         || !sample_matches_domain(&manifest.independent_domain, sample.coordinate)
@@ -440,6 +444,7 @@ pub(super) fn derive_history_identity(
             manifest.quantity,
             manifest.location,
             &manifest.value_shape,
+            manifest.complex_representation,
             &manifest.sampling,
             &manifest.retention,
             manifest.partial_access,

@@ -251,6 +251,8 @@ pub fn run_modal_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &mode_shapes,
                 },
                 HistoryFieldSeries {
@@ -260,6 +262,8 @@ pub fn run_modal_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &rotation_mode_shapes,
                 },
             ],

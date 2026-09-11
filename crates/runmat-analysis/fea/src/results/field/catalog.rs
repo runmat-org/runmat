@@ -72,15 +72,7 @@ impl RecoveredFieldCatalog {
             if entity_count == 0 {
                 return Err(RecoveredFieldError::ArtifactTopologyMismatch);
             }
-            let components = definition
-                .value_shape()
-                .component_count()
-                .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
-            let expected_shape = if components == 1 {
-                vec![entity_count]
-            } else {
-                vec![entity_count, components]
-            };
+            let expected_shape = definition.storage_shape(entity_count)?;
             if field.storage().shape != expected_shape {
                 return Err(RecoveredFieldError::StorageShapeMismatch);
             }

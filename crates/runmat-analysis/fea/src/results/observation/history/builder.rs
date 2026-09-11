@@ -144,6 +144,7 @@ impl BoundedObservationHistory {
             quantity: self.observation.spec.quantity,
             location: self.observation.spec.output_location,
             value_shape: samples[0].result.value_shape.clone(),
+            complex_representation: self.observation.spec.complex_representation,
             sampling: self.observation.spec.sampling,
             retention: self.observation.spec.storage.retention,
             partial_access: self.observation.spec.storage.partial_access,
@@ -182,6 +183,7 @@ fn validate_result_against_observation(
         || result.quantity != observation.spec.quantity
         || result.location != observation.spec.output_location
         || result.value_shape != expected_shape
+        || result.complex_representation != observation.spec.complex_representation
         || result.partial_access != observation.spec.storage.partial_access
     {
         return Err(ObservationError::Identity(

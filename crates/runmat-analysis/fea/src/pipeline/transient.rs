@@ -459,6 +459,8 @@ pub fn run_transient_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &displacement_snapshots,
                 },
                 HistoryFieldSeries {
@@ -468,6 +470,8 @@ pub fn run_transient_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &velocity_snapshots,
                 },
                 HistoryFieldSeries {
@@ -477,6 +481,8 @@ pub fn run_transient_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &acceleration_snapshots,
                 },
                 HistoryFieldSeries {
@@ -486,6 +492,8 @@ pub fn run_transient_with_options(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &rotation_snapshots,
                 },
             ],

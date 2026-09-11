@@ -63,10 +63,6 @@ impl RecoveredFieldSelectionIdentity {
 pub enum RecoveredFieldNumericRepresentation {
     Real,
     ComplexInterleaved,
-    ComplexSplitReal,
-    ComplexSplitImaginary,
-    Magnitude,
-    PhaseRadians,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -230,6 +226,39 @@ impl RecoveredFieldDefinition {
         self.numeric_representation
     }
 
+    pub(crate) fn logical_component_count(&self) -> Result<usize, RecoveredFieldError> {
+        self.value_shape
+            .component_count()
+            .ok_or(RecoveredFieldError::QuantityShapeMismatch)
+    }
+
+    pub(crate) fn storage_component_count(&self) -> Result<usize, RecoveredFieldError> {
+        let logical = self.logical_component_count()?;
+        match self.numeric_representation {
+            RecoveredFieldNumericRepresentation::Real => Ok(logical),
+            RecoveredFieldNumericRepresentation::ComplexInterleaved => logical
+                .checked_mul(2)
+                .ok_or(RecoveredFieldError::StorageShapeMismatch),
+        }
+    }
+
+    pub(crate) fn storage_shape(
+        &self,
+        entity_count: usize,
+    ) -> Result<Vec<usize>, RecoveredFieldError> {
+        let logical = self.logical_component_count()?;
+        Ok(match (self.numeric_representation, logical) {
+            (RecoveredFieldNumericRepresentation::Real, 1) => vec![entity_count],
+            (RecoveredFieldNumericRepresentation::Real, _) => vec![entity_count, logical],
+            (RecoveredFieldNumericRepresentation::ComplexInterleaved, 1) => {
+                vec![entity_count, 2]
+            }
+            (RecoveredFieldNumericRepresentation::ComplexInterleaved, _) => {
+                vec![entity_count, logical, 2]
+            }
+        })
+    }
+
     fn derive_identity(&self) -> Result<RecoveredFieldDefinitionIdentity, RecoveredFieldError> {
         encode_contract(
             FIELD_PREFIX,
@@ -371,7 +400,15 @@ impl RecoveredField {
             AnalysisFieldValues::HostF64(values) => values.len(),
             AnalysisFieldValues::DeviceRef(reference) => reference.element_count,
         };
-        if expected != actual {
+        let entity_count = self
+            .storage
+            .shape
+            .first()
+            .copied()
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+        if expected != actual
+            || self.storage.shape != self.definition.storage_shape(entity_count)?
+        {
             return Err(RecoveredFieldError::StorageShapeMismatch);
         }
         if self.identity != self.derive_identity()? {
@@ -769,16 +806,7 @@ impl RecoveredFieldArtifact {
             if expected_entities == 0 {
                 return Err(RecoveredFieldError::ArtifactTopologyMismatch);
             }
-            let components = field
-                .definition()
-                .value_shape()
-                .component_count()
-                .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
-            let expected_shape = if components == 1 {
-                vec![expected_entities]
-            } else {
-                vec![expected_entities, components]
-            };
+            let expected_shape = field.definition().storage_shape(expected_entities)?;
             if field.storage().shape != expected_shape {
                 return Err(RecoveredFieldError::StorageShapeMismatch);
             }

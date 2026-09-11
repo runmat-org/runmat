@@ -80,11 +80,7 @@ impl RecoveredFieldPartition {
                 "field partition indices must be nonempty and strictly increasing".into(),
             ));
         }
-        let components = source
-            .definition()
-            .value_shape()
-            .component_count()
-            .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
+        let components = source.definition().storage_component_count()?;
         let source_values =
             source
                 .storage()
@@ -106,11 +102,7 @@ impl RecoveredFieldPartition {
                     .ok_or(RecoveredFieldError::StorageShapeMismatch)?,
             );
         }
-        let shape = if components == 1 {
-            vec![source_indices.len()]
-        } else {
-            vec![source_indices.len(), components]
-        };
+        let shape = source.definition().storage_shape(source_indices.len())?;
         let mut partition = Self {
             schema_version: 1,
             identity: RecoveredFieldPartitionIdentity(Digest::sha256([])),
@@ -127,7 +119,7 @@ impl RecoveredFieldPartition {
 
     pub fn value(&self, source_index: usize) -> Option<&[f64]> {
         let local_index = self.source_indices.binary_search(&source_index).ok()?;
-        let components = self.definition.value_shape().component_count()?;
+        let components = self.definition.storage_component_count().ok()?;
         let start = local_index.checked_mul(components)?;
         let end = start.checked_add(components)?;
         self.storage.as_host_f64()?.get(start..end)
@@ -157,16 +149,7 @@ impl RecoveredFieldPartition {
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
         self.definition.validate()?;
         self.sample.validate()?;
-        let components = self
-            .definition
-            .value_shape()
-            .component_count()
-            .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
-        let expected_shape = if components == 1 {
-            vec![self.source_indices.len()]
-        } else {
-            vec![self.source_indices.len(), components]
-        };
+        let expected_shape = self.definition.storage_shape(self.source_indices.len())?;
         if self.schema_version != 1
             || self.source_indices.is_empty()
             || self

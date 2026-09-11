@@ -222,6 +222,8 @@ pub(super) fn run(
                     entity_domain:
                         crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &temperature_snapshots,
                 },
                 HistoryFieldSeries {
@@ -230,6 +232,8 @@ pub(super) fn run(
                     location: runmat_analysis_core::FieldLocation::Element,
                     entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &temperature_gradient_snapshots,
                 },
                 HistoryFieldSeries {
@@ -238,6 +242,8 @@ pub(super) fn run(
                     location: runmat_analysis_core::FieldLocation::Element,
                     entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    numeric_representation:
+                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
                     snapshots: &heat_flux_snapshots,
                 },
             ],

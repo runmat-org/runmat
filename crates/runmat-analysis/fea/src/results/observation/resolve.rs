@@ -4,21 +4,23 @@ use runmat_analysis_core::{
     AnalysisModel, ComplexRepresentation, CompressionPolicy, EntityDimension, ExcitationTarget,
     ExpectedTopology, FieldLocation, ObservationComponent, ObservationCostEstimate,
     ObservationRequest, ObservationSpec, ObservationTarget, ProcedureStep, RecoveryPolicy,
-    RetentionPolicy, SamplingPolicy, SeriesReduction, SignalPrecision, SpatialReduction,
-    TargetCardinality,
+    RetentionPolicy, SamplingPolicy, SeriesReduction, SpatialReduction, TargetCardinality,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    results::field::{RecoveredFieldDefinition, RecoveredFieldEntityDomain},
+    results::field::{
+        RecoveredFieldDefinition, RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation,
+    },
     topology::AnalysisProjection,
 };
 
 use super::contract::{
-    checked_bytes, shape_component_count, ObservationError, ObservationLimits,
-    ObservationSampleBounds, ResolvedComponentProjection, ResolvedObservation,
-    ResolvedObservationPlan, ResolvedObservationPlanIdentity, ResolvedObservationTarget,
+    checked_bytes, observation_result_storage_component_count, shape_component_count,
+    validate_output_numeric_contract, ObservationError, ObservationLimits, ObservationSampleBounds,
+    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
+    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
 use super::topology::StructuralObservationTopology;
@@ -120,6 +122,7 @@ fn resolve_request(
     }
     validate_supported_spec(request, spec)?;
     let source_field = bind_field(spec, fields)?;
+    validate_numeric_representation(spec, &source_field)?;
     let target = resolve_target(request, spec, source_field.entity_domain(), topology)?;
     let (component, result_component_count) = resolve_component(spec, &source_field)?;
     let selected = target.selected_entity_count();
@@ -132,13 +135,17 @@ fn resolve_request(
     if selected > limits.maximum_selected_entities {
         return Err(ObservationError::Limit("selected topology entities"));
     }
+    let result_storage_component_count = observation_result_storage_component_count(
+        result_component_count,
+        spec.complex_representation,
+    )?;
     let value_count = match request {
         ObservationRequest::Reduction(_)
         | ObservationRequest::History(ObservationSpec {
             reduction: Some(_), ..
-        }) => result_component_count,
+        }) => result_storage_component_count,
         _ => selected
-            .checked_mul(result_component_count)
+            .checked_mul(result_storage_component_count)
             .ok_or(ObservationError::Limit("observation value count"))?,
     };
     if value_count > limits.maximum_values {
@@ -157,7 +164,7 @@ fn resolve_request(
     };
     let retained_sample_count = u64::try_from(sample_bounds.maximum_retained_samples)
         .map_err(|_| ObservationError::Limit("observation retained sample count"))?;
-    let result_component_count_u64 = u64::try_from(result_component_count)
+    let result_component_count_u64 = u64::try_from(result_storage_component_count)
         .map_err(|_| ObservationError::Limit("observation result component count"))?;
     let work_entities = integration_work(&target, topology)?;
     let operation_count = u64::try_from(work_entities)
@@ -174,7 +181,11 @@ fn resolve_request(
         .ok_or(ObservationError::Limit("observation retained value bytes"))?;
     let source_work_bytes = checked_bytes(
         work_entities
-            .checked_mul(shape_component_count(source_field.value_shape())?)
+            .checked_mul(
+                source_field
+                    .storage_component_count()
+                    .map_err(|error| ObservationError::Invalid(error.to_string()))?,
+            )
             .ok_or(ObservationError::Limit("observation working-set values"))?,
     )?;
     let stored_bytes = retained_value_bytes
@@ -211,6 +222,7 @@ fn validate_supported_spec(
     request: &ObservationRequest,
     spec: &ObservationSpec,
 ) -> Result<(), ObservationError> {
+    validate_output_numeric_contract(spec)?;
     if spec.source_location != spec.output_location || spec.recovery != RecoveryPolicy::Native {
         return Err(ObservationError::Unsupported(
             "field recovery and location transfer must be completed before observation evaluation",
@@ -222,13 +234,6 @@ fn validate_supported_spec(
     ) {
         return Err(ObservationError::Unsupported(
             "this evaluator accepts only nodal and element fields",
-        ));
-    }
-    if spec.complex_representation != ComplexRepresentation::Real
-        || spec.storage.precision != SignalPrecision::Real64
-    {
-        return Err(ObservationError::Unsupported(
-            "this serial evaluator currently publishes real f64 observations",
         ));
     }
     match request {
@@ -307,6 +312,23 @@ fn validate_supported_spec(
             ))
         }
         _ => Ok(()),
+    }
+}
+
+fn validate_numeric_representation(
+    spec: &ObservationSpec,
+    source: &RecoveredFieldDefinition,
+) -> Result<(), ObservationError> {
+    match source.numeric_representation() {
+        RecoveredFieldNumericRepresentation::Real
+            if spec.complex_representation == ComplexRepresentation::Real =>
+        {
+            Ok(())
+        }
+        RecoveredFieldNumericRepresentation::ComplexInterleaved => Ok(()),
+        RecoveredFieldNumericRepresentation::Real => Err(ObservationError::Invalid(
+            "a real recovered field cannot provide imaginary, phase, or complex values".into(),
+        )),
     }
 }
 

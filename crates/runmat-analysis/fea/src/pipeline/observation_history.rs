@@ -164,6 +164,7 @@ pub(crate) struct HistoryFieldSeries<'a> {
     pub location: FieldLocation,
     pub entity_domain: RecoveredFieldEntityDomain,
     pub value_shape: ObservationValueShape,
+    pub numeric_representation: RecoveredFieldNumericRepresentation,
     pub snapshots: &'a [AnalysisField],
 }
 
@@ -209,7 +210,7 @@ pub(crate) fn evaluate_field_histories(
                 source.location,
                 source.entity_domain,
                 source.value_shape.clone(),
-                RecoveredFieldNumericRepresentation::Real,
+                source.numeric_representation,
             )
             .map_err(|error| ObservationError::Invalid(error.to_string()))
         })

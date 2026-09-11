@@ -48,6 +48,7 @@ pub fn publish_observation(
         || result.quantity != planned.spec.quantity
         || result.location != planned.spec.output_location
         || result.value_shape != expected_shape
+        || result.complex_representation != planned.spec.complex_representation
         || result.entities != expected_entities
     {
         return Err(ObservationError::Identity(

@@ -2,9 +2,7 @@ use runmat_analysis_core::{AnalysisModel, ObservationId, SamplingPolicy};
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    results::field::{
-        RecoveredFieldCatalog, RecoveredFieldNumericRepresentation, RecoveredFieldSample,
-    },
+    results::field::{RecoveredFieldCatalog, RecoveredFieldSample},
     topology::AnalysisProjection,
 };
 
@@ -161,11 +159,9 @@ fn evaluate_sample(
             reason: "supplied field declaration differs from the resolved plan".into(),
         });
     }
-    if source.sample() != sample
-        || source.definition().numeric_representation() != RecoveredFieldNumericRepresentation::Real
-    {
-        return Err(ObservationError::Unsupported(
-            "this serial evaluator requires a matching real recovered-field sample",
+    if source.sample() != sample {
+        return Err(ObservationError::Identity(
+            "recovered-field sample differs from the requested coordinate",
         ));
     }
     evaluate_one(plan, observation, source, topology)

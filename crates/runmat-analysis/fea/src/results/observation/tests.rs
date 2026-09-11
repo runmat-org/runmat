@@ -41,6 +41,18 @@ fn scalar_definition() -> RecoveredFieldDefinition {
     .unwrap()
 }
 
+fn complex_pressure_definition() -> RecoveredFieldDefinition {
+    RecoveredFieldDefinition::new(
+        "acoustic.pressure.recovered",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap()
+}
+
 fn catalog(
     projection: &AnalysisProjection,
     definition: &RecoveredFieldDefinition,
@@ -109,6 +121,29 @@ fn thermal_step(requests: Vec<ObservationRequest>) -> ProcedureStep {
     step.independent_domain = runmat_analysis_core::IndependentDomain::Static;
     step.observations = requests;
     step
+}
+
+fn complex_pressure_history_spec(
+    id: &str,
+    representation: ComplexRepresentation,
+) -> ObservationSpec {
+    let mut spec = spec(id, ObservationTarget::WholeModel);
+    spec.quantity = ObservationQuantity::AcousticPressure;
+    spec.complex_representation = representation;
+    spec.sampling = SamplingPolicy::FrequencyHertz(vec![100.0, 200.0]);
+    spec.storage.precision = if representation == ComplexRepresentation::Complex {
+        SignalPrecision::Complex128
+    } else {
+        SignalPrecision::Real64
+    };
+    spec.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    spec
 }
 
 fn projection(order: ElementOrder) -> AnalysisProjection {
@@ -334,6 +369,231 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
     let mut invalid_manifest = serde_json::to_value(history.manifest()).unwrap();
     invalid_manifest["maximum_retained_samples"] = serde_json::json!(3);
     assert!(serde_json::from_value::<ObservationHistoryManifest>(invalid_manifest).is_err());
+}
+
+#[test]
+fn complex_frequency_histories_preserve_exact_phasors_and_derived_views() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = complex_pressure_definition();
+    let representations = [
+        ComplexRepresentation::Real,
+        ComplexRepresentation::Imaginary,
+        ComplexRepresentation::Magnitude,
+        ComplexRepresentation::PhaseRadians,
+        ComplexRepresentation::Complex,
+    ];
+    let mut step = ProcedureStep::acoustic_harmonic("acoustic-frequency-history");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![100.0, 200.0]);
+    step.observations = representations
+        .iter()
+        .enumerate()
+        .map(|(index, representation)| {
+            ObservationRequest::History(complex_pressure_history_spec(
+                &format!("pressure_{index}"),
+                *representation,
+            ))
+        })
+        .collect();
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let mut builders = plan
+        .observations
+        .iter()
+        .map(|observation| {
+            BoundedObservationHistory::new(&plan, &observation.spec.observation_id).unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    for frequency in [100.0, 200.0] {
+        let scale = frequency / 100.0;
+        let values = [3.0, 4.0, 0.0, 2.0, -3.0, 0.0, 0.0, -4.0]
+            .into_iter()
+            .map(|value| value * scale)
+            .collect::<Vec<_>>();
+        let sample = RecoveredFieldSample::FrequencyHertz(frequency);
+        let fields = catalog_at_sample(&projection, &definition, sample, vec![4, 2], values);
+        for (observation, builder) in plan.observations.iter().zip(&mut builders) {
+            let result = evaluate_observation_sample(
+                &plan,
+                &observation.spec.observation_id,
+                &projection,
+                &fields,
+                sample,
+            )
+            .unwrap();
+            builder.push(sample, result).unwrap();
+        }
+    }
+
+    let histories = builders
+        .into_iter()
+        .map(|builder| builder.finish().unwrap())
+        .collect::<Vec<_>>();
+    let final_values = histories
+        .iter()
+        .map(|history| {
+            let decoded =
+                ObservationHistory::from_canonical_bytes(&history.canonical_bytes().unwrap())
+                    .unwrap();
+            assert_eq!(&decoded, history);
+            assert_eq!(
+                history.manifest().complex_representation,
+                history.samples()[0].result.complex_representation
+            );
+            history.samples()[0]
+                .result
+                .field
+                .as_host_f64()
+                .unwrap()
+                .to_vec()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(final_values[0], vec![3.0, 0.0, -3.0, 0.0]);
+    assert_eq!(final_values[1], vec![4.0, 2.0, 0.0, -4.0]);
+    assert_eq!(final_values[2], vec![5.0, 2.0, 3.0, 4.0]);
+    assert_eq!(
+        final_values[3],
+        vec![
+            4.0_f64.atan2(3.0),
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+            -std::f64::consts::FRAC_PI_2,
+        ]
+    );
+    assert_eq!(
+        final_values[4],
+        vec![3.0, 4.0, 0.0, 2.0, -3.0, 0.0, 0.0, -4.0]
+    );
+    assert_eq!(histories[4].samples()[0].result.field.shape, vec![4, 2]);
+    assert_eq!(
+        histories[4]
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        vec![
+            RecoveredFieldSample::FrequencyHertz(100.0),
+            RecoveredFieldSample::FrequencyHertz(200.0),
+        ]
+    );
+}
+
+#[test]
+fn complex_observation_precision_and_real_source_mismatch_fail_closed() {
+    let projection = projection(ElementOrder::Tet4);
+    let complex_definition = complex_pressure_definition();
+    let mut wrong_precision =
+        complex_pressure_history_spec("complex_wrong_precision", ComplexRepresentation::Complex);
+    wrong_precision.storage.precision = SignalPrecision::Real64;
+    let mut step = ProcedureStep::acoustic_harmonic("complex-wrong-precision");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![100.0, 200.0]);
+    step.observations = vec![ObservationRequest::History(wrong_precision)];
+    assert!(resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&complex_definition),
+        ObservationLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("precision"));
+
+    let real_definition = RecoveredFieldDefinition::new(
+        "acoustic.pressure.real-only",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    step.observations = vec![ObservationRequest::History(complex_pressure_history_spec(
+        "imaginary_from_real",
+        ComplexRepresentation::Imaginary,
+    ))];
+    assert!(resolve_observation_plan(
+        &step,
+        &projection,
+        &[real_definition],
+        ObservationLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("real recovered field"));
+}
+
+#[test]
+fn complex_vector_component_projection_uses_logical_components() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "acoustic.velocity.recovered",
+        ObservationQuantity::AcousticParticleVelocity,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    let mut y_component =
+        complex_pressure_history_spec("velocity_y_complex", ComplexRepresentation::Complex);
+    y_component.quantity = ObservationQuantity::AcousticParticleVelocity;
+    y_component.value_shape = ObservationValueShape::Vector3;
+    y_component.component = ObservationComponent::Y;
+    let mut magnitude =
+        complex_pressure_history_spec("velocity_magnitude", ComplexRepresentation::Magnitude);
+    magnitude.quantity = ObservationQuantity::AcousticParticleVelocity;
+    magnitude.value_shape = ObservationValueShape::Vector3;
+    magnitude.component = ObservationComponent::Magnitude;
+    let mut step = ProcedureStep::acoustic_harmonic("complex-vector-components");
+    step.independent_domain =
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![100.0, 200.0]);
+    step.observations = vec![
+        ObservationRequest::History(y_component),
+        ObservationRequest::History(magnitude),
+    ];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let source_node = [3.0, 4.0, 0.0, 12.0, 0.0, 0.0];
+    let values = source_node.repeat(4);
+    let sample = RecoveredFieldSample::FrequencyHertz(100.0);
+    let fields = catalog_at_sample(&projection, &definition, sample, vec![4, 3, 2], values);
+
+    let y = evaluate_observation_sample(
+        &plan,
+        &ObservationId("velocity_y_complex".into()),
+        &projection,
+        &fields,
+        sample,
+    )
+    .unwrap();
+    assert_eq!(y.value_shape, ObservationValueShape::Scalar);
+    assert_eq!(y.field.shape, vec![4, 2]);
+    assert_eq!(
+        y.field.as_host_f64().unwrap(),
+        &[0.0, 12.0, 0.0, 12.0, 0.0, 12.0, 0.0, 12.0]
+    );
+    let magnitude = evaluate_observation_sample(
+        &plan,
+        &ObservationId("velocity_magnitude".into()),
+        &projection,
+        &fields,
+        sample,
+    )
+    .unwrap();
+    assert_eq!(magnitude.field.shape, vec![4]);
+    assert_eq!(magnitude.field.as_host_f64().unwrap(), &[13.0; 4]);
 }
 
 #[test]
