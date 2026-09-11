@@ -1,7 +1,8 @@
 use runmat_analysis_core::{
-    AnalysisField, FieldLocation, ObservationQuantity, ObservationRequest, ObservationValueShape,
-    ProcedureStep, SamplingPolicy,
+    AnalysisField, AnalysisModel, FieldLocation, ObservationQuantity, ObservationRequest,
+    ObservationValueShape, ProcedureStep, SamplingPolicy,
 };
+use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     results::{
@@ -10,9 +11,10 @@ use crate::{
             RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation, RecoveredFieldSample,
         },
         observation::{
-            evaluate_observation_sample, exact_scheduled_coordinates, resolve_observation_plan,
-            sample_matches_policy, BoundedObservationHistory, ObservationError, ObservationHistory,
-            ObservationLimits,
+            evaluate_observation_sample, evaluate_structural_observation_sample,
+            exact_scheduled_coordinates, resolve_observation_plan,
+            resolve_structural_observation_plan, sample_matches_policy, BoundedObservationHistory,
+            ObservationError, ObservationHistory, ObservationLimits, StructuralObservationTopology,
         },
     },
     topology::AnalysisProjection,
@@ -165,9 +167,18 @@ pub(crate) struct HistoryFieldSeries<'a> {
     pub snapshots: &'a [AnalysisField],
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum HistoryTopology<'a> {
+    Solid(&'a AnalysisProjection),
+    Structural {
+        model: &'a AnalysisModel,
+        mesh: Option<&'a SolverMeshArtifact>,
+    },
+}
+
 pub(crate) fn evaluate_field_histories(
     step: &ProcedureStep,
-    projection: &AnalysisProjection,
+    topology: HistoryTopology<'_>,
     coordinates: &[RecoveredFieldSample],
     series: &[HistoryFieldSeries<'_>],
 ) -> Result<Vec<ObservationHistory>, ObservationError> {
@@ -203,12 +214,35 @@ pub(crate) fn evaluate_field_histories(
             .map_err(|error| ObservationError::Invalid(error.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let plan = resolve_observation_plan(
-        &history_step,
-        projection,
-        &definitions,
-        ObservationLimits::default(),
-    )?;
+    let (plan, topology_digest, entity_counts) = match topology {
+        HistoryTopology::Solid(projection) => {
+            let topology = StructuralObservationTopology::from_projection(projection);
+            (
+                resolve_observation_plan(
+                    &history_step,
+                    projection,
+                    &definitions,
+                    ObservationLimits::default(),
+                )?,
+                projection.projection_digest,
+                topology.entity_counts(),
+            )
+        }
+        HistoryTopology::Structural { model, mesh } => {
+            let topology = StructuralObservationTopology::derive(model, mesh)?;
+            (
+                resolve_structural_observation_plan(
+                    &history_step,
+                    model,
+                    mesh,
+                    &definitions,
+                    ObservationLimits::default(),
+                )?,
+                topology.digest(),
+                topology.entity_counts(),
+            )
+        }
+    };
     let mut histories = plan
         .observations
         .iter()
@@ -229,8 +263,9 @@ pub(crate) fn evaluate_field_histories(
                     .map_err(|error| ObservationError::Invalid(error.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let catalog = RecoveredFieldCatalog::new(projection, fields)
-            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        let catalog =
+            RecoveredFieldCatalog::new_for_topology(topology_digest, entity_counts, fields)
+                .map_err(|error| ObservationError::Invalid(error.to_string()))?;
         for (observation_id, history) in &mut histories {
             let observation = plan
                 .observations
@@ -242,13 +277,25 @@ pub(crate) fn evaluate_field_histories(
             if !sample_matches_policy(&observation.spec.sampling, coordinate)? {
                 continue;
             }
-            let result = evaluate_observation_sample(
-                &plan,
-                observation_id,
-                projection,
-                &catalog,
-                coordinate,
-            )?;
+            let result = match topology {
+                HistoryTopology::Solid(projection) => evaluate_observation_sample(
+                    &plan,
+                    observation_id,
+                    projection,
+                    &catalog,
+                    coordinate,
+                )?,
+                HistoryTopology::Structural { model, mesh } => {
+                    evaluate_structural_observation_sample(
+                        &plan,
+                        observation_id,
+                        model,
+                        mesh,
+                        &catalog,
+                        coordinate,
+                    )?
+                }
+            };
             history.push(coordinate, result)?;
         }
     }

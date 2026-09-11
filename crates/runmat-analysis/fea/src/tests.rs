@@ -195,10 +195,10 @@ fn history_observation(
         },
         purpose: runmat_analysis_core::ObservationPurpose::Publication,
         cost: runmat_analysis_core::ObservationCostEstimate {
-            operation_count: 1_000_000,
-            peak_resident_bytes: 1_000_000,
-            stored_bytes: 1_000_000,
-            transfer_bytes: 1_000_000,
+            operation_count: 1_000_000_000,
+            peak_resident_bytes: 1_000_000_000,
+            stored_bytes: 1_000_000_000,
+            transfer_bytes: 1_000_000_000,
             collective_count: 0,
         },
     })
@@ -2100,7 +2100,7 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
 fn transient_every_accepted_increment_history_tracks_the_solver_grid() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_transient("accepted_increment_history");
-    step.accuracy.resources.maximum_samples = 20;
+    step.accuracy.resources.maximum_samples = 1_000;
     step.observations = vec![nodal_history_observation(
         "accepted_displacement_history",
         runmat_analysis_core::ObservationQuantity::Displacement,
@@ -2246,6 +2246,67 @@ fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
 }
 
 #[test]
+fn modal_beam_history_separates_rotation_from_translation() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let mut step = ProcedureStep::structural_modal("beam_modal_history");
+    step.observations = vec![
+        nodal_history_observation(
+            "beam_modal_displacement",
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
+        ),
+        nodal_history_observation(
+            "beam_modal_rotation",
+            runmat_analysis_core::ObservationQuantity::Rotation,
+            runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
+        ),
+    ];
+    model.sequence.steps = vec![step];
+
+    let result = crate::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            mode_count: 2,
+            ..experimental_modal_options()
+        },
+    )
+    .expect("explicit beam modes should publish typed translation and rotation histories");
+
+    assert_eq!(result.mode_shapes[0].shape, vec![2, 3]);
+    assert_eq!(result.run.observation_histories.len(), 2);
+    let displacement = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Displacement
+        })
+        .expect("modal displacement history should be present");
+    let rotation = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Rotation
+        })
+        .expect("modal rotation history should be present");
+    assert_eq!(
+        displacement.samples()[0].result.field.as_host_f64(),
+        result.mode_shapes[0].as_host_f64()
+    );
+    assert!(rotation.samples().iter().any(|sample| {
+        sample
+            .result
+            .field
+            .as_host_f64()
+            .expect("modal rotation should be host-backed")
+            .iter()
+            .any(|value| value.abs() > 0.0)
+    }));
+}
+
+#[test]
 fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
@@ -2386,9 +2447,14 @@ fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
 #[test]
 fn transient_beam_moment_emits_rotational_snapshots() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.sequence.steps = vec![ProcedureStep::structural_transient(
-        "beam_moment_transient".to_string(),
+    let mut step = ProcedureStep::structural_transient("beam_moment_transient".to_string());
+    step.accuracy.resources.maximum_samples = 1_000;
+    step.observations = vec![nodal_history_observation(
+        "beam_rotation_history",
+        runmat_analysis_core::ObservationQuantity::Rotation,
+        runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement,
     )];
+    model.sequence.steps = vec![step];
     let result = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -2436,6 +2502,18 @@ fn transient_beam_moment_emits_rotational_snapshots() {
 
     assert!(final_rotation.iter().any(|value| value.abs() > 0.0));
     assert!(max_angular_velocity > 0.0);
+    let history = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Rotation
+        })
+        .expect("beam transient should publish the requested rotation history");
+    assert_eq!(history.samples().len(), result.rotation_snapshots.len());
+    for (sample, snapshot) in history.samples().iter().zip(&result.rotation_snapshots) {
+        assert_eq!(sample.result.field.as_host_f64(), snapshot.as_host_f64());
+    }
 }
 
 #[test]
@@ -3180,9 +3258,14 @@ fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
 #[test]
 fn nonlinear_beam_moment_emits_rotation_snapshots() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    model.sequence.steps = vec![ProcedureStep::structural_nonlinear(
-        "beam_moment_nonlinear".to_string(),
+    let mut step = ProcedureStep::structural_nonlinear("beam_moment_nonlinear".to_string());
+    step.accuracy.resources.maximum_samples = 20;
+    step.observations = vec![nodal_history_observation(
+        "beam_rotation_history",
+        runmat_analysis_core::ObservationQuantity::Rotation,
+        runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement,
     )];
+    model.sequence.steps = vec![step];
     let result = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -3216,6 +3299,28 @@ fn nonlinear_beam_moment_emits_rotation_snapshots() {
                 .map(|value| value.abs())
                 .fold(0.0_f64, f64::max)
     );
+    let history = result
+        .run
+        .observation_histories
+        .iter()
+        .find(|history| {
+            history.manifest().quantity == runmat_analysis_core::ObservationQuantity::Rotation
+        })
+        .expect("beam nonlinear solve should publish the requested rotation history");
+    assert_eq!(history.samples().len(), result.rotation_snapshots.len() + 1);
+    assert!(history.samples()[0]
+        .result
+        .field
+        .as_host_f64()
+        .expect("initial rotation should be host-backed")
+        .iter()
+        .all(|value| *value == 0.0));
+    for (sample, snapshot) in history.samples()[1..]
+        .iter()
+        .zip(&result.rotation_snapshots)
+    {
+        assert_eq!(sample.result.field.as_host_f64(), snapshot.as_host_f64());
+    }
 }
 
 #[test]

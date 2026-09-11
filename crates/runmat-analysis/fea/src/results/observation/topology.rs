@@ -9,7 +9,7 @@ use crate::{
         explicit_element_identity, node_space::CanonicalStructuralNodeSpace,
         CanonicalStructuralTopologyIdentity,
     },
-    results::field::RecoveredFieldEntityDomain,
+    results::field::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain},
     topology::AnalysisProjection,
 };
 
@@ -74,6 +74,15 @@ impl StructuralObservationTopology {
             shell_elements: Vec::new(),
             solid_projection: Some(projection.clone()),
             node_selectors,
+        }
+    }
+
+    pub(crate) fn entity_counts(&self) -> RecoveredFieldEntityCounts {
+        RecoveredFieldEntityCounts {
+            structural_nodes: self.nodes.len(),
+            solid_elements: self.solid_elements.len(),
+            beam_elements: self.beam_elements.len(),
+            shell_elements: self.shell_elements.len(),
         }
     }
 

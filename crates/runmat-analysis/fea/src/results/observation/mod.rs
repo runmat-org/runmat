@@ -46,6 +46,7 @@ pub use partition::{
 };
 pub use publish::publish_observation;
 pub use resolve::{resolve_observation_plan, resolve_structural_observation_plan};
+pub(crate) use topology::StructuralObservationTopology;
 
 #[cfg(test)]
 mod partition_tests;

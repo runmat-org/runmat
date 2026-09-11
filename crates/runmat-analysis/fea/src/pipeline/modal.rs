@@ -15,13 +15,17 @@ use crate::{
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     pipeline::observation_history::{
         evaluate_field_histories, required_mode_history_indices, HistoryFieldSeries,
+        HistoryTopology,
+    },
+    pipeline::structural_nodal::{
+        nodal_vector_shape, project_structural_nodal_snapshot, project_structural_nodal_snapshots,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
-    topology::AnalysisProjection,
 };
 
 const MODAL_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.modal.displacement";
+const MODAL_ROTATION_HISTORY_SOURCE: &str = "structural.modal.rotation";
 
 pub fn run_modal(
     model: &AnalysisModel,
@@ -146,6 +150,12 @@ pub fn run_modal_with_options(
         .first()
         .cloned()
         .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
+    let projected_displacement =
+        project_structural_nodal_snapshot(&summary.structural_dof_layout, &displacement)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let projected_mode_shapes =
+        project_structural_nodal_snapshots(&summary.structural_dof_layout, &modal.mode_shapes)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let von_mises = displacement
         .iter()
         .map(|value| value.abs())
@@ -160,8 +170,8 @@ pub fn run_modal_with_options(
     let mut run_fields = vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            vector_shape(summary.dof_count),
-            padded_vector_values(displacement, summary.dof_count),
+            nodal_vector_shape(&summary.structural_dof_layout),
+            projected_displacement.translations,
         ),
         AnalysisField::host_f64(FEA_FIELD_STRUCTURAL_VON_MISES, vec![1], vec![von_mises]),
     ];
@@ -194,19 +204,26 @@ pub fn run_modal_with_options(
         fields: run_fields,
     };
 
-    let mode_shape = vector_shape(summary.dof_count);
-    let mode_shape_value_count = mode_shape.iter().product();
-    let mode_shapes = modal
-        .mode_shapes
-        .into_iter()
+    let mode_shape = nodal_vector_shape(&summary.structural_dof_layout);
+    let mode_shapes = projected_mode_shapes
+        .iter()
         .enumerate()
         .map(|(index, shape)| {
-            let mut values = shape;
-            values.resize(mode_shape_value_count, 0.0);
             AnalysisField::host_f64(
                 fea_modal_mode_shape_field_id(index + 1),
                 mode_shape.clone(),
-                values,
+                shape.translations.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let rotation_mode_shapes = projected_mode_shapes
+        .iter()
+        .enumerate()
+        .map(|(index, shape)| {
+            AnalysisField::host_f64(
+                format!("structural.modal.rotation.{}", index + 1),
+                mode_shape.clone(),
+                shape.rotations.clone(),
             )
         })
         .collect::<Vec<_>>();
@@ -216,33 +233,36 @@ pub fn run_modal_with_options(
             runmat_analysis_core::ObservationRequest::History(_)
         )
     }) {
-        if summary.structural_rotational_dof_count != 0 {
-            return Err(FeaRunError::Observation(
-                "modal nodal histories require a pure translational structural topology".into(),
-            ));
-        }
-        let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
-            FeaRunError::Observation(
-                "modal spatial histories require the canonical solver mesh used by assembly".into(),
-            )
-        })?;
-        let projection = AnalysisProjection::derive(mesh)
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         let coordinates = (1..=mode_shapes.len())
             .map(crate::results::field::RecoveredFieldSample::ModeIndex)
             .collect::<Vec<_>>();
         evaluate_field_histories(
             execution_step,
-            &projection,
+            HistoryTopology::Structural {
+                model,
+                mesh: options.solver_mesh.as_ref(),
+            },
             &coordinates,
-            &[HistoryFieldSeries {
-                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
-                source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
-                location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                snapshots: &mode_shapes,
-            }],
+            &[
+                HistoryFieldSeries {
+                    quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                    source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
+                    location: runmat_analysis_core::FieldLocation::Node,
+                    entity_domain:
+                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    snapshots: &mode_shapes,
+                },
+                HistoryFieldSeries {
+                    quantity: runmat_analysis_core::ObservationQuantity::Rotation,
+                    source_field_id: MODAL_ROTATION_HISTORY_SOURCE,
+                    location: runmat_analysis_core::FieldLocation::Node,
+                    entity_domain:
+                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    snapshots: &rotation_mode_shapes,
+                },
+            ],
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?
     } else {
@@ -274,15 +294,6 @@ pub fn run_modal_with_options(
         mode_shapes,
         residual_norms: modal.residual_norms,
     })
-}
-
-fn vector_shape(dof_count: usize) -> Vec<usize> {
-    vec![dof_count.div_ceil(3).max(1), 3]
-}
-
-fn padded_vector_values(mut values: Vec<f64>, dof_count: usize) -> Vec<f64> {
-    values.resize(vector_shape(dof_count).iter().product(), 0.0);
-    values
 }
 
 fn recover_modal_result_fields(

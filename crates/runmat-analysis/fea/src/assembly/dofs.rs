@@ -163,6 +163,10 @@ impl StructuralDofLayout {
         self.rows.len() + self.reference_point_count * StructuralDofKind::ORDER.len()
     }
 
+    pub fn node_dof_count(&self) -> usize {
+        self.rows.len()
+    }
+
     pub fn node_count(&self) -> usize {
         self.node_sets.len()
     }

@@ -20,6 +20,7 @@ use crate::{
     },
     pipeline::observation_history::{
         evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
+        HistoryTopology,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
@@ -211,7 +212,7 @@ pub(super) fn run(
             .collect::<Vec<_>>();
         run.observation_histories = evaluate_field_histories(
             thermal_step,
-            &initial_assembly.projection,
+            HistoryTopology::Solid(&initial_assembly.projection),
             &coordinates,
             &[
                 HistoryFieldSeries {
