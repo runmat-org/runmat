@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { auditMigration, parseBatch } from "./builtin-migration/audit.mjs";
 import { parseControlManifest } from "./builtin-migration/control.mjs";
 import { buildControlDraft, freezeReviewedControl } from "./builtin-migration/control-draft.mjs";
+import { dispositionInputFromControl } from "./builtin-migration/dispositions.mjs";
 import { buildDispositionSeed, buildInventory, emptyDispositionInput, parseInventoryEvidence } from "./builtin-migration/inventory.mjs";
 import { issueLease, parseLease } from "./builtin-migration/lease.mjs";
 import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
@@ -44,7 +45,10 @@ try {
   if (options.command === "produce-gate") {
     const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
     const control = parseControlManifest(readJson(options.control), baseline);
-    emit(runGateProducer({ control, inventory: baseline, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
+    const subject = buildInventory(repository, dispositionInputFromControl(control), {
+      compiledInventory: readJson(options.compiledInventory),
+    });
+    emit(runGateProducer({ control, baseline_inventory: baseline, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
     process.exit(0);
   }
   if (options.command === "verify") { runVerify(options); process.exit(process.exitCode ?? 0); }
@@ -62,7 +66,7 @@ try {
     else {
       const lease = parseLease(readJson(options.lease), control);
       if (options.command === "prepare") emit(prepareIdentity(repository, inventory, control, lease, options.identity, options.workspace), options.output);
-      else runAudit(options, inventory, control, lease);
+      else runAudit(options, baselineInventory, inventory, control, lease);
     }
   }
   if (inventory.diagnostics.some((entry) => entry.severity === "error")) process.exitCode = 1;
@@ -71,7 +75,7 @@ try {
   process.exitCode = 2;
 }
 
-function runAudit(options, inventory, control, lease) {
+function runAudit(options, baseline, subject, control, lease) {
   const batch = readJson(options.batch);
   parseBatch(batch);
   const evidencePath = path.resolve(options.evidence);
@@ -81,7 +85,7 @@ function runAudit(options, inventory, control, lease) {
   const base = path.dirname(evidencePath);
   const load = (paths) => paths.map((entry) => readJson(path.resolve(base, entry)));
   const changedPaths = gitChangedPaths(lease.value.base_revision);
-  const output = auditMigration(repository, inventory, control, lease, batch, { artifact_id: evidence.artifact_id, changed_paths: changedPaths, prepare_results: load(evidence.prepare_results), source_dispositions: load(evidence.source_dispositions), gate_results: load(evidence.gate_results) });
+  const output = auditMigration(repository, baseline, subject, control, lease, batch, { artifact_id: evidence.artifact_id, changed_paths: changedPaths, prepare_results: load(evidence.prepare_results), source_dispositions: load(evidence.source_dispositions), gate_results: load(evidence.gate_results) });
   emit(output, options.output);
   if (output.result !== "pass") process.exitCode = 1;
 }
@@ -126,7 +130,7 @@ function parse(arguments_) {
     if (!fields[option]) throw new Error(`unknown option ${option}`);
     options[fields[option]] = requireValue(arguments_, option);
   }
-  const requiresCompiled = ["inventory", "queue", "seed-dispositions", "prepare", "audit"].includes(command);
+  const requiresCompiled = ["inventory", "queue", "seed-dispositions", "prepare", "audit", "produce-gate"].includes(command);
   if (requiresCompiled && !options.compiledInventory) throw new Error(`${command} requires --compiled-inventory`);
   if (["queue", "prepare", "audit", "validate-control", "produce-gate"].includes(command) && !options.control) throw new Error(`${command} requires --control`);
   if (["queue", "prepare", "audit", "draft-control", "freeze-control", "validate-control", "issue-lease", "produce-gate", "seal"].includes(command) && !options.baselineInventory) throw new Error(`${command} requires --baseline-inventory`);
@@ -151,7 +155,7 @@ function help() {
     `  builtin-migration-factory.mjs freeze-control --draft PATH --control PATH --baseline-inventory PATH [--output PATH]\n` +
     `  builtin-migration-factory.mjs validate-control --control PATH --baseline-inventory PATH [--output PATH]\n` +
     `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs produce-gate --control PATH --baseline-inventory PATH --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH [--state PATH] [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +

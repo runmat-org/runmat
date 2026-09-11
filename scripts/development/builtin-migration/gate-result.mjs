@@ -9,17 +9,18 @@ import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesyste
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 1, "runmat-builtin-migration-gate-result", "gate result");
-  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
+  kind(value, 2, "runmat-builtin-migration-gate-result", "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
   if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
   const producedAt = timestamp(value.produced_at, "gate produced_at");
-  const producerEvidence = parseProducerEvidence(value.producer_evidence, value.producer, value.source_revision);
+  const producerEvidence = parseProducerEvidence(value.producer_evidence, value.producer);
   stableId(value.artifact_id, "gate artifact id");
   sourceRevision(value.source_revision, "gate source revision");
   digest(value.source_digest, "gate source digest");
-  digest(value.inventory_digest, "gate inventory digest");
+  digest(value.baseline_inventory_digest, "gate baseline inventory digest");
+  digest(value.subject_inventory_digest, "gate subject inventory digest");
   digest(value.control_manifest_digest, "gate control manifest digest");
   stableId(value.bundle_id, "gate bundle id");
   const identities = uniqueStrings(value.identities, "gate identities", { pattern: SAFE_IDENTITY, lower: true });
@@ -41,7 +42,7 @@ export function parseGateResult(value, expected) {
   if (value.result !== derivedResult) throw new Error("gate result conflicts with captured process status or checks");
   parseStorageAdmission(value.storage_admission, value.result, expected?.storage_policy, producedAt);
   if (expected) {
-    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.inventory_digest !== expected.inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
+    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.baseline_inventory_digest !== expected.baseline_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
     if (expected.gate_plans) validateReviewedPlan(gate, value.result, producerEvidence, artifacts, expected);
@@ -60,14 +61,13 @@ function parseArtifact(value) {
   return { ...value, path: artifactPath };
 }
 
-function parseProducerEvidence(value, producer, sourceRevisionValue) {
+function parseProducerEvidence(value, producer) {
   kind(value, 1, `${producer}-evidence`, "typed producer evidence");
   exact(value, ["schema_version", "kind", "contract", "invocation", "process", "captured_process_digest"], "typed producer evidence");
-  exact(value.contract, ["source_revision", "executable_digest", "source_digest"], "producer contract evidence");
-  sourceRevision(value.contract.source_revision, "producer contract source revision");
-  if (value.contract.source_revision !== sourceRevisionValue) throw new Error("producer contract revision differs from gate source revision");
+  exact(value.contract, ["reviewed_source_revision", "executable_digest", "producer_source_digest"], "producer contract evidence");
+  sourceRevision(value.contract.reviewed_source_revision, "producer reviewed source revision");
   digest(value.contract.executable_digest, "producer executable digest");
-  digest(value.contract.source_digest, "producer source digest");
+  digest(value.contract.producer_source_digest, "producer source digest");
   exact(value.invocation, ["executable", "arguments", "cwd"], "producer invocation");
   nonempty(value.invocation.executable, "producer executable");
   array(value.invocation.arguments, "producer arguments", { empty: true }).forEach((entry) => nonempty(entry, "producer argument"));
@@ -87,7 +87,7 @@ function validateReviewedPlan(gate, result, evidence, artifacts, expected) {
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
   const contract = gatePlanEvidence(plan, expected.compiled_build, expected.repository);
-  if (evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
+  if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision || evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.producer_source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
   if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
   const actualRoles = artifacts.map((entry) => entry.role);
   if (actualRoles.some((role) => !plan.expected_artifact_roles.includes(role))) throw new Error(`${gate}: producer emitted an unreviewed artifact role`);

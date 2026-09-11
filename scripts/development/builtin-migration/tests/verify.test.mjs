@@ -17,12 +17,12 @@ function evidence() {
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", fs.mkdtempSync(path.join(os.tmpdir(), "verify-")));
   const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
-  const audit = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
+  const audit = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
   const auditReference = digestReference("audit.json", "audit-foo", audit);
   const gateReferences = gates.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
   const manifest = {
-    schema_version: 2, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
-    batch: { artifact_id: "verify-foo", source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: ["foo"] },
+    schema_version: 3, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
+    batch: { artifact_id: "verify-foo", source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: ["foo"] },
     audit: auditReference, gate_results: gateReferences,
     expectations: [{ identity: "foo", required_gates: ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"] }],
   };
@@ -31,10 +31,10 @@ function evidence() {
   return { fixture, audit, gates, manifest, loadedAudit, loadedGates };
 }
 
-test("verification v2 passes only exact, content-addressed audit and gate evidence", () => {
+test("verification v3 passes only exact, content-addressed audit and gate evidence", () => {
   const input = evidence();
   const result = verifyBatch(input.manifest, input.loadedAudit, input.loadedGates);
-  assert.equal(result.schema_version, 2);
+  assert.equal(result.schema_version, 3);
   assert.equal(result.result, "pass");
 });
 
@@ -45,8 +45,8 @@ test("verification rejects missing, duplicate, stale, and mutated evidence", () 
   assert.throws(() => verifyBatch(duplicate, input.loadedAudit, input.loadedGates), /unique/);
   const mutated = structuredClone(input.loadedGates); mutated[0].value.checks[0].evidence_digest = `sha256:${"f".repeat(64)}`;
   assert.ok(verifyBatch(input.manifest, input.loadedAudit, mutated).global_failures.some((entry) => entry.code === "gate-digest-mismatch"));
-  const future = structuredClone(input.manifest); future.schema_version = 3;
-  assert.throws(() => verifyBatch(future, input.loadedAudit, input.loadedGates), /schema_version 2/);
+  const future = structuredClone(input.manifest); future.schema_version = 4;
+  assert.throws(() => verifyBatch(future, input.loadedAudit, input.loadedGates), /schema_version 3/);
   const inconsistentAudit = structuredClone(input.loadedAudit);
   inconsistentAudit.value.identities[0].failures.push({ code: "forged", detail: "ignored" });
   inconsistentAudit.reference.digest = evidenceDigest(inconsistentAudit.value);
@@ -72,8 +72,8 @@ test("seal requires a passing exact verification plus deterministic products and
   const integration = [gate(input.fixture, "deterministic-products"), gate(input.fixture, "inventory-delta")];
   const references = integration.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
   const manifest = {
-    schema_version: 1, kind: "runmat-builtin-migration-seal-manifest", authority: "reviewed-integration-request", seal_id: "seal-foo", bundle_id: input.fixture.bundleId, identities: ["foo"],
-    source_revision: input.fixture.inventory.source.revision, source_digest: input.fixture.inventory.source.digest, inventory_digest: input.fixture.inventory.digest, control_manifest_digest: input.fixture.control.digest,
+    schema_version: 2, kind: "runmat-builtin-migration-seal-manifest", authority: "reviewed-integration-request", seal_id: "seal-foo", bundle_id: input.fixture.bundleId, identities: ["foo"],
+    source_revision: input.fixture.inventory.source.revision, source_digest: input.fixture.inventory.source.digest, baseline_inventory_digest: input.fixture.inventory.digest, subject_inventory_digest: input.fixture.inventory.digest, control_manifest_digest: input.fixture.control.digest,
     verification: digestReference("verification.json", verification.artifact_id, verification), integration_gates: references, prerequisite_seals: [], review: { status: "reviewed", evidence: ["integration review"] },
   };
   const loaded = references.map((reference, index) => ({ reference, value: integration[index] }));

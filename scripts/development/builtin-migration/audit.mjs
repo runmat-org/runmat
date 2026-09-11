@@ -9,30 +9,34 @@ import { parsePrepareResult } from "./prepare.mjs";
 import { SAFE_IDENTITY, exact, kind, stableId, uniqueStrings } from "./schema.mjs";
 import { parseCompletedSourceDisposition } from "./source-fields.mjs";
 
-export function auditMigration(repository, inventory, control, lease, batchValue, evidence) {
+export function auditMigration(repository, baseline, subject, control, lease, batchValue, evidence) {
   stableId(evidence.artifact_id, "audit artifact id");
   const requested = parseBatch(batchValue);
   const bundle = lease.bundle;
   const failures = [];
+  if (subject.source.dirty !== false) failures.push(issue("subject-source-not-clean", "audit subject must be a clean committed source snapshot"));
   if (JSON.stringify(requested) !== JSON.stringify(sorted(bundle.identities))) failures.push(issue("partial-bundle", "audit batch must cover the complete reviewed bundle"));
   try { validateLeaseDiff(bundle, evidence.changed_paths ?? []); } catch (error) { failures.push(issue("lease-violation", error.message)); }
   const expected = {
-    source_revision: inventory.source.revision, source_digest: inventory.source.digest,
-    inventory_digest: inventory.digest, control_manifest_digest: control.digest, bundle_id: bundle.id,
+    source_revision: subject.source.revision, source_digest: subject.source.digest,
+    baseline_source_revision: baseline.source.revision,
+    baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
+    control_manifest_digest: control.digest, bundle_id: bundle.id,
     storage_policy: control.value.storage_policy,
-    source_files: inventory.source.files,
-    repository, gate_plans: bundle.gate_plans, compiled_build: inventory.compiled_inventory.build,
+    source_files: subject.source.files,
+    repository, gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
   };
   const gates = parseGates(evidence.gate_results ?? [], expected, requested, failures);
-  const prepares = indexPrepare(evidence.prepare_results ?? [], expected, lease, requested, failures);
+  const prepares = indexPrepare(evidence.prepare_results ?? [], baseline, control, lease, requested, failures);
   const dispositions = indexDispositions(evidence.source_dispositions ?? [], prepares, requested, failures);
-  const inventoryByIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
+  const inventoryByIdentity = new Map(subject.identities.map((entry) => [entry.identity, entry]));
   const identities = requested.map((id) => auditIdentity(repository, id, inventoryByIdentity.get(id), control.identities.get(id), gates, prepares, dispositions));
-  failures.push(...inventory.diagnostics.filter((entry) => entry.severity === "error").map((entry) => issue("inventory-error", `${entry.code}:${entry.path ?? ""}`)));
+  failures.push(...subject.diagnostics.filter((entry) => entry.severity === "error").map((entry) => issue("inventory-error", `${entry.code}:${entry.path ?? ""}`)));
   const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 3, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
-    artifact_id: evidence.artifact_id, source: inventory.source, inventory_digest: inventory.digest,
+    schema_version: 4, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
+    artifact_id: evidence.artifact_id, source: subject.source,
+    baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest, bundle_id: bundle.id, lease_id: lease.value.lease_id,
     requested_identities: requested, evidence: {
       gate_artifacts: [...gates.values()].map((entry) => entry.artifact_id).sort(compareCodePoint),
@@ -64,13 +68,13 @@ function parseGates(values, expected, requested, failures) {
   return result;
 }
 
-function indexPrepare(values, expected, lease, requested, failures) {
+function indexPrepare(values, baseline, control, lease, requested, failures) {
   const result = new Map();
   for (const raw of values) {
     try {
-      const parsed = parsePrepareResult(raw, { bundle_id: expected.bundle_id, control_manifest_digest: expected.control_manifest_digest, lease_id: lease.value.lease_id });
+      const parsed = parsePrepareResult(raw, { bundle_id: lease.bundle.id, control_manifest_digest: control.digest, lease_id: lease.value.lease_id });
       if (!requested.includes(parsed.identity)) throw new Error(`${parsed.identity}: prepare result is outside the batch`);
-      if (parsed.source.revision !== expected.source_revision || parsed.source.digest !== expected.source_digest || parsed.inventory_digest !== expected.inventory_digest) throw new Error(`${parsed.identity}: stale prepare result`);
+      if (parsed.source.revision !== baseline.source.revision || parsed.source.digest !== baseline.source.digest || parsed.inventory_digest !== baseline.digest) throw new Error(`${parsed.identity}: stale prepare result`);
       if (result.has(parsed.identity)) throw new Error(`${parsed.identity}: duplicate prepare result`);
       result.set(parsed.identity, parsed);
     } catch (error) { failures.push(issue("invalid-prepare-evidence", error.message)); }

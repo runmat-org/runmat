@@ -9,9 +9,9 @@ node scripts/runtime/verify-builtin-examples.mjs inventory \
   --output artifacts/builtin-examples/inventory.json
 ```
 
-The `runmat.builtin-examples.inventory.v2` document records the full Git revision, clean or dirty source state, verifier digest, normalized example definitions and fixture requirements, documentation-only admissions, and one execution identity for every required lane. Catalog examples require stable IDs and executable verification contracts. Legacy sidecar examples receive content-derived fallback IDs; presentation-only legacy examples remain visible as `documentation-only` records.
+The `runmat.builtin-examples.inventory.v3` document records the full Git revision, clean or dirty source state, verifier digest, normalized example definitions and fixture requirements, documentation-only admissions, and one execution identity for every required lane. Catalog examples require stable IDs and executable verification contracts. Legacy sidecar examples receive content-derived fallback IDs; presentation-only legacy examples remain visible as `documentation-only` records.
 
-The complete inventory is the release closure authority. `--builtin`, `--filter`, and `--limit` create a development-scoped inventory that cannot be reconciled as closure evidence. `--export` accepts an existing documentation-export JSON file, which is useful when the exporter was produced separately.
+The complete inventory is the release closure authority. One or more `--builtin` arguments select an exact, canonical builtin set for an atomic migration bundle. `--filter` and `--limit` remain exploratory selectors and cannot be combined with that set. Any selector creates a development-scoped inventory that cannot be reconciled as whole-product closure evidence. `--export` accepts an existing documentation-export JSON file, which is useful when the exporter was produced separately.
 
 ## 2. Freeze the execution plan
 
@@ -62,15 +62,15 @@ The closed matrix repeats the plan digest and the canonical `(lane, shardIndex, 
 | --- | --- | --- |
 | `native-host` | `native-cli` | available |
 | `native-filesystem` | `native-cli` | available |
-| `native-loopback-network` | `native-cli` | unavailable |
-| `native-foreign-runtime` | `native-cli` | unavailable |
-| `interactive-host` | `native-cli` | unavailable |
+| `native-loopback-network` | `native-cli` | available |
+| `native-foreign-runtime` | `native-cli` | available |
+| `interactive-host` | `native-cli` | available |
 | `browser-host` | `browser-wasm` | available |
 | `browser-graphics` | `browser-wasm` | available |
 | `browser-wgpu` | `browser-wasm` | available |
 | `desktop-host` | `desktop-native` | available in RunMat Desktop |
 
-Unavailable adapters are planned and produce explicit `unavailable` results. They are never omitted or reported as passes. `Portable` examples require both `native-host` and `browser-host` execution.
+Unavailable product capabilities produce explicit `unavailable` results. They are never omitted or reported as passes. `Portable` examples require both `native-host` and `browser-host` execution.
 
 ## 3. Run isolated shards
 

@@ -26,6 +26,15 @@ const PARSERS_BY_GATE = Object.freeze({
   "inventory-delta": ["inventory_delta"],
 });
 
+const ARTIFACT_ROLES_BY_PARSER = Object.freeze({
+  compiled_inventory: ["compiled-inventory"],
+  documentation_cutover: ["documentation-reconciliation"],
+  example_reconciliation: ["example-reconciliation"],
+  exit_status: [],
+  generated_products: ["generated-products"],
+  inventory_delta: ["inventory-delta"],
+});
+
 export function parseGatePlans(value, bundleId, current = null) {
   const rows = array(value, `${bundleId} gate plans`, { empty: true }).map((entry) => parseGatePlan(entry, bundleId, current));
   const keys = rows.map((entry) => entry.gate);
@@ -56,6 +65,7 @@ function parseGatePlan(value, bundleId, current) {
   uniqueStrings(value.arguments, `${bundleId} gate arguments`, { empty: true });
   const roles = uniqueStrings(value.expected_artifact_roles, `${bundleId} gate artifact roles`, { empty: true });
   if (JSON.stringify(roles) !== JSON.stringify([...roles].sort())) throw new Error(`${bundleId}: gate artifact roles must use canonical ordering`);
+  if (JSON.stringify(roles) !== JSON.stringify(ARTIFACT_ROLES_BY_PARSER[parser])) throw new Error(`${bundleId}: ${parser} must emit its exact typed artifact role set`);
   parseProgram(value.program, bundleId, current);
   return value;
 }
