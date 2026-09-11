@@ -55,6 +55,7 @@ function queueRow(bundle, control, inventory, state) {
   return {
     bundle_id: bundle.id,
     identities: bundle.identities,
+    target_families: [...new Set(controlled.map((entry) => `${entry.domain}/${entry.family}`))].sort(compareCodePoint),
     cohort: cohorts[0],
     owner_role: bundle.owner_role,
     migration_state: blockers.length && !["sealed", "verified"].includes(migrationState) ? "blocked" : migrationState,

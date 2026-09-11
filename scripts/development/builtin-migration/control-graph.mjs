@@ -8,6 +8,8 @@ export function validateBundleGraph(bundles, identities) {
     if (JSON.stringify(members) !== JSON.stringify(bundle.identities)) {
       throw new Error(`${bundleId}: bundle identities must exactly match reciprocal identity rows`);
     }
+    const cohorts = new Set(bundle.identities.map((identity) => identities.get(identity)?.cohort));
+    if (cohorts.size !== 1) throw new Error(`${bundleId}: atomic bundle identities must belong to one cohort`);
     for (const prerequisite of bundle.prerequisites) {
       if (!bundles.has(prerequisite.bundle_id)) throw new Error(`${bundleId}: dangling prerequisite ${prerequisite.bundle_id}`);
       if (prerequisite.bundle_id === bundleId) throw new Error(`${bundleId}: bundle cannot depend on itself`);

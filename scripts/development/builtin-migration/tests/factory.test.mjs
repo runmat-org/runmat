@@ -171,7 +171,7 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   assert.throws(() => parseControlManifest(spelling), /case-fold to the identity key/);
   const observedSpelling = structuredClone(fixture.controlValue); observedSpelling.identities.foo.public_spelling = "Foo";
   assert.throws(() => parseControlManifest(observedSpelling, fixture.inventory), /public spelling differs from the reviewed inventory/);
-  const domain = structuredClone(fixture.controlValue); domain.bundles[fixture.bundleId].domain = "other"; domain.identities.foo.domain = "other";
+  const domain = structuredClone(fixture.controlValue); domain.identities.foo.domain = "other";
   assert.throws(() => parseControlManifest(domain, fixture.inventory), /domain or family differs from its reviewed disposition override/);
   const disposition = structuredClone(fixture.controlValue); disposition.identities.foo.disposition = { kind: "internal", reason: "Changed after disposition review", evidence: ["late control edit"] }; disposition.identities.foo.runtime_owner = null;
   assert.throws(() => parseControlManifest(disposition, fixture.inventory), /disposition differs from the reviewed inventory/);
@@ -185,6 +185,36 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   assert.throws(() => parseControlManifest(danglingAlias), /alias target is absent/);
   const missingGatePlan = structuredClone(fixture.controlValue); missingGatePlan.bundles[fixture.bundleId].gate_plans = missingGatePlan.bundles[fixture.bundleId].gate_plans.filter((entry) => entry.gate !== "runtime-binding");
   assert.throws(() => parseControlManifest(missingGatePlan, fixture.inventory), /required gate runtime-binding has no reviewed gate plan/);
+});
+
+test("atomic bundles preserve identity-local target taxonomy", () => {
+  const fixture = controlledFixture();
+  const control = structuredClone(fixture.controlValue);
+  const bar = structuredClone(control.identities.foo);
+  bar.identity = "bar";
+  bar.public_spelling = "bar";
+  bar.disposition = { kind: "canonical", target: "bar" };
+  bar.family = "secondary";
+  bar.runtime_owner = "crates/runmat-runtime/src/builtins/math/secondary/bar.rs";
+  bar.expected_authorities.catalog_package = "crates/runmat-builtins/src/catalog/entries/math/secondary/bar/mod.rs";
+  bar.expected_authorities.runtime_bindings = [{ path: bar.runtime_owner, function: "bar_builtin", variant: "default" }];
+  control.identities.bar = bar;
+  control.bundles[fixture.bundleId].identities = ["bar", "foo"];
+  assert.doesNotThrow(() => parseControlManifest(control));
+
+  const parsed = parseControlManifest(control);
+  const inventory = structuredClone(fixture.inventory);
+  inventory.identities.push({ ...structuredClone(inventory.identities[0]), identity: "bar" });
+  const queue = buildQueue(inventory, parsed);
+  assert.deepEqual(queue.rows[0].target_families, ["math/basic", "math/secondary"]);
+
+  const mixedCohort = structuredClone(control);
+  mixedCohort.identities.bar.cohort = "C02";
+  assert.throws(() => parseControlManifest(mixedCohort), /must belong to one cohort/);
+
+  const duplicateTaxonomy = structuredClone(fixture.controlValue);
+  duplicateTaxonomy.bundles[fixture.bundleId].domain = "math";
+  assert.throws(() => parseControlManifest(duplicateTaxonomy), /fields must be exactly/);
 });
 
 test("control draft is deterministic, complete, and leaves review judgments unresolved", () => {
@@ -314,7 +344,6 @@ test("disposition review expands exact reviewed groups without inferred selector
   const control = structuredClone(fixture.controlValue);
   control.baseline.inventory_digest = inventory.digest;
   control.baseline.dispositions_digest = inventory.dispositions_digest;
-  control.bundles[fixture.bundleId].domain = "reviewed-target";
   control.identities.foo.domain = "reviewed-target";
   assert.doesNotThrow(() => parseControlManifest(control, inventory));
 });
