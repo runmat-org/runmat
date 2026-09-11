@@ -296,8 +296,11 @@ function validateReviewedClassification(control, inventory) {
   if (!inventory.spellings.includes(control.public_spelling)) {
     throw new Error(`${control.identity}: public spelling differs from the reviewed inventory`);
   }
-  if (inventory.domain !== control.domain || inventory.family !== control.family) {
-    throw new Error(`${control.identity}: domain or family differs from the reviewed inventory`);
+  const reviewedDomain = inventory.classification_input.domain;
+  const reviewedFamily = inventory.classification_input.family;
+  if ((reviewedDomain !== null && reviewedDomain !== control.domain)
+    || (reviewedFamily !== null && reviewedFamily !== control.family)) {
+    throw new Error(`${control.identity}: domain or family differs from its reviewed disposition override`);
   }
   const observed = inventory.disposition;
   if (observed.kind !== control.disposition.kind) {

@@ -36,8 +36,6 @@ function dispositionReviewFixture(inventory) {
       disposition: "canonical",
       identities: ["foo"],
       alias_targets: {},
-      domain: "math",
-      family: "basic",
       reason: null,
       evidence: ["catalog and runtime owner review"],
       review: { status: "reviewed", evidence: ["C00 disposition review"] },
@@ -150,7 +148,7 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   const observedSpelling = structuredClone(fixture.controlValue); observedSpelling.identities.foo.public_spelling = "Foo";
   assert.throws(() => parseControlManifest(observedSpelling, fixture.inventory), /public spelling differs from the reviewed inventory/);
   const domain = structuredClone(fixture.controlValue); domain.bundles[fixture.bundleId].domain = "other"; domain.identities.foo.domain = "other";
-  assert.throws(() => parseControlManifest(domain, fixture.inventory), /domain or family differs from the reviewed inventory/);
+  assert.throws(() => parseControlManifest(domain, fixture.inventory), /domain or family differs from its reviewed disposition override/);
   const disposition = structuredClone(fixture.controlValue); disposition.identities.foo.disposition = { kind: "internal", reason: "Changed after disposition review", evidence: ["late control edit"] }; disposition.identities.foo.runtime_owner = null;
   assert.throws(() => parseControlManifest(disposition, fixture.inventory), /disposition differs from the reviewed inventory/);
   const unsafeStorage = structuredClone(fixture.controlValue); unsafeStorage.storage_policy.volume_roles.target_temp.filesystem_id = unsafeStorage.storage_policy.volume_roles.source_worktree.filesystem_id;
@@ -257,8 +255,8 @@ test("disposition review expands exact reviewed groups without inferred selector
   assert.deepEqual(output.identities.foo, {
     disposition: "canonical",
     canonical: null,
-    domain: "math",
-    family: "basic",
+    domain: null,
+    family: null,
     reason: null,
     review: {
       status: "reviewed",
@@ -266,6 +264,17 @@ test("disposition review expands exact reviewed groups without inferred selector
     },
   });
   assert.doesNotThrow(() => validateDispositionInput(output));
+
+  const inventory = buildInventory(fixture.repository, output, {
+    revision: REVISION,
+    compiledInventory: fixture.compiledInventory,
+  });
+  const control = structuredClone(fixture.controlValue);
+  control.baseline.inventory_digest = inventory.digest;
+  control.baseline.dispositions_digest = inventory.dispositions_digest;
+  control.bundles[fixture.bundleId].domain = "reviewed-target";
+  control.identities.foo.domain = "reviewed-target";
+  assert.doesNotThrow(() => parseControlManifest(control, inventory));
 });
 
 test("disposition review rejects omissions, overlap, guesses, and stale baselines", () => {
