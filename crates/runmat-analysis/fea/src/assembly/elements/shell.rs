@@ -848,3 +848,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod qualification_tests;
