@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("left = uint8(12), right = int8(-2)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(left == uint8(12)); assert(right == int8(-2));",
         },
@@ -37,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = uint16([16 32 48])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(c, 'uint16')); assert(isequal(c, uint16([16 32 48])));",
         },

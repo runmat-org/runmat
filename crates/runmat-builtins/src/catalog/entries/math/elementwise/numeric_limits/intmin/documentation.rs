@@ -29,6 +29,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = int16(-32768)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(limit, \"int16\"));\nassert(limit == int16(-32768));\nassert(isequal(size(limit), [1 1]));",
         },
@@ -40,6 +42,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = uint16(0)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(limit, \"uint16\"));\nassert(limit == uint16(0));",
         },
@@ -51,6 +55,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = int64(-9223372036854775808)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(limit, \"int64\"));\nassert(isequal(limit, intmin(\"int64\")));\nassert(isequal(size(limit), [1 1]));",
         },

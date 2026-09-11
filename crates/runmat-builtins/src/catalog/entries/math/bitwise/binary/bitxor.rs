@@ -41,6 +41,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = 5"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(c == 5); assert(isa(c, 'double'));",
         },
@@ -52,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = uint8([2 0 4])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(c, 'uint8')); assert(isequal(c, uint8([2 0 4])));",
         },

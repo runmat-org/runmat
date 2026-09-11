@@ -6,6 +6,7 @@ use super::{documentation, CELLSTR_DESCRIPTOR, CELLSTR_EXTENSIONS, CELLSTR_INTEG
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const CELLSTR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cellstr" },
     category: "cells/core",
     documentation: documentation::DOCUMENTATION,

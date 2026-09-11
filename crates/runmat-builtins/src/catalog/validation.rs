@@ -6,6 +6,8 @@ use crate::BuiltinAsyncBehavior;
 use runmat_types::EffectKind;
 use std::collections::{BTreeMap, BTreeSet};
 
+mod example;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinCatalogValidationError {
     pub identity: Option<&'static str>,
@@ -166,6 +168,7 @@ fn validate_documentation(
                 "documentation example verification must be complete",
             ));
         }
+        example::validate(name, example, errors);
     }
 }
 

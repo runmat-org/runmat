@@ -84,6 +84,7 @@ pub const ERF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 pub const ERF_CATALOG_ENTRY: BuiltinCatalogEntry =
     provider_unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+        provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "erf" },
         documentation: DOCUMENTATION,
         descriptor: &ERF_DESCRIPTOR,

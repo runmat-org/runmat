@@ -192,6 +192,7 @@ const FULL_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BI
 const FULL_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const FULL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "full" },
     category: "array/creation",
     documentation: FULL_DOCUMENTATION,
@@ -383,6 +384,7 @@ pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const ZEROS_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const ZEROS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const ZEROS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "zeros" },
     category: "array/creation",
     documentation: ZEROS_DOCUMENTATION,

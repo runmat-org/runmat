@@ -167,6 +167,7 @@ pub const TAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const TAN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const TAN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tan" },
     category: "math/trigonometry",
     documentation: TAN_DOCUMENTATION,

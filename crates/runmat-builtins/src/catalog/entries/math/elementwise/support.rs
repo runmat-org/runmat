@@ -20,6 +20,7 @@ const MAY_SUSPEND_AND_THROW: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKi
 /// builder: APIs with output-count, mutation, workspace, or capability
 /// semantics should use a family that represents those rules directly.
 pub(super) struct UnaryNumericCatalogSpec {
+    pub provenance: crate::BuiltinCatalogProvenance,
     pub identity: BuiltinCatalogIdentity,
     pub documentation: BuiltinDocumentation,
     pub descriptor: &'static BuiltinDescriptor,
@@ -35,6 +36,7 @@ pub(super) const fn unary_numeric_catalog_entry(
     spec: UnaryNumericCatalogSpec,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        provenance: spec.provenance,
         identity: spec.identity,
         category: "math/elementwise",
         documentation: spec.documentation,

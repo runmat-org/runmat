@@ -41,6 +41,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = 7"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(c == 7); assert(isa(c, 'double'));",
         },
@@ -52,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = uint16([9 10 12])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(c, 'uint16')); assert(isequal(c, uint16([9 10 12])));",
         },

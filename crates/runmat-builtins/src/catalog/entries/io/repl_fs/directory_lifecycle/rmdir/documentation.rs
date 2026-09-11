@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical true and the folder is absent"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(existsAfter == 0);",
         },
@@ -37,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical true and the hierarchy is absent"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(existsAfter == 0);",
         },
@@ -48,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical false and diagnostics identify the missing folder"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && ~status); assert(~isempty(msg)); assert(~isempty(msgID));",
         },
@@ -59,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical false and the nonempty directory remains"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && ~status); assert(~isempty(msg)); assert(~isempty(msgID)); assert(stillPresent ~= 0);",
         },
@@ -70,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("uppercase S recursively removes the hierarchy"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(existsAfter == 0);",
         },
@@ -81,6 +91,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("the explicit default policy removes the directory"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(existsAfter == 0);",
         },

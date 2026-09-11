@@ -7,8 +7,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { combineMachineReports } from "./builtin-example-verifier/reporting.mjs";
+import { runProtocolCli } from "./builtin-example-verifier/protocol-cli.mjs";
 
 const args = process.argv.slice(2);
+if (args.includes("--plan") || args.includes("--inventory")) {
+    await runProtocolCli(["reconcile", ...args]);
+    process.exit(process.exitCode ?? 0);
+}
 let output = "";
 let source = "";
 let artifact = "";

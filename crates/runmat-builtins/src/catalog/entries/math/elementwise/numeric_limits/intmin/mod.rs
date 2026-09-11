@@ -46,6 +46,7 @@ const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 pub const INTMIN_CATALOG_ENTRY: crate::BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "intmin",
     documentation::DOCUMENTATION,
     &DESCRIPTOR,

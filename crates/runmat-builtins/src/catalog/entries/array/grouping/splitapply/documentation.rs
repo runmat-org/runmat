@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [6; 4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(Y, [6; 4]));",
         },
@@ -43,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [10; 30]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(Y, [10; 30]));",
         },
@@ -54,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [11 33; 22 44]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(Y, [11 33; 22 44]));",
         },

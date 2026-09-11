@@ -25,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("T is a 4-by-2 table containing every pair"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(height(T) == 4);\nassert(width(T) == 2);\nassert(isequal(T.Var1, [1; 1; 2; 2]));\nassert(isequal(T.Var2, [\"x\"; \"y\"; \"x\"; \"y\"]));" },
     },
     BuiltinExample {
@@ -34,6 +36,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("T is a 6-by-3 table"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(T), [6 3]));\nassert(isequal(T.Var1, [10; 10; 10; 20; 20; 20]));\nassert(all(T.Var2));\nassert(isequal(T.Var3, [3; 4; 5; 3; 4; 5]));" },
     },
     BuiltinExample {
@@ -43,6 +47,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("T.Var1 is a 4-by-1 uint64 array with exact values"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(T.Var1, \"uint64\"));\nassert(isequal(T.Var1, [ids(1); ids(1); ids(2); ids(2)]));" },
     },
     BuiltinExample {
@@ -52,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("T is a 0-by-2 table and T.Var1 remains int16"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(height(T) == 0);\nassert(width(T) == 2);\nassert(isa(T.Var1, \"int16\"));\nassert(isequal(size(T.Var1), [0 1]));" },
     },
 ];

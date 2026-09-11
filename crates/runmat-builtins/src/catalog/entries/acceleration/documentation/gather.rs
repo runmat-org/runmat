@@ -54,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("H = [1 2 3; 4 5 6]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(H, \"double\"));\nassert(isequal(H, [1 2 3; 4 5 6]));",
         },
@@ -65,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = uint16([10 20 30])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"uint16\"));\nassert(isequal(y, x));",
         },
@@ -76,6 +80,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostMask = logical([1 0 1 0])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(hostMask, \"logical\"));\nassert(isequal(hostMask, logical([1 0 1 0])));",
         },
@@ -87,6 +93,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostC contains host values [1 2] and uint8(42)"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(hostC{1}, [1 2]));\nassert(isa(hostC{2}, \"uint8\"));\nassert(hostC{2} == uint8(42));",
         },
@@ -98,6 +106,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("S_host.data is a host matrix and S_host.label is unchanged"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(S_host.data, [8 1 6; 3 5 7; 4 9 2]));\nassert(S_host.label == \"gpu result\");",
         },
@@ -109,6 +119,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostA is eye(3); hostB is ones(2, 2)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(hostA, eye(3)));\nassert(isequal(hostB, ones(2, 2)));",
         },
@@ -120,6 +132,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 2.5 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(result - [0 2.5 5])) < 1e-5);",
         },

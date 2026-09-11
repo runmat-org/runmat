@@ -70,6 +70,7 @@ macro_rules! define_component_projection {
 
         const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "math/elementwise",
             documentation: $documentation,

@@ -9,6 +9,7 @@ use crate::*;
 pub use contract::*;
 
 pub const MTIMES_CATALOG_ENTRY: BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "mtimes",
     documentation::DOCUMENTATION,
     &MTIMES_DESCRIPTOR,

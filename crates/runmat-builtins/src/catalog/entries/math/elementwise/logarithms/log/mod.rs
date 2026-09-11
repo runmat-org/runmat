@@ -109,6 +109,7 @@ pub const LOG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const LOG_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 pub const LOG_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+        provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "log" },
         documentation: LOG_DOCUMENTATION,
         descriptor: &LOG_DESCRIPTOR,

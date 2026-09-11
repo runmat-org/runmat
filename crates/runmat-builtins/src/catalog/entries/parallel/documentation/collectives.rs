@@ -101,6 +101,8 @@ const LAB_BARRIER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("both labs continue after reaching the barrier"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "assert(before{1} == 1 && after{1} == 1);\nassert(before{2} == 2 && after{2} == 2);\ndelete(pool);" },
 }];
 const SPMD_BARRIER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
@@ -110,6 +112,8 @@ const SPMD_BARRIER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("both ranks continue after reaching the barrier"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "assert(before{1} == 1 && after{1} == 1);\nassert(before{2} == 2 && after{2} == 2);\ndelete(pool);" },
 }];
 
@@ -120,6 +124,8 @@ const LAB_BROADCAST_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("both labs receive the first lab's uint64 vector"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "expected = uint64([1 0x0020000000000001u64]);\nassert(isequal(shared{1}, expected));\nassert(isequal(shared{2}, expected));\ndelete(pool);" },
 }];
 const SPMD_BROADCAST_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
@@ -129,6 +135,8 @@ const SPMD_BROADCAST_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("both ranks receive the first rank's uint64 vector"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "expected = uint64([1 0x0020000000000001u64]);\nassert(isequal(shared{1}, expected));\nassert(isequal(shared{2}, expected));\ndelete(pool);" },
 }];
 
@@ -141,6 +149,8 @@ macro_rules! send_example {
             display_output: Some("the two workers exchange uint16 rank values"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(received{1}, uint16(2)));\nassert(isequal(received{2}, uint16(1)));\ndelete(pool);" },
         }];
     };
@@ -167,6 +177,8 @@ const LAB_RECEIVE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("the two labs receive each other's uint16 rank values"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(received{1}, uint16(2)));\nassert(isequal(received{2}, uint16(1)));\ndelete(pool);" },
 }];
 const SPMD_RECEIVE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
@@ -176,6 +188,8 @@ const SPMD_RECEIVE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("each rank receives the peer value, source rank, and tag"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(received{1}, uint16(2)));\nassert(isequal(received{2}, uint16(1)));\nassert(source{1} == 2 && source{2} == 1);\nassert(tag{1} == uint64(7) && tag{2} == uint64(7));\ndelete(pool);" },
 }];
 
@@ -188,6 +202,8 @@ macro_rules! probe_example {
             display_output: Some("each worker observes and receives its queued message"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(ready{1} && ready{2});\nassert(isequal(received{1}, uint16(1)));\nassert(isequal(received{2}, uint16(2)));\ndelete(pool);" },
         }];
     };
@@ -216,6 +232,8 @@ macro_rules! send_receive_example {
             display_output: Some("each worker receives the peer's uint16 value"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(exchanged{1}, uint16(2)));\nassert(isequal(exchanged{2}, uint16(1)));\ndelete(pool);" },
         }];
     };
@@ -232,6 +250,8 @@ macro_rules! plus_example {
             display_output: Some("both workers receive uint32(3)"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(total{1}, uint32(3)));\nassert(isequal(total{2}, uint32(3)));\ndelete(pool);" },
         }];
     };
@@ -248,6 +268,8 @@ macro_rules! cat_example {
             display_output: Some("both workers receive uint16([1 2])"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(joined{1}, uint16([1 2])));\nassert(isequal(joined{2}, uint16([1 2])));\ndelete(pool);" },
         }];
     };
@@ -264,6 +286,8 @@ macro_rules! reduce_example {
             display_output: Some("both workers receive uint32(3)"),
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Native,
+            fixture: crate::BuiltinExampleFixture::None,
+            requirements: crate::BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(total{1}, uint32(3)));\nassert(isequal(total{2}, uint32(3)));\ndelete(pool);" },
         }];
     };

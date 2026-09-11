@@ -98,6 +98,7 @@ pub const GRP2IDX_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const GRP2IDX_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "grp2idx" },
     category: "array/grouping",
     documentation: DOCUMENTATION,

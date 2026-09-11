@@ -1,15 +1,23 @@
 // @ts-check
 
-import { execFileSync, spawnSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 
-export function runNativeCases(repository, cases, timeoutMs) {
+import { materializeFilesystemFixture } from "./adapters/filesystem.mjs";
+import { prepareForeignFixture } from "./adapters/foreign.mjs";
+import { runInteraction } from "./adapters/interaction.mjs";
+import { withLoopbackFixture } from "./adapters/loopback.mjs";
+import { runBoundedProcess } from "./adapters/process.mjs";
+
+export async function runNativeCases(repository, cases, timeoutMs) {
     const binary = resolveNativeBinary(repository);
     const root = mkdtempSync(join(tmpdir(), "runmat-documentation-examples-"));
     try {
-        return cases.map((testCase) => runCase(binary, root, testCase, timeoutMs));
+        const results = [];
+        for (const testCase of cases) results.push(await runCase(binary, root, testCase, timeoutMs));
+        return results;
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -42,44 +50,91 @@ function resolveNativeBinary(repository) {
     return binary;
 }
 
-function runCase(binary, root, testCase, timeoutMs) {
+async function runCase(binary, root, testCase, timeoutMs) {
     const caseDirectory = join(root, String(testCase.id));
+    const workspaceDirectory = join(caseDirectory, "workspace");
     const artifactsDirectory = join(caseDirectory, "artifacts");
-    const manifest = join(artifactsDirectory, "run_manifest.json");
     mkdirSync(caseDirectory, { recursive: true });
-    const source = join(caseDirectory, "example.m");
-    const config = join(caseDirectory, "runmat.toml");
-    writeFileSync(source, `${testCase.input.trimEnd()}\n`, "utf8");
+    if (testCase.fixture && typeof testCase.fixture === "object" && "DesktopHostOnly" in testCase.fixture) {
+        return unavailable(
+            testCase.id,
+            "the native CLI product cannot provide the declared RunMat Desktop host scenario"
+        );
+    }
+    try {
+        prepareWorkspace(workspaceDirectory, testCase.fixture);
+    } catch (error) {
+        return failure(
+            testCase.id,
+            "",
+            `native lane fixture preparation failed: ${error instanceof Error ? error.message : String(error)}`,
+            ""
+        );
+    }
+    let foreignConfig = "";
+    let foreignEnvironment = {};
+    if (testCase.fixture && typeof testCase.fixture === "object" && "ForeignAdapter" in testCase.fixture) {
+        const prepared = await prepareForeignFixture(binary, workspaceDirectory, testCase.fixture.ForeignAdapter, timeoutMs);
+        if (!prepared.available) return unavailable(testCase.id, prepared.reason);
+        if (prepared.error) return failure(testCase.id, "", `native foreign fixture: ${prepared.error}`, "");
+        foreignConfig = prepared.config;
+        foreignEnvironment = prepared.environment;
+    }
+    const config = join(workspaceDirectory, "runmat.toml");
     writeFileSync(
         config,
-        `[runtime.language]\ncompat = "${testCase.compatibility.toLowerCase()}"\n\n[runtime.accelerate]\nenabled = false\n\n[runtime.telemetry]\nenabled = false\n`,
+        `[runtime.language]\ncompat = "${testCase.compatibility.toLowerCase()}"\n\n[runtime.accelerate]\nenabled = false\n\n[runtime.telemetry]\nenabled = false\n\n${foreignConfig}`,
         "utf8"
     );
-    const completed = spawnSync(
-        binary,
-        [
-            "--color=never",
-            "--no-jit",
-            "--config",
-            config,
-            "--artifacts-dir",
-            artifactsDirectory,
-            "--artifacts-manifest",
-            manifest,
-            "--capture-figures=off",
-            "run",
-            source
-        ],
-        {
-            cwd: caseDirectory,
-            encoding: "utf8",
-            env: { ...process.env, NO_COLOR: "1" },
-            timeout: timeoutMs,
-            maxBuffer: 16 * 1024 * 1024
+    if (testCase.fixture && typeof testCase.fixture === "object" && "Loopback" in testCase.fixture) {
+        try {
+            const outcome = await withLoopbackFixture(
+                testCase.input,
+                testCase.fixture.Loopback,
+                ({ program }) => executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, null, foreignEnvironment)
+            );
+            return outcome.value;
+        } catch (error) {
+            return failure(testCase.id, "", `native loopback fixture failed: ${error instanceof Error ? error.message : String(error)}`, "");
         }
-    );
-    const stdoutText = completed.stdout ?? "";
-    const stderrText = completed.stderr ?? "";
+    }
+    const transcript = testCase.fixture && typeof testCase.fixture === "object" && "CliInteraction" in testCase.fixture
+        ? testCase.fixture.CliInteraction.transcript
+        : null;
+    return executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, testCase.input, testCase, timeoutMs, transcript, foreignEnvironment);
+}
+
+async function executeProgram(binary, caseDirectory, workspaceDirectory, artifactsDirectory, config, program, testCase, timeoutMs, transcript = null, environmentOverrides = {}) {
+    const source = join(workspaceDirectory, "example.m");
+    const manifest = join(artifactsDirectory, "run_manifest.json");
+    writeFileSync(source, `${program.trimEnd()}\n`, "utf8");
+    if (testCase.requirements.engine === "Aot") {
+        return executeAotProgram(binary, caseDirectory, workspaceDirectory, config, source, testCase, timeoutMs, environmentOverrides);
+    }
+    const args = [
+        "--color=never",
+        ...nativeEngineArguments(testCase.requirements.engine),
+        "--config",
+        config,
+        "--artifacts-dir",
+        artifactsDirectory,
+        "--artifacts-manifest",
+        manifest,
+        "--capture-figures=off",
+        "run",
+        source
+    ];
+    const options = {
+        cwd: workspaceDirectory,
+        env: { ...process.env, ...environmentOverrides, NO_COLOR: "1" },
+        timeout: timeoutMs,
+        maxBuffer: 16 * 1024 * 1024
+    };
+    const completed = transcript
+        ? await runInteraction(binary, args, options, transcript)
+        : await runBoundedProcess(binary, args, options);
+    const stdoutText = completed.stdout;
+    const stderrText = completed.stderr;
     if (completed.error) {
         return failure(testCase.id, stdoutText, `native lane: ${completed.error.message}`, "");
     }
@@ -102,6 +157,12 @@ function runCase(binary, root, testCase, timeoutMs) {
             ""
         );
     }
+    if (testCase.requirements.engine === "Interpreter" && outcome.usedJit) {
+        return failure(testCase.id, stdoutText, "native interpreter example executed through the JIT", "");
+    }
+    if (testCase.requirements.engine === "Jit" && !outcome.usedJit) {
+        return failure(testCase.id, stdoutText, "native JIT example did not execute through the JIT", "");
+    }
     if (completed.status === 0 && outcome.success) {
         return { id: testCase.id, stdoutText, valueText: "", errorText: "", errorIdentifier: "" };
     }
@@ -111,6 +172,75 @@ function runCase(binary, root, testCase, timeoutMs) {
         `native lane: ${stderrText.trim() || `process exited with status ${completed.status}`}`,
         outcome.errorIdentifier
     );
+}
+
+export function nativeEngineArguments(engine) {
+    switch (engine) {
+        case "Default": return [];
+        case "Interpreter": return ["--no-jit"];
+        case "Jit": return [];
+        case "Aot": throw new Error("AOT execution uses the native compile adapter");
+        default: throw new Error(`unsupported native execution engine requirement: ${engine}`);
+    }
+}
+
+async function executeAotProgram(binary, caseDirectory, workspaceDirectory, config, source, testCase, timeoutMs, environmentOverrides) {
+    const executable = join(caseDirectory, process.platform === "win32" ? "example-aot.exe" : "example-aot");
+    const environment = { ...process.env, ...environmentOverrides, NO_COLOR: "1" };
+    const compile = await runBoundedProcess(binary, [
+        "--color=never",
+        "--config",
+        config,
+        "compile",
+        source,
+        "--output",
+        executable,
+        "--force"
+    ], {
+        cwd: workspaceDirectory,
+        env: environment,
+        timeout: timeoutMs,
+        maxBuffer: 16 * 1024 * 1024
+    });
+    if (compile.error || compile.status !== 0) {
+        const detail = compile.error?.message ?? (compile.stderr.trim() || `compiler exited with status ${compile.status}`);
+        return failure(testCase.id, compile.stdout, `native AOT compile: ${detail}`, "");
+    }
+    if (!existsSync(executable)) {
+        return failure(testCase.id, compile.stdout, "native AOT compile produced no executable", "");
+    }
+    const completed = await runBoundedProcess(executable, [], {
+        cwd: workspaceDirectory,
+        env: environment,
+        timeout: timeoutMs,
+        maxBuffer: 16 * 1024 * 1024
+    });
+    const stdoutText = completed.stdout;
+    if (completed.error) return failure(testCase.id, stdoutText, `native AOT execution: ${completed.error.message}`, "");
+    if (completed.status === 0) return { id: testCase.id, stdoutText, valueText: "", errorText: "", errorIdentifier: "" };
+    return failure(
+        testCase.id,
+        stdoutText,
+        `native AOT execution: ${completed.stderr.trim() || `process exited with status ${completed.status}`}`,
+        ""
+    );
+}
+
+function prepareWorkspace(workspaceDirectory, fixture) {
+    if (fixture === undefined
+        || fixture === "None"
+        || (fixture && typeof fixture === "object" && ("Loopback" in fixture || "CliInteraction" in fixture))) {
+        mkdirSync(workspaceDirectory);
+        return;
+    }
+    if (fixture && typeof fixture === "object" && "ForeignAdapter" in fixture) {
+        materializeFilesystemFixture(workspaceDirectory, fixture.ForeignAdapter.files);
+        return;
+    }
+    if (!fixture || typeof fixture !== "object" || !("Filesystem" in fixture)) {
+        throw new Error("selected native adapter cannot materialize the declared fixture");
+    }
+    materializeFilesystemFixture(workspaceDirectory, fixture.Filesystem);
 }
 
 export function parseNativeArtifactManifest(source) {
@@ -124,12 +254,20 @@ export function parseNativeArtifactManifest(source) {
     if (manifest.error_identifier !== null && typeof manifest.error_identifier !== "string") {
         throw new Error("run artifact error_identifier must be a string or null");
     }
+    if (typeof manifest.used_jit !== "boolean") {
+        throw new Error("run artifact used_jit must be a boolean");
+    }
     return {
         success: manifest.success,
-        errorIdentifier: manifest.error_identifier ?? ""
+        errorIdentifier: manifest.error_identifier ?? "",
+        usedJit: manifest.used_jit
     };
 }
 
 function failure(id, stdoutText, errorText, errorIdentifier) {
     return { id, stdoutText, valueText: "", errorText, errorIdentifier };
+}
+
+function unavailable(id, reason) {
+    return { id, stdoutText: "", valueText: "", errorText: reason, errorIdentifier: "", availability: "unavailable" };
 }

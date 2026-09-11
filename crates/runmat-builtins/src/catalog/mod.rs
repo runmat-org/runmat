@@ -11,6 +11,7 @@ mod inference;
 mod integer;
 mod link;
 mod placement;
+mod provenance;
 mod registry;
 mod validation;
 
@@ -30,5 +31,6 @@ pub use inference::*;
 pub use integer::*;
 pub use link::*;
 pub use placement::*;
+pub use provenance::*;
 pub use registry::*;
 pub use validation::*;

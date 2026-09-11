@@ -190,6 +190,7 @@ pub const NUMEL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [runmat_types::EffectKind; 1] = [runmat_types::EffectKind::MayThrow];
 pub const NUMEL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "numel" },
     category: "array/introspection",
     documentation: NUMEL_DOCUMENTATION,

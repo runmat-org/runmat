@@ -25,6 +25,8 @@ pub(super) const fn example(
         display_output: Some(display_output),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: assertions },
     }
 }
@@ -43,6 +45,8 @@ pub(super) const fn expected_error_example(
         display_output: Some(display_output),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::ExpectedError { identifier },
     }
 }

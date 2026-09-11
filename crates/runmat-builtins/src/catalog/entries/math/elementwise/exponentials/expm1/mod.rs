@@ -105,6 +105,7 @@ const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const EXPM1_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "expm1" },
     category: "math/elementwise",
     documentation: EXPM1_DOCUMENTATION,

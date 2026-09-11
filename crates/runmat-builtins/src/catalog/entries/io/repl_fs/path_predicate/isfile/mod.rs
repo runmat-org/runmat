@@ -15,6 +15,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const ISFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "isfile" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

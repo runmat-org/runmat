@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("sz = [2 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(sz, [2 3]));",
         },
@@ -43,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("rows = 8"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(rows == 8);",
         },
@@ -54,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("selected = [5 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(selected, [5 3]));",
         },
@@ -65,6 +71,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("selected = [4 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(selected, [4 3]));",
         },
@@ -76,6 +84,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("first = 3; remainder = 20"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(first == 3);\nassert(remainder == 20);",
         },
@@ -87,6 +97,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("sz is a 1-by-0 double array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(sz), [1 0]));\nassert(isa(sz, 'double'));",
         },
@@ -98,6 +110,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("sz = [2 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(sz, [2 3]));",
         },
@@ -109,6 +123,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("sz = [256 512]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(sz, [256 512]));\nassert(~isgpuarray(sz));",
         },

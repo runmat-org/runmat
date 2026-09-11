@@ -10,6 +10,8 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [0 0.25 0.5 0.75 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(R, [0 0.25 0.5 0.75 1]));" },
     },
     BuiltinExample {
@@ -19,6 +21,8 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [-1 -0.5 0 0.5 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(R, [-1 -0.5 0 0.5 1]));" },
     },
     BuiltinExample {
@@ -28,6 +32,8 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [0 0 0.25 0.5 0.75 1 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(R, [0 0 0.25 0.5 0.75 1 1]));" },
     },
     BuiltinExample {
@@ -37,6 +43,8 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [0.2857 0.0714; 0.4286 0; 1 1; 0 0.4286]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "expected = [2/7 1/14; 3/7 0; 1 1; 0 3/7];\nassert(max(abs(R(:) - expected(:))) < 1e-12);" },
     },
     BuiltinExample {
@@ -46,6 +54,8 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = single([0 0.5 1])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(R, \"single\"));\nassert(isequal(R, single([0 0.5 1])));" },
     },
 ];

@@ -22,6 +22,7 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
 const DESCRIPTOR: BuiltinDescriptor = super::contract::descriptor(&SIGNATURES);
 
 pub const REALMAX_CATALOG_ENTRY: crate::BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "realmax",
     documentation::DOCUMENTATION,
     &DESCRIPTOR,

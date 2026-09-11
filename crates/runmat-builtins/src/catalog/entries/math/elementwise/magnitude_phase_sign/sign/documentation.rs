@@ -35,6 +35,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = -1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(result == -1);",
         },
@@ -46,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("s = [-1 0 0 1 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(s, [-1 0 0 1 1]));",
         },
@@ -57,6 +61,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("u = [0.6+0.8i -0.7071+0.7071i 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "expected = [0.6+0.8i (-1+1i)/sqrt(2) 0];\nassert(max(abs(u - expected)) < 1e-12);",
@@ -69,6 +75,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codes = [1 1 1 1 1 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(codes, \"double\"));\nassert(isequal(codes, ones(1, 6)));",
         },
@@ -80,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("numeric = [0 1 0; 1 0 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(numeric, \"double\"));\nassert(isequal(numeric, [0 1 0; 1 0 1]));",
         },
@@ -91,6 +101,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [-1 0; 1 -1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(host, [-1 0; 1 -1]));",
         },
@@ -102,6 +114,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("out = [1 -1 NaN 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(out(1) == 1 && out(2) == -1 && isnan(out(3)) && out(4) == 0);",
         },

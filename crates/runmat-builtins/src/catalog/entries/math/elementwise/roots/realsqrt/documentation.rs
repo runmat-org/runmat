@@ -31,6 +31,8 @@ const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 3"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 3);",
         },
@@ -42,6 +44,8 @@ const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [1 2 3; 4 5 6]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(R, [1 2 3; 4 5 6]));",
         },
@@ -53,6 +57,8 @@ const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Error using realsqrt\nInput must be nonnegative."),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::ExpectedError {
             identifier: "RunMat:realsqrt:ComplexResult",
         },
@@ -64,6 +70,8 @@ const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = sparse([1 3], [1 2], [2 3], 3, 2)"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(issparse(R));\nassert(isequal(full(R), [2 0; 0 0; 0 3]));",
         },
@@ -75,6 +83,8 @@ const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 1; 2 3]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [0 1; 2 3]));",
         },

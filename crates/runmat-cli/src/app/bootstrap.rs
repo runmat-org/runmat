@@ -49,7 +49,10 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 
     configure_gc_from_config(&config)?;
 
-    let compilation_only = matches!(cli.command, Some(Commands::Compile { .. }));
+    let compilation_only = matches!(
+        cli.command,
+        Some(Commands::Compile { .. } | Commands::NativeInterface { .. })
+    );
     if !compilation_only {
         let accel_options: AccelerateInitOptions = (&config.accelerate).into();
         runmat_accelerate::initialize_acceleration_provider_with(&accel_options);

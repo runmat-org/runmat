@@ -51,6 +51,8 @@ const CODISTRIBUTOR_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codist is an incomplete codistributor1d object"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(class(codist) == \"codistributor1d\");\nassert(~isComplete(codist));",
         },
@@ -62,6 +64,8 @@ const CODISTRIBUTOR_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codist has worker grid [1 2] and block size 4"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(class(codist) == \"codistributor2dbc\");\nassert(all(codist.WorkerGrid == uint64([1 2])));\nassert(codist.BlockSize == uint64(4));",
         },
@@ -75,6 +79,8 @@ const ONE_DIMENSIONAL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("dimension 2 is split into lengths 2 and 3"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(codist.Dimension == uint64(2));\nassert(all(codist.Partition == uint64([2 3])));\nassert(all(codist.GlobalSize == uint64([4 5])));\nassert(isComplete(codist));",
         },
@@ -86,6 +92,8 @@ const ONE_DIMENSIONAL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("dimension, partition, and global size are resolved later"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isempty(codist.Dimension));\nassert(isempty(codist.Partition));\nassert(~isComplete(codist));",
         },
@@ -99,6 +107,8 @@ const TWO_DIMENSIONAL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("a 2-by-2 column-oriented worker grid with unit blocks"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(all(codist.WorkerGrid == uint64([2 2])));\nassert(codist.BlockSize == uint64(1));\nassert(codist.Orientation == \"col\");\nassert(isComplete(codist));",
         },
@@ -110,6 +120,8 @@ const TWO_DIMENSIONAL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Orientation is row"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(codist.Orientation == \"row\");\nassert(~isComplete(codist));",
         },
@@ -123,6 +135,8 @@ const COMPLETE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(tf);" },
     },
     BuiltinExample {
@@ -132,6 +146,8 @@ const COMPLETE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = false"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(~tf);" },
     },
 ];
@@ -143,6 +159,8 @@ const IS_CODISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(tf);\nassert(isequal(gather(value), uint16([1 2])));\ndelete(gcp(\"nocreate\"));",
         },
@@ -154,6 +172,8 @@ const IS_CODISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = false"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(~tf);" },
     },
 ];

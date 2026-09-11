@@ -53,6 +53,7 @@ const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING
 const EFFECTS: [EffectKind; 2] = [EffectKind::EnvironmentRead, EffectKind::MayThrow];
 
 pub const PWD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pwd" },
     category: "io/repl_fs",
     documentation: DOCUMENTATION,

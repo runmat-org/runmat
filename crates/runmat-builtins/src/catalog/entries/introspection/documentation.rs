@@ -37,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 3.14"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 3.14) < 1e-12);",
         },
@@ -48,6 +50,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = int32(7)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"int32\"));\nassert(y == int32(7));",
         },
@@ -59,6 +63,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("value = uint64(9); index = 2"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isa(value, \"uint64\"));\nassert(value == uint64(9));\nassert(index == 2);",
@@ -71,6 +77,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [4 7 12]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [4 7 12]));",
         },
@@ -82,6 +90,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [0 1 0] within floating tolerance"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(host - [0 1 0])) < 1e-6);",
         },
@@ -93,6 +103,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 1"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 1) < 1e-12);",
         },

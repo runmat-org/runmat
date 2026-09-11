@@ -17,6 +17,7 @@ const EFFECTS: [EffectKind; 3] = [
     EffectKind::MayThrow,
 ];
 pub const ACCUMARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "accumarray" },
     category: "array/accumulation",
     documentation: DOCUMENTATION,

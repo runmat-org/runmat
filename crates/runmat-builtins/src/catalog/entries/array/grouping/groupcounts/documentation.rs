@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [1; 3], BG = [1; 2], BP = [25; 75]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(B, [1; 3]));\nassert(isequal(BG, [1; 2]));\nassert(isequal(BP, [25; 75]));" },
     },
     BuiltinExample {
@@ -47,6 +49,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [2; 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(B, [2; 1]));\nassert(isequaln(BG, [2; NaN]));" },
     },
     BuiltinExample {
@@ -56,6 +60,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [2; 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(B, [2; 1]));\nassert(isa(BG, \"uint64\"));\nassert(isequal(BG, uint64([0x0020000000000000u64; 0x0020000000000001u64])));" },
     },
     BuiltinExample {
@@ -65,6 +71,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [1; 0; 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(B, [1; 0; 1]));\nassert(numel(BG) == 3);" },
     },
 ];

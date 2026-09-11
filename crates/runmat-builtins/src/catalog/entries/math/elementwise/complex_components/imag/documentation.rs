@@ -35,6 +35,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("b = 4"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(b == 4);",
         },
@@ -46,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [2 -3; 0 8]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(Y, [2 -3; 0 8]));",
         },
@@ -57,6 +61,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("values = [0 0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(values, [0 0 0]));",
         },
@@ -68,6 +74,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("zerosOnly = [0 0 0; 0 0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(zerosOnly, \"double\"));\nassert(isequal(zerosOnly, zeros(2, 3)));",
         },
@@ -79,6 +87,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [0 0; 0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(host, zeros(2, 2)));",
         },

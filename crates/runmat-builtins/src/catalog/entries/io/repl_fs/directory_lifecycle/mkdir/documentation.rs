@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical true and existsAfter is nonzero"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(existsAfter ~= 0);",
         },
@@ -37,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical true and the nested directory exists"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(created ~= 0);",
         },
@@ -48,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is true and msg and msgID describe the existing directory"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(~isempty(msg)); assert(~isempty(msgID));",
         },
@@ -59,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical true and every path component is created"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(created ~= 0);",
         },
@@ -70,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("character-row paths use the same filesystem operation"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && status); assert(created ~= 0);",
         },
@@ -81,6 +91,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is logical false, diagnostics are populated, and the file remains"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(status) && ~status); assert(~isempty(msg)); assert(~isempty(msgID)); assert(stillFile ~= 0);",
         },
@@ -92,6 +104,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("successful creation returns empty character rows"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(status); assert(ischar(msg) && isequal(messageSize, [1 0])); assert(ischar(msgID) && isequal(idSize, [1 0]));",
         },

@@ -82,6 +82,7 @@ const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub(super) const fn entry(
+    provenance: crate::BuiltinCatalogProvenance,
     name: &'static str,
     documentation: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
@@ -89,6 +90,7 @@ pub(super) const fn entry(
     integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "math/elementwise",
         documentation,

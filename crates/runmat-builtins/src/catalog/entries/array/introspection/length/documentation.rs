@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 4"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 4);",
         },
@@ -49,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 12"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 12);",
         },
@@ -60,6 +64,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 7"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 7);",
         },
@@ -71,6 +77,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 6"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 6);",
         },
@@ -82,6 +90,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 1);",
         },
@@ -93,6 +103,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 9"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 9);",
         },
@@ -104,6 +116,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 256"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(n == 256);\nassert(~isgpuarray(n));",
         },

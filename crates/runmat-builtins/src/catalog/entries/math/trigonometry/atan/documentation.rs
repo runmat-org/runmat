@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.7854"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - pi/4) < 1e-12);",
         },
@@ -49,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("angles = [-1.1071 -0.7854 0 0.7854 1.1071]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(angles), size(x)));\nassert(max(abs(tan(angles) - x)) < 1e-12);",
         },
@@ -62,6 +66,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         ),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(Y), size(A)));\nassert(max(abs(tan(Y(:)) - A(:))) < 1e-12);",
         },
@@ -73,6 +79,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w = 1.33897 + 0.40236i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(tan(w) - z) < 1e-12);",
         },
@@ -84,6 +92,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [-1.2490 -0.7854 0 0.7854 1.2490]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = atan([-3 -1 0 1 3]);\nassert(isa(deviceResult, \"gpuArray\"));\nassert(max(abs(result - expected)) < 1e-6);",
         },
@@ -95,6 +105,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codes is a 1-by-3 double row vector"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = atan(double('RUN'));\nassert(isa(codes, \"double\"));\nassert(isequal(size(codes), [1 3]));\nassert(max(abs(codes - expected)) < 1e-12);",
         },

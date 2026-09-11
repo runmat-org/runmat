@@ -39,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 1) < 1e-12);",
         },
@@ -50,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("values = [0 0.5000 0.7071 0.8660]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 0.5 sqrt(0.5) sqrt(3)/2];\nassert(max(abs(values - expected)) < 1e-12);",
         },
@@ -61,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = 3.1658 + 1.9596i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = sin(1) * cosh(2) + 1i * cos(1) * sinh(2);\nassert(abs(z - expected) < 1e-12);",
         },
@@ -72,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result is a 2-by-2 single matrix"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(result, \"single\"));\nassert(max(abs(double(result(:)) - [0; 0; 1; -1])) < 1e-5);",
         },
@@ -83,6 +91,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = single([0 1])"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(result, \"single\"));\nassert(max(abs(double(result) - [0 1])) < 1e-5);",
         },

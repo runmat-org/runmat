@@ -1,118 +1,99 @@
-import { compareCodePoint, sorted } from "./constants.mjs";
+import { compareCodePoint } from "./constants.mjs";
+import { findAuthoredCollisions } from "./control-graph.mjs";
+import { exact, kind, nonempty, object, stableId } from "./schema.mjs";
 
-export function buildQueue(inventory) {
-  const rows = inventory.identities.map((identity) => queueRow(identity));
-  rows.sort((left, right) => right.complexity.score - left.complexity.score || compareCodePoint(left.identity, right.identity));
+export function buildQueue(inventory, control, state = emptyQueueState()) {
+  validateQueueState(state, control);
+  const inventoryByIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
+  const rows = [...control.bundles.values()].map((bundle) => queueRow(bundle, control, inventoryByIdentity, state));
+  rows.sort((left, right) => {
+    const order = control.cohorts.get(left.cohort).order - control.cohorts.get(right.cohort).order;
+    return order || right.complexity.weight - left.complexity.weight || compareCodePoint(left.bundle_id, right.bundle_id);
+  });
   return {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-work-queue",
     authority: "development-scheduling-evidence-only",
-    inventory_schema_version: inventory.schema_version,
-    ordering: "complexity-score-descending-then-identity",
-    weights: WEIGHTS,
+    control_manifest_digest: control.digest,
+    source: inventory.source,
+    inventory_digest: inventory.digest,
+    migration_findings_digest: inventory.migration_findings_digest,
+    ordering: "cohort-then-complexity-weight-descending-then-bundle",
+    authored_write_collisions: findAuthoredCollisions(control.bundles),
     summary: summarize(rows),
     rows,
   };
 }
 
-const WEIGHTS = Object.freeze({
-  unresolved_field: 3,
-  additional_runtime_binding: 2,
-  legacy_resolver: 3,
-  provider: 3,
-  fusion: 2,
-  host_capability_kind: 2,
-  runtime_shadow: 2,
-  weak_or_missing_tests: 2,
-  weak_or_missing_documentation: 2,
-  file_over_500_lines: 2,
-  file_over_1500_lines: 3,
-  ownership_file_after_first: 1,
-});
+export function emptyQueueState() {
+  return { schema_version: 1, kind: "runmat-builtin-migration-queue-state", bundles: {} };
+}
 
-function queueRow(identity) {
-  const evidence = [];
-  add(evidence, "unresolved-fields", identity.unresolved.length * WEIGHTS.unresolved_field, identity.unresolved);
-  add(evidence, "additional-runtime-bindings", Math.max(0, identity.registrations.runtime.length - 1) * WEIGHTS.additional_runtime_binding, identity.registrations.runtime.map((entry) => `${entry.path}:${entry.function ?? "?"}`));
-  add(evidence, "legacy-resolver", identity.dependencies.legacy_resolver_paths.length * WEIGHTS.legacy_resolver, identity.dependencies.legacy_resolver_paths);
-  add(evidence, "provider", identity.provider.gpu_or_wgpu_paths.length ? WEIGHTS.provider : 0, identity.provider.gpu_or_wgpu_paths);
-  add(evidence, "fusion", identity.provider.fusion_paths.length ? WEIGHTS.fusion : 0, identity.provider.fusion_paths);
-  add(evidence, "host-capabilities", identity.host_capability_hints.length * WEIGHTS.host_capability_kind, identity.host_capability_hints.map((entry) => entry.kind));
-  add(evidence, "runtime-shadow", identity.ownership.runtime_documentation_shadows.length * WEIGHTS.runtime_shadow, identity.ownership.runtime_documentation_shadows);
-  add(evidence, "test-strength", ["none", "weak"].includes(identity.tests.strength) ? WEIGHTS.weak_or_missing_tests : 0, [identity.tests.strength]);
-  add(evidence, "documentation-strength", ["none", "weak"].includes(identity.documentation.strength) ? WEIGHTS.weak_or_missing_documentation : 0, [identity.documentation.strength]);
-  const sizeScore = identity.source_metrics.maximum_file_lines > 1500 ? WEIGHTS.file_over_1500_lines : identity.source_metrics.maximum_file_lines > 500 ? WEIGHTS.file_over_500_lines : 0;
-  add(evidence, "monolith", sizeScore, identity.source_metrics.files.filter((entry) => entry.lines > 500).map((entry) => `${entry.path}:${entry.lines}`));
-  const ownershipPaths = unique([...identity.ownership.catalog, ...identity.ownership.runtime]);
-  add(evidence, "ownership-spread", Math.max(0, ownershipPaths.length - 1) * WEIGHTS.ownership_file_after_first, ownershipPaths);
-  const score = evidence.reduce((sum, entry) => sum + entry.points, 0);
-  const familyKey = typeof identity.domain === "string" && typeof identity.family === "string" ? `${identity.domain}/${identity.family}` : "unresolved";
+function queueRow(bundle, control, inventory, state) {
+  const controlled = bundle.identities.map((id) => control.identities.get(id));
+  const observed = bundle.identities.map((id) => inventory.get(id) ?? null);
+  const blockers = [];
+  const migrationFindings = control.migrationFindings.filter((entry) => entry.bundle_id === bundle.id);
+  for (const finding of migrationFindings) blockers.push(`migration-finding:${finding.finding_digest}`);
+  for (const prerequisite of bundle.prerequisites) {
+    if (state.bundles[prerequisite.bundle_id]?.state !== "sealed") blockers.push(`prerequisite:${prerequisite.bundle_id}`);
+  }
+  for (let index = 0; index < observed.length; index += 1) {
+    if (!observed[index]) blockers.push(`missing-inventory:${bundle.identities[index]}`);
+    else if (observed[index].unresolved.length) blockers.push(`unresolved-inventory:${bundle.identities[index]}`);
+  }
+  const recorded = state.bundles[bundle.id]?.state ?? null;
+  const cohorts = [...new Set(controlled.map((entry) => entry.cohort))];
+  if (cohorts.length !== 1) blockers.push("mixed-cohort-bundle");
+  const migrationState = recorded ?? (blockers.length ? "blocked" : "ready");
   return {
-    identity: identity.identity,
-    disposition: identity.disposition,
-    domain: identity.domain,
-    family: identity.family,
-    family_key: familyKey,
-    migration_state: migrationState(identity),
-    applicable_maturity_columns: maturityColumns(identity),
-    complexity: { score, class: complexityClass(score), evidence },
-    write_set_collision_keys: collisionKeys(identity, familyKey),
-    expected_paths: identity.expected_paths,
-    ownership: identity.ownership,
-    provider: identity.provider,
-    host_capability_hints: identity.host_capability_hints,
-    tests: identity.tests,
-    documentation: identity.documentation,
-    examples: identity.examples,
-    unresolved: identity.unresolved,
+    bundle_id: bundle.id,
+    identities: bundle.identities,
+    cohort: cohorts[0],
+    owner_role: bundle.owner_role,
+    migration_state: blockers.length && !["sealed", "verified"].includes(migrationState) ? "blocked" : migrationState,
+    blockers: [...new Set(blockers)].sort(compareCodePoint),
+    prerequisites: bundle.prerequisites,
+    authored_write_set: bundle.authored_write_set,
+    integration_outputs: bundle.integration_outputs,
+    complexity: bundle.complexity,
+    migration_findings: migrationFindings,
+    applicable_maturity: Object.fromEntries(controlled.map((entry) => [entry.identity, requiredMaturity(entry.maturity)])),
+    inventory_observations: observed.map((entry, index) => ({
+      identity: bundle.identities[index],
+      present: Boolean(entry),
+      discovery_only: true,
+      unresolved: entry?.unresolved ?? ["identity-not-in-inventory"],
+      source_metrics: entry?.source_metrics ?? null,
+    })),
   };
 }
 
-function migrationState(identity) {
-  if (identity.disposition.kind === "unresolved") return "classification-required";
-  if (identity.unresolved.length) return "evidence-review-required";
-  if (identity.disposition.kind !== "canonical") return "reviewed-noncanonical";
-  if (identity.ownership.catalog.length && !identity.ownership.sidecars.length && !identity.ownership.runtime_documentation_shadows.length && !identity.dependencies.legacy_resolver_paths.length) return "catalog-cutover-candidate";
-  if (identity.ownership.catalog.length) return "partial-cutover";
-  return "legacy";
+function requiredMaturity(maturity) {
+  return Object.entries(maturity).filter(([, value]) => value.applicability === "required").map(([gate]) => gate).sort(compareCodePoint);
 }
 
-function maturityColumns(identity) {
-  const columns = ["identity", "disposition", "runtime-binding", "documentation", "examples", "tests"];
-  if (identity.provider.gpu_or_wgpu_paths.length) columns.push("provider");
-  if (identity.provider.fusion_paths.length) columns.push("fusion");
-  if (identity.host_capability_hints.length) columns.push("host-capabilities");
-  if (identity.registrations.native_link.catalog_contract_paths.length || identity.registrations.runtime.length) columns.push("native-link");
-  if (identity.dependencies.generated_registry.length) columns.push("wasm-registry");
-  return columns;
-}
-
-function collisionKeys(identity, familyKey) {
-  const keys = [`identity:${identity.identity}`, `family:${familyKey}`];
-  for (const sourcePath of unique([
-    ...identity.ownership.catalog, ...identity.ownership.runtime, ...identity.ownership.sidecars,
-    ...identity.ownership.runtime_documentation_shadows, ...identity.dependencies.legacy_resolver_paths,
-    ...identity.dependencies.catalog_resolver_paths,
-  ])) keys.push(`path:${sourcePath}`);
-  if (identity.dependencies.generated_registry.length) keys.push("generated-registry:wasm");
-  return unique(keys);
+function validateQueueState(value, control) {
+  kind(value, 1, "runmat-builtin-migration-queue-state", "queue state");
+  exact(value, ["schema_version", "kind", "bundles"], "queue state");
+  object(value.bundles, "queue state bundles");
+  for (const [bundleId, entry] of Object.entries(value.bundles)) {
+    stableId(bundleId, "queue state bundle id");
+    if (!control.bundles.has(bundleId)) throw new Error(`queue state references unknown bundle ${bundleId}`);
+    exact(entry, ["artifact", "state"], `${bundleId} queue state entry`);
+    nonempty(entry.artifact, `${bundleId} queue artifact`);
+    if (!["leased", "submitted", "integrated", "verified", "sealed"].includes(entry.state)) throw new Error(`${bundleId}: invalid queue state entry`);
+  }
 }
 
 function summarize(rows) {
-  const counts = (selector) => Object.fromEntries([...group(rows.map(selector)).entries()].sort((a, b) => compareCodePoint(a[0], b[0])));
+  const byState = {};
+  for (const row of rows) byState[row.migration_state] = (byState[row.migration_state] ?? 0) + 1;
   return {
-    identities: rows.length,
-    complexity_points: rows.reduce((sum, row) => sum + row.complexity.score, 0),
-    by_complexity: counts((row) => row.complexity.class),
-    by_migration_state: counts((row) => row.migration_state),
-    by_disposition: counts((row) => row.disposition.kind),
-    unresolved_identities: rows.filter((row) => row.unresolved.length).length,
+    bundles: rows.length,
+    identities: rows.reduce((sum, row) => sum + row.identities.length, 0),
+    complexity_weight: rows.reduce((sum, row) => sum + row.complexity.weight, 0),
+    by_state: Object.fromEntries(Object.entries(byState).sort(([a], [b]) => compareCodePoint(a, b))),
+    blocked: rows.filter((row) => row.blockers.length).length,
   };
 }
-
-function group(values) { const result = new Map(); for (const value of values) result.set(value, (result.get(value) ?? 0) + 1); return result; }
-function add(evidence, factor, points, details) { if (points > 0) evidence.push({ factor, points, details }); }
-function complexityClass(score) { return score >= 16 ? "very-high" : score >= 10 ? "high" : score >= 5 ? "medium" : "low"; }
-function unique(values) { return sorted(new Set(values)); }
-
-export { WEIGHTS };

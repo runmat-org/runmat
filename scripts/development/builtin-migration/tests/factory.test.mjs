@@ -1,188 +1,417 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { auditInventory, parseBatch } from "../audit.mjs";
-import { compareCodePoint } from "../constants.mjs";
-import { buildDispositionSeed, buildInventory, validateDispositionInput } from "../inventory.mjs";
+import { auditMigration, parseBatch } from "../audit.mjs";
+import { parseControlManifest } from "../control.mjs";
+import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../control-draft.mjs";
+import { validateDispositionInput } from "../dispositions.mjs";
+import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { runGateProducer } from "../gate-adapter.mjs";
+import { buildDocumentationCutoverArtifact, documentationCutoverChecks, parseDocumentationCutoverArtifact } from "../documentation-cutover.mjs";
+import { parseGateResult } from "../gate-result.mjs";
+import { buildInventory } from "../inventory.mjs";
+import { issueLease, parseLease, parseLeaseRequest, validateLeaseDiff } from "../lease.mjs";
 import { prepareIdentity } from "../prepare.mjs";
 import { buildQueue } from "../queue.mjs";
+import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceFieldBaselineSource } from "../source-fields.mjs";
+import { compiledInventoryFixture, controlledFixture, gate, repositoryFixture, REVISION } from "./helpers.mjs";
 
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-factory-"));
-  const write = (relative, contents) => {
-    const target = path.join(root, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, contents);
-  };
-  write("crates/runmat-runtime/src/builtins/math/basic/foo.rs", `
-#[runtime_builtin(
-  name = "Foo",
-  category = "math/basic",
-  type_resolver(foo_type),
-  builtin_path = "crate::builtins::math::basic::foo"
-)]
-async fn foo_builtin() {}
-#[cfg(test)] mod tests {}
-#[runmat_macros::register_gpu_spec(builtin_path = "foo")] const GPU_SPEC: () = ();
-`);
-  write("crates/runmat-runtime/src/builtins/io/files/hidden.rs", `
-#[runtime_builtin(name = "hidden", category = "io/files")]
-fn hidden_builtin() { let _ = std::fs::read("x"); }
-`);
-  write("crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", `
-crate :: builtins :: math :: basic :: foo :: __runmat_wasm_register_builtin_foo_builtin();
-`);
-  write("crates/runmat-builtins/src/catalog/entries/math/basic/foo/mod.rs", `
-pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
- identity: BuiltinCatalogIdentity { name: "foo" },
- link: BuiltinLinkContract {},
- contract: BuiltinContractDeclaration { inference_rule: BuiltinInferenceRule::Math(Rule::Foo) },
-};
-`);
-  write("docs/builtins/reference/foo.json", JSON.stringify({ name: "foo", summary: "Foo", examples: [{ input: "foo(1)" }] }));
-  write("crates/runmat-runtime/src/builtins/builtins-json/foo.json", JSON.stringify({ name: "foo", summary: "old" }));
-  return root;
-}
-
-function disposition(identities) {
-  return { schema_version: 1, kind: "runmat-builtin-dispositions", identities };
-}
-
-function reviewed(values) {
-  return { review: { status: "reviewed", evidence: ["ticket review"] }, ...values };
-}
-
-test("the shared comparator uses explicit code-point order", () => {
-  assert.deepEqual(["a", "Z", "A", "z"].sort(compareCodePoint), ["A", "Z", "a", "z"]);
+test("inventory v2 binds lexical observations to content-derived source and disposition digests", () => {
+  const repository = repositoryFixture();
+  const compiledInventory = compiledInventoryFixture();
+  const first = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  const second = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  assert.equal(first.schema_version, 2);
+  assert.equal(first.digest, second.digest);
+  assert.match(first.source.digest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(first.source.digest, evidenceDigest({ roots: first.source.roots, files: first.source.files }));
+  assert.equal(first.scanned_source_coverage.digest, evidenceDigest(first.scanned_source_coverage.paths.map((entry) => first.source.files.find((file) => file.path === entry))));
+  fs.appendFileSync(path.join(repository, "crates/runmat-runtime/src/builtins/math/basic/foo.rs"), "\n// change\n");
+  const changed = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  assert.notEqual(changed.source.digest, first.source.digest);
+  assert.notEqual(changed.digest, first.digest);
 });
 
-test("inventory joins source surfaces without inferring unresolved intent", () => {
-  const inventory = buildInventory(fixture(), disposition({ hidden: reviewed({ disposition: "internal", reason: "reviewed helper" }) }));
-  assert.deepEqual(inventory.identities.map((entry) => entry.identity), ["foo", "hidden"]);
-  assert.equal(inventory.summary.runtime_binding_records, 2);
-  assert.deepEqual(inventory.summary.runtime_binding_provenance, { "literal-attribute": 2 });
-  const foo = inventory.identities[0];
-  assert.equal(foo.disposition.kind, "canonical");
-  assert.equal(foo.disposition.source, "catalog-entry");
-  assert.equal(foo.domain, "math");
-  assert.equal(foo.family, "basic");
-  assert.equal(foo.registrations.runtime[0].function, "foo_builtin");
-  assert.deepEqual(foo.registrations.wasm, ["foo_builtin"]);
-  assert.equal(foo.registrations.native_link.runtime_binding_inputs[0].builtin_path, "crate::builtins::math::basic::foo");
-  assert.equal(foo.provider.gpu_or_wgpu_paths.length, 1);
-  assert.equal(foo.tests.strength, "medium");
-  assert.equal(foo.ownership.runtime_documentation_shadows.length, 1);
-  assert.equal(foo.examples.discovered_count, 1);
-  assert.deepEqual(foo.unresolved, ["case-spelling-conflict"]);
-  const hidden = inventory.identities[1];
-  assert.equal(hidden.disposition.kind, "internal");
-  assert.deepEqual(hidden.host_capability_hints.map((hint) => hint.kind), ["filesystem"]);
+test("inventory rejects absent, future, or tampered compiled semantic authority", () => {
+  const repository = repositoryFixture();
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION }), /requires a compiled migration inventory/);
+  const future = compiledInventoryFixture(); future.schema_version = 2;
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: future }), /schema_version 1/);
+  const tampered = compiledInventoryFixture(); tampered.snapshot.observed.runtime_bindings[0].variant = "changed";
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: tampered }), /digest mismatch/);
+  const collision = compiledInventoryFixture(); collision.snapshot.declared.legacy_documentation.push({ name: "Foo", category: null, summary: null, keywords: null, errors: null, related: null, introduced: null, status: null, examples: null });
+  collision.digest.value = contentDigest(Buffer.from(JSON.stringify(collision.snapshot))).slice("sha256:".length);
+  assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: collision }), /spellings collide case-insensitively/);
 });
 
-test("queue is deterministic, weighted, and exposes collisions", () => {
-  const inventory = buildInventory(fixture());
-  const first = buildQueue(inventory);
-  const second = buildQueue(inventory);
-  assert.deepEqual(first, second);
-  for (let index = 1; index < first.rows.length; index += 1) {
-    assert.ok(first.rows[index - 1].complexity.score >= first.rows[index].complexity.score);
+test("compiled authority rejects unknown or malformed nested records even with a recomputed digest", () => {
+  const repository = repositoryFixture();
+  const cases = [
+    (value) => { value.snapshot.declared.catalog_entries[0].documentation.extra = true; },
+    (value) => { value.snapshot.declared.catalog_entries[0].bindings[0].availability = "Maybe"; },
+    (value) => { value.snapshot.declared.catalog_provenance[0].provenance.extra = "x"; },
+    (value) => { value.snapshot.observed.runtime_bindings[0].native_symbol = "guessed"; },
+    (value) => { value.snapshot.observed.implementation_provenance[0].authority = "unknown"; },
+    (value) => { value.snapshot.build.crate_feature_inventory.enabled_features = ["not-known"]; },
+    (value) => { value.snapshot.observed.gpu_specs = [{ key: "data.*", owner: { kind: "legacy_group", raw: "data.*", extra: true }, operation: "custom:data", supported_precisions: [], broadcast: "none", provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs", nan_mode: "include", two_pass_threshold: null, workgroup_size: null, accepts_nan_mode: false, notes: "fixture" }]; },
+  ];
+  for (const mutate of cases) {
+    const value = compiledInventoryFixture(); mutate(value);
+    value.digest.value = contentDigest(Buffer.from(JSON.stringify(value.snapshot))).slice("sha256:".length);
+    assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: value }));
   }
-  const hidden = first.rows.find((row) => row.identity === "hidden");
-  assert.equal(hidden.migration_state, "classification-required");
-  assert.ok(hidden.complexity.evidence.some((entry) => entry.factor === "unresolved-fields"));
-  const foo = first.rows.find((row) => row.identity === "foo");
-  assert.ok(foo.write_set_collision_keys.includes("family:math/basic"));
-  assert.ok(foo.write_set_collision_keys.includes("generated-registry:wasm"));
-  assert.equal(first.summary.identities, 2);
 });
 
-test("reviewed alias and internal inputs require their semantic evidence", () => {
-  assert.throws(
-    () => validateDispositionInput(disposition({ old: reviewed({ disposition: "alias" }) })),
-    /aliases require a canonical target/,
-  );
-  assert.throws(
-    () => validateDispositionInput(disposition({ helper: reviewed({ disposition: "internal" }) })),
-    /require a reviewed reason/,
-  );
+test("compiled migration findings and non-identity legacy spec keys remain explicit reviewed work", () => {
+  const finding = { code: "legacy_spec_group_requires_disposition", source: "gpu_spec_registry", identity: "data.*", message: "Legacy group needs reviewed ownership" };
+  const fixture = controlledFixture({ finding, legacyGroup: true });
+  assert.deepEqual(fixture.inventory.migration_findings, [finding]);
+  assert.equal(fixture.inventory.identities.some((entry) => entry.identity === "data.*"), false);
+  assert.equal(fixture.control.migrationFindings[0].bundle_id, fixture.bundleId);
+  const queue = buildQueue(fixture.inventory, fixture.control);
+  assert.deepEqual(queue.rows[0].migration_findings.map((entry) => entry.identity), ["data.*"]);
+  assert.ok(queue.rows[0].blockers.some((entry) => entry.startsWith("migration-finding:")));
+  const missing = structuredClone(fixture.controlValue); missing.migration_findings.rows = [];
+  assert.throws(() => parseControlManifest(missing, fixture.inventory), /do not exactly cover/);
+  const unknown = structuredClone(fixture.controlValue); unknown.migration_findings.rows[0].unexpected = true;
+  assert.throws(() => parseControlManifest(unknown, fixture.inventory), /fields must be exactly/);
 });
 
-test("inventory diagnoses dangling and contradictory reviewed dispositions", () => {
-  const inventory = buildInventory(fixture(), disposition({
-    foo: reviewed({ disposition: "alias", canonical: "missing" }),
-  }));
-  assert.deepEqual(inventory.diagnostics.map((entry) => entry.code), [
-    "dangling-alias",
-    "disposition-contradicts-catalog",
-  ]);
+test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity", () => {
+  const fixture = controlledFixture();
+  assert.equal(fixture.control.identities.get("foo").public_spelling, "foo");
+  const future = structuredClone(fixture.controlValue); future.schema_version = 2;
+  assert.throws(() => parseControlManifest(future), /schema_version 1/);
+  const extra = structuredClone(fixture.controlValue); extra.unreviewed = true;
+  assert.throws(() => parseControlManifest(extra), /fields must be exactly/);
+  const collision = structuredClone(fixture.controlValue); collision.identities.Foo = structuredClone(collision.identities.foo); collision.identities.Foo.identity = "foo";
+  assert.throws(() => parseControlManifest(collision), /collide case-insensitively/);
+  const spelling = structuredClone(fixture.controlValue); spelling.identities.foo.public_spelling = "bar";
+  assert.throws(() => parseControlManifest(spelling), /case-fold to the identity key/);
+  const unsafeStorage = structuredClone(fixture.controlValue); unsafeStorage.storage_policy.volume_roles.target_temp.filesystem_id = unsafeStorage.storage_policy.volume_roles.source_worktree.filesystem_id;
+  assert.throws(() => parseControlManifest(unsafeStorage), /disjoint filesystem/);
+  const removal = structuredClone(fixture.controlValue); removal.identities.foo.expected_removals = [{ kind: "file", path: "docs/builtins/reference/foo.json", baseline_digest: `sha256:${"a".repeat(64)}` }];
+  assert.throws(() => parseControlManifest(removal), /lacks matching baseline/);
+  const incompleteInventory = structuredClone(fixture.inventory); incompleteInventory.identities.push({ identity: "bar" });
+  assert.throws(() => parseControlManifest(fixture.controlValue, incompleteInventory), /exactly cover/);
+  const danglingAlias = structuredClone(fixture.controlValue); danglingAlias.identities.foo.disposition = { kind: "alias", target: "missing" }; danglingAlias.identities.foo.runtime_owner = null;
+  assert.throws(() => parseControlManifest(danglingAlias), /alias target is absent/);
+  const missingGatePlan = structuredClone(fixture.controlValue); missingGatePlan.bundles[fixture.bundleId].gate_plans = missingGatePlan.bundles[fixture.bundleId].gate_plans.filter((entry) => entry.gate !== "runtime-binding");
+  assert.throws(() => parseControlManifest(missingGatePlan, fixture.inventory), /required gate runtime-binding has no reviewed gate plan/);
 });
 
-test("seed format is explicit and accepts only unreviewed empty rows", () => {
-  const seed = buildDispositionSeed(buildInventory(fixture()));
-  validateDispositionInput(seed);
-  assert.equal(seed.identities.foo.review.status, "unreviewed");
-  assert.equal(seed.identities.foo.disposition, null);
-  seed.identities.foo.domain = "math";
-  assert.throws(() => validateDispositionInput(seed), /unreviewed seed rows/);
+test("control draft is deterministic, complete, and leaves review judgments unresolved", () => {
+  const fixture = controlledFixture();
+  const first = buildControlDraft(fixture.inventory);
+  const second = buildControlDraft(fixture.inventory);
+  assert.deepEqual(first, second);
+  assert.equal(first.authority, "unreviewed-scaffold-only");
+  assert.deepEqual(first.bundle_drafts, []);
+  assert.deepEqual(first.identity_rows.map((entry) => entry.identity), fixture.inventory.identities.map((entry) => entry.identity).sort());
+  assert.ok(first.identity_rows.every((entry) => entry.review.status === "unreviewed" && entry.unresolved_fields.includes("disposition") && entry.unresolved_fields.includes("maturity")));
+  assert.doesNotThrow(() => parseControlDraft(first, fixture.inventory));
 });
 
-test("strict audit reports legacy debt and passes a reviewed internal identity", () => {
-  const inventory = buildInventory(fixture(), disposition({ hidden: reviewed({ disposition: "internal", reason: "reviewed helper" }) }));
-  const report = auditInventory(inventory, ["foo", "hidden"], { source: "git:test", artifact: "fixture-audit" });
-  assert.equal(report.schema_version, 2);
-  assert.equal(report.metadata.source, "git:test");
-  assert.match(report.metadata.inventory.digest, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(report.result, "fail");
-  assert.equal(report.identities.find((entry) => entry.identity === "hidden").result, "pass");
-  const fooCodes = report.identities.find((entry) => entry.identity === "foo").failures.map((entry) => entry.code);
-  assert.ok(fooCodes.includes("legacy-sidecar-count"));
-  assert.ok(fooCodes.includes("runtime-shadow-count"));
-  assert.throws(() => parseBatch({ schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo", "Foo"] }), /unique ignoring case/);
+test("control draft rejects inferred facts, omissions, tampering, and review claims", () => {
+  const fixture = controlledFixture();
+  const mutateAndSeal = (mutate) => {
+    const value = structuredClone(buildControlDraft(fixture.inventory));
+    mutate(value);
+    const { digest: _old, ...payload } = value;
+    value.digest = evidenceDigest(payload);
+    return value;
+  };
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.bundle_drafts.push({ id: "guessed" }); }), fixture.inventory), /cannot infer or pre-populate bundles/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.identity_rows[0].disposition = "canonical"; }), fixture.inventory), /fields must be exactly/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.identity_rows.pop(); }), fixture.inventory), /nonempty array|exactly cover/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.identity_rows[0].inventory_row_digest = `sha256:${"0".repeat(64)}`; }), fixture.inventory), /differ from the inventory/);
+  assert.throws(() => parseControlDraft(mutateAndSeal((value) => { value.review = { status: "reviewed", evidence: ["self claim"] }; }), fixture.inventory), /cannot claim review/);
 });
 
-test("prepare creates an isolated deterministic review workspace", () => {
-  const repository = fixture();
-  const inventory = buildInventory(repository);
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-review-"));
-  const first = prepareIdentity(repository, inventory, "foo", output);
-  const copied = path.join(first.workspace, "legacy-documents", "sidecar-foo.json");
-  assert.equal(fs.readFileSync(copied, "utf8"), fs.readFileSync(path.join(repository, "docs/builtins/reference/foo.json"), "utf8"));
-  const firstResult = fs.readFileSync(path.join(first.workspace, "prepare-result.json"), "utf8");
-  prepareIdentity(repository, inventory, "foo", output);
-  assert.equal(fs.readFileSync(path.join(first.workspace, "prepare-result.json"), "utf8"), firstResult);
-  fs.writeFileSync(path.join(first.workspace, "catalog", "mod.rs.template"), "review edit\n");
-  assert.throws(() => prepareIdentity(repository, inventory, "foo", output), /refuses to overwrite modified review file/);
-  assert.throws(() => prepareIdentity(repository, inventory, "foo", path.join(repository, "generated")), /outside the canonical repository path/);
+test("reviewed control freeze binds the exact draft and baseline inventory", () => {
+  const fixture = controlledFixture();
+  const draft = buildControlDraft(fixture.inventory);
+  const reviewed = structuredClone(fixture.controlValue);
+  reviewed.control_draft_digest = draft.digest;
+  assert.equal(freezeReviewedControl(draft, reviewed, fixture.inventory).value.control_draft_digest, draft.digest);
+  const stale = structuredClone(reviewed); stale.control_draft_digest = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => freezeReviewedControl(draft, stale, fixture.inventory), /does not cite the exact/);
+  const mutatedDraft = structuredClone(draft); mutatedDraft.identity_rows[0].compiled_authority_digest = `sha256:${"1".repeat(64)}`;
+  const { digest: _old, ...payload } = mutatedDraft; mutatedDraft.digest = evidenceDigest(payload);
+  assert.throws(() => freezeReviewedControl(mutatedDraft, reviewed, fixture.inventory), /differ from the inventory/);
 });
 
-test("prepare rejects an output-root symlink into the repository", () => {
-  const repository = fixture();
-  const inventory = buildInventory(repository);
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-output-link-"));
-  const linkedOutput = path.join(outside, "review");
-  fs.symlinkSync(repository, linkedOutput, "dir");
-  const sourceBefore = fs.readFileSync(path.join(repository, "docs/builtins/reference/foo.json"), "utf8");
-  assert.throws(() => prepareIdentity(repository, inventory, "foo", linkedOutput), /canonical repository path/);
-  assert.equal(fs.readFileSync(path.join(repository, "docs/builtins/reference/foo.json"), "utf8"), sourceBefore);
-  assert.equal(fs.existsSync(path.join(repository, "foo")), false);
+test("expected removals are bound to the exact baseline source bytes and locator", () => {
+  const fixture = controlledFixture({ sidecar: true });
+  const value = structuredClone(fixture.controlValue);
+  const source = fixture.inventory.source.files.find((entry) => entry.path === "docs/builtins/reference/foo.json");
+  value.identities.foo.expected_removals = [{ kind: "file", path: source.path, baseline_digest: source.content_digest }];
+  value.identities.foo.baseline_evidence = [{ kind: "sidecar", path: source.path, locator: null, digest: source.content_digest }];
+  assert.doesNotThrow(() => parseControlManifest(value, fixture.inventory));
+  value.identities.foo.baseline_evidence[0].locator = { kind: "rust-item", name: "guessed" };
+  assert.throws(() => parseControlManifest(value, fixture.inventory), /file removal baseline/);
 });
 
-test("prepare rejects a pre-existing identity-workspace symlink into the repository", () => {
-  const repository = fixture();
-  const inventory = buildInventory(repository);
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-migration-workspace-link-"));
-  fs.symlinkSync(repository, path.join(output, "foo"), "dir");
-  const sourceBefore = fs.readFileSync(path.join(repository, "docs/builtins/reference/foo.json"), "utf8");
-  assert.throws(() => prepareIdentity(repository, inventory, "foo", output), /canonical repository path/);
-  assert.equal(fs.readFileSync(path.join(repository, "docs/builtins/reference/foo.json"), "utf8"), sourceBefore);
-  assert.equal(fs.existsSync(path.join(repository, "catalog")), false);
+test("internal double-underscore identities and null runtime owners are representable", () => {
+  const fixture = controlledFixture();
+  const value = structuredClone(fixture.controlValue);
+  const row = value.identities.foo;
+  delete value.identities.foo;
+  row.identity = "__register_test_classes"; row.public_spelling = "__register_test_classes";
+  row.disposition = { kind: "internal", reason: "Generated registration helper", evidence: ["review"] };
+  row.runtime_owner = null; row.expected_authorities.catalog_entry_count = 0; row.expected_authorities.catalog_package = null; row.expected_authorities.documentation = "none";
+  value.identities.__register_test_classes = row;
+  value.bundles[fixture.bundleId].identities = ["__register_test_classes"];
+  assert.equal(parseControlManifest(value).identities.get("__register_test_classes").runtime_owner, null);
 });
 
-test("case variants join while preserving contradictory spelling evidence", () => {
-  const inventory = buildInventory(fixture());
-  const foo = inventory.identities.find((entry) => entry.identity === "foo");
-  assert.deepEqual(foo.spellings, ["Foo", "foo"]);
-  assert.ok(foo.unresolved.includes("case-spelling-conflict"));
+test("bundle graph rejects cycles, dangling edges, and authored/generated overlap", () => {
+  const fixture = controlledFixture();
+  const dangling = structuredClone(fixture.controlValue); dangling.bundles[fixture.bundleId].prerequisites = [{ bundle_id: "missing", kind: "semantic" }];
+  assert.throws(() => parseControlManifest(dangling), /dangling prerequisite/);
+  const overlap = structuredClone(fixture.controlValue); overlap.bundles[fixture.bundleId].authored_write_set.push({ kind: "file", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs" });
+  assert.throws(() => parseControlManifest(overlap), /overlaps authored write scope/);
+  const cross = structuredClone(fixture.controlValue);
+  cross.bundles.other = { ...structuredClone(cross.bundles[fixture.bundleId]), id: "other", identities: ["bar"], authored_write_set: [{ kind: "file", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs" }], integration_outputs: [] };
+  cross.identities.bar = { ...structuredClone(cross.identities.foo), identity: "bar", public_spelling: "bar", bundle_id: "other", disposition: { kind: "canonical", target: "bar" }, runtime_owner: "crates/runmat-runtime/src/builtins/bar.rs" };
+  assert.throws(() => parseControlManifest(cross), /overlaps .* integration output/);
+});
+
+test("disposition v1 is closed and supports reviewed internal double-underscore identities", () => {
+  const value = { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities: { __helper: { disposition: "internal", canonical: null, domain: "internal", family: "registration", reason: "Generated helper", review: { status: "reviewed", evidence: ["owner review"] } } } };
+  assert.doesNotThrow(() => validateDispositionInput(value));
+  value.identities.__helper.extra = true;
+  assert.throws(() => validateDispositionInput(value), /fields must be exactly/);
+});
+
+test("gate producer requests cannot inject commands, results, checks, or storage", () => {
+  const fixture = controlledFixture();
+  const request = { control: fixture.controlValue, inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
+  assert.throws(() => runGateProducer({ ...request, command: { executable: "/private/tmp/fake", arguments: [], cwd: "/private/tmp" } }), /fields must be exactly/);
+  const fake = structuredClone(fixture.controlValue);
+  fake.bundles[fixture.bundleId].gate_plans[0].program.path = "scripts/fake.mjs";
+  assert.throws(() => parseControlManifest(fake, fixture.inventory), /absent from or differs from the frozen source snapshot/);
+  fs.writeFileSync(path.join(fixture.repository, "nearby-documentation-token.json"), "{\"result\":\"pass\"}\n");
+  for (const [gateName, detail] of [
+    ["source-removal", /syntax-aware proof/],
+    ["deterministic-products", /two-run determinism report/],
+    ["inventory-delta", /final-versus-baseline migration inventory reconciliation/],
+  ]) {
+    assert.throws(() => runGateProducer({ ...request, gate: gateName }), detail);
+  }
+});
+
+test("validate-control CLI requires and verifies the frozen baseline inventory", () => {
+  const fixture = controlledFixture();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-cli-"));
+  const controlPath = path.join(directory, "control.json");
+  const inventoryPath = path.join(directory, "inventory.json");
+  fs.writeFileSync(controlPath, JSON.stringify(fixture.controlValue));
+  fs.writeFileSync(inventoryPath, JSON.stringify(fixture.inventory));
+  const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
+  const missing = spawnSync(process.execPath, [cli, "validate-control", "--control", controlPath], { encoding: "utf8" });
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /requires --baseline-inventory/);
+  const valid = spawnSync(process.execPath, [cli, "validate-control", "--control", controlPath, "--baseline-inventory", inventoryPath], { encoding: "utf8" });
+  assert.equal(valid.status, 0, valid.stderr);
+  const tampered = structuredClone(fixture.inventory); tampered.source.digest = `sha256:${"0".repeat(64)}`;
+  const tamperedPath = path.join(directory, "tampered.json"); fs.writeFileSync(tamperedPath, JSON.stringify(tampered));
+  const rejected = spawnSync(process.execPath, [cli, "validate-control", "--control", controlPath, "--baseline-inventory", tamperedPath], { encoding: "utf8" });
+  assert.equal(rejected.status, 2);
+});
+
+test("control draft, freeze, and lease issuance CLI keep review and derivation separate", () => {
+  const fixture = controlledFixture();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-workflow-"));
+  const inventoryPath = path.join(directory, "inventory.json");
+  const draftPath = path.join(directory, "draft.json");
+  const reviewedPath = path.join(directory, "reviewed.json");
+  const frozenPath = path.join(directory, "frozen.json");
+  const requestPath = path.join(directory, "lease-request.json");
+  const leasePath = path.join(directory, "lease.json");
+  fs.writeFileSync(inventoryPath, JSON.stringify(fixture.inventory));
+  const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
+  const draftResult = spawnSync(process.execPath, [cli, "draft-control", "--baseline-inventory", inventoryPath, "--output", draftPath], { encoding: "utf8" });
+  assert.equal(draftResult.status, 0, draftResult.stderr);
+  const draft = JSON.parse(fs.readFileSync(draftPath));
+  const reviewed = structuredClone(fixture.controlValue); reviewed.control_draft_digest = draft.digest;
+  fs.writeFileSync(reviewedPath, JSON.stringify(reviewed));
+  const freezeResult = spawnSync(process.execPath, [cli, "freeze-control", "--draft", draftPath, "--control", reviewedPath, "--baseline-inventory", inventoryPath, "--output", frozenPath], { encoding: "utf8" });
+  assert.equal(freezeResult.status, 0, freezeResult.stderr);
+  const control = parseControlManifest(JSON.parse(fs.readFileSync(frozenPath)), fixture.inventory);
+  const request = { schema_version: 1, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: fixture.bundleId, lease_id: "cli-lane", owner: "builtin-migrator", issued_at: "2026-09-11T01:00:00.000Z", expires_at: "2026-09-11T02:00:00.000Z", review: { status: "reviewed", evidence: ["assignment review"] } };
+  fs.writeFileSync(requestPath, JSON.stringify(request));
+  const leaseResult = spawnSync(process.execPath, [cli, "issue-lease", "--request", requestPath, "--control", frozenPath, "--baseline-inventory", inventoryPath, "--output", leasePath], { encoding: "utf8" });
+  assert.equal(leaseResult.status, 0, leaseResult.stderr);
+  assert.doesNotThrow(() => parseLease(JSON.parse(fs.readFileSync(leasePath)), control));
+});
+
+test("gate evidence rejects stale storage, filesystem identity, and forged process status", () => {
+  const fixture = controlledFixture();
+  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy };
+  const stale = gate(fixture, "architecture"); stale.storage_admission.observed_at = "2026-09-10T23:00:00.000Z";
+  assert.throws(() => parseGateResult(stale, expected), /time bound/);
+  const filesystem = gate(fixture, "architecture"); filesystem.storage_admission.volumes[0].filesystem_id = "posix-dev:3";
+  assert.throws(() => parseGateResult(filesystem, expected), /differs from reviewed/);
+  const forged = gate(fixture, "architecture"); forged.producer_evidence.process.exit_code = 1;
+  assert.throws(() => parseGateResult(forged, expected), /conflicts|inconsistent/);
+});
+
+test("queue is derived by bundle and carries prerequisite, scope, and maturity facts", () => {
+  const fixture = controlledFixture();
+  const queue = buildQueue(fixture.inventory, fixture.control);
+  assert.equal(queue.schema_version, 2);
+  assert.equal(queue.rows.length, 1);
+  assert.deepEqual(queue.rows[0].identities, ["foo"]);
+  assert.equal(queue.rows[0].inventory_observations[0].discovery_only, true);
+  assert.ok(queue.rows[0].applicable_maturity.foo.includes("catalog-contract"));
+});
+
+test("lease rejects integration output authorship and paths outside reviewed scope", () => {
+  const fixture = controlledFixture();
+  assert.throws(() => validateLeaseDiff(fixture.lease.bundle, ["README.md"]), /lease violation/);
+  assert.throws(() => validateLeaseDiff(fixture.lease.bundle, ["crates/runmat-runtime/src/builtins/generated_wasm_registry.rs"]), /lease violation/);
+  const extra = structuredClone(fixture.leaseValue); extra.extra = true;
+  assert.throws(() => parseLease(extra, fixture.control), /fields must be exactly/);
+});
+
+test("lease issuance derives immutable scopes from a reviewed request and control", () => {
+  const fixture = controlledFixture();
+  const request = {
+    schema_version: 1, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request",
+    control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, lease_id: "lane-17",
+    owner: "builtin-migrator", issued_at: "2026-09-11T01:00:00.000Z", expires_at: "2026-09-11T05:00:00.000Z",
+    review: { status: "reviewed", evidence: ["C00 assignment review"] },
+  };
+  assert.doesNotThrow(() => parseLeaseRequest(request, fixture.control));
+  const first = issueLease(request, fixture.control);
+  const second = issueLease(request, fixture.control);
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.authored_write_set, fixture.control.bundles.get(fixture.bundleId).authored_write_set);
+  assert.doesNotThrow(() => parseLease(first, fixture.control));
+
+  const injected = structuredClone(request); injected.authored_write_set = [{ kind: "tree", path: "." }];
+  assert.throws(() => issueLease(injected, fixture.control), /fields must be exactly/);
+  const unreviewed = structuredClone(request); unreviewed.review = { status: "unreviewed", evidence: [] };
+  assert.throws(() => issueLease(unreviewed, fixture.control), /must be reviewed/);
+  const widened = structuredClone(first); widened.authored_write_set.push({ kind: "tree", path: "crates" });
+  const { digest: _old, ...payload } = widened; widened.digest = evidenceDigest(payload);
+  assert.throws(() => parseLease(widened, fixture.control), /differs from reviewed bundle scope/);
+});
+
+test("prepare v2 is source-neutral and inventories every legacy JSON leaf", () => {
+  const fixture = controlledFixture({ sidecar: true });
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const result = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
+  assert.equal(result.schema_version, 2);
+  assert.equal(result.source_changes, false);
+  const checklistPath = path.join(result.workspace, "source-field-disposition.json");
+  const checklist = JSON.parse(fs.readFileSync(checklistPath));
+  assert.ok(checklist.sources[0].leaves.length >= 3);
+  assert.ok(checklist.sources[0].leaves.every((leaf) => leaf.disposition === "pending"));
+  assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /not reviewed/);
+});
+
+test("completed field dispositions require exact prepared leaves and review evidence", () => {
+  const fixture = controlledFixture({ sidecar: true });
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const result = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
+  const checklist = JSON.parse(fs.readFileSync(path.join(result.workspace, "source-field-disposition.json")));
+  checklist.review = { status: "reviewed", evidence: ["review"] };
+  for (const source of checklist.sources) for (const leaf of source.leaves) { leaf.disposition = "preserved"; leaf.destination = { kind: "catalog-documentation", catalog_identity: "foo", pointer: leaf.pointer, value_digest: leaf.value_digest }; }
+  assert.doesNotThrow(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest));
+  checklist.sources[0].leaves.pop();
+  assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /prepared baseline/);
+});
+
+test("audit v3 cannot pass on file presence or example tokens without exact gate evidence", () => {
+  const fixture = controlledFixture();
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
+  const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
+  const absent = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: [] });
+  assert.equal(absent.result, "fail");
+  assert.ok(absent.identities[0].failures.some((entry) => entry.code === "required-gate-missing"));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
+  const passed = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
+  assert.equal(passed.result, "pass");
+  const stale = structuredClone(gates); stale[0].source_digest = `sha256:${"b".repeat(64)}`;
+  assert.equal(auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: stale }).result, "fail");
+  const impersonated = structuredClone(gates); impersonated[0].producer_evidence.contract.source_digest = `sha256:${"e".repeat(64)}`;
+  const rejected = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: impersonated });
+  assert.ok(rejected.global_failures.some((entry) => entry.detail.includes("differs from the reviewed gate plan")));
+});
+
+test("source-field destinations require value-digest reconciliation from the documentation producer", () => {
+  const fixture = controlledFixture({ sidecar: true });
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
+  const disposition = JSON.parse(fs.readFileSync(path.join(prepared.workspace, "source-field-disposition.json")));
+  disposition.review = { status: "reviewed", evidence: ["review"] };
+  for (const source of disposition.sources) for (const leaf of source.leaves) { leaf.disposition = "preserved"; leaf.destination = { kind: "catalog-documentation", catalog_identity: "foo", pointer: leaf.pointer, value_digest: leaf.value_digest }; }
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
+  const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
+  const missing = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
+  assert.ok(missing.identities[0].failures.some((entry) => entry.code === "destination-proof-missing"));
+  const documentation = gates.find((entry) => entry.gate === "documentation-cutover");
+  for (const source of disposition.sources) for (const leaf of source.leaves) documentation.checks.push({ id: `destination:foo:${source.path}:${leaf.pointer}:${leaf.destination.kind}:${leaf.destination.pointer}`, result: "pass", evidence_digest: leaf.value_digest });
+  const reconciled = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
+  assert.ok(!reconciled.identities[0].failures.some((entry) => entry.code === "destination-proof-missing"));
+});
+
+test("documentation cutover evidence reconciles every nested leaf by exact escaped pointer and digest", () => {
+  const valueDigest = (value) => evidenceDigest(value);
+  const legacyBytes = Buffer.from(`${JSON.stringify({ nested: { "a/b": ["kept", "old"] }, obsolete: true })}\n`);
+  const baselineSource = sourceFieldBaselineSource("docs/builtins/reference/foo.json", legacyBytes);
+  const disposition = {
+    schema_version: 2, kind: "runmat-builtin-source-field-disposition", authority: "review-workspace-only", identity: "foo",
+    sources: [{ path: baselineSource.path, digest: baselineSource.digest, leaves: [
+      { pointer: "/nested/a~1b/0", value_digest: valueDigest("kept"), disposition: "preserved", destination: { kind: "catalog-documentation", catalog_identity: "foo", pointer: "/nested/a~1b/0", value_digest: valueDigest("kept") }, reason: null, evidence: [] },
+      { pointer: "/nested/a~1b/1", value_digest: valueDigest("old"), disposition: "normalized", destination: { kind: "catalog-documentation", catalog_identity: "foo", pointer: "/nested/a~1b/1", value_digest: valueDigest("new") }, reason: "Normalize wording", evidence: ["review"] },
+      { pointer: "/obsolete", value_digest: valueDigest(true), disposition: "removed", destination: null, reason: "Obsolete field", evidence: ["review"] },
+    ] }], review: { status: "reviewed", evidence: ["owner review"] },
+  };
+  const catalogExport = { schema_version: 1, inventory: { documents: 1, catalog_identities: 1, legacy_sidecars: 0, missing_catalog_documentation: [] }, builtins: [{ key: "foo", authority: "catalog", nested: { "a/b": ["kept", "new"] } }] };
+  const catalogBytes = `${JSON.stringify(catalogExport)}\n`;
+  const provenance = { source_revision: REVISION, source_digest: `sha256:${"2".repeat(64)}`, compiled_inventory_digest: `sha256:${"3".repeat(64)}`, control_manifest_digest: `sha256:${"4".repeat(64)}`, bundle_id: "math-basic-foo", identities: ["foo"] };
+  const input = { catalog_export: catalogExport, catalog_export_bytes: catalogBytes, source_dispositions: [{ baseline_digest: sourceFieldBaselineDigest(disposition), value: disposition }], expected_sources: { foo: [baselineSource] }, provenance };
+  const artifact = buildDocumentationCutoverArtifact(input);
+  assert.equal(artifact.result, "pass");
+  assert.equal(artifact.rows.length, 3);
+  assert.ok(documentationCutoverChecks(artifact).some((entry) => entry.id.includes("/nested/a~1b/0")));
+  const expected = { ...provenance, catalog_export_digest: contentDigest(Buffer.from(catalogBytes)), source_dispositions: input.source_dispositions };
+  assert.doesNotThrow(() => parseDocumentationCutoverArtifact(artifact, expected));
+
+  const mismatch = structuredClone(input); mismatch.catalog_export.builtins[0].nested["a/b"][0] = "nearby kept token"; mismatch.catalog_export_bytes = `${JSON.stringify(mismatch.catalog_export)}\n`;
+  assert.equal(buildDocumentationCutoverArtifact(mismatch).result, "fail");
+  const omitted = structuredClone(input); omitted.source_dispositions[0].value.sources[0].leaves.pop();
+  assert.throws(() => buildDocumentationCutoverArtifact(omitted), /prepared baseline inventory/);
+  const duplicated = structuredClone(input); duplicated.source_dispositions[0].value.sources[0].leaves.push(structuredClone(duplicated.source_dispositions[0].value.sources[0].leaves[0]));
+  assert.throws(() => buildDocumentationCutoverArtifact(duplicated), /duplicate source-field leaf/);
+  const changed = structuredClone(input); changed.source_dispositions[0].value.sources[0].leaves[0].value_digest = valueDigest("changed");
+  changed.source_dispositions[0].baseline_digest = sourceFieldBaselineDigest(changed.source_dispositions[0].value);
+  assert.throws(() => buildDocumentationCutoverArtifact(changed), /frozen source documents/);
+  assert.throws(() => parseDocumentationCutoverArtifact(artifact, { ...provenance, catalog_export_digest: `sha256:${"9".repeat(64)}` }), /catalog export is stale/);
+
+  const omittedArtifact = structuredClone(artifact);
+  omittedArtifact.rows.pop();
+  omittedArtifact.summary = { identities: 1, leaves: 2, passed: 2 };
+  const { digest: _oldDigest, ...omittedPayload } = omittedArtifact;
+  omittedArtifact.digest = evidenceDigest(omittedPayload);
+  assert.throws(() => parseDocumentationCutoverArtifact(omittedArtifact, expected), /exactly cover/);
+
+  const alteredArtifact = structuredClone(artifact);
+  alteredArtifact.rows[0].destination.pointer = "/nested/a~1b/1";
+  const { digest: _alteredDigest, ...alteredPayload } = alteredArtifact;
+  alteredArtifact.digest = evidenceDigest(alteredPayload);
+  assert.throws(() => parseDocumentationCutoverArtifact(alteredArtifact, expected), /exactly cover/);
+});
+
+test("batch schema rejects unsafe and case-colliding identities", () => {
+  assert.deepEqual(parseBatch({ schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["__helper"] }), ["__helper"]);
+  assert.throws(() => parseBatch({ schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo", "Foo"] }), /unique/);
+  assert.throws(() => parseBatch({ schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["../foo"] }), /invalid/);
 });

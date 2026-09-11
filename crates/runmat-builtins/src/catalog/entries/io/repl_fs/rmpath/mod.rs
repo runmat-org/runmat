@@ -20,6 +20,7 @@ const EFFECTS: [EffectKind; 5] = [
 ];
 
 pub const RMPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rmpath" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

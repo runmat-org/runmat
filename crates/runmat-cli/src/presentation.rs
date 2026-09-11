@@ -251,6 +251,9 @@ pub fn cli_output_mode(cli: &Cli) -> OutputMode {
             OutputMode::Machine
         }
         Some(Commands::Job { job_command }) if job_command.machine_output() => OutputMode::Machine,
+        Some(Commands::NativeInterface { command }) if command.machine_output() => {
+            OutputMode::Machine
+        }
         Some(Commands::Package { package_command }) if package_command.machine_output() => {
             OutputMode::Machine
         }

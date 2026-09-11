@@ -57,6 +57,8 @@ const TASK_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("task = []"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isempty(task));",
         },
@@ -68,6 +70,8 @@ const TASK_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("seen = [true true true true]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(all(seen));\ndelete(pool);",
         },
@@ -81,6 +85,8 @@ const WORKER_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("worker = []"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isempty(worker));",
         },
@@ -92,6 +98,8 @@ const WORKER_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("seen = [true true true true]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(all(seen));\ndelete(pool);",
         },
@@ -104,6 +112,8 @@ const JOB_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("job = [] in ordinary driver execution"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isempty(job));",
     },

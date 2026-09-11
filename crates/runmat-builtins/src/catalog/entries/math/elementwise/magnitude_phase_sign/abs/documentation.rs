@@ -36,6 +36,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 42"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 42);",
         },
@@ -47,6 +49,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [2 1 0 1 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [2 1 0 1 2]));",
         },
@@ -58,6 +62,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("magnitudes = [5 1.4142]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(magnitudes - [5 sqrt(2)])) < 1e-12);",
         },
@@ -69,6 +75,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [3 4; 5 6]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(host, [3 4; 5 6]));",
         },
@@ -80,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("numeric = [0 1 0; 1 0 1]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(numeric, \"double\"));\nassert(isequal(numeric, [0 1 0; 1 0 1]));",
         },
@@ -91,6 +101,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codes = [65 66 67]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(codes, \"double\"));\nassert(isequal(codes, [65 66 67]));",
         },
@@ -102,6 +114,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [6 2 0 2 6]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(y - [6 2 0 2 6])) < 1e-12);",
         },

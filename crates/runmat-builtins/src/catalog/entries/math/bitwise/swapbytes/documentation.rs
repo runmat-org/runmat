@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = uint16(13330), whose hexadecimal form is 3412"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'uint16')); assert(y == uint16(hex2dec('3412')));",
         },
@@ -43,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = uint16([hex2dec('3412') hex2dec('ff00')])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = uint16([hex2dec('3412') hex2dec('ff00')]); assert(isa(y, 'uint16')); assert(isequal(y, expected));",
         },
@@ -54,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = uint8([0 1 127 255])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'uint8')); assert(isequal(y, x));",
         },
@@ -65,6 +71,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = int32(hex2dec('04030201'))"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'int32')); assert(y == int32(hex2dec('04030201')));",
         },
@@ -76,6 +84,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y is a 2-by-3 uint16 array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'uint16')); assert(isequal(size(y), [2 3])); assert(isequal(swapbytes(y), x));",
         },
@@ -87,6 +97,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y is a host uint16 array with reversed bytes"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = uint16([hex2dec('3412') hex2dec('ff00')]); assert(isa(y, 'uint16')); assert(isequal(y, expected));",
         },

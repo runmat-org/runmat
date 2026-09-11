@@ -530,11 +530,34 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let builtin_path_lit =
         builtin_path_lit.expect("runtime_builtin requires `builtin_path = \"...\"`");
+    let builtin_path_text = builtin_path_lit.clone();
     let builtin_path: syn::Path = syn::parse_str(&builtin_path_lit.value())
         .expect("runtime_builtin `builtin_path` must be a valid path");
     let helper_ident = format_ident!("__runmat_wasm_register_builtin_{}", ident);
     let builtin_expr_helper = builtin_expr.clone();
     let doc_expr_helper = doc_expr.clone();
+    let provenance_authority = if binding_variant_lit.is_some() {
+        quote! { runmat_builtins::BuiltinImplementationAuthority::CanonicalBinding }
+    } else {
+        quote! { runmat_builtins::BuiltinImplementationAuthority::LegacyFunction }
+    };
+    let provenance_variant = if let Some(variant) = binding_variant_lit.as_ref() {
+        quote! { Some(#variant) }
+    } else {
+        quote! { None }
+    };
+    let provenance_expr = quote! {
+        runmat_builtins::BuiltinImplementationProvenance {
+            name: #name_str,
+            binding_variant: #provenance_variant,
+            source_file: file!(),
+            module_path: module_path!(),
+            function: stringify!(#ident),
+            builtin_path: #builtin_path_text,
+            authority: #provenance_authority,
+        }
+    };
+    let provenance_expr_helper = provenance_expr.clone();
     let (wasm_helper, register_native) = if let Some(variant) = binding_variant_lit {
         let native_symbol = runmat_builtins::native_binding_symbol(&name_str, &variant.value());
         let native_symbol = syn::LitStr::new(&native_symbol, proc_macro2::Span::call_site());
@@ -557,11 +580,14 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 #[allow(non_snake_case)]
                 pub(crate) fn #helper_ident() {
                     crate::builtin::wasm_registry::submit(#binding_expr);
+                    runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
                 }
             },
             quote! {
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #binding_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #provenance_expr }
                 // A package's unit-test harness can link both its cfg(test)
                 // copy and a normal dependency copy of the runtime. Only the
                 // latter should publish the process-wide AOT ABI symbols.
@@ -578,6 +604,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 pub(crate) fn #helper_ident() {
                     runmat_builtins::wasm_registry::submit_builtin_function(#builtin_expr_helper);
                     runmat_builtins::wasm_registry::submit_builtin_doc(#doc_expr_helper);
+                    runmat_builtins::wasm_registry::submit_builtin_implementation_provenance(#provenance_expr_helper);
                 }
             },
             quote! {
@@ -585,6 +612,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 runmat_builtins::inventory::submit! { #builtin_expr }
                 #[cfg(not(target_arch = "wasm32"))]
                 runmat_builtins::inventory::submit! { #doc_expr }
+                #[cfg(not(target_arch = "wasm32"))]
+                runmat_builtins::inventory::submit! { #provenance_expr }
             },
         )
     };

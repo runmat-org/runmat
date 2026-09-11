@@ -29,6 +29,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = int32(2147483647)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"int32\"));\nassert(limit == int32(2147483647));\nassert(isequal(size(limit), [1 1]));" },
     },
     BuiltinExample {
@@ -38,6 +40,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = uint64(18446744073709551615)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"uint64\"));\nassert(limit > uint64(9007199254740992));\nassert(limit + uint64(1) == limit);" },
     },
     BuiltinExample {
@@ -47,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = uint16(65535)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"uint16\"));\nassert(limit == uint16(65535));\nassert(isequal(size(limit), [1 1]));" },
     },
 ];

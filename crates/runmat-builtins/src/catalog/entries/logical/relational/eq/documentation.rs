@@ -18,6 +18,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, true));",
         },
@@ -29,6 +31,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = [true false true false]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, logical([1 0 1 0])));",
         },
@@ -40,6 +44,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = [true false false; false true false]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, logical([1 0 0; 0 1 0])));",
         },
@@ -51,6 +57,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = [true false]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, logical([1 0])));",
         },
@@ -62,6 +70,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = [true false false]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, logical([1 0 0])));",
         },
@@ -73,6 +83,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = [true false true]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(tf, logical([1 0 1])));",
         },
@@ -84,6 +96,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("condition = Y(0) == 0"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Succeeds,
     },
     BuiltinExample {
@@ -94,6 +108,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("gtf remains a gpuArray and tf = [true false true]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(gtf, 'gpuArray'));\nassert(isequal(tf, logical([1 0 1])));",
         },

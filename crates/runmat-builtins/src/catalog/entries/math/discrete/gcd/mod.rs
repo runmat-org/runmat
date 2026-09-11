@@ -158,6 +158,7 @@ pub const GCD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const GCD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "gcd" },
     category: "math/discrete",
     documentation: GCD_DOCUMENTATION,

@@ -44,6 +44,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = 3 - 4i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(result - (3 - 4i)) < 1e-12);",
         },
@@ -55,6 +57,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C = [1-2i 4+3i; -5+0i 7-8i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(C, [1-2i 4+3i; -5+0i 7-8i]));",
         },
@@ -66,6 +70,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("unchanged = [-2.5 0 9.75]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(unchanged, data));",
         },
@@ -77,6 +83,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("numeric retains logical class and values"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(numeric));\nassert(isequal(numeric, mask));",
         },
@@ -88,6 +96,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codes = [82 117 110 77 97 116]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isa(codes, \"double\"));\nassert(isequal(codes, [82 117 110 77 97 116]));",
@@ -100,6 +110,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [1 -2; 3 -4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(host, [1 -2; 3 -4]));",
         },

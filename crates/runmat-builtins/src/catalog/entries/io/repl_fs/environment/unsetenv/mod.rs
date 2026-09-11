@@ -10,6 +10,7 @@ pub use contract::*;
 const EFFECTS: &[EffectKind] = &[EffectKind::EnvironmentWrite, EffectKind::MayThrow];
 
 pub const UNSETENV_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "unsetenv" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

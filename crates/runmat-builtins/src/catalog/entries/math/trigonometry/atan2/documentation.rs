@@ -40,6 +40,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("theta = 0.9273"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(theta - 0.9272952180016122) < 1e-12);",
         },
@@ -51,6 +53,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("angles = [-2.3562 3.1416 2.3562]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [-3*pi/4, pi, 3*pi/4];\nassert(max(abs(angles - expected)) < 1e-12);",
         },
@@ -62,6 +66,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("angles has the same 2-by-3 shape as A"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(angles), [2 3]));\nassert(max(abs(tan(angles(:)) - A(:)/2)) < 1e-12);",
         },
@@ -73,6 +79,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("theta contains positive zero, positive zero, and negative zero"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(theta(1) == 0 && theta(2) == 0 && theta(3) == 0);\nassert(1/theta(1) > 0 && 1/theta(2) > 0 && 1/theta(3) < 0);",
         },
@@ -84,6 +92,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P is a 1-by-2 single row vector"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(P, 'single'));\nassert(max(abs(double(P) - atan2(double(Y), -2))) < 1e-6);",
         },
@@ -95,6 +105,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P retains variables A and B"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(istable(P));\nassert(max(abs(P.A - [3*pi/4; -3*pi/4])) < 1e-12);\nassert(max(abs(P.B - [pi; 3*pi/4])) < 1e-12);",
         },
@@ -106,6 +118,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("theta = 0.5764"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(theta - atan2(65, 100)) < 1e-12);",
         },
@@ -117,6 +131,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("angles = [pi/4 3*pi/4; -pi/4 -3*pi/4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [pi/4 3*pi/4; -pi/4 -3*pi/4];\nassert(isa(anglesDevice, 'gpuArray'));\nassert(max(abs(angles(:) - expected(:))) < 1e-6);",
         },

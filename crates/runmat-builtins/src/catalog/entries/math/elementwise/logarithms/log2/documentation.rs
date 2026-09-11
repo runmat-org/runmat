@@ -67,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("powers = [0 1 2 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(powers - [0 1 2 3])) < 1e-12);",
         },
@@ -78,6 +80,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = -Inf"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isinf(z) && z < 0);",
         },
@@ -89,6 +93,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("out = [0.0000 + 4.5324i 1.0000 + 4.5324i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 1] + (pi/log(2))*1i;\nassert(max(abs(out - expected)) < 1e-12);",
         },
@@ -100,6 +106,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("exponents = [6 7; 8 9]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [6 7; 8 9];\nassert(max(abs(exponents(:) - expected(:))) < 1e-12);",
         },
@@ -111,6 +119,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("F = [0.5 -0.75 0 Inf]\nE = [1 2 0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(F, [0.5 -0.75 0 Inf]));\nassert(isequal(E, [1 2 0 0]));",
         },
@@ -122,6 +132,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [0 2 4 6]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(host - [0 2 4 6])) < 1e-12);",
         },
@@ -133,6 +145,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("values = [6.0224 6.0444 6.0661]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = log2([65 66 67]);\nassert(max(abs(values - expected)) < 1e-12);",
         },

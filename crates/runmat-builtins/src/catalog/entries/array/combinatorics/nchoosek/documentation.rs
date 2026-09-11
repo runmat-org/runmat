@@ -22,6 +22,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("b = 10"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(b, 10));",
         },
@@ -33,6 +35,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C = [10 20; 10 30; 20 30]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(C, [10 20; 10 30; 20 30]));",
         },
@@ -44,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C = ['ab'; 'ac'; 'bc']"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(C, ['ab'; 'ac'; 'bc']));",
         },
@@ -55,6 +61,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 1-by-0 double array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(C), [1 0]));",
         },

@@ -25,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Ready for the next command"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Succeeds,
     },
     BuiltinExample {
@@ -34,6 +36,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(sample_count == 42);",
         },
@@ -45,6 +49,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("clc: expected no input arguments"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::ExpectedError {
             identifier: "RunMat:clc:ArgumentCount",
         },

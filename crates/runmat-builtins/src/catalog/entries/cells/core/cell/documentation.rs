@@ -8,6 +8,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 0-by-0 cell array"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(iscell(C));\nassert(isequal(size(C), [0 0]));",
         },
@@ -19,6 +21,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 3-by-3 cell array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(C), [3 3]));\nassert(isequal(C{1}, []));",
         },
@@ -30,6 +34,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 2-by-4 cell array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(iscell(C));\nassert(isequal(size(C), [2 4]));\nassert(isequal(C{2,4}, []));",
@@ -42,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C has the same 5-by-2 shape as A"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(C), [5 2]));",
         },
@@ -53,6 +61,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 2-by-3-by-4 cell array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(C), [2 3 4]));",
         },
@@ -64,6 +74,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("C is a 4-by-1 cell array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(C), [4 1]));\nassert(isequal(C{4}, []));",
         },
@@ -75,6 +87,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Each cell contains an empty logical array"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isequal(size(C), [2 2]));\nassert(islogical(C{1}));\nassert(isempty(C{1}));",

@@ -32,6 +32,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 3"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 3);",
         },
@@ -43,6 +45,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [1 2 3; 4 5 6]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(R, [1 2 3; 4 5 6]));",
         },
@@ -54,6 +58,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("roots = [0.0000 + 1.0000i, 0.0000 + 2.0000i, 3.0000 + 0.0000i]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(roots - [1i 2i 3])) < 1e-12);",
         },
@@ -65,6 +71,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 1; 2 3]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [0 1; 2 3]));",
         },
@@ -76,6 +84,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w = [2 + 1i, 0.7862 + 1.2720i]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(w .* w - z)) < 1e-10);",
         },
@@ -87,6 +97,8 @@ const SQRT_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("numericRoots = [8.0623 8.2462]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(numericRoots - sqrt([65 66]))) < 1e-12);",
         },

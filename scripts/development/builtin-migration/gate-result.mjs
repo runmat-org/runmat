@@ -1,0 +1,105 @@
+import fs from "node:fs";
+
+import { compareCodePoint } from "./constants.mjs";
+import { contentDigest, evidenceDigest } from "./evidence.mjs";
+import { gatePlanEvidence } from "./gate-plan.mjs";
+import { GATE_PRODUCERS } from "./gate-kinds.mjs";
+import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity, integer, kind, nonempty, sourceRevision, stableId, timestamp, uniqueStrings } from "./schema.mjs";
+
+export { GATE_PRODUCERS } from "./gate-kinds.mjs";
+
+export function parseGateResult(value, expected) {
+  kind(value, 1, "runmat-builtin-migration-gate-result", "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "storage_admission"], "gate result");
+  if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
+  const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
+  if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
+  const producedAt = timestamp(value.produced_at, "gate produced_at");
+  const producerEvidence = parseProducerEvidence(value.producer_evidence, value.producer, value.source_revision);
+  stableId(value.artifact_id, "gate artifact id");
+  sourceRevision(value.source_revision, "gate source revision");
+  digest(value.source_digest, "gate source digest");
+  digest(value.inventory_digest, "gate inventory digest");
+  digest(value.control_manifest_digest, "gate control manifest digest");
+  stableId(value.bundle_id, "gate bundle id");
+  const identities = uniqueStrings(value.identities, "gate identities", { pattern: SAFE_IDENTITY, lower: true });
+  enumValue(value.result, ["pass", "fail", "unavailable"], "gate result");
+  const checks = array(value.checks, "gate checks").map((entry) => {
+    exact(entry, ["id", "result", "evidence_digest"], "gate check");
+    nonempty(entry.id, "gate check id");
+    enumValue(entry.result, ["pass", "fail", "unavailable"], "gate check result");
+    digest(entry.evidence_digest, "gate check evidence digest");
+    return entry;
+  });
+  if (new Set(checks.map((entry) => entry.id)).size !== checks.length) throw new Error("gate check ids must be unique");
+  for (const id of identities) if (!checks.some((entry) => entry.id === `${gate}:${id}`)) throw new Error(`${gate}: typed producer evidence is missing the ${id} identity check`);
+  const derivedResult = value.producer_evidence.process.exit_code === 0 && checks.every((entry) => entry.result === "pass") ? "pass" : "fail";
+  if (value.result !== derivedResult) throw new Error("gate result conflicts with captured process status or checks");
+  parseStorageAdmission(value.storage_admission, value.result, expected?.storage_policy, producedAt);
+  if (expected) {
+    if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.inventory_digest !== expected.inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
+      throw new Error(`${gate}: stale or mismatched gate provenance`);
+    }
+    if (expected.gate_plans) validateReviewedPlan(gate, producerEvidence, expected);
+  }
+  return { ...value, identities: identities.sort(compareCodePoint), checks };
+}
+
+function parseProducerEvidence(value, producer, sourceRevisionValue) {
+  kind(value, 1, `${producer}-evidence`, "typed producer evidence");
+  exact(value, ["schema_version", "kind", "contract", "invocation", "process", "captured_process_digest"], "typed producer evidence");
+  exact(value.contract, ["source_revision", "executable_digest", "source_digest"], "producer contract evidence");
+  sourceRevision(value.contract.source_revision, "producer contract source revision");
+  if (value.contract.source_revision !== sourceRevisionValue) throw new Error("producer contract revision differs from gate source revision");
+  digest(value.contract.executable_digest, "producer executable digest");
+  digest(value.contract.source_digest, "producer source digest");
+  exact(value.invocation, ["executable", "arguments", "cwd"], "producer invocation");
+  nonempty(value.invocation.executable, "producer executable");
+  array(value.invocation.arguments, "producer arguments", { empty: true }).forEach((entry) => nonempty(entry, "producer argument"));
+  absolutePath(value.invocation.cwd, "producer working directory");
+  if (contentDigest(fs.readFileSync(value.invocation.executable)) !== value.contract.executable_digest) throw new Error("producer executable bytes differ from contract evidence");
+  exact(value.process, ["exit_code", "signal", "stdout_digest", "stderr_digest"], "producer process result");
+  integer(value.process.exit_code, "producer exit code");
+  if (value.process.signal !== null) nonempty(value.process.signal, "producer signal");
+  digest(value.process.stdout_digest, "producer stdout digest");
+  digest(value.process.stderr_digest, "producer stderr digest");
+  digest(value.captured_process_digest, "producer captured process digest");
+  if (value.captured_process_digest !== evidenceDigest(value.process)) throw new Error("producer captured process digest is inconsistent");
+  return value;
+}
+
+function validateReviewedPlan(gate, evidence, expected) {
+  const plan = expected.gate_plans.get(gate);
+  if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
+  const contract = gatePlanEvidence(plan, expected.compiled_build, expected.repository);
+  if (evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
+  if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
+}
+
+function parseStorageAdmission(value, gateResult, policy, producedAt) {
+  exact(value, ["observed_at", "volumes"], "gate storage admission");
+  const observedAt = timestamp(value.observed_at, "gate storage observed_at");
+  const volumes = array(value.volumes, "gate storage volumes");
+  const expectedRoles = ["source-worktree", "target-temp"];
+  if (JSON.stringify(volumes.map((entry) => entry.role).sort()) !== JSON.stringify([...expectedRoles].sort())) throw new Error("gate storage admission must cover both named volume roles exactly once");
+  for (const entry of volumes) {
+    exact(entry, ["role", "evidence_path", "filesystem_id", "available_bytes", "minimum_free_bytes", "pause_below_bytes", "status"], "gate storage volume");
+    enumValue(entry.role, expectedRoles, "gate storage role");
+    absolutePath(entry.evidence_path, `${entry.role} storage evidence path`);
+    filesystemIdentity(entry.filesystem_id, `${entry.role} storage filesystem id`);
+    integer(entry.available_bytes, `${entry.role} available bytes`);
+    integer(entry.minimum_free_bytes, `${entry.role} minimum free bytes`, 1);
+    integer(entry.pause_below_bytes, `${entry.role} pause below bytes`, 1);
+    if (entry.pause_below_bytes < entry.minimum_free_bytes) throw new Error(`${entry.role}: pause threshold is below minimum`);
+    const expectedStatus = entry.available_bytes >= entry.pause_below_bytes ? "admitted" : "paused";
+    if (entry.status !== expectedStatus) throw new Error(`${entry.role}: storage status conflicts with observed bytes`);
+    if (gateResult === "pass" && entry.status !== "admitted") throw new Error(`${entry.role}: a product gate cannot pass below its pause threshold`);
+    if (policy) {
+      const key = entry.role === "source-worktree" ? "source_worktree" : "target_temp";
+      const configured = policy.volume_roles[key];
+      const age = (Date.parse(producedAt) - Date.parse(observedAt)) / 1000;
+      if (age < 0 || age > configured.maximum_observation_age_seconds) throw new Error(`${entry.role}: storage observation is outside the reviewed time bound`);
+      if (entry.evidence_path !== configured.mount_path || entry.filesystem_id !== configured.filesystem_id || entry.minimum_free_bytes !== configured.minimum_free_bytes || entry.pause_below_bytes !== configured.pause_below_bytes) throw new Error(`${entry.role}: storage evidence differs from reviewed control policy`);
+    }
+  }
+}

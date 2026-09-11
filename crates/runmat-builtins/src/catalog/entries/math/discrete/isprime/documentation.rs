@@ -24,6 +24,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("TF = logical([1 1 0 0 0])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(TF, logical([1 1 0 0 0])));",
         },
@@ -35,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("TF = logical([0 1 0])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(islogical(TF)); assert(isequal(TF, logical([0 1 0])));",
         },
@@ -46,6 +50,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("TF = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(TF);",
         },
@@ -57,6 +63,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("TF = logical([1 0; 1 0])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(TF), [2 2])); assert(isequal(TF, logical([1 0; 1 0])));",
         },

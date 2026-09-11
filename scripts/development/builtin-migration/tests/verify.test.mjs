@@ -1,180 +1,85 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-
-import { buildMachineReport, combineMachineReports } from "../../../runtime/builtin-example-verifier/reporting.mjs";
-import { createInventory, shardInventory } from "../../../runtime/builtin-example-verifier/sharding.mjs";
-import { canonicalJson } from "../evidence.mjs";
-import { parseVerificationManifest } from "../verify-schema.mjs";
+import { auditMigration } from "../audit.mjs";
+import { evidenceDigest } from "../evidence.mjs";
+import { prepareIdentity } from "../prepare.mjs";
+import { sealBundle } from "../seal.mjs";
 import { verifyBatch } from "../verify.mjs";
+import { controlledFixture, digestReference, gate } from "./helpers.mjs";
 
-const SOURCE = "git:abc";
-const FACTORY_DIGEST = `sha256:${"a".repeat(64)}`;
-
-function exampleReport(harness = "Portable", matches = true, shard = { index: 0, count: 1 }, artifact = "examples-0") {
-  const testCase = {
-    id: 1, exampleKey: "foo#scalar", builtin: "foo", authority: "catalog", compatibility: "Matlab",
-    harness, input: "foo(1)", expectedOutput: "1", hasExpectedOutput: true, exampleIndex: 0,
+function evidence() {
+  const fixture = controlledFixture();
+  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", fs.mkdtempSync(path.join(os.tmpdir(), "verify-")));
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
+  const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
+  const audit = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
+  const auditReference = digestReference("audit.json", "audit-foo", audit);
+  const gateReferences = gates.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
+  const manifest = {
+    schema_version: 2, kind: "runmat-builtin-migration-verification-manifest", authority: "reviewed-verification-request",
+    batch: { artifact_id: "verify-foo", source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: ["foo"] },
+    audit: auditReference, gate_results: gateReferences,
+    expectations: [{ identity: "foo", required_gates: ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"] }],
   };
-  const inventory = createInventory([testCase]);
-  const selected = shardInventory(inventory, shard);
-  const rows = selected.cases.map((entry) => ({
-    testCase: entry, normalizedExpected: "1", normalizedActual: matches ? "1" : "2",
-    imageRelPath: "", imageError: "", matches,
-  }));
-  return buildMachineReport({ rows, inventory, shard, range: selected.range, source: SOURCE, artifact });
+  const loadedAudit = { reference: auditReference, value: audit };
+  const loadedGates = gateReferences.map((reference, index) => ({ reference, value: gates[index] }));
+  return { fixture, audit, gates, manifest, loadedAudit, loadedGates };
 }
 
-function factoryAudit() {
-  return {
-    schema_version: 2,
-    kind: "runmat-builtin-migration-audit",
-    authority: "development-verification-only",
-    metadata: {
-      source: SOURCE,
-      artifact: "factory-audit-1",
-      inventory: {
-        schema_version: 1, kind: "runmat-builtin-migration-inventory", digest: FACTORY_DIGEST, identities: ["foo"],
-      },
-    },
-    requested_identities: ["foo"],
-    global_diagnostics: [],
-    summary: { identities: 1, passed: 1, failed: 0, global_errors: 0 },
-    result: "pass",
-    identities: [{ identity: "foo", result: "pass", failures: [], evidence: null }],
-  };
-}
-
-function manifest(report, requiredLanes = ["browser", "native"]) {
-  return {
-    schema_version: 1,
-    kind: "runmat-builtin-migration-verification-manifest",
-    batch: {
-      artifact: "batch-1", source: SOURCE, identities: ["foo"],
-      factory_inventory_digest: FACTORY_DIGEST,
-      example_inventory_digest: report.metadata.inventory.digest,
-      combined_example_artifact: report.metadata.index === undefined ? report.metadata.artifact : "batch-1-examples",
-    },
-    factory_audit: { path: "audit.json", artifact: "factory-audit-1" },
-    example_reports: [{ path: "examples.json", artifact: report.metadata.artifact }],
-    expectations: [{ identity: "foo", example_keys: ["foo#scalar"], required_lanes: requiredLanes }],
-  };
-}
-
-function verify(report, audit = factoryAudit(), requiredLanes) {
-  const input = manifest(report, requiredLanes);
-  return verifyBatch(
-    input,
-    { reference: input.factory_audit, value: audit },
-    [{ reference: input.example_reports[0], value: report }],
-  );
-}
-
-test("verification passes exact factory, inventory, example, and lane evidence", () => {
-  const result = verify(exampleReport());
+test("verification v2 passes only exact, content-addressed audit and gate evidence", () => {
+  const input = evidence();
+  const result = verifyBatch(input.manifest, input.loadedAudit, input.loadedGates);
+  assert.equal(result.schema_version, 2);
   assert.equal(result.result, "pass");
-  assert.deepEqual(result.identities[0].observed_lanes, ["browser", "native"]);
-  assert.equal(result.metadata.artifacts.example_combined, "batch-1-examples");
-  assert.equal(result.authority, "development-verification-evidence-only");
 });
 
-test("stale factory and example identities fail as explicit evidence diagnostics", () => {
-  const report = exampleReport();
-  const staleFactory = factoryAudit();
-  staleFactory.metadata.source = "git:old";
-  assert.deepEqual(verify(report, staleFactory).global_failures.map((entry) => entry.code), ["factory-evidence-invalid"]);
-  const input = manifest(report);
-  input.batch.example_inventory_digest = `sha256:${"b".repeat(64)}`;
-  const result = verifyBatch(input, { reference: input.factory_audit, value: factoryAudit() }, [{ reference: input.example_reports[0], value: report }]);
-  assert.match(result.global_failures[0].detail, /Stale example inventory/);
+test("verification rejects missing, duplicate, stale, and mutated evidence", () => {
+  const input = evidence();
+  assert.equal(verifyBatch(input.manifest, input.loadedAudit, input.loadedGates.slice(1)).result, "fail");
+  const duplicate = structuredClone(input.manifest); duplicate.gate_results.push(duplicate.gate_results[0]);
+  assert.throws(() => verifyBatch(duplicate, input.loadedAudit, input.loadedGates), /unique/);
+  const mutated = structuredClone(input.loadedGates); mutated[0].value.checks[0].evidence_digest = `sha256:${"f".repeat(64)}`;
+  assert.ok(verifyBatch(input.manifest, input.loadedAudit, mutated).global_failures.some((entry) => entry.code === "gate-digest-mismatch"));
+  const future = structuredClone(input.manifest); future.schema_version = 3;
+  assert.throws(() => verifyBatch(future, input.loadedAudit, input.loadedGates), /schema_version 2/);
+  const inconsistentAudit = structuredClone(input.loadedAudit);
+  inconsistentAudit.value.identities[0].failures.push({ code: "forged", detail: "ignored" });
+  inconsistentAudit.reference.digest = evidenceDigest(inconsistentAudit.value);
+  const inconsistentManifest = structuredClone(input.manifest);
+  inconsistentManifest.audit.digest = inconsistentAudit.reference.digest;
+  assert.ok(verifyBatch(inconsistentManifest, inconsistentAudit, input.loadedGates).global_failures.some((entry) => entry.code === "audit-invalid"));
 });
 
-test("failed examples and partial lane coverage fail the identity", () => {
-  assert.deepEqual(verify(exampleReport("Portable", false)).identities[0].failures.map((entry) => entry.code), ["example-failed"]);
-  const partial = verify(exampleReport("Browser"), factoryAudit(), ["browser", "native"]);
-  assert.deepEqual(partial.identities[0].failures, [{ code: "required-lane-missing", lane: "native" }]);
+test("a passing product gate is rejected below either reviewed storage pause watermark", () => {
+  const input = evidence();
+  const low = structuredClone(input.loadedGates);
+  low[0].value.storage_admission.volumes[0].available_bytes = 0;
+  low[0].value.storage_admission.volumes[0].status = "paused";
+  low[0].reference.digest = evidenceDigest(low[0].value);
+  const manifest = structuredClone(input.manifest);
+  manifest.gate_results[0].digest = low[0].reference.digest;
+  assert.match(verifyBatch(manifest, input.loadedAudit, low).global_failures.find((entry) => entry.code === "gate-invalid").detail, /cannot pass below/);
 });
 
-test("verification accepts one exact combined report or one complete shard set", () => {
-  const unsharded = exampleReport();
-  const combined = combineMachineReports([unsharded], SOURCE, "batch-1-examples");
-  const combinedResult = verify(combined);
-  assert.equal(combinedResult.result, "pass");
-  assert.deepEqual(combinedResult.metadata.artifacts.example_constituents, ["examples-0"]);
-
-  const first = exampleReport("Portable", true, { index: 0, count: 2 }, "examples-0");
-  const second = exampleReport("Portable", true, { index: 1, count: 2 }, "examples-1");
-  const input = manifest(first);
-  input.example_reports.push({ path: "examples-1.json", artifact: "examples-1" });
-  const result = verifyBatch(
-    input,
-    { reference: input.factory_audit, value: factoryAudit() },
-    [
-      { reference: input.example_reports[0], value: first },
-      { reference: input.example_reports[1], value: second },
-    ],
-  );
-  assert.equal(result.result, "pass");
-  assert.deepEqual(result.metadata.artifacts.example_constituents, ["examples-0", "examples-1"]);
-});
-
-test("manifest and shard reconciliation reject guessed or incomplete evidence", () => {
-  const report = exampleReport();
-  const badManifest = manifest(report);
-  badManifest.expectations[0].identity = "bar";
-  assert.throws(() => verifyBatch(badManifest, null, []), /cover each batch identity/);
-
-  const first = exampleReport("Portable", true, { index: 0, count: 2 }, "examples-0");
-  const input = manifest(first);
-  input.example_reports.push({ path: "examples-1.json", artifact: "examples-1" });
-  const incomplete = verifyBatch(input, { reference: input.factory_audit, value: factoryAudit() }, [{ reference: input.example_reports[0], value: first }]);
-  assert.match(incomplete.global_failures[0].detail, /count does not match/);
-});
-
-test("schemas reject extra fields and exact combined artifact mismatches", () => {
-  const report = exampleReport();
-  const extra = manifest(report);
-  extra.batch.sorce = SOURCE;
-  assert.throws(() => verifyBatch(extra, null, []), /verification batch fields/);
-  const future = manifest(report);
-  future.schema_version = 2;
-  assert.throws(() => verifyBatch(future, null, []), /schema_version 1/);
-
-  const malformedAudit = factoryAudit();
-  malformedAudit.metadata.inventory.extra = true;
-  assert.match(verify(report, malformedAudit).global_failures[0].detail, /factory audit inventory fields/);
-  const oldAudit = factoryAudit();
-  oldAudit.schema_version = 1;
-  assert.match(verify(report, oldAudit).global_failures[0].detail, /schema_version 2/);
-
-  const combined = combineMachineReports([report], SOURCE, "actual-combined");
-  const wrongIdentity = manifest(combined);
-  wrongIdentity.batch.combined_example_artifact = "expected-combined";
-  const result = verifyBatch(wrongIdentity, { reference: wrongIdentity.factory_audit, value: factoryAudit() }, [{ reference: wrongIdentity.example_reports[0], value: combined }]);
-  assert.match(result.global_failures[0].detail, /Combined example artifact mismatch/);
-});
-
-test("canonical evidence uses code-point order and rejects ambiguous values", () => {
-  const encoded = canonicalJson({ "𐀀": 2, "": 1 });
-  assert.ok(encoded.indexOf("") < encoded.indexOf("𐀀"));
-  for (const value of [undefined, NaN, Infinity, -Infinity, -0, 1n, () => {}, new Date(0)]) {
-    assert.throws(() => canonicalJson(value), /Unsupported/);
-  }
-  const sparse = [];
-  sparse.length = 1;
-  assert.throws(() => canonicalJson(sparse), /Sparse/);
-  const cyclic = {};
-  cyclic.self = cyclic;
-  assert.throws(() => canonicalJson(cyclic), /Cyclic/);
-});
-
-test("manifest artifacts and expectations use explicit code-point ordering", () => {
-  const input = manifest(exampleReport());
-  input.example_reports = [
-    { path: "astral.json", artifact: "𐀀" },
-    { path: "private.json", artifact: "" },
-  ];
-  input.expectations[0].example_keys = ["foo#𐀀", "foo#"];
-  const parsed = parseVerificationManifest(input);
-  assert.deepEqual(parsed.example_reports.map((entry) => entry.artifact), ["", "𐀀"]);
-  assert.deepEqual(parsed.expectations[0].example_keys, ["foo#", "foo#𐀀"]);
+test("seal requires a passing exact verification plus deterministic products and inventory delta", () => {
+  const input = evidence();
+  const verification = verifyBatch(input.manifest, input.loadedAudit, input.loadedGates);
+  const integration = [gate(input.fixture, "deterministic-products"), gate(input.fixture, "inventory-delta")];
+  const references = integration.map((value) => digestReference(`${value.artifact_id}.json`, value.artifact_id, value));
+  const manifest = {
+    schema_version: 1, kind: "runmat-builtin-migration-seal-manifest", authority: "reviewed-integration-request", seal_id: "seal-foo", bundle_id: input.fixture.bundleId, identities: ["foo"],
+    source_revision: input.fixture.inventory.source.revision, source_digest: input.fixture.inventory.source.digest, inventory_digest: input.fixture.inventory.digest, control_manifest_digest: input.fixture.control.digest,
+    verification: digestReference("verification.json", verification.artifact_id, verification), integration_gates: references, prerequisite_seals: [], review: { status: "reviewed", evidence: ["integration review"] },
+  };
+  const loaded = references.map((reference, index) => ({ reference, value: integration[index] }));
+  assert.equal(sealBundle(manifest, verification, loaded, [], input.fixture.control, input.fixture.repository).result, "pass");
+  assert.equal(sealBundle(manifest, verification, loaded.slice(1), [], input.fixture.control, input.fixture.repository).result, "fail");
+  const partial = structuredClone(manifest); partial.identities = [];
+  assert.throws(() => sealBundle(partial, verification, loaded, [], input.fixture.control, input.fixture.repository), /nonempty array/);
+  const inventedPrerequisite = structuredClone(manifest);
+  inventedPrerequisite.prerequisite_seals = [{ path: "seal-other.json", artifact_id: "seal-other", digest: `sha256:${"a".repeat(64)}`, bundle_id: "other" }];
+  assert.throws(() => sealBundle(inventedPrerequisite, verification, loaded, [], input.fixture.control, input.fixture.repository), /control DAG/);
 });

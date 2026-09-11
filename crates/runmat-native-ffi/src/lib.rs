@@ -10,6 +10,9 @@ pub mod metadata;
 pub mod model;
 
 #[cfg(not(target_family = "wasm"))]
+mod preparation;
+
+#[cfg(not(target_family = "wasm"))]
 pub mod invoke;
 #[cfg(not(target_family = "wasm"))]
 pub mod loader;
@@ -40,5 +43,10 @@ pub use metadata::{
     HeaderPreparation, HeaderPreparationError, HeaderPreparationResult,
 };
 pub use model::*;
+#[cfg(not(target_family = "wasm"))]
+pub use preparation::{
+    prepare_native_interface, NativeInterfacePreparation, NativeInterfacePreparationError,
+    PreparedNativeInterface,
+};
 #[cfg(not(target_family = "wasm"))]
 pub use value::NativePointer;

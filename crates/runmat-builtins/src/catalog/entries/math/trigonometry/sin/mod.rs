@@ -167,6 +167,7 @@ pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const SIN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const SIN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sin" },
     category: "math/trigonometry",
     documentation: SIN_DOCUMENTATION,

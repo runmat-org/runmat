@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.5236"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - pi/6) < 1e-12);",
         },
@@ -49,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = 1.5708 - 0.6224i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(real(z) - pi/2) < 1e-12);\nassert(abs(imag(z) + 0.622362503714779) < 1e-12);",
         },
@@ -62,6 +66,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         ),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(Y), size(A)));\nassert(max(abs(sin(Y(:)) - A(:))) < 1e-12);",
         },
@@ -73,6 +79,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("angles = [0 1.5708 1.5708 0]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(angles, \"double\"));\nassert(isequal(angles, [0 pi/2 pi/2 0]));",
         },
@@ -84,6 +92,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [-1.5708 -0.5236 0 0.5236 1.5708]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = asin(linspace(-1, 1, 5));\nassert(isa(resultGpu, \"gpuArray\"));\nassert(max(abs(result - expected)) < 1e-6);",
         },
@@ -95,6 +105,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w is a 1-by-2 complex row vector"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(w), [1 2]));\nassert(max(abs(sin(w) - values)) < 1e-12);",
         },

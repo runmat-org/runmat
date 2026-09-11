@@ -3,8 +3,8 @@ use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{
-    accel, batch, benchmark, check, compile, config, gc, job, mex, package, repl, script, test,
-    version,
+    accel, batch, benchmark, check, compile, config, gc, job, mex, native_interface, package, repl,
+    script, test, version,
 };
 use crate::remote;
 
@@ -87,6 +87,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeCon
         }
         Commands::Mex(args) => mex::execute(args),
         Commands::Mexcuda(args) => mex::execute_cuda(args),
+        Commands::NativeInterface { command } => native_interface::execute(command),
         Commands::Check {
             file,
             json,

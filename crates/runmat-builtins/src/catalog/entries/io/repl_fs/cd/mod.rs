@@ -78,6 +78,7 @@ const EFFECTS: [EffectKind; 5] = [
 ];
 
 pub const CD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cd" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

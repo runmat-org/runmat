@@ -19,13 +19,14 @@ use std::sync::OnceLock;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_registry {
-    use super::{BuiltinDoc, BuiltinFunction, Constant};
+    use super::{BuiltinDoc, BuiltinFunction, BuiltinImplementationProvenance, Constant};
     use std::cell::{Cell, RefCell};
 
     thread_local! {
         static FUNCTIONS: RefCell<Vec<&'static BuiltinFunction>> = const { RefCell::new(Vec::new()) };
         static CONSTANTS: RefCell<Vec<&'static Constant>> = const { RefCell::new(Vec::new()) };
         static DOCS: RefCell<Vec<&'static BuiltinDoc>> = const { RefCell::new(Vec::new()) };
+        static IMPLEMENTATION_PROVENANCE: RefCell<Vec<&'static BuiltinImplementationProvenance>> = const { RefCell::new(Vec::new()) };
         static REGISTERED: Cell<bool> = const { Cell::new(false) };
     }
 
@@ -48,6 +49,11 @@ pub mod wasm_registry {
         DOCS.with_borrow_mut(|docs| docs.push(leaked));
     }
 
+    pub fn submit_builtin_implementation_provenance(provenance: BuiltinImplementationProvenance) {
+        let leaked = leak(provenance);
+        IMPLEMENTATION_PROVENANCE.with_borrow_mut(|entries| entries.push(leaked));
+    }
+
     pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
         FUNCTIONS.with_borrow(Clone::clone)
     }
@@ -58,6 +64,10 @@ pub mod wasm_registry {
 
     pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
         DOCS.with_borrow(Clone::clone)
+    }
+
+    pub fn builtin_implementation_provenance() -> Vec<&'static BuiltinImplementationProvenance> {
+        IMPLEMENTATION_PROVENANCE.with_borrow(Clone::clone)
     }
 
     pub fn mark_registered() {

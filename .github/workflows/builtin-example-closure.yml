@@ -1,0 +1,230 @@
+name: Builtin Example Product Closure
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  plan:
+    name: Freeze builtin example inventory and plan
+    runs-on: ubuntu-latest
+    outputs:
+      execution_matrix: ${{ steps.freeze.outputs.execution_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Create clean-source inventory, plan, and matrix
+        id: freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/builtin-example-closure/protocol
+          mkdir -p "$root"
+          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
+          node scripts/runtime/verify-builtin-examples.mjs plan \
+            --inventory "$root/inventory.json" \
+            --topology scripts/runtime/builtin-example-topology.c00.json \
+            --output "$root/plan.json"
+          node scripts/runtime/verify-builtin-examples.mjs matrix \
+            --plan "$root/plan.json" --output "$root/execution-matrix.json"
+          matrix="$(node -e 'const m=require("./artifacts/builtin-example-closure/protocol/execution-matrix.json"); process.stdout.write(JSON.stringify({include:m.include}))')"
+          echo "execution_matrix=$matrix" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-example-protocol-${{ github.run_attempt }}
+          path: artifacts/builtin-example-closure/protocol
+          if-no-files-found: error
+
+  products:
+    name: Build and identify native and browser products
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.90.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install native and browser build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
+          npm ci --prefix bindings/ts
+      - name: Build embedded-AOT native product without OCCT
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build-runmat-with-aot-runtime.sh --locked --release \
+            --bin runmat --no-default-features --features blas-lapack,wgpu,jit
+      - name: Stage, identify, and probe native product
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/builtin-example-closure/products/native
+          source_revision="$(git rev-parse HEAD)"
+          node scripts/runtime/stage-builtin-example-product.mjs \
+            --binary target/release/runmat --destination "$root/product" --executable-name runmat
+          node scripts/runtime/verify-builtin-examples.mjs artifacts \
+            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --root "$root/product" --entrypoint runmat-binary=runmat --output "$root/artifacts.json"
+          node scripts/runtime/verify-builtin-examples.mjs probe \
+            --kind native-embedded-aot-compile-and-execute-v1 \
+            --artifact-manifest "$root/artifacts.json" --output "$root/embedded-aot.product-probe.json"
+      - name: Build browser product once without OCCT
+        working-directory: bindings/ts
+        shell: bash
+        run: npm run build:examples
+      - name: Stage and identify browser product
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=artifacts/builtin-example-closure/products/browser
+          source_revision="$(git rev-parse HEAD)"
+          mkdir -p "$root/product"
+          cp bindings/ts/dist/pkg-web/runmat_wasm_web.js "$root/product/"
+          cp bindings/ts/dist/pkg-web/runmat_wasm_web_bg.wasm "$root/product/"
+          node scripts/runtime/verify-builtin-examples.mjs artifacts \
+            --product browser-wasm --profile web --source-revision "$source_revision" \
+            --file wasm-js="$root/product/runmat_wasm_web.js" \
+            --file wasm-binary="$root/product/runmat_wasm_web_bg.wasm" \
+            --output "$root/artifacts.json"
+      - name: Preserve staged product bytes and executable modes
+        shell: bash
+        run: tar -cf builtin-example-products.tar artifacts/builtin-example-closure/products
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-example-products-${{ github.run_attempt }}
+          path: builtin-example-products.tar
+          if-no-files-found: error
+
+  execute-shard:
+    name: Execute ${{ matrix.lane }} shard ${{ matrix.shardIndex }}
+    needs: [plan, products]
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.plan.outputs.execution_matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install native execution dependencies
+        if: startsWith(matrix.lane, 'native-') || matrix.lane == 'interactive-host'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev libssl-dev
+      - name: Setup Chrome
+        if: startsWith(matrix.lane, 'browser-')
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          install-chromedriver: true
+          install-dependencies: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-example-protocol-${{ github.run_attempt }}
+          path: artifacts/builtin-example-closure/protocol
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-example-products-${{ github.run_attempt }}
+      - name: Restore staged products
+        shell: bash
+        run: tar -xf builtin-example-products.tar
+      - name: Execute exactly one frozen shard
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.chrome.outputs.chromedriver-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.product }}" == "native-cli" ]]; then
+            manifest=artifacts/builtin-example-closure/products/native/artifacts.json
+          else
+            manifest=artifacts/builtin-example-closure/products/browser/artifacts.json
+          fi
+          result=artifacts/builtin-example-closure/results/${{ matrix.lane }}-${{ matrix.shardIndex }}.shard-result.json
+          work=artifacts/builtin-example-closure/work/${{ matrix.lane }}/${{ matrix.shardIndex }}
+          node scripts/runtime/verify-builtin-examples.mjs run \
+            --inventory artifacts/builtin-example-closure/protocol/inventory.json \
+            --plan artifacts/builtin-example-closure/protocol/plan.json \
+            --lane "${{ matrix.lane }}" --shard-index "${{ matrix.shardIndex }}" \
+            --assignment-digest "${{ matrix.assignmentDigest }}" \
+            --artifact-manifest "$manifest" --work-dir "$work" --result-out "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: builtin-example-result-${{ github.run_attempt }}-${{ matrix.lane }}-${{ matrix.shardIndex }}
+          path: artifacts/builtin-example-closure/results/*.shard-result.json
+          if-no-files-found: error
+
+  reconcile:
+    name: Reconcile builtin example closure
+    if: always() && needs.plan.result == 'success' && needs.products.result == 'success'
+    needs: [plan, products, execute-shard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-example-protocol-${{ github.run_attempt }}
+          path: artifacts/builtin-example-closure/protocol
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-example-products-${{ github.run_attempt }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: builtin-example-result-${{ github.run_attempt }}-*
+          path: artifacts/builtin-example-closure/result-artifacts
+      - name: Restore exact product evidence
+        shell: bash
+        run: tar -xf builtin-example-products.tar
+      - name: Reconcile exact expected shard closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/runtime/verify-builtin-examples.mjs reconcile \
+            --inventory artifacts/builtin-example-closure/protocol/inventory.json \
+            --plan artifacts/builtin-example-closure/protocol/plan.json \
+            --results-dir artifacts/builtin-example-closure/result-artifacts \
+            --artifact-manifest artifacts/builtin-example-closure/products/native/artifacts.json \
+            --artifact-manifest artifacts/builtin-example-closure/products/browser/artifacts.json \
+            --product-probe artifacts/builtin-example-closure/products/native/embedded-aot.product-probe.json \
+            --closure --report-dir artifacts/builtin-example-closure/report \
+            --output artifacts/builtin-example-closure/reconciliation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: builtin-example-closure-report-${{ github.run_attempt }}
+          path: |
+            artifacts/builtin-example-closure/reconciliation.json
+            artifacts/builtin-example-closure/report
+          if-no-files-found: warn

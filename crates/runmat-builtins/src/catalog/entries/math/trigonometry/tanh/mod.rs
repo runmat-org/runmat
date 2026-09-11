@@ -119,6 +119,7 @@ pub const TANH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const TANH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tanh" },
     category: "math/trigonometry",
     documentation: TANH_DOCUMENTATION,

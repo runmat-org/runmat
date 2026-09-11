@@ -76,6 +76,7 @@ pub const PRIMES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const PRIMES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "primes" },
     category: "math/discrete",
     documentation: PRIMES_DOCUMENTATION,

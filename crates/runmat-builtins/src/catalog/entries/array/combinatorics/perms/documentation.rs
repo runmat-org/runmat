@@ -25,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P = [3 2 1; 3 1 2; 2 3 1; 2 1 3; 1 3 2; 1 2 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(P, [3 2 1; 3 1 2; 2 3 1; 2 1 3; 1 3 2; 1 2 3]));" },
     },
     BuiltinExample {
@@ -34,6 +36,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P contains cba, cab, bca, bac, acb, and abc"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(P, ['cba'; 'cab'; 'bca'; 'bac'; 'acb'; 'abc']));" },
     },
     BuiltinExample {
@@ -43,6 +47,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P has six rows, including duplicate rows"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(P), [6 3]));\nassert(sum(all(P == [2 1 1], 2)) == 2);" },
     },
     BuiltinExample {
@@ -52,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P is a 1-by-0 empty double array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(P), [1 0]));" },
     },
     BuiltinExample {
@@ -61,6 +69,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("P is a 2-by-2 uint64 array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(P, \"uint64\"));\nassert(isequal(size(P), [2 2]));\nassert(P(1,1) == v(2) && P(2,1) == v(1));" },
     },
 ];

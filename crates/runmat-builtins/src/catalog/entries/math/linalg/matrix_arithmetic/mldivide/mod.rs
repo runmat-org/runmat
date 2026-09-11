@@ -8,6 +8,7 @@ use crate::*;
 pub use contract::*;
 
 pub const MLDIVIDE_CATALOG_ENTRY: BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "mldivide",
     documentation::DOCUMENTATION,
     &MLDIVIDE_DESCRIPTOR,

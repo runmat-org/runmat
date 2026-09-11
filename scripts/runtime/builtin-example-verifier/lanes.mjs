@@ -12,7 +12,59 @@ export function usesNativeLane(harness) {
     return harness === "Portable"
         || harness === "Native"
         || harness === "NativeFilesystem"
-        || harness === "NativeForeignRuntime";
+        || harness === "NativeLoopbackNetwork"
+        || harness === "NativeForeignRuntime"
+        || harness === "InteractiveHost";
+}
+
+export const EXECUTION_LANES = Object.freeze([
+    "browser-host",
+    "browser-graphics",
+    "browser-wgpu",
+    "native-host",
+    "native-filesystem",
+    "native-loopback-network",
+    "native-foreign-runtime",
+    "interactive-host"
+]);
+
+const HARNESS_LANES = Object.freeze({
+    LegacyBrowser: ["browser-host"],
+    Portable: ["native-host", "browser-host"],
+    Native: ["native-host"],
+    Browser: ["browser-host"],
+    BrowserGraphics: ["browser-graphics"],
+    NativeFilesystem: ["native-filesystem"],
+    NativeLoopbackNetwork: ["native-loopback-network"],
+    Wgpu: ["browser-wgpu"],
+    NativeForeignRuntime: ["native-foreign-runtime"],
+    InteractiveHost: ["interactive-host"]
+});
+
+export function requiredExecutionLanes(harness) {
+    const lanes = HARNESS_LANES[harness];
+    if (!lanes) throw new Error(`Unknown builtin example harness: ${harness}`);
+    return [...lanes];
+}
+
+export function isExecutionLane(lane) {
+    return EXECUTION_LANES.includes(lane);
+}
+
+export function laneProduct(lane) {
+    if (!isExecutionLane(lane)) throw new Error(`Unknown builtin example execution lane: ${lane}`);
+    if (lane.startsWith("browser-")) return "browser-wasm";
+    return "native-cli";
+}
+
+export function laneAdapterAvailability(lane) {
+    if (!isExecutionLane(lane)) throw new Error(`Unknown builtin example execution lane: ${lane}`);
+    return { available: true, reason: "" };
+}
+
+export function laneEnablesGpu(lane) {
+    if (!isExecutionLane(lane)) throw new Error(`Unknown builtin example execution lane: ${lane}`);
+    return lane === "browser-wgpu";
 }
 
 export function mergeLaneResults(cases, browserResults, nativeResults, unsupportedCases) {

@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 2 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(Y, [1 2 2]));" },
     },
     BuiltinExample {
@@ -41,6 +43,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 1 2 3 4 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(Y, [1 1 2 3 4 5]));" },
     },
     BuiltinExample {
@@ -50,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 2], E = [0 0.5 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(Y, [1 2]));\nassert(isequal(E, [0 0.5 1]));" },
     },
     BuiltinExample {
@@ -59,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y is uint64 and uses zero outside the bins"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(Y, \"uint64\"));\nassert(isequal(Y, uint64([0 labels(1) labels(2) 0])));" },
     },
     BuiltinExample {
@@ -68,6 +76,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 1 2 2 NaN]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequaln(Y, [1 1 2 2 NaN]));" },
     },
 ];

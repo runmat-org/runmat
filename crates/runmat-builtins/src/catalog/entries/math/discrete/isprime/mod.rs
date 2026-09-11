@@ -66,6 +66,7 @@ pub const ISPRIME_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const ISPRIME_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "isprime" },
     category: "math/discrete",
     documentation: ISPRIME_DOCUMENTATION,

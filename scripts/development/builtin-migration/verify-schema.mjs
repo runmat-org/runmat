@@ -1,145 +1,83 @@
-import { compareCodePoint, sorted } from "./constants.mjs";
-import { validateCombinedMachineReport, validateMachineReport } from "../../runtime/builtin-example-verifier/report-schema.mjs";
-
-const SAFE_IDENTITY = /^[A-Za-z][A-Za-z0-9_.]*$/;
-const DIGEST = /^sha256:[a-f0-9]{64}$/;
-const LANES = new Set(["browser", "native"]);
+import { compareCodePoint } from "./constants.mjs";
+import { evidenceDigest } from "./evidence.mjs";
+import { array, digest, enumValue, exact, integer, kind, nonempty, repositoryPath, sourceRevision, stableId, uniqueStrings, SAFE_IDENTITY } from "./schema.mjs";
 
 export function parseVerificationManifest(value) {
-  requireKind(value, "runmat-builtin-migration-verification-manifest");
-  exact(value, ["schema_version", "kind", "batch", "factory_audit", "example_reports", "expectations"], "verification manifest");
-  const batch = requireObject(value.batch, "batch");
-  exact(batch, ["artifact", "source", "identities", "factory_inventory_digest", "example_inventory_digest", "combined_example_artifact"], "verification batch");
-  const identities = uniqueStrings(batch.identities, "batch identities", false, SAFE_IDENTITY).map(lower);
-  const expectations = requireArray(value.expectations, "expectations").map(parseExpectation);
-  const expectedIdentities = sorted(expectations.map((entry) => entry.identity));
-  if (JSON.stringify(sorted(identities)) !== JSON.stringify(expectedIdentities)) {
-    throw new Error("Expectations must cover each batch identity exactly once");
-  }
-  const exampleKeys = expectations.flatMap((entry) => entry.example_keys);
-  if (new Set(exampleKeys).size !== exampleKeys.length) throw new Error("Example keys must be unique across expectations");
-  const reports = requireArray(value.example_reports, "example reports").map((entry) => parseReference(entry, "example report"));
-  if (new Set(reports.map((entry) => entry.artifact)).size !== reports.length) throw new Error("Example report artifacts must be unique");
-  reports.sort((a, b) => compareCodePoint(a.artifact, b.artifact));
-  const source = nonempty(batch.source, "batch source");
-  if (source === "unspecified") throw new Error("batch source must be an exact source identity, not unspecified");
-  return {
-    schema_version: 1,
-    kind: value.kind,
-    batch: {
-      artifact: nonempty(batch.artifact, "batch artifact"),
-      source,
-      identities: sorted(identities),
-      factory_inventory_digest: digest(batch.factory_inventory_digest, "factory inventory digest"),
-      example_inventory_digest: digest(batch.example_inventory_digest, "example inventory digest"),
-      combined_example_artifact: nonempty(batch.combined_example_artifact, "combined example artifact"),
-    },
-    factory_audit: parseReference(value.factory_audit, "factory audit"),
-    example_reports: reports,
-    expectations: expectations.sort((a, b) => compareCodePoint(a.identity, b.identity)),
+  kind(value, 2, "runmat-builtin-migration-verification-manifest", "verification manifest");
+  exact(value, ["schema_version", "kind", "authority", "batch", "audit", "gate_results", "expectations"], "verification manifest");
+  if (value.authority !== "reviewed-verification-request") throw new Error("verification manifest has invalid authority");
+  exact(value.batch, ["artifact_id", "source_revision", "source_digest", "inventory_digest", "control_manifest_digest", "bundle_id", "identities"], "verification batch");
+  const identities = uniqueStrings(value.batch.identities, "verification identities", { pattern: SAFE_IDENTITY, lower: true }).sort(compareCodePoint);
+  const batch = {
+    artifact_id: stableId(value.batch.artifact_id, "verification artifact id"),
+    source_revision: sourceRevision(value.batch.source_revision, "verification source revision"),
+    source_digest: digest(value.batch.source_digest, "verification source digest"),
+    inventory_digest: digest(value.batch.inventory_digest, "verification inventory digest"),
+    control_manifest_digest: digest(value.batch.control_manifest_digest, "verification control digest"),
+    bundle_id: stableId(value.batch.bundle_id, "verification bundle id"), identities,
   };
+  const audit = parseReference(value.audit, "audit reference");
+  const gates = array(value.gate_results, "gate references").map((entry) => parseReference(entry, "gate reference"));
+  if (!gates.length || new Set(gates.map((entry) => entry.artifact_id)).size !== gates.length) throw new Error("gate references must be nonempty and unique");
+  const expectations = array(value.expectations, "verification expectations").map(parseExpectation).sort((a, b) => compareCodePoint(a.identity, b.identity));
+  if (JSON.stringify(expectations.map((entry) => entry.identity)) !== JSON.stringify(identities)) throw new Error("expectations must cover each batch identity exactly once");
+  return { ...value, batch, audit, gate_results: gates.sort((a, b) => compareCodePoint(a.artifact_id, b.artifact_id)), expectations };
 }
 
-export function validateFactoryAudit(value) {
-  if (!value || value.schema_version !== 2 || value.kind !== "runmat-builtin-migration-audit") {
-    throw new Error("Expected schema_version 2 and kind runmat-builtin-migration-audit");
-  }
-  exact(value, ["schema_version", "kind", "authority", "metadata", "requested_identities", "global_diagnostics", "summary", "result", "identities"], "factory audit");
-  if (value.authority !== "development-verification-only") throw new Error("Invalid factory audit authority");
-  const metadata = requireObject(value.metadata, "factory audit metadata");
-  exact(metadata, ["source", "artifact", "inventory"], "factory audit metadata");
-  const inventory = requireObject(metadata.inventory, "factory audit inventory");
-  exact(inventory, ["schema_version", "kind", "digest", "identities"], "factory audit inventory");
-  if (inventory.schema_version !== 1 || inventory.kind !== "runmat-builtin-migration-inventory") throw new Error("Unsupported factory inventory schema");
-  uniqueStrings(inventory.identities, "factory inventory identities", false);
-  const requested = sorted(uniqueStrings(value.requested_identities, "factory requested identities", false, SAFE_IDENTITY).map(lower));
-  if (!Array.isArray(value.identities) || !["pass", "fail"].includes(value.result)
-      || !Array.isArray(value.global_diagnostics)) throw new Error("Invalid factory audit result");
-  const resultIdentities = value.identities.map((entry) => {
-    exact(entry, ["identity", "result", "failures", "evidence"], "factory identity result");
-    if (!entry || typeof entry.identity !== "string" || !SAFE_IDENTITY.test(entry.identity)
-        || !["pass", "fail"].includes(entry.result) || !Array.isArray(entry.failures)) {
-      throw new Error("Invalid factory identity audit record");
-    }
-    return entry.identity.toLowerCase();
+export function validateAudit(value, batch) {
+  kind(value, 3, "runmat-builtin-migration-audit", "migration audit");
+  exact(value, ["schema_version", "kind", "authority", "artifact_id", "source", "inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "requested_identities", "evidence", "summary", "result", "global_failures", "identities"], "migration audit");
+  if (value.authority !== "development-verification-evidence-only") throw new Error("migration audit has invalid authority");
+  stableId(value.artifact_id, "migration audit artifact id");
+  digest(value.inventory_digest, "migration audit inventory digest");
+  digest(value.control_manifest_digest, "migration audit control digest");
+  stableId(value.bundle_id, "migration audit bundle id");
+  stableId(value.lease_id, "migration audit lease id");
+  exact(value.source, ["revision", "dirty", "roots", "files", "digest"], "migration audit source");
+  sourceRevision(value.source.revision, "migration audit source revision"); digest(value.source.digest, "migration audit source digest");
+  if (![true, false, null].includes(value.source.dirty)) throw new Error("migration audit source dirty must be boolean or null");
+  const roots = uniqueStrings(value.source.roots, "migration audit source roots").sort(compareCodePoint);
+  if (JSON.stringify(roots) !== JSON.stringify(value.source.roots)) throw new Error("migration audit source roots must use canonical order");
+  array(value.source.files, "migration audit source files", { empty: true }).forEach((entry) => { exact(entry, ["path", "mode", "content_digest"], "migration audit source file"); repositoryPath(entry.path, "migration audit source file path"); integer(entry.mode, "migration audit source file mode"); digest(entry.content_digest, "migration audit source file digest"); });
+  const filePaths = value.source.files.map((entry) => entry.path);
+  if (new Set(filePaths).size !== filePaths.length || JSON.stringify([...filePaths].sort(compareCodePoint)) !== JSON.stringify(filePaths)) throw new Error("migration audit source files must be unique and canonically ordered");
+  if (evidenceDigest({ roots: value.source.roots, files: value.source.files }) !== value.source.digest) throw new Error("migration audit source digest is inconsistent");
+  exact(value.evidence, ["gate_artifacts", "prepare_digests", "source_disposition_digests"], "migration audit evidence");
+  uniqueStrings(value.evidence.gate_artifacts, "migration audit gate artifacts", { empty: true });
+  for (const field of ["prepare_digests", "source_disposition_digests"]) array(value.evidence[field], `migration audit ${field}`, { empty: true }).forEach((entry) => digest(entry, `migration audit ${field}`));
+  exact(value.summary, ["identities", "passed", "failed", "global_failures"], "migration audit summary");
+  for (const field of ["identities", "passed", "failed", "global_failures"]) integer(value.summary[field], `migration audit summary ${field}`);
+  enumValue(value.result, ["pass", "fail"], "migration audit result");
+  array(value.global_failures, "migration audit global failures", { empty: true }).forEach((entry) => { exact(entry, ["code", "detail"], "migration audit failure"); nonempty(entry.code, "migration audit failure code"); nonempty(entry.detail, "migration audit failure detail"); });
+  array(value.identities, "migration audit identity results").forEach((entry) => {
+    exact(entry, ["identity", "result", "failures"], "migration audit identity result");
+    if (!SAFE_IDENTITY.test(nonempty(entry.identity, "migration audit identity"))) throw new Error("migration audit identity is unsafe");
+    if (!["pass", "fail"].includes(entry.result)) throw new Error("migration audit identity result is invalid");
+    array(entry.failures, "migration audit identity failures", { empty: true }).forEach((failure) => { exact(failure, ["code", "detail"], "migration audit identity failure"); nonempty(failure.code, "migration audit identity failure code"); nonempty(failure.detail, "migration audit identity failure detail"); });
+    if ((entry.result === "pass") !== (entry.failures.length === 0)) throw new Error(`${entry.identity}: audit result conflicts with its failures`);
   });
-  if (new Set(resultIdentities).size !== resultIdentities.length
-      || JSON.stringify(sorted(resultIdentities)) !== JSON.stringify(requested)) {
-    throw new Error("Factory identity results must exactly match requested identities");
-  }
-  exact(value.summary, ["identities", "passed", "failed", "global_errors"], "factory audit summary");
+  const requested = uniqueStrings(value.requested_identities, "migration audit requested identities", { pattern: SAFE_IDENTITY, lower: true }).sort(compareCodePoint);
+  if (JSON.stringify(requested) !== JSON.stringify(value.requested_identities)) throw new Error("migration audit requested identities must be normalized and canonically ordered");
+  const resultIds = value.identities.map((entry) => entry.identity).sort(compareCodePoint);
+  if (new Set(resultIds).size !== resultIds.length || JSON.stringify(resultIds) !== JSON.stringify(value.identities.map((entry) => entry.identity))) throw new Error("migration audit identity results must be unique and canonically ordered");
+  if (JSON.stringify(requested) !== JSON.stringify(resultIds)) throw new Error("migration audit result identities do not exactly match its request");
   const failed = value.identities.filter((entry) => entry.result === "fail").length;
-  if (value.summary.identities !== value.identities.length || value.summary.passed !== value.identities.length - failed
-      || value.summary.failed !== failed || value.summary.global_errors !== value.global_diagnostics.length) {
-    throw new Error("Inconsistent factory audit summary");
-  }
-  return {
-    value,
-    source: nonempty(metadata.source, "factory audit source"),
-    artifact: nonempty(metadata.artifact, "factory audit artifact"),
-    inventory_digest: digest(inventory.digest, "factory inventory digest"),
-  };
-}
-
-export function classifyExampleReport(value) {
-  if (!value || value.schemaVersion !== "runmat.builtin-example-report.v2") throw new Error("Unsupported example report schema");
-  const kind = Number.isInteger(value.metadata?.index) ? "shard" : Array.isArray(value.metadata?.shards) ? "combined" : "unknown";
-  if (kind === "shard") validateMachineReport(value);
-  else if (kind === "combined") validateCombinedMachineReport(value);
-  else throw new Error("Example report is neither a shard nor a combined artifact");
-  const metadata = value.metadata;
-  const inventory = metadata.inventory;
-  return {
-    value,
-    kind,
-    source: nonempty(metadata.source, "example report source"),
-    artifact: nonempty(metadata.artifact, "example report artifact"),
-    inventory_digest: inventory.digest,
-  };
+  const expectedResult = failed === 0 && value.global_failures.length === 0 ? "pass" : "fail";
+  if (value.summary.identities !== value.identities.length || value.summary.passed !== value.identities.length - failed || value.summary.failed !== failed || value.summary.global_failures !== value.global_failures.length || value.result !== expectedResult) throw new Error("migration audit result or summary is inconsistent");
+  if (value.artifact_id !== batch.audit_artifact_id || value.source.revision !== batch.source_revision || value.source.digest !== batch.source_digest || value.inventory_digest !== batch.inventory_digest || value.control_manifest_digest !== batch.control_manifest_digest || value.bundle_id !== batch.bundle_id) throw new Error("migration audit provenance is stale or mismatched");
+  if (JSON.stringify(value.requested_identities) !== JSON.stringify(batch.identities)) throw new Error("migration audit identities differ from verification batch");
+  if (value.result !== "pass" || value.global_failures.length || value.identities.some((entry) => entry.result !== "pass")) throw new Error("migration audit is not passing");
+  return value;
 }
 
 function parseExpectation(value) {
-  const entry = requireObject(value, "expectation");
-  exact(entry, ["identity", "example_keys", "required_lanes"], "expectation");
-  const identity = nonempty(entry.identity, "expectation identity").toLowerCase();
-  if (!SAFE_IDENTITY.test(identity)) throw new Error(`Unsafe expectation identity ${identity}`);
-  return {
-    identity,
-    example_keys: sorted(uniqueStrings(entry.example_keys, `${identity} example keys`, true)),
-    required_lanes: sorted(uniqueStrings(entry.required_lanes, `${identity} required lanes`, true).map((lane) => {
-      if (!LANES.has(lane)) throw new Error(`Unsupported required lane ${lane}`);
-      return lane;
-    })),
-  };
+  exact(value, ["identity", "required_gates"], "verification expectation");
+  const identity = nonempty(value.identity, "expectation identity").toLowerCase();
+  if (!SAFE_IDENTITY.test(identity)) throw new Error(`unsafe expectation identity ${identity}`);
+  return { identity, required_gates: uniqueStrings(value.required_gates, `${identity} required gates`).sort(compareCodePoint) };
 }
 
 function parseReference(value, label) {
-  const reference = requireObject(value, label);
-  exact(reference, ["path", "artifact"], label);
-  return { path: nonempty(reference.path, `${label} path`), artifact: nonempty(reference.artifact, `${label} artifact`) };
-}
-
-function requireKind(value, kind) {
-  if (!value || value.schema_version !== 1 || value.kind !== kind) throw new Error(`Expected schema_version 1 and kind ${kind}`);
-}
-function requireObject(value, label) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
-  return value;
-}
-function requireArray(value, label) { if (!Array.isArray(value) || !value.length) throw new Error(`${label} must be a nonempty array`); return value; }
-function nonempty(value, label) { if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a nonempty string`); return value.trim(); }
-function digest(value, label) { const result = nonempty(value, label); if (!DIGEST.test(result)) throw new Error(`${label} must be sha256 hex`); return result; }
-function uniqueStrings(value, label, allowEmpty = false, pattern = null) {
-  if (!Array.isArray(value) || (!allowEmpty && !value.length)) throw new Error(`${label} must be ${allowEmpty ? "an" : "a nonempty"} array`);
-  const entries = value.map((entry) => nonempty(entry, label));
-  if (pattern && entries.some((entry) => !pattern.test(entry))) throw new Error(`${label} contains an unsafe value`);
-  if (new Set(entries.map(lower)).size !== entries.length) throw new Error(`${label} must be unique`);
-  return entries;
-}
-function lower(value) { return value.toLowerCase(); }
-function exact(value, keys, label) {
-  requireObject(value, label);
-  const actual = sorted(Object.keys(value));
-  const expected = sorted(keys);
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label} fields must be exactly ${keys.join(", ")}`);
+  exact(value, ["path", "artifact_id", "digest"], label);
+  return { path: repositoryPath(value.path, `${label} path`), artifact_id: stableId(value.artifact_id, `${label} artifact id`), digest: digest(value.digest, `${label} digest`) };
 }

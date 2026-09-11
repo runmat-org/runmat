@@ -125,6 +125,7 @@ const EFFECTS: [EffectKind; 3] = [
     EffectKind::MayThrow,
 ];
 pub const SPLITAPPLY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "splitapply" },
     category: "array/grouping",
     documentation: DOCUMENTATION,

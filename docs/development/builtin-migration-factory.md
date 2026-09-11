@@ -1,124 +1,196 @@
 # Builtin migration factory
 
-`scripts/development/builtin-migration-factory.mjs` produces deterministic development evidence and review workspaces for the C00-C07 migration. It is not loaded by RunMat, is not an editable catalog, and its generated JSON and templates must not be checked in as authority.
+The builtin migration factory coordinates the reviewed C00-C07 migration without becoming runtime or catalog authority. Generated queues, workspaces, audits, verification results, and seals are content-addressed development evidence. They must remain outside production source.
 
-The `inventory` command unions these repository surfaces:
+## Authority model
 
-- typed catalog source identities;
-- runtime registrations, their implementation files, and typed lexical provenance (`literal-attribute` or `macro-invocation`);
-- legacy documentation sidecars and runtime documentation shadows;
-- runtime-local resolver declarations, catalog inference/link evidence, provider/fusion declarations, and generated WASM registry membership;
-- tests and examples discoverable from those owned source files.
+The factory consumes two complementary inventories:
 
-Source evidence cannot reliably distinguish a public canonical builtin from a callable alias or an internal binding. Catalog membership proves a canonical identity; all other intent stays explicitly unresolved until a reviewed disposition input says otherwise. The tool also preserves casing conflicts instead of silently selecting a spelling. Runtime totals report separate name-identity, binding-record, and provenance counts. The historical 1,412 figure remains labeled orientation evidence rather than a target the scanner manipulates its results to match.
+- `runmat-compiled-builtin-migration-inventory` v1 is the semantic and registration authority. The runtime exporter reports the compiled catalog, legacy functions and documentation, constants, runtime bindings, declaration provenance, GPU specifications, fusion specifications, build configuration, and its own snapshot digest.
+- The JavaScript source scanner records paths, documentation files, tests, examples, and bounded lexical observations. Every such observation is labeled `discovery_only`; it cannot establish runtime registration or semantic completion.
+
+Export the compiled snapshot for the exact build configuration being migrated, then pass it to every inventory-derived command:
 
 ```sh
-node scripts/development/builtin-migration-factory.mjs inventory > /tmp/runmat-builtin-inventory.json
+cargo run -p runmat-runtime --bin export_builtin_migration_inventory \
+  > /tmp/runmat-compiled-inventory.json
+node scripts/development/builtin-migration-factory.mjs inventory \
+  --compiled-inventory /tmp/runmat-compiled-inventory.json \
+  --output /tmp/runmat-builtin-inventory.json
+```
+
+The factory rejects a missing snapshot, a future schema version, unknown fields at any nesting level, malformed enum or record payloads, noncanonical ordering, inconsistent binding/provenance relationships, structurally invalid producer validation, or a snapshot whose SHA-256 digest does not match its contents. Migration-readiness findings are different from structural errors: the factory preserves every typed finding in inventory evidence and requires the control manifest to give it an exact reviewed disposition. A legacy GPU or fusion registry group remains a reviewed raw key rather than being guessed into a callable identity. Inventory v2 pins the source revision, the complete ordered source-root and file snapshot, a separate digest over every scanner-consumed path, the compiled snapshot digest, the migration-finding digest, and the reviewed identity-disposition digest.
+
+## Reviewed control and scheduling
+
+The v1 `runmat-builtin-migration-control-manifest` is authored and reviewed rather than inferred. It contains:
+
+- the digest of the exact unreviewed control draft from which review began;
+- the exact baseline revision and source, compiled inventory, and disposition digests;
+- C00-C07 with fixed order and semantic labels;
+- atomic family bundles and their prerequisite DAG;
+- reciprocal identity membership, exact public spelling, and typed `canonical`, `alias`, or `internal` disposition;
+- domain, family, runtime owner when one exists, shared dependencies, reviewed complexity, maturity applicability, expected authorities, expected removals, and baseline evidence;
+- authored write scopes separated from integration-produced files;
+- exact reviewed dispositions for every compiled migration-readiness finding;
+- per-bundle gate plans that freeze the program source, arguments, working-directory policy, parser kind, and expected artifact roles;
+- reviewed exceptions and storage policy.
+
+Identifiers beginning with `__` are supported for real internal bindings. Distinct identity keys or public spellings that collide case-insensitively are rejected. Canonical identities require a runtime owner; aliases and internal identities may explicitly use `null`. Bundle prerequisites must exist and form a DAG. Bundle/identity membership must be reciprocal. Authored scopes cannot overlap integration outputs, and cross-bundle authored collisions are reported by the queue.
+
+Generating the initial review surface does not confer authority. `draft-control` emits a deterministic, content-addressed v1 scaffold for every exact inventory identity and migration finding. It pins the baseline and the compiled-authority, lexical-observation, and complete inventory-row digests, but leaves public spelling, disposition, alias target, cohort, bundle, domain, family, runtime owner, dependencies, complexity, maturity, expected authorities, removals, baseline evidence, owner, gate plans, exceptions, and storage policy unresolved. Its bundle list is empty, every review status is `unreviewed`, and the parser rejects attempts to insert inferred facts or review claims into the draft.
+
+```sh
+node scripts/development/builtin-migration-factory.mjs draft-control \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --output /tmp/rm1064-control-draft.json
+```
+
+Reviewers author the complete control manifest separately and set its `control_draft_digest` to the draft digest. `freeze-control` verifies the draft against the baseline inventory, requires exact identity and finding coverage, validates every reviewed control field and relationship, and only then emits the reviewed manifest. It does not promote draft observations into review decisions.
+
+```sh
+node scripts/development/builtin-migration-factory.mjs freeze-control \
+  --draft /tmp/rm1064-control-draft.json \
+  --control /tmp/rm1064-reviewed-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --output /tmp/rm1064-control.json
+```
+
+```sh
+node scripts/development/builtin-migration-factory.mjs validate-control \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json
 node scripts/development/builtin-migration-factory.mjs queue \
+  --compiled-inventory /tmp/runmat-compiled-inventory.json \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
   --dispositions /tmp/reviewed-dispositions.json \
   --output /tmp/runmat-builtin-queue.json
-node scripts/development/builtin-migration-factory.mjs prepare accumarray \
-  --workspace /tmp/runmat-builtin-review
-node scripts/development/builtin-migration-factory.mjs audit \
-  --batch /tmp/array-batch.json \
-  --dispositions /tmp/reviewed-dispositions.json \
-  --source git:0123456789abcdef \
-  --artifact array-batch-audit
-node scripts/development/builtin-migration-factory.mjs verify \
-  --manifest /tmp/array-batch-verification.json \
-  --output /tmp/array-batch-verification-result.json
-node --test scripts/development/builtin-migration/tests/*.test.mjs
 ```
 
-## Reviewed disposition input
+Queue v2 is derived at bundle granularity. It exposes prerequisite and migration-finding blockers, reviewed complexity, applicable maturity gates, authored scopes, integration outputs, and source observations. Queue state may record workflow progress, but cannot override blockers or create authority.
 
-Generate a complete, deliberately unclassified seed outside the repository:
+## Storage admission
+
+The control manifest gives storage two named roles:
+
+- `source-worktree`, for source and worktree safety;
+- `target-temp`, for disjoint build targets and temporary products.
+
+Each role has an absolute evidence path, a POSIX device or Windows volume identity, minimum-free and pause-below watermarks, and a maximum observation age. Source and target roles must identify different filesystems, build targets must be disjoint, and OCCT remains disabled unless the affected surface requires it. Every machine gate samples both roles through the operating system and records the timestamp, path, filesystem identity, available bytes, reviewed thresholds, and derived `admitted` or `paused` status. A product gate cannot pass with stale evidence, a different filesystem, or either role below its pause watermark.
+
+## Leases and preparation
+
+An authored lease v1 binds one bundle to the control digest, owner, base revision, exact authored write set, and forbidden integration outputs. Audit derives changed paths from Git at the lease base. Changes outside the reviewed scope or direct edits to generated integration products fail.
+
+Lease assignment is also a two-stage workflow. A closed v1 request names only the reviewed control digest, bundle, lease ID, owner, UTC interval, and review evidence. `issue-lease` rejects unreviewed or stale requests and derives the base revision, authored scope, and integration-output exclusions from the frozen control; a request cannot supply or widen those fields. The resulting lease embeds the reviewed request and carries its own content digest.
 
 ```sh
-node scripts/development/builtin-migration-factory.mjs seed-dispositions \
-  --output /tmp/reviewed-dispositions.json
+node scripts/development/builtin-migration-factory.mjs issue-lease \
+  --request /tmp/array-shape-lease-request.json \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --output /tmp/array-shape-lease.json
 ```
 
-Every seed row starts with `review.status: "unreviewed"` and null classification fields. An unreviewed row fails validation if classification is added. A reviewer changes the status, records nonempty evidence, and then supplies the disposition:
+`prepare` requires the compiled inventory, control, and lease. Its workspace must be outside the repository. Canonical path checks reject symlink escapes into source. Prepare v2 copies legacy documentation byte-for-byte, writes comment-only templates, records inventory evidence, and emits a source-field checklist. It never edits source and refuses to overwrite a modified review file.
+
+```sh
+node scripts/development/builtin-migration-factory.mjs prepare accumarray \
+  --compiled-inventory /tmp/runmat-compiled-inventory.json \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --lease /tmp/array-lease.json \
+  --workspace /tmp/runmat-builtin-review
+```
+
+The source-field disposition schema is v2. It inventories every JSON leaf by JSON Pointer and value digest. Closure requires every prepared leaf to be marked `preserved`, `normalized`, `corrected`, or `removed`. Preserved fields name a typed catalog destination. Changes and removals require a reason and evidence. Missing, duplicate, added, or mutated baseline leaves fail reconciliation.
+
+## Audit and machine gates
+
+Audit v3 accepts a complete bundle, not a convenient subset. An audit evidence manifest points to prepare results, completed field dispositions, and machine gate results. The CLI derives the changed-path set; callers cannot assert it themselves.
+
+Machine gate results use a closed v1 schema and a code-owned producer identity. Each reviewed bundle owns closed gate plans whose program, fixed arguments, and approved executable digest for each target platform are part of the control digest. A producer request can select only the reviewed bundle and gate. The adapter resolves that plan, verifies its executable plus script or manifest bytes against the reviewed plan and frozen source inventory, executes it from the repository, captures its exact exit status, signal, stdout and stderr digests, validates its parser-specific machine output, derives checks and aggregate status, and samples storage. The adapter also records the executable bytes, producer source, and source revision. Requests cannot supply an executable, arguments, working directory, identities, checks, result, raw output digest, timestamp, or storage facts. Catalog-contract and runtime-binding adapters consume the recursively validated compiled inventory exporter; the architecture and other reviewed exit-status plans derive identity checks only from their frozen bundle scope.
+
+The documentation-cutover adapter executes the reviewed catalog documentation exporter and reconciles that output with the completed source-field dispositions. It independently reads each legacy JSON source from the frozen Git revision, verifies those bytes against the baseline inventory, and derives the complete leaf set. Its closed v1 evidence artifact records every source path, source digest, escaped JSON Pointer, original value digest, reviewed disposition, and any reason or review evidence. Retained leaves also record a typed catalog destination, its reviewed expected digest, and the digest observed at that exact pointer in the canonical catalog export. Removed leaves require an explicit reviewed reason and have no destination. The artifact binds the source revision and digest, compiled inventory, control manifest, bundle, source dispositions, and complete catalog export. Missing or duplicate leaves, nearby matching values, stale exports, changed source values, and destination mismatches cannot pass.
+
+Documentation evidence must be written outside the repository to a new path. The input file contains only reviewed source dispositions and that output path:
 
 ```json
 {
-  "schema_version": 1,
-  "kind": "runmat-builtin-dispositions",
-  "identities": {
-    "oldfoo": {
-      "review": { "status": "reviewed", "evidence": ["RM-1064 review link"] },
-      "disposition": "alias",
-      "canonical": "foo",
-      "domain": "math",
-      "family": "elementwise",
-      "reason": null
-    }
-  }
-}
-```
-
-Aliases require a canonical target. Internal bindings require a reviewed reason. Domain and family overrides are review inputs, not deductions.
-
-## Queue interpretation
-
-Every row includes ownership paths, registry/resolver dependencies, provider and host markers, documentation and test strength, conventional expected paths, maturity columns, migration state, and write-set collision keys. The queue sorts by a documented complexity score and then stable identity. Scores are scheduling estimates only: each nonzero factor contains the exact evidence that contributed its points.
-
-The scanner intentionally uses bounded lexical recognition instead of compiling or importing production registries. Consequently, output diagnostics and unresolved fields are work items. They must not be converted into semantic conclusions without review. In particular, a missing generated-WASM match means only that the expected registration helper was not observed, not that the builtin is unsupported in browsers.
-
-## Prepare and audit
-
-`prepare` requires a workspace outside the repository and never edits RunMat source. It resolves canonical filesystem paths before writing and rejects both an output-root symlink into the repository and a pre-existing identity-workspace symlink that escapes the output root or enters the repository. It copies legacy JSON byte-for-byte, emits a field-by-field disposition checklist, records the selected inventory row, and creates comment-only catalog/runtime templates. Re-running it with unchanged source produces identical file content; it refuses to overwrite any review file whose content changed.
-
-`audit` accepts repeated `--identity` selections or a batch document:
-
-```json
-{
-  "schema_version": 1,
-  "kind": "runmat-builtin-migration-batch",
-  "identities": ["accumarray", "discretize"]
-}
-```
-
-The audit is intentionally strict. Canonical identities require one catalog authority, runtime binding evidence, catalog documentation and typed examples, test evidence, native-link inputs, no old sidecar or runtime shadow, and no legacy resolver. Aliases must resolve to a canonical identity without copied documentation. Internal bindings must have runtime evidence and no public catalog/documentation surface. Missing, duplicated, contradictory, ambiguous, cyclic, or unresolved evidence fails the machine-readable report and exits nonzero.
-
-## Batch verification and reconciliation
-
-`verify` joins an audit to example-verifier evidence only through identifiers explicitly pinned by a versioned manifest. It does not run builds, shell commands, examples, or migrations. Relative evidence paths resolve from the manifest directory. A verification result is deterministic development evidence and must not be checked in or consumed as production authority.
-
-```json
-{
-  "schema_version": 1,
-  "kind": "runmat-builtin-migration-verification-manifest",
-  "batch": {
-    "artifact": "array-batch-c03",
-    "source": "git:0123456789abcdef",
-    "identities": ["accumarray"],
-    "factory_inventory_digest": "sha256:<64 lowercase hex characters>",
-    "example_inventory_digest": "sha256:<64 lowercase hex characters>",
-    "combined_example_artifact": "array-examples-combined"
-  },
-  "factory_audit": {
-    "path": "array-batch-audit.json",
-    "artifact": "array-batch-audit"
-  },
-  "example_reports": [
-    { "path": "example-output-report.json", "artifact": "array-examples" }
-  ],
-  "expectations": [
+  "source_dispositions": [
     {
-      "identity": "accumarray",
-      "example_keys": ["accumarray#basic"],
-      "required_lanes": ["browser", "native"]
+      "baseline_digest": "sha256:...",
+      "value": { "schema_version": 2, "kind": "runmat-builtin-source-field-disposition" }
     }
-  ]
+  ],
+  "artifact_output": "/tmp/array-shape-documentation-evidence.json"
 }
 ```
 
-The manifest must contain exactly one expectation per batch identity. `example_keys` and `required_lanes` are review inputs, including explicit empty arrays for aliases or internal bindings without public examples. The verifier never guesses them from source names or descriptions.
+The bundle's reviewed `documentation-cutover` gate plan must select the `documentation_cutover` parser and the `runmat-builtins` catalog documentation exporter with its transition argument. Run it with `--inputs`:
 
-Example inputs may be one combined report or one complete shard set. A supplied combined report must carry the exact `combined_example_artifact`; a shard set is deterministically combined under that identity while retaining its ordered constituent artifacts. Mixed forms, multiple combined reports, shard gaps, duplicate artifacts/results, failed examples, per-identity example-set mismatches, stale source IDs, and mismatched inventory digests fail reconciliation. Harness declarations provide typed lane coverage: `Portable` proves browser and native execution because the standalone verifier requires both; browser-only and native-only harnesses prove only their own lane. Unsupported harnesses prove neither.
+```sh
+node scripts/development/builtin-migration-factory.mjs produce-gate \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --bundle array-shape --gate documentation-cutover \
+  --artifact array-shape-documentation \
+  --inputs /tmp/array-shape-documentation-input.json \
+  --output /tmp/array-shape-documentation-gate.json
+```
 
-Schemas are closed: missing, misspelled, or additional fields fail validation. The verification manifest and result remain version 1, the migration audit is version 2, the referenced migration inventory remains version 1, and example reports use `runmat.builtin-example-report.v2`. Audit v1 and example-report v1 retain their sealed meanings and are explicitly rejected by this reconciliation layer. Future producers must increment their own schema version and update the consumer instead of relying on ignored fields.
+Three reserved parser kinds remain fail-closed because the repository does not yet expose evidence strong enough for their contracts:
 
-The result uses schema version 1 and kind `runmat-builtin-migration-verification-result`. It repeats the pinned batch, source, artifact, and inventory identities; records exact evidence artifacts; and emits global plus per-identity failures. Passing verification never changes catalog or runtime authority and never marks a C00-C07 migration complete by itself.
+- `source_removal` needs syntax-aware baseline and current proof for exact Rust items, macro registrations, and match arms.
+- `generated_products` needs a closed two-run determinism report over the bundle's exact integration outputs and content digests.
+- `inventory_delta` needs a closed final-versus-baseline reconciliation covering identities, authorities, removals, and migration-finding dispositions.
+
+The factory rejects these gates before executing their reviewed command. Nearby files, matching tokens, successful exit codes, file-presence counts, or authored delta JSON cannot substitute for the missing machine contracts.
+
+Run a reviewed producer with:
+
+```sh
+node scripts/development/builtin-migration-factory.mjs produce-gate \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --bundle array-shape --gate architecture --artifact array-shape-architecture \
+  --output /tmp/array-shape-architecture.json
+```
+
+Each result pins its artifact, source revision and digest, inventory digest, control digest, bundle, complete identity set, checks, result, and storage admission. Gate identities cover catalog contracts, runtime bindings, documentation cutover, native linking, WASM registration, exact source-item removal, architecture boundaries, focused tests, strict Clippy, formatting/diff checks, native/browser examples, provider/host/foreign tests, deterministic generated products, and inventory delta.
+
+Audit maps each reviewed maturity requirement to structural gate evidence. A passing token search, test filename, example string, or file-presence count is not closure. Canonical identities additionally require exact catalog cardinality and removal of legacy sidecars, runtime documentation shadows, and legacy resolvers. Aliases and internal identities use disposition-specific rules. Expected file removals require matching baseline path/digest evidence in control and actual absence; source-item removals require the typed source-removal producer.
+
+For every preserved, normalized, or corrected legacy documentation leaf, the documentation producer reports the exact source path and JSON Pointer, typed catalog destination identity and pointer, reviewed expected value digest, and observed destination value digest. This destination reconciliation prevents a completed checklist from passing when the destination field is absent or contains unrelated content.
+
+## Verification and sealing
+
+Verification manifest v2 is a reviewed, closed request containing content-addressed references to one passing audit v3 and the required gate artifacts. Every reference includes path, artifact ID, and digest. Verification rejects missing, duplicate, mutated, unavailable, failed, stale, or wrong-bundle evidence and emits verification result v2.
+
+Seal manifest v1 combines an exact passing verification with integration-owned evidence. A seal requires at least `deterministic-products` and `inventory-delta`, complete bundle identity coverage, matching provenance, and reviewed prerequisite seal references. A passing seal is still integration evidence; it does not mutate catalog or runtime authority.
+
+```sh
+node scripts/development/builtin-migration-factory.mjs audit \
+  --compiled-inventory /tmp/runmat-compiled-inventory.json \
+  --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --lease /tmp/array-lease.json \
+  --batch /tmp/array-batch.json --evidence /tmp/array-audit-evidence.json \
+  --output /tmp/array-audit.json
+node scripts/development/builtin-migration-factory.mjs verify \
+  --manifest /tmp/array-verification.json --output /tmp/array-verification-result.json
+node scripts/development/builtin-migration-factory.mjs seal \
+  --manifest /tmp/array-seal.json --control /tmp/rm1064-control.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --output /tmp/array-seal-result.json
+```
+
+All schemas reject unknown fields and unsupported versions. Existing schema versions retain their prior meaning; producers and consumers must advance together rather than interpreting new fields opportunistically.
+
+Run the focused factory suite with:
+
+```sh
+env TMPDIR=/private/tmp node --test \
+  scripts/development/builtin-migration/tests/*.test.mjs
+```

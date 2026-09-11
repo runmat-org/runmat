@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_native_ffi::{
-    artifact_identity, invoke_symbol_with_bindings, prepare_header,
-    prepare_header_with_declarations_report, CallbackBinding, HeaderPreparation, InvocationValue,
-    NativeInterfaceArtifactManifest, NativeLibraryMetadata, NativePointerResource, NativeScalar,
-    NativeType, ParameterDirection, PointerBinding, PointerOwnership, SymbolPrototype,
-    NATIVE_FFI_METADATA_SCHEMA_VERSION,
+    artifact_identity, invoke_symbol_with_bindings, prepare_header_with_declarations_report,
+    prepare_native_interface, CallbackBinding, HeaderPreparation, InvocationValue,
+    NativeInterfaceArtifactManifest, NativeInterfacePreparation, NativeLibraryMetadata,
+    NativePointerResource, NativeScalar, NativeType, ParameterDirection, PointerBinding,
+    PointerOwnership, SymbolPrototype, NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
 pub use runmat_native_ffi::{NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION};
 use runmat_types::{
@@ -1223,22 +1223,18 @@ impl NativeFfiAdapter {
         let alias = alias.map(Ok).unwrap_or_else(|| default_alias(&header))?;
         self.validate_available_alias(&alias)?;
         let library_path = PathBuf::from(&library);
-        let metadata = prepare_header(&HeaderPreparation {
-            header: PathBuf::from(header),
+        let prepared = prepare_native_interface(&NativeInterfacePreparation {
+            interface_name: alias.clone(),
             library_name: alias.clone(),
-            library_path: library.clone(),
-            target_triple: target_lexicon::HOST.to_string(),
-            clang: self.compiler_frontend.clone(),
+            library_path: library_path.clone(),
+            primary_header: PathBuf::from(header),
+            additional_headers: Vec::new(),
             include_directories: includes,
             definitions: Vec::new(),
+            compiler_frontend: self.compiler_frontend.clone(),
         })
         .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
-        let manifest = NativeInterfaceArtifactManifest::from_library_path(
-            alias.clone(),
-            metadata,
-            &library_path,
-        )
-        .map_err(|error| foreign_error(ForeignErrorKind::LoadFailed, error.to_string()))?;
+        let manifest = prepared.manifest;
         let manifest_path = NativeInterfaceArtifactManifest::path_for_library(&library_path);
         manifest
             .publish(&manifest_path)

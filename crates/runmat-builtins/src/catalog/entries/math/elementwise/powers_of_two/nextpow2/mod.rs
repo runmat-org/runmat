@@ -14,6 +14,7 @@ const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 
 pub const NEXTPOW2_CATALOG_ENTRY: BuiltinCatalogEntry =
     provider_unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+        provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "nextpow2" },
         documentation: DOCUMENTATION,
         descriptor: &NEXTPOW2_DESCRIPTOR,
