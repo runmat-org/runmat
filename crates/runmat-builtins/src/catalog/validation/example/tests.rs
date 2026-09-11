@@ -165,3 +165,84 @@ fn foreign_preparation_is_complete_and_references_declared_files() {
         .iter()
         .any(|error| error.message.contains("not a declared fixture file")));
 }
+
+#[test]
+fn desktop_fixture_validates_typed_host_interactions() {
+    const FILTERS: &[crate::BuiltinDialogFilterExpectation] =
+        &[crate::BuiltinDialogFilterExpectation {
+            patterns: &["*.csv"],
+            description: Some("CSV files"),
+        }];
+    const INTERACTIONS: &[crate::BuiltinDesktopHostInteraction] = &[
+        crate::BuiltinDesktopHostInteraction::OpenFileDialog(
+            crate::BuiltinOpenFileDialogInteraction {
+                request: crate::BuiltinOpenFileDialogExpectation {
+                    title: Some("Choose data"),
+                    default_path: Some("data"),
+                    filters: FILTERS,
+                    multiselect: false,
+                },
+                outcome: crate::BuiltinOpenFileDialogOutcome::Selection {
+                    paths: &["data/input.csv"],
+                    filter_index: Some(0),
+                },
+            },
+        ),
+        crate::BuiltinDesktopHostInteraction::FigurePresentation(
+            crate::BuiltinFigurePresentationInteraction {
+                figure_ordinal: 1,
+                event: crate::BuiltinFigurePresentationEvent::Created,
+                snapshot: Some(crate::BuiltinFigureSnapshotExpectation {
+                    title: Some("Result"),
+                    axes_rows: 1,
+                    axes_cols: 1,
+                }),
+            },
+        ),
+    ];
+    let mut example = BuiltinExample {
+        id: "desktop-host",
+        title: "Use desktop host services",
+        program: "file = uigetfile('*.csv'); figure;",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::InteractiveHost,
+        fixture: BuiltinExampleFixture::DesktopHostOnly(crate::BuiltinDesktopHostFixture {
+            id: crate::BuiltinExampleFixtureId {
+                local_name: "desktop-host",
+            },
+            entries: &[
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "data",
+                },
+                BuiltinFilesystemEntry::File {
+                    relative_path: "data/input.csv",
+                    content: BuiltinFixtureContent::Utf8("value\n1\n"),
+                },
+            ],
+            interactions: INTERACTIONS,
+        }),
+        requirements: BuiltinExampleRequirements {
+            host: BuiltinExampleHostRequirement::DesktopHostOnly,
+            ..BuiltinExampleRequirements::NONE
+        },
+        verification: BuiltinExampleVerification::Succeeds,
+    };
+
+    let mut errors = Vec::new();
+    validate("uigetfile", &example, &mut errors);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    let BuiltinExampleFixture::DesktopHostOnly(mut fixture) = example.fixture else {
+        unreachable!();
+    };
+    fixture.id = crate::BuiltinExampleFixtureId {
+        local_name: "Invalid Fixture",
+    };
+    example.fixture = BuiltinExampleFixture::DesktopHostOnly(fixture);
+    errors.clear();
+    validate("uigetfile", &example, &mut errors);
+    assert!(errors
+        .iter()
+        .any(|error| error.message.contains("fixture local name")));
+}

@@ -6,7 +6,7 @@ import { compareUtf8, digestObject, sha256 } from "./identity.mjs";
 import { requiredArtifactRoles } from "./product-contracts.mjs";
 import { digest, enumValue, exactKeys, gitRevision, integer } from "./schema.mjs";
 
-export const ARTIFACT_SCHEMA = "runmat.builtin-examples.artifacts.v1";
+export const ARTIFACT_SCHEMA = "runmat.builtin-examples.artifacts.v2";
 export const ARTIFACT_LAYOUTS = Object.freeze(["recursive-tree", "exact-files"]);
 
 export function buildArtifactManifest(fields) {
@@ -15,6 +15,7 @@ export function buildArtifactManifest(fields) {
         product: fields.product,
         artifactProfile: fields.artifactProfile,
         sourceRevision: fields.sourceRevision,
+        producerRevision: fields.producerRevision ?? null,
         layout: structuredClone(fields.layout),
         entrypoints: [...fields.entrypoints].sort((left, right) => compareUtf8(left.role, right.role)),
         files: [...fields.files].sort((left, right) => compareUtf8(left.path, right.path)),
@@ -48,6 +49,7 @@ export function buildArtifactManifestFromFiles(fields) {
         product: fields.product,
         artifactProfile: fields.artifactProfile,
         sourceRevision: fields.sourceRevision,
+        producerRevision: fields.producerRevision ?? null,
         layout: { kind: "exact-files" },
         entrypoints,
         files
@@ -72,6 +74,7 @@ export function buildArtifactManifestFromTree(fields) {
         product: fields.product,
         artifactProfile: fields.artifactProfile,
         sourceRevision: fields.sourceRevision,
+        producerRevision: fields.producerRevision ?? null,
         layout: { kind: "recursive-tree", root: rootPath },
         entrypoints,
         files
@@ -82,9 +85,13 @@ export function buildArtifactManifestFromTree(fields) {
 
 export function validateArtifactManifest(manifest, options = {}) {
     if (!manifest || manifest.schema !== ARTIFACT_SCHEMA) throw new Error("Unsupported builtin example artifact manifest schema");
-    exactKeys(manifest, ["schema", "product", "artifactProfile", "sourceRevision", "layout", "entrypoints", "files", "artifactManifestDigest"], "artifact manifest");
-    enumValue(manifest.product, ["native-cli", "browser-wasm"], "artifact product");
+    exactKeys(manifest, ["schema", "product", "artifactProfile", "sourceRevision", "producerRevision", "layout", "entrypoints", "files", "artifactManifestDigest"], "artifact manifest");
+    enumValue(manifest.product, ["native-cli", "browser-wasm", "desktop-native"], "artifact product");
     gitRevision(manifest.sourceRevision, "artifact source revision");
+    if (manifest.producerRevision !== null) gitRevision(manifest.producerRevision, "artifact producer revision");
+    if ((manifest.product === "desktop-native") !== (manifest.producerRevision !== null)) {
+        throw new Error("Only desktop-native artifacts require a producer revision");
+    }
     digest(manifest.artifactManifestDigest, "artifact manifest digest");
     if (digestObject(manifest, ["artifactManifestDigest"]) !== manifest.artifactManifestDigest) throw new Error("Artifact manifest digest mismatch");
     validateLayout(manifest);
@@ -121,6 +128,7 @@ export function validateArtifactManifest(manifest, options = {}) {
     if (JSON.stringify([...roles].sort(compareUtf8)) !== JSON.stringify([...requiredRoles].sort(compareUtf8))) throw new Error(`Artifact manifest does not exactly implement ${manifest.product}/${manifest.artifactProfile}`);
     if (manifest.layout.kind === "exact-files" && filePaths.size !== entrypointPaths.size) throw new Error("Exact-file artifact manifests cannot contain untyped package files");
     if (options.sourceRevision && manifest.sourceRevision !== options.sourceRevision) throw new Error("Artifact source revision does not match the execution plan");
+    if (options.producerRevision && manifest.producerRevision !== options.producerRevision) throw new Error("Artifact producer revision does not match the expected Desktop source");
     if (options.verifyFiles) verifyArtifactFiles(manifest, options.manifestPath);
     return manifest;
 }
@@ -151,7 +159,9 @@ function validateLayout(manifest) {
     if (manifest.layout.kind === "recursive-tree") {
         exactKeys(manifest.layout, ["kind", "root"], "recursive artifact layout");
         canonicalRootPath(manifest.layout.root);
-        if (manifest.product !== "native-cli" || manifest.artifactProfile !== "embedded-aot") throw new Error("Recursive-tree artifact layout is only valid for native-cli/embedded-aot");
+        const recursiveProfile = (manifest.product === "native-cli" && manifest.artifactProfile === "embedded-aot")
+            || (manifest.product === "desktop-native" && manifest.artifactProfile === "desktop-host");
+        if (!recursiveProfile) throw new Error("Recursive-tree artifact layout is invalid for this product profile");
     } else {
         exactKeys(manifest.layout, ["kind"], "exact-file artifact layout");
         if (manifest.product !== "browser-wasm" || manifest.artifactProfile !== "web") throw new Error("Exact-file artifact layout is only valid for browser-wasm/web");

@@ -1,4 +1,4 @@
-name: Builtin Example Product Closure
+name: Builtin Example Public Product Verification
 
 on:
   workflow_call:
@@ -37,6 +37,7 @@ jobs:
           node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
           node scripts/runtime/verify-builtin-examples.mjs plan \
             --inventory "$root/inventory.json" \
+            --product public-products \
             --topology scripts/runtime/builtin-example-topology.c00.json \
             --output "$root/plan.json"
           node scripts/runtime/verify-builtin-examples.mjs matrix \
@@ -184,7 +185,7 @@ jobs:
           if-no-files-found: error
 
   reconcile:
-    name: Reconcile builtin example closure
+    name: Reconcile builtin public-product evidence
     if: always() && needs.plan.result == 'success' && needs.products.result == 'success'
     needs: [plan, products, execute-shard]
     runs-on: ubuntu-latest
@@ -207,7 +208,7 @@ jobs:
       - name: Restore exact product evidence
         shell: bash
         run: tar -xf builtin-example-products.tar
-      - name: Reconcile exact expected shard closure
+      - name: Reconcile exact expected public-product shards
         shell: bash
         run: |
           set -euo pipefail
@@ -218,12 +219,12 @@ jobs:
             --artifact-manifest artifacts/builtin-example-closure/products/native/artifacts.json \
             --artifact-manifest artifacts/builtin-example-closure/products/browser/artifacts.json \
             --product-probe artifacts/builtin-example-closure/products/native/embedded-aot.product-probe.json \
-            --closure --report-dir artifacts/builtin-example-closure/report \
+            --report-dir artifacts/builtin-example-closure/report \
             --output artifacts/builtin-example-closure/reconciliation.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: builtin-example-closure-report-${{ github.run_attempt }}
+          name: builtin-example-public-product-report-${{ github.run_attempt }}
           path: |
             artifacts/builtin-example-closure/reconciliation.json
             artifacts/builtin-example-closure/report

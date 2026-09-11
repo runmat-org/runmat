@@ -24,8 +24,8 @@ const DEFAULT_LIMITS = Object.freeze({
 export function buildPlan(inventory, topology = null, options = {}) {
     validateInventory(inventory);
     const productScope = options.product ?? "all";
-    enumValue(productScope, ["all", "native-cli", "browser-wasm"], "plan product scope");
-    const selectedUnits = inventory.executionUnits.filter((unit) => productScope === "all" || laneProduct(unit.lane) === productScope);
+    enumValue(productScope, ["all", "public-products", "native-cli", "browser-wasm", "desktop-native"], "plan product scope");
+    const selectedUnits = inventory.executionUnits.filter((unit) => productInScope(laneProduct(unit.lane), productScope));
     if (selectedUnits.length === 0 && options.product) throw new Error(`Inventory contains no execution units for product scope ${productScope}`);
     const requiredLanes = [...new Set(selectedUnits.map((unit) => unit.lane))];
     const normalizedTopology = normalizeTopology(topology, requiredLanes);
@@ -94,7 +94,7 @@ export function validatePlan(plan, inventory = null) {
     for (const [value, label] of [[plan.inventoryDigest, "plan inventory digest"], [plan.runnerDigest, "plan runner digest"], [plan.planDigest, "plan digest"]]) digest(value, label);
     if (digestObject(plan, ["planDigest"]) !== plan.planDigest) throw new Error("Builtin example plan digest mismatch");
     if (plan.partitionAlgorithm !== PARTITION_ALGORITHM) throw new Error("Unsupported builtin example partition algorithm");
-    enumValue(plan.productScope, ["all", "native-cli", "browser-wasm"], "plan product scope");
+    enumValue(plan.productScope, ["all", "public-products", "native-cli", "browser-wasm", "desktop-native"], "plan product scope");
     exactKeys(plan.scope, ["kind", "builtin", "filter", "limit"], "plan scope");
     enumValue(plan.scope.kind, ["complete", "development"], "plan scope kind");
     for (const field of ["builtin", "filter"]) {
@@ -108,7 +108,7 @@ export function validatePlan(plan, inventory = null) {
     const productKinds = new Set();
     for (const product of plan.products) {
         exactKeys(product, ["kind", "artifactProfile", "requiredRoles", "requiredProbes"], "planned product");
-        enumValue(product.kind, ["native-cli", "browser-wasm"], "planned product kind");
+        enumValue(product.kind, ["native-cli", "browser-wasm", "desktop-native"], "planned product kind");
         if (productKinds.has(product.kind)) throw new Error(`Duplicate planned product: ${product.kind}`);
         productKinds.add(product.kind);
         if (JSON.stringify(product.requiredRoles) !== JSON.stringify(requiredArtifactRoles(product.kind, product.artifactProfile))) throw new Error(`Invalid artifact profile or required roles for ${product.kind}`);
@@ -153,7 +153,7 @@ export function validatePlan(plan, inventory = null) {
             if (plan[key] !== inventory[key]) throw new Error(`Plan ${key} does not match inventory`);
         }
         if (JSON.stringify(plan.scope) !== JSON.stringify(inventory.scope)) throw new Error("Plan scope does not match inventory");
-        const scopedUnits = inventory.executionUnits.filter((unit) => plan.productScope === "all" || laneProduct(unit.lane) === plan.productScope);
+        const scopedUnits = inventory.executionUnits.filter((unit) => productInScope(laneProduct(unit.lane), plan.productScope));
         const expectedLanes = [...new Set(scopedUnits.map((unit) => unit.lane))].sort((left, right) => EXECUTION_LANES.indexOf(left) - EXECUTION_LANES.indexOf(right));
         if (JSON.stringify(plan.lanes.map((lane) => lane.lane)) !== JSON.stringify(expectedLanes)) throw new Error("Plan lanes do not exactly match the inventory");
         const expected = scopedUnits.map((unit) => unit.executionIdentity).sort(compareUtf8);
@@ -161,6 +161,12 @@ export function validatePlan(plan, inventory = null) {
         if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error("Plan does not cover the inventory exactly once");
     }
     return plan;
+}
+
+function productInScope(product, scope) {
+    if (scope === "all") return true;
+    if (scope === "public-products") return product === "native-cli" || product === "browser-wasm";
+    return product === scope;
 }
 
 function normalizeTopology(topology, requiredLanes) {
@@ -193,7 +199,7 @@ function normalizeTopology(topology, requiredLanes) {
     }
     const configuredProducts = {};
     for (const [product, raw] of Object.entries(topology.products)) {
-        enumValue(product, ["native-cli", "browser-wasm"], "topology product");
+        enumValue(product, ["native-cli", "browser-wasm", "desktop-native"], "topology product");
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Invalid topology product ${product}`);
         exactKeys(raw, ["artifactProfile"], `topology product ${product}`);
         requiredArtifactRoles(product, raw.artifactProfile);

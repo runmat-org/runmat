@@ -137,7 +137,9 @@ export function validateInventory(inventory) {
         enumValue(example.admission.kind, ["executable", "documentation-only"], "example admission kind");
         if (example.admission.kind === "documentation-only" && (typeof example.admission.reason !== "string" || !example.admission.reason.trim())) throw new Error(`Documentation-only example lacks a reason: ${example.identity}`);
         if (example.authority === "catalog" && example.admission.kind !== "executable") throw new Error(`Catalog example is not executable: ${example.builtinKey}#${example.exampleId}`);
-        const expectedLanes = example.admission.kind === "executable" ? requiredExecutionLanes(example.harness) : [];
+        const expectedLanes = example.admission.kind === "executable"
+            ? requiredExecutionLanes(example.harness, example.requirements.host)
+            : [];
         if (JSON.stringify(example.requiredLanes) !== JSON.stringify(expectedLanes)) throw new Error(`Example lanes do not match its harness: ${example.identity}`);
     }
     for (const unit of inventory.executionUnits) {
@@ -240,7 +242,7 @@ function normalizeExample(raw, context) {
     if (context.authority === "catalog" && reason) {
         throw new Error(`${context.builtinKey} catalog example ${exampleId} is not executable: ${reason}`);
     }
-    const requiredLanes = reason ? [] : requiredExecutionLanes(harness);
+    const requiredLanes = reason ? [] : requiredExecutionLanes(harness, requirements.host);
     const executableProgram = appendAssertions(program, verification);
     const definitionRecord = { ...definition, program: executableProgram };
     return {

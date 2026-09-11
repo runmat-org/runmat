@@ -54,6 +54,7 @@ export function executeShard({ inventory, plan, lanePlan, shard, artifactManifes
         env.RUNMAT_EXAMPLE_WASM_MODULE = resolveArtifactPath(artifactManifest, artifactManifestPath, "wasm-js");
         env.RUNMAT_EXAMPLE_WASM_BINARY = resolveArtifactPath(artifactManifest, artifactManifestPath, "wasm-binary");
     }
+    if (lanePlan.product === "desktop-native") env.RUNMAT_EXAMPLE_DESKTOP_BINARY = resolveArtifactPath(artifactManifest, artifactManifestPath, "runmat-desktop-binary");
     const completed = spawnSync(process.execPath, [join(moduleDirectory, "legacy-runner.mjs"), "--all"], {
         cwd: repositoryRoot(moduleDirectory),
         env,

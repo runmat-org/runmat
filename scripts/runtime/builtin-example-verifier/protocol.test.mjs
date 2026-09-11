@@ -10,7 +10,7 @@ import { digestObject, partitionBucket, sha256 } from "./identity.mjs";
 import { buildInventory, validateInventory } from "./inventory.mjs";
 import { buildExecutionMatrix, validateExecutionMatrix } from "./execution-matrix.mjs";
 import { buildPlan, PLAN_SCHEMA, TOPOLOGY_SCHEMA, validatePlan } from "./plan.mjs";
-import { buildProductProbe, NATIVE_EMBEDDED_AOT_PROBE, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
+import { buildProductProbe, DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, runDesktopHostProtocolProbe, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
 import { stageNativeProduct } from "./product-staging.mjs";
 import { reconcileShardResults, validateReconciliation } from "./reconcile.mjs";
 import { buildShardResult, validateShardResult } from "./result-manifest.mjs";
@@ -112,6 +112,40 @@ test("product-scoped plans contain only that product and cannot claim full closu
     assert.equal(report.productScope, "native-cli");
     validateReconciliation(report);
     assert.throws(() => reconcileShardResults(inventory, native, completeResults(inventory, native), { closure: true }), /all-product execution plan/);
+});
+
+test("public-product plans exclude private Desktop evidence without claiming full closure", () => {
+    const exported = exportFixture();
+    exported.builtins.push({
+        key: "desktop-dialog",
+        authority: "catalog",
+        category: "io/dialog",
+        examples: [{
+            id: "open",
+            input: "input('Name: ', 's');",
+            harness: "InteractiveHost",
+            compatibility: "RunMat",
+            verification: "Succeeds",
+            requirements: { host: "DesktopHostOnly", engine: "Default", compiler: [], runtime: [], toolchain: [] },
+            fixture: {
+                DesktopHostOnly: {
+                    id: { local_name: "desktop-dialog" },
+                    entries: [],
+                    interactions: [{ LineInput: { prompt: "Name: ", echo: true, outcome: { Line: "Ada" } } }]
+                }
+            }
+        }]
+    });
+    const inventory = buildInventory(exported, inventoryOptions());
+    const complete = buildPlan(inventory);
+    assert.ok(complete.products.some((product) => product.kind === "desktop-native"));
+    const publicProducts = buildPlan(inventory, null, { product: "public-products" });
+    assert.deepEqual(publicProducts.products.map((product) => product.kind), ["browser-wasm", "native-cli"]);
+    assert.ok(publicProducts.lanes.every((lane) => lane.product !== "desktop-native"));
+    assert.throws(
+        () => reconcileShardResults(inventory, publicProducts, completeResults(inventory, publicProducts), { closure: true }),
+        /all-product execution plan/u
+    );
 });
 
 test("execution matrices exactly bind every frozen lane and shard assignment", () => {
@@ -216,6 +250,43 @@ test("browser artifact producer preserves its exact-file profile", () => {
     }
 });
 
+test("Desktop artifact manifests bind Runtime and Desktop revisions", () => {
+    const directory = mkdtempSync(join(tmpdir(), "runmat-desktop-artifacts-"));
+    try {
+        const product = join(directory, "desktop-product");
+        mkdirSync(product);
+        writeFileSync(join(product, "runmat-desktop"), "desktop");
+        const manifestPath = join(directory, "artifacts.json");
+        const producerRevision = "abcdef0123456789abcdef0123456789abcdef01";
+        const manifest = buildArtifactManifestFromTree({
+            product: "desktop-native",
+            artifactProfile: "desktop-host",
+            sourceRevision: SOURCE,
+            producerRevision,
+            manifestPath,
+            root: product,
+            entrypoints: { "runmat-desktop-binary": "runmat-desktop" }
+        });
+        assert.equal(manifest.producerRevision, producerRevision);
+        validateArtifactManifest(manifest, {
+            sourceRevision: SOURCE,
+            producerRevision,
+            verifyFiles: true,
+            manifestPath
+        });
+        assert.throws(() => buildArtifactManifestFromTree({
+            product: "desktop-native",
+            artifactProfile: "desktop-host",
+            sourceRevision: SOURCE,
+            manifestPath,
+            root: product,
+            entrypoints: { "runmat-desktop-binary": "runmat-desktop" }
+        }), /producer revision/u);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
 test("native product staging preserves the executable and closes Windows dependency collisions", () => {
     const directory = mkdtempSync(join(tmpdir(), "runmat-product-stage-"));
     try {
@@ -293,6 +364,18 @@ test("product probes bind the fixed vector, product bytes, and successful proces
     const tampered = structuredClone(probe);
     tampered.result.status = "failed";
     assert.throws(() => validateProductProbe(tampered), /Product probe digest mismatch/);
+
+    const impossibleNativeFailure = structuredClone(probe);
+    impossibleNativeFailure.result.status = "failed";
+    impossibleNativeFailure.result.failureKind = "protocol";
+    impossibleNativeFailure.productProbeDigest = digestObject(impossibleNativeFailure, ["productProbeDigest"]);
+    assert.throws(() => validateProductProbe(impossibleNativeFailure), /native product probe failure kind/u);
+
+    const inconsistentNativeFailure = structuredClone(probe);
+    inconsistentNativeFailure.result.status = "failed";
+    inconsistentNativeFailure.result.failureKind = "prepare-process";
+    inconsistentNativeFailure.productProbeDigest = digestObject(inconsistentNativeFailure, ["productProbeDigest"]);
+    assert.throws(() => validateProductProbe(inconsistentNativeFailure), /prepare-process evidence is inconsistent/u);
 });
 
 test("native product probes execute the manifested entrypoint and reject bytes changed during the probe", { skip: process.platform === "win32" }, () => {
@@ -324,6 +407,45 @@ test("native product probes execute the manifested entrypoint and reject bytes c
             artifactManifestPath: manifestPath,
             sourceRevision: SOURCE
         }), /recursive tree/);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("Desktop product probes execute the closed hidden-host protocol", { skip: process.platform === "win32" }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), "runmat-desktop-product-probe-test-"));
+    try {
+        const product = join(directory, "product");
+        mkdirSync(product);
+        const binary = join(product, "runmat-desktop");
+        writeFakeDesktopHost(binary);
+        const manifestPath = join(directory, "artifacts.json");
+        const producerRevision = "abcdef0123456789abcdef0123456789abcdef01";
+        const manifest = buildArtifactManifestFromTree({
+            product: "desktop-native",
+            artifactProfile: "desktop-host",
+            sourceRevision: SOURCE,
+            producerRevision,
+            manifestPath,
+            root: product,
+            entrypoints: { "runmat-desktop-binary": "runmat-desktop" }
+        });
+        writeFileSync(manifestPath, JSON.stringify(manifest));
+        const probe = await runDesktopHostProtocolProbe({
+            artifactManifest: manifest,
+            artifactManifestPath: manifestPath,
+            sourceRevision: SOURCE,
+            producerRevision
+        });
+        assert.equal(probe.probeKind, DESKTOP_HOST_PROTOCOL_PROBE);
+        assert.equal(probe.result.status, "passed");
+        validateProductProbe(probe, { artifactManifest: manifest, artifactManifestPath: manifestPath, verifyFiles: true });
+
+        const impossibleDesktopFailure = structuredClone(probe);
+        impossibleDesktopFailure.result.status = "failed";
+        impossibleDesktopFailure.result.failureKind = "prepare-process";
+        impossibleDesktopFailure.productProbeDigest = digestObject(impossibleDesktopFailure, ["productProbeDigest"]);
+        assert.throws(() => validateProductProbe(impossibleDesktopFailure), /Desktop product probe failure kind/u);
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }
@@ -508,7 +630,13 @@ function successfulNativeProbe(artifact) {
         artifactManifestDigest: artifact.artifactManifestDigest,
         probeKind: NATIVE_EMBEDDED_AOT_PROBE,
         vectorDigest: sha256("disp(2 + 3);\n"),
-        result: { status: "passed", failureKind: "none", compileExitCode: 0, executeExitCode: 0 },
+        result: {
+            kind: "compile-and-execute",
+            status: "passed",
+            failureKind: "none",
+            prepareExitCode: 0,
+            executeExitCode: 0
+        },
         stdoutDigest: sha256("5\n")
     });
 }
@@ -516,6 +644,23 @@ function successfulNativeProbe(artifact) {
 function writeFakeCompiler(path, mutateAdjacentDependency) {
     const mutation = mutateAdjacentDependency ? "printf changed > \"$0.runtime\"\n" : "";
     writeFileSync(path, `#!/bin/sh\nset -eu\n${mutation}output=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\nprintf '#!/bin/sh\\nprintf \"5\\\\n\"\\n' > \"$output\"\nchmod +x \"$output\"\n`, "utf8");
+    chmodSync(path, 0o700);
+}
+
+function writeFakeDesktopHost(path) {
+    writeFileSync(path, `#!/usr/bin/env node
+const fs = require("node:fs");
+const request = JSON.parse(fs.readFileSync(process.env.RUNMAT_BUILTIN_EXAMPLE_HOST_REQUEST, "utf8"));
+fs.writeFileSync(process.env.RUNMAT_BUILTIN_EXAMPLE_HOST_RESULT, JSON.stringify({
+  schema: "runmat.builtin-examples.desktop-host-result.v1",
+  exampleKey: request.exampleKey,
+  stdoutText: "5\\n",
+  valueText: "",
+  errorText: "",
+  errorIdentifier: "",
+  interactions: { expectedCount: 1, observedCount: 1, expectedFigureCount: 0, observedFigureCount: 0, matched: true, figurePresentationsMatched: true }
+}));
+`, "utf8");
     chmodSync(path, 0o700);
 }
 

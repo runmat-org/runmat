@@ -401,10 +401,9 @@ fn selected_outputs(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use runmat_filesystem::{DirEntry, FileHandle, FsMetadata, FsProvider, OpenFlags};
+    use runmat_filesystem::HostDialogProvider;
     use runmat_value::{CharArray, Tensor};
-    use std::io::{self, ErrorKind};
-    use std::path::Path;
+    use std::io;
     use std::sync::{Arc, Mutex};
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
@@ -433,63 +432,7 @@ mod tests {
     }
 
     #[async_trait(?Send)]
-    impl FsProvider for DialogProvider {
-        fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
-            Err(unsupported())
-        }
-
-        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
-            Err(unsupported())
-        }
-
-        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
-            Err(unsupported())
-        }
-
-        async fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
-            Err(unsupported())
-        }
-
-        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
-            Err(unsupported())
-        }
-
-        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
-            Err(unsupported())
-        }
-
-        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
-            Err(unsupported())
-        }
-
-        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
-            Err(unsupported())
-        }
-
+    impl HostDialogProvider for DialogProvider {
         async fn select_file_save(
             &self,
             request: &SaveFileDialogRequest,
@@ -497,10 +440,6 @@ mod tests {
             *self.request.lock().unwrap() = Some(request.clone());
             Ok(self.selection.clone())
         }
-    }
-
-    fn unsupported() -> io::Error {
-        io::Error::new(ErrorKind::Unsupported, "unsupported")
     }
 
     fn rooted_tmp_path() -> PathBuf {
@@ -537,7 +476,7 @@ mod tests {
             selection,
             request: request.clone(),
         });
-        let _guard = runmat_filesystem::replace_provider(provider);
+        let _guard = runmat_filesystem::replace_host_dialog_provider(Some(provider));
         body(request);
     }
 

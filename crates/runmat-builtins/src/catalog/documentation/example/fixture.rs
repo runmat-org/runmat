@@ -1,7 +1,9 @@
 use serde::Serialize;
 
+mod desktop;
 mod foreign;
 
+pub use desktop::*;
 pub use foreign::*;
 
 /// Stable identifier for a fixture owned by one catalog example.
@@ -154,17 +156,4 @@ pub enum BuiltinCliTranscriptStep {
     SendBytes(&'static [u8]),
     SendEndOfInput,
     SendInterrupt,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct BuiltinDesktopHostFixture {
-    pub id: BuiltinExampleFixtureId,
-    pub scenario: BuiltinDesktopHostScenario,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BuiltinDesktopHostScenario {
-    FilePicker,
-    FigureWindow,
-    InteractivePrompt,
 }

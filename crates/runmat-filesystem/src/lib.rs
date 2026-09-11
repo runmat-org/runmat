@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::SystemTime;
 
+mod dialog;
 #[cfg(not(target_arch = "wasm32"))]
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +20,7 @@ pub mod sandbox;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+pub use dialog::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use memory::MemoryFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -293,50 +295,6 @@ impl ReadManyEntry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenFileDialogFilter {
-    pub patterns: Vec<String>,
-    pub description: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct OpenFileDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-    pub filters: Vec<OpenFileDialogFilter>,
-    pub multiselect: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OpenFileDialogSelection {
-    pub paths: Vec<PathBuf>,
-    pub filter_index: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SaveFileDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-    pub filters: Vec<OpenFileDialogFilter>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SaveFileDialogSelection {
-    pub path: PathBuf,
-    pub filter_index: Option<usize>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DirectoryDialogRequest {
-    pub title: Option<String>,
-    pub default_path: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DirectoryDialogSelection {
-    pub path: PathBuf,
-}
-
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -439,27 +397,6 @@ pub trait FsProvider: Send + Sync + 'static {
             ErrorKind::Unsupported,
             "data chunk upload is unsupported by this provider",
         ))
-    }
-
-    async fn select_file_open(
-        &self,
-        _request: &OpenFileDialogRequest,
-    ) -> io::Result<Option<OpenFileDialogSelection>> {
-        Ok(None)
-    }
-
-    async fn select_file_save(
-        &self,
-        _request: &SaveFileDialogRequest,
-    ) -> io::Result<Option<SaveFileDialogSelection>> {
-        Ok(None)
-    }
-
-    async fn select_directory(
-        &self,
-        _request: &DirectoryDialogRequest,
-    ) -> io::Result<Option<DirectoryDialogSelection>> {
-        Ok(None)
     }
 }
 
@@ -877,8 +814,10 @@ pub async fn select_file_open_async(
     if let Some(default_path) = resolved.default_path.as_mut() {
         *default_path = resolve_path(default_path);
     }
-    let provider = current_provider();
-    provider.select_file_open(&resolved).await
+    match current_host_dialog_provider() {
+        Some(provider) => provider.select_file_open(&resolved).await,
+        None => Ok(None),
+    }
 }
 
 pub async fn select_file_save_async(
@@ -888,8 +827,10 @@ pub async fn select_file_save_async(
     if let Some(default_path) = resolved.default_path.as_mut() {
         *default_path = resolve_path(default_path);
     }
-    let provider = current_provider();
-    provider.select_file_save(&resolved).await
+    match current_host_dialog_provider() {
+        Some(provider) => provider.select_file_save(&resolved).await,
+        None => Ok(None),
+    }
 }
 
 pub async fn select_directory_async(
@@ -899,8 +840,10 @@ pub async fn select_directory_async(
     if let Some(default_path) = resolved.default_path.as_mut() {
         *default_path = resolve_path(default_path);
     }
-    let provider = current_provider();
-    provider.select_directory(&resolved).await
+    match current_host_dialog_provider() {
+        Some(provider) => provider.select_directory(&resolved).await,
+        None => Ok(None),
+    }
 }
 
 pub async fn data_manifest_descriptor_async(
@@ -1015,6 +958,11 @@ mod tests {
         flushed_async: Arc<Mutex<bool>>,
     }
 
+    struct TestHostDialogProvider {
+        request: Arc<Mutex<Option<OpenFileDialogRequest>>>,
+        selection: OpenFileDialogSelection,
+    }
+
     struct TestProviderStateGuard {
         previous_provider: Arc<dyn FsProvider>,
         previous_current_dir: Option<PathBuf>,
@@ -1074,6 +1022,17 @@ mod tests {
 
         fn file_bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
             self.files.lock().unwrap().get(path.as_ref()).cloned()
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl HostDialogProvider for TestHostDialogProvider {
+        async fn select_file_open(
+            &self,
+            request: &OpenFileDialogRequest,
+        ) -> io::Result<Option<OpenFileDialogSelection>> {
+            *self.request.lock().unwrap() = Some(request.clone());
+            Ok(Some(self.selection.clone()))
         }
     }
 
@@ -1636,6 +1595,40 @@ mod tests {
             futures::executor::block_on(select_file_open_async(&request)).expect("select file");
 
         assert_eq!(selection, None);
+    }
+
+    #[test]
+    fn host_dialog_provider_is_independent_from_storage_provider() {
+        let _guard = test_lock();
+        let storage: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let _storage_guard = replace_provider(storage);
+        let observed = Arc::new(Mutex::new(None));
+        let selected_path = PathBuf::from("/workspace/selected.csv");
+        let dialogs: Arc<dyn HostDialogProvider> = Arc::new(TestHostDialogProvider {
+            request: observed.clone(),
+            selection: OpenFileDialogSelection {
+                paths: vec![selected_path.clone()],
+                filter_index: Some(2),
+            },
+        });
+        let _dialog_guard = replace_host_dialog_provider(Some(dialogs));
+        let request = OpenFileDialogRequest {
+            title: Some("Choose data".to_string()),
+            default_path: Some(PathBuf::from("/workspace")),
+            filters: vec![OpenFileDialogFilter {
+                patterns: vec!["*.csv".to_string()],
+                description: Some("CSV files".to_string()),
+            }],
+            multiselect: false,
+        };
+
+        let selection = futures::executor::block_on(select_file_open_async(&request))
+            .expect("host dialog selection")
+            .expect("selected file");
+
+        assert_eq!(selection.paths, vec![selected_path]);
+        assert_eq!(selection.filter_index, Some(2));
+        assert_eq!(*observed.lock().unwrap(), Some(request));
     }
 
     #[test]

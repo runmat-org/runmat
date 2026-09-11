@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mergeLaneResults, usesBrowserLane, usesNativeLane } from "./lanes.mjs";
+import { laneProduct, mergeLaneResults, requiredExecutionLanes, usesBrowserLane, usesNativeLane } from "./lanes.mjs";
 import { parseNativeArtifactManifest } from "./native.mjs";
 
 const result = (id, errorText = "", errorIdentifier = "") => ({
@@ -22,6 +22,8 @@ test("harnesses select only their executable lanes", () => {
     assert.equal(usesNativeLane("NativeLoopbackNetwork"), true);
     assert.equal(usesBrowserLane("InteractiveHost"), false);
     assert.equal(usesNativeLane("InteractiveHost"), true);
+    assert.deepEqual(requiredExecutionLanes("InteractiveHost", "DesktopHostOnly"), ["desktop-host"]);
+    assert.equal(laneProduct("desktop-host"), "desktop-native");
 });
 
 test("portable success requires both lanes", () => {

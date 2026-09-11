@@ -23,17 +23,30 @@ pub(super) fn validate_filesystem(
     errors: &mut Vec<BuiltinCatalogValidationError>,
 ) {
     validate_fixture_id(builtin, fixture.id, errors);
-    if fixture.entries.is_empty() || fixture.entries.len() > MAX_FILESYSTEM_ENTRIES {
+    validate_filesystem_entries(builtin, fixture.entries, true, errors);
+}
+
+pub(super) fn validate_filesystem_entries(
+    builtin: &'static str,
+    entries: &[BuiltinFilesystemEntry],
+    require_nonempty: bool,
+    errors: &mut Vec<BuiltinCatalogValidationError>,
+) {
+    if (require_nonempty && entries.is_empty()) || entries.len() > MAX_FILESYSTEM_ENTRIES {
         push(
             errors,
             builtin,
-            "filesystem fixture must contain between 1 and 64 entries",
+            if require_nonempty {
+                "filesystem fixture must contain between 1 and 64 entries"
+            } else {
+                "filesystem fixture must contain no more than 64 entries"
+            },
         );
     }
     let mut paths = BTreeSet::new();
     let mut ordered_paths = Vec::new();
     let mut aggregate_payload = 0usize;
-    for entry in fixture.entries {
+    for entry in entries {
         let (path, payload_len, is_file) = match entry {
             BuiltinFilesystemEntry::Directory { relative_path } => (*relative_path, 0, false),
             BuiltinFilesystemEntry::File {

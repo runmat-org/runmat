@@ -7,7 +7,7 @@ import { buildInventory } from "./inventory.mjs";
 import { buildPlan, validatePlan } from "./plan.mjs";
 import { buildExecutionMatrix } from "./execution-matrix.mjs";
 import { buildArtifactManifestFromFiles, buildArtifactManifestFromTree, validateArtifactManifest } from "./artifacts.mjs";
-import { NATIVE_EMBEDDED_AOT_PROBE, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
+import { DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, runDesktopHostProtocolProbe, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
 import { reconcileShardResults } from "./reconcile.mjs";
 import { executeShard } from "./runner-process.mjs";
 import { computeRunnerDigest, readJson, repositoryRoot, sourceIdentity, writeJson } from "./io.mjs";
@@ -33,12 +33,13 @@ function artifactsCommand(options) {
     const product = required(options.product, "--product");
     const artifactProfile = required(options.profile, "--profile");
     const sourceRevision = required(options["source-revision"], "--source-revision");
+    const producerRevision = options["producer-revision"];
     const files = parseAssignments(arrayOption(options.file), "--file", "artifact role");
     const entrypoints = parseAssignments(arrayOption(options.entrypoint), "--entrypoint", "artifact entrypoint role");
     if (options.root && Object.keys(files).length) throw new Error("artifacts accepts either --root with --entrypoint or --file, not both");
     let manifest;
     if (options.root) {
-        manifest = buildArtifactManifestFromTree({ product, artifactProfile, sourceRevision, manifestPath: output, root: options.root, entrypoints });
+        manifest = buildArtifactManifestFromTree({ product, artifactProfile, sourceRevision, producerRevision, manifestPath: output, root: options.root, entrypoints });
     } else if (product === "native-cli" && artifactProfile === "embedded-aot") {
         const roles = Object.keys(files);
         if (roles.length !== 1 || roles[0] !== "runmat-binary") throw new Error("Native --file compatibility requires exactly one runmat-binary=PATH");
@@ -47,31 +48,36 @@ function artifactsCommand(options) {
             product,
             artifactProfile,
             sourceRevision,
+            producerRevision,
             manifestPath: output,
             root: dirname(binary),
             entrypoints: { "runmat-binary": basename(binary) }
         });
     } else {
-        manifest = buildArtifactManifestFromFiles({ product, artifactProfile, sourceRevision, manifestPath: output, files });
+        manifest = buildArtifactManifestFromFiles({ product, artifactProfile, sourceRevision, producerRevision, manifestPath: output, files });
     }
     writeJson(output, manifest);
     console.log(`Wrote ${product}/${artifactProfile} artifact manifest to ${resolve(output)}`);
 }
 
-function probeCommand(options) {
+async function probeCommand(options) {
     const output = required(options.output, "--output");
     const manifestPaths = arrayOption(options["artifact-manifest"]);
     if (manifestPaths.length !== 1) throw new Error("probe requires exactly one --artifact-manifest");
     const manifestPath = manifestPaths[0];
     const kind = required(options.kind, "--kind");
-    if (kind !== NATIVE_EMBEDDED_AOT_PROBE) throw new Error(`Unsupported product probe kind: ${kind}`);
+    if (![NATIVE_EMBEDDED_AOT_PROBE, DESKTOP_HOST_PROTOCOL_PROBE].includes(kind)) throw new Error(`Unsupported product probe kind: ${kind}`);
     const manifest = readJson(manifestPath);
-    const probe = runNativeEmbeddedAotProbe({
+    const probeFields = {
         artifactManifest: manifest,
         artifactManifestPath: manifestPath,
         sourceRevision: manifest.sourceRevision,
+        producerRevision: manifest.producerRevision,
         timeoutMs: options["timeout-ms"] === undefined ? undefined : integerOption(options["timeout-ms"], "--timeout-ms", 120_000)
-    });
+    };
+    const probe = kind === NATIVE_EMBEDDED_AOT_PROBE
+        ? runNativeEmbeddedAotProbe(probeFields)
+        : await runDesktopHostProtocolProbe(probeFields);
     validateProductProbe(probe, { artifactManifest: manifest, artifactManifestPath: manifestPath, verifyFiles: true });
     writeJson(output, probe);
     console.log(`Wrote ${kind} ${probe.result.status} evidence to ${resolve(output)}`);
