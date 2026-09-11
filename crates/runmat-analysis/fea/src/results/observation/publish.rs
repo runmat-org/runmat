@@ -1,6 +1,4 @@
-use runmat_analysis_core::{
-    ExtremaTiePolicy, ObservationValueShape, PartialAccessPolicy, SpatialReduction,
-};
+use runmat_analysis_core::{ExtremaTiePolicy, PartialAccessPolicy, SpatialReduction};
 
 use crate::execution::{
     chunk_numerical_payload, AnalysisNumericalObjectKind, ChunkedAnalysisPayload,
@@ -24,11 +22,7 @@ pub fn publish_observation(
         .ok_or_else(|| {
             ObservationError::Invalid("observation result is absent from its resolved plan".into())
         })?;
-    let expected_shape = if planned.result_component_count == 1 {
-        ObservationValueShape::Scalar
-    } else {
-        planned.spec.value_shape.clone()
-    };
+    let expected_shape = &planned.result_value_shape;
     let expected_entities = match &planned.target {
         ResolvedObservationTarget::Nodes { identities, .. } => identities
             .iter()
@@ -87,7 +81,7 @@ pub fn publish_observation(
         || result.partial_access != planned.spec.storage.partial_access
         || result.quantity != planned.spec.quantity
         || result.location != planned.spec.output_location
-        || result.value_shape != expected_shape
+        || &result.value_shape != expected_shape
         || result.complex_representation != planned.spec.complex_representation
         || !entities_match
     {

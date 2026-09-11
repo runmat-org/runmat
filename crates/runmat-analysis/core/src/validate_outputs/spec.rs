@@ -2,8 +2,8 @@ use crate::{
     AnalysisModel, AnalysisProcedure, AnalysisValidationError, ComplexRepresentation,
     CoordinateFrame, CoupledPhysicsFamily, ExcitationTarget, FieldLocation, ObservationComponent,
     ObservationQuantity, ObservationRequest, ObservationSpec, ObservationTarget,
-    ObservationValueShape, PhysicsFamily, ProcedureStep, RecoveryPolicy, SeriesReduction,
-    SignConvention, SignalPrecision, SpatialReduction,
+    ObservationValueShape, PhysicsFamily, ProcedureStep, RecoveryPolicy, SignConvention,
+    SignalPrecision,
 };
 
 use super::{invalid_observation, observation_error};
@@ -406,18 +406,7 @@ fn validate_recovery(
 }
 
 pub(super) fn is_scalar_result(spec: &ObservationSpec) -> bool {
-    spec.quantity.canonical_value_shape() == ObservationValueShape::Scalar
-        || !matches!(
-            spec.component,
-            ObservationComponent::All | ObservationComponent::Deviatoric
-        )
-        || spec.reduction.as_ref().is_some_and(|reduction| {
-            !matches!(reduction.spatial, SpatialReduction::None)
-                || !matches!(
-                    reduction.series,
-                    SeriesReduction::None | SeriesReduction::Envelope
-                )
-        })
+    spec.result_value_shape() == ObservationValueShape::Scalar
 }
 
 #[cfg(test)]

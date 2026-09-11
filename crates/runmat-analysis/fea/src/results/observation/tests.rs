@@ -361,6 +361,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
         series: SeriesReduction::None,
         extrema_ties: ExtremaTiePolicy::FirstCanonical,
     });
+    volume.output_location = FieldLocation::Global;
     let face_selector = projection.boundary_faces[0].provenance[0]
         .analysis_selection_id()
         .unwrap();
@@ -372,6 +373,7 @@ fn volume_and_boundary_reductions_use_finite_element_quadrature() {
         )),
     );
     boundary.reduction = volume.reduction.clone();
+    boundary.output_location = FieldLocation::Global;
     let step = thermal_step(vec![
         ObservationRequest::Reduction(volume),
         ObservationRequest::Reduction(boundary),

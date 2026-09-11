@@ -143,6 +143,31 @@ impl ObservationQuantity {
     }
 }
 
+impl ObservationSpec {
+    /// Canonical value shape after component projection and spatial reduction.
+    ///
+    /// This is distinct from `value_shape`, which describes the recovered source quantity.
+    pub fn result_value_shape(&self) -> ObservationValueShape {
+        let projected = match self.component {
+            ObservationComponent::All | ObservationComponent::Deviatoric => {
+                self.value_shape.clone()
+            }
+            _ => ObservationValueShape::Scalar,
+        };
+        match self.reduction.as_ref().map(|reduction| reduction.spatial) {
+            Some(
+                SpatialReduction::EuclideanNorm
+                | SpatialReduction::Minimum
+                | SpatialReduction::Maximum,
+            ) => ObservationValueShape::Scalar,
+            Some(SpatialReduction::Resultant | SpatialReduction::Moment { .. }) => {
+                ObservationValueShape::Vector3
+            }
+            _ => projected,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationValueShape {
@@ -326,7 +351,7 @@ pub struct ReductionPolicy {
     pub extrema_ties: ExtremaTiePolicy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpatialReduction {
     None,
@@ -337,7 +362,7 @@ pub enum SpatialReduction {
     Minimum,
     Maximum,
     Resultant,
-    Moment,
+    Moment { about: Position },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

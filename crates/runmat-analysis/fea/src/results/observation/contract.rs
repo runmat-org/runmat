@@ -155,7 +155,7 @@ pub struct ResolvedObservation {
     pub source_entity_domain: RecoveredFieldEntityDomain,
     pub target: ResolvedObservationTarget,
     pub component: ResolvedComponentProjection,
-    pub result_component_count: usize,
+    pub result_value_shape: ObservationValueShape,
     pub sample_bounds: ObservationSampleBounds,
     pub resolved_cost: ObservationCostEstimate,
 }
@@ -867,11 +867,6 @@ fn validate_resolved_observation(
             "resolved observation sample bounds do not converge",
         ));
     }
-    if observation.result_component_count == 0 {
-        return Err(ObservationError::Invalid(
-            "resolved source field does not match its authored observation".into(),
-        ));
-    }
     let source_components = shape_component_count(&observation.spec.value_shape)?;
     let spatial_extrema = observation
         .spec
@@ -888,19 +883,32 @@ fn validate_resolved_observation(
         .reduction
         .as_ref()
         .is_some_and(|reduction| reduction.spatial != SpatialReduction::None);
-    let expected_result_components = match observation.component {
-        ResolvedComponentProjection::All => source_components,
-        ResolvedComponentProjection::Cartesian { axis } if axis < source_components => 1,
-        ResolvedComponentProjection::Magnitude3 if source_components == 3 => 1,
-        _ => {
-            return Err(ObservationError::Invalid(
-                "resolved component projection is incompatible with its source field".into(),
-            ))
-        }
+    let has_discrete_reaction_reduction =
+        observation
+            .spec
+            .reduction
+            .as_ref()
+            .is_some_and(|reduction| {
+                matches!(
+                    reduction.spatial,
+                    SpatialReduction::Resultant | SpatialReduction::Moment { .. }
+                ) && matches!(
+                    observation.spec.quantity,
+                    runmat_analysis_core::ObservationQuantity::ReactionForce
+                        | runmat_analysis_core::ObservationQuantity::ReactionMoment
+                )
+            });
+    let component_projection_is_valid = match observation.component {
+        ResolvedComponentProjection::All => true,
+        ResolvedComponentProjection::Cartesian { axis } => axis < source_components,
+        ResolvedComponentProjection::Magnitude3 => source_components == 3,
     };
-    if observation.result_component_count != expected_result_components {
+    if !component_projection_is_valid
+        || observation.result_value_shape != observation.spec.result_value_shape()
+        || shape_component_count(&observation.result_value_shape)? == 0
+    {
         return Err(ObservationError::Invalid(
-            "resolved result component count is inconsistent".into(),
+            "resolved result value shape is inconsistent".into(),
         ));
     }
     match &observation.target {
@@ -910,7 +918,7 @@ fn validate_resolved_observation(
         } => {
             if observation.spec.source_location != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
-                || (has_spatial_reduction && !spatial_extrema)
+                || (has_spatial_reduction && !spatial_extrema && !has_discrete_reaction_reduction)
                 || indices.len() != identities.len()
                 || indices.is_empty()
                 || !strictly_increasing(indices)

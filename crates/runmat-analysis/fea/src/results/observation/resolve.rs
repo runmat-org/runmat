@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     AnalysisModel, ComplexRepresentation, CompressionPolicy, EntityDimension, ExcitationTarget,
     ExpectedTopology, FieldLocation, ObservationComponent, ObservationCostEstimate,
-    ObservationRequest, ObservationSpec, ObservationTarget, ProcedureStep, RecoveryPolicy,
-    RetentionPolicy, SamplingPolicy, SeriesReduction, SpatialReduction, TargetCardinality,
+    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationTarget,
+    ObservationValueShape, ProcedureStep, RecoveryPolicy, RetentionPolicy, SamplingPolicy,
+    SeriesReduction, SignConvention, SpatialReduction, TargetCardinality,
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
@@ -125,7 +126,10 @@ fn resolve_request(
     let source_field = bind_field(spec, fields)?;
     validate_numeric_representation(spec, &source_field)?;
     let target = resolve_target(request, spec, source_field.entity_domain(), topology)?;
-    let (component, result_component_count) = resolve_component(spec, &source_field)?;
+    validate_resolved_spatial_reduction(spec, &source_field, &target)?;
+    let component = resolve_component(spec, &source_field)?;
+    let result_value_shape = spec.result_value_shape();
+    let result_component_count = shape_component_count(&result_value_shape)?;
     let spatial_extrema = spec.reduction.as_ref().is_some_and(|reduction| {
         matches!(
             reduction.spatial,
@@ -261,7 +265,7 @@ fn resolve_request(
         source_entity_domain: source_field.entity_domain(),
         target,
         component,
-        result_component_count,
+        result_value_shape,
         sample_bounds,
         resolved_cost,
     })
@@ -274,6 +278,12 @@ fn validate_supported_spec(
     validate_output_numeric_contract(spec)?;
     let native_location =
         spec.source_location == spec.output_location && spec.recovery == RecoveryPolicy::Native;
+    let reduced_location = spec.output_location == FieldLocation::Global
+        && spec.recovery == RecoveryPolicy::Native
+        && spec
+            .reduction
+            .as_ref()
+            .is_some_and(|reduction| reduction.spatial != SpatialReduction::None);
     let solid_point_interpolation = spec.source_location == FieldLocation::Node
         && spec.output_location == FieldLocation::Point
         && spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation
@@ -281,7 +291,7 @@ fn validate_supported_spec(
             spec.target,
             ObservationTarget::Point { .. } | ObservationTarget::Path { .. }
         );
-    if !native_location && !solid_point_interpolation {
+    if !native_location && !reduced_location && !solid_point_interpolation {
         return Err(ObservationError::Unsupported(
             "field recovery and location transfer must be completed before observation evaluation",
         ));
@@ -353,11 +363,14 @@ fn validate_supported_spec(
                 | SpatialReduction::Integral
                 | SpatialReduction::Average
                 | SpatialReduction::RootMeanSquare
+                | SpatialReduction::EuclideanNorm
                 | SpatialReduction::Minimum
                 | SpatialReduction::Maximum
+                | SpatialReduction::Resultant
+                | SpatialReduction::Moment { .. }
         ) {
             return Err(ObservationError::Unsupported(
-                "this slice supports FE-weighted integral, average, and root-mean-square reductions",
+                "unsupported spatial reduction",
             ));
         }
     }
@@ -390,6 +403,87 @@ fn validate_supported_spec(
         }
         _ => Ok(()),
     }
+}
+
+fn validate_resolved_spatial_reduction(
+    spec: &ObservationSpec,
+    source: &RecoveredFieldDefinition,
+    target: &ResolvedObservationTarget,
+) -> Result<(), ObservationError> {
+    let Some(operation) = spec.reduction.as_ref().map(|reduction| reduction.spatial) else {
+        return Ok(());
+    };
+    if matches!(
+        operation,
+        SpatialReduction::Integral
+            | SpatialReduction::Average
+            | SpatialReduction::RootMeanSquare
+            | SpatialReduction::EuclideanNorm
+            | SpatialReduction::Resultant
+            | SpatialReduction::Moment { .. }
+    ) && spec.output_location != FieldLocation::Global
+    {
+        return Err(ObservationError::Invalid(
+            "integrated spatial reductions require global output location".into(),
+        ));
+    }
+    if !matches!(
+        operation,
+        SpatialReduction::Resultant | SpatialReduction::Moment { .. }
+    ) {
+        return Ok(());
+    }
+    if spec.component != ObservationComponent::All {
+        return Err(ObservationError::Invalid(
+            "resultant and moment reductions require all source components".into(),
+        ));
+    }
+    if source.numeric_representation() != RecoveredFieldNumericRepresentation::Real
+        || spec.complex_representation != ComplexRepresentation::Real
+    {
+        return Err(ObservationError::Unsupported(
+            "complex resultants require the production frequency-domain reduction path",
+        ));
+    }
+    let source_shape = source.value_shape();
+    match (source_shape, target) {
+        (ObservationValueShape::Vector3, ResolvedObservationTarget::Nodes { .. })
+            if matches!(
+                spec.quantity,
+                ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
+            ) => {}
+        (ObservationValueShape::Vector3, ResolvedObservationTarget::Volume { .. })
+        | (ObservationValueShape::Vector3, ResolvedObservationTarget::Boundary { .. }) => {}
+        (ObservationValueShape::SymmetricTensor3, ResolvedObservationTarget::Boundary { .. })
+            if spec.quantity == ObservationQuantity::Stress
+                && matches!(
+                    spec.sign_convention,
+                    SignConvention::Native | SignConvention::TensionPositive
+                ) => {}
+        (ObservationValueShape::Scalar, ResolvedObservationTarget::Boundary { .. })
+            if matches!(
+                spec.quantity,
+                ObservationQuantity::FluidPressure
+                    | ObservationQuantity::AcousticPressure
+                    | ObservationQuantity::ContactPressure
+            ) && matches!(
+                spec.sign_convention,
+                SignConvention::OutwardPositive | SignConvention::InwardPositive
+            ) => {}
+        _ => {
+            return Err(ObservationError::Unsupported(
+                "resultants require a vector volume/surface field, boundary stress, or explicitly oriented boundary pressure",
+            ))
+        }
+    }
+    if matches!(operation, SpatialReduction::Moment { .. })
+        && spec.quantity == ObservationQuantity::ReactionMoment
+    {
+        return Err(ObservationError::Invalid(
+            "a moment reduction cannot take a second moment of reaction moments".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_numeric_representation(
@@ -711,7 +805,6 @@ fn resolve_reduction_target(
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
-    let projection = solid_projection(topology, spec)?;
     if !matches!(
         field_domain,
         RecoveredFieldEntityDomain::StructuralNodes | RecoveredFieldEntityDomain::SolidElements
@@ -720,6 +813,43 @@ fn resolve_reduction_target(
             "beam and shell reductions require formulation-owned integration rules",
         ));
     }
+    if matches!(
+        spec.quantity,
+        ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
+    ) {
+        if spec.source_location != FieldLocation::Node
+            || field_domain != RecoveredFieldEntityDomain::StructuralNodes
+        {
+            return Err(ObservationError::Invalid(
+                "reaction resultants require a nodal structural reaction field".into(),
+            ));
+        }
+        return match &spec.target {
+            ObservationTarget::WholeModel
+            | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
+                nodes_target((0..topology.nodes.len()).collect(), topology)
+            }
+            ObservationTarget::Spatial(ExcitationTarget::Region(region))
+                if region.entity_dimension == EntityDimension::Point
+                    && region.expected_topology == ExpectedTopology::MeshNode =>
+            {
+                let id = parse_node_selector(&region.region_id, spec)?;
+                let index = topology.node_index(id)?.ok_or_else(|| {
+                    target_error(spec, "structural-node selector does not resolve")
+                })?;
+                enforce_cardinality(region.cardinality, 1, spec)?;
+                nodes_target(vec![index], topology)
+            }
+            ObservationTarget::Constraint { .. } => Err(ObservationError::Unsupported(
+                "constraint-target reaction resultants require the canonical executed constraint plan",
+            )),
+            _ => Err(target_error(
+                spec,
+                "reaction resultants support the whole model or an exact structural node",
+            )),
+        };
+    }
+    let projection = solid_projection(topology, spec)?;
     match &spec.target {
         ObservationTarget::WholeModel
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
@@ -904,21 +1034,21 @@ fn enforce_cardinality(
 fn resolve_component(
     spec: &ObservationSpec,
     field: &RecoveredFieldDefinition,
-) -> Result<(ResolvedComponentProjection, usize), ObservationError> {
+) -> Result<ResolvedComponentProjection, ObservationError> {
     let source = shape_component_count(field.value_shape())?;
     match spec.component {
-        ObservationComponent::All => Ok((ResolvedComponentProjection::All, source)),
+        ObservationComponent::All => Ok(ResolvedComponentProjection::All),
         ObservationComponent::X if source == 3 => {
-            Ok((ResolvedComponentProjection::Cartesian { axis: 0 }, 1))
+            Ok(ResolvedComponentProjection::Cartesian { axis: 0 })
         }
         ObservationComponent::Y if source == 3 => {
-            Ok((ResolvedComponentProjection::Cartesian { axis: 1 }, 1))
+            Ok(ResolvedComponentProjection::Cartesian { axis: 1 })
         }
         ObservationComponent::Z if source == 3 => {
-            Ok((ResolvedComponentProjection::Cartesian { axis: 2 }, 1))
+            Ok(ResolvedComponentProjection::Cartesian { axis: 2 })
         }
         ObservationComponent::Magnitude if source == 3 => {
-            Ok((ResolvedComponentProjection::Magnitude3, 1))
+            Ok(ResolvedComponentProjection::Magnitude3)
         }
         _ => Err(ObservationError::Unsupported(
             "this evaluator supports scalar/all and vector all, Cartesian, or magnitude components",

@@ -203,6 +203,14 @@ pub(super) fn validate_reduction(
     request: &ObservationRequest,
     spec: &ObservationSpec,
 ) -> Result<(), AnalysisValidationError> {
+    if spec.reduction.as_ref().is_some_and(|value| {
+        matches!(
+            value.spatial,
+            SpatialReduction::Moment { about } if !about.is_finite()
+        )
+    }) {
+        return observation_error(request, "moment reference position must be finite");
+    }
     let has_reduction = spec.reduction.as_ref().is_some_and(|value| {
         !matches!(value.spatial, SpatialReduction::None)
             || !matches!(value.series, SeriesReduction::None)

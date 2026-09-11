@@ -352,6 +352,7 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
         series: SeriesReduction::None,
         extrema_ties: ExtremaTiePolicy::FirstCanonical,
     });
+    observation.output_location = FieldLocation::Global;
     let (projection, plan, field) =
         prepared_on(projection, ObservationRequest::Reduction(observation));
     let topology = StructuralObservationTopology::from_projection(&projection);
@@ -393,6 +394,427 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     {
         assert!((single - split).abs() <= 1.0e-14);
     }
+}
+
+#[test]
+fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let boundary = mesh.topology.boundary_faces[0].provenance[0].clone();
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance = vec![boundary.clone()];
+    }
+    mesh.seal_canonical_digest().unwrap();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let selector = boundary.analysis_selection_id().unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "contact.pressure",
+        ObservationQuantity::ContactPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
+        runmat_analysis_core::RegionTarget::boundary(selector),
+    ));
+    let mut resultant = spec("pressure_resultant", target.clone());
+    resultant.quantity = ObservationQuantity::ContactPressure;
+    resultant.output_location = FieldLocation::Global;
+    resultant.sign_convention = SignConvention::OutwardPositive;
+    resultant.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let about = Position::new([0.0, 1.0, 0.0]);
+    let mut moment = resultant.clone();
+    moment.observation_id = ObservationId("pressure_moment".into());
+    moment.reduction.as_mut().unwrap().spatial = SpatialReduction::Moment { about };
+    let mut step = ProcedureStep::structural_nonlinear("pressure-resultants");
+    step.observations = vec![
+        ObservationRequest::Reduction(resultant),
+        ObservationRequest::Reduction(moment),
+    ];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = projection
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m[0])
+        .collect::<Vec<_>>();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64("contact.pressure", vec![values.len()], values),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let policy = ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap());
+    let resultant = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        policy,
+        None,
+    )
+    .unwrap();
+    let moment = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[1],
+        &field,
+        &topology,
+        policy,
+        None,
+    )
+    .unwrap();
+
+    let volume = projection
+        .elements
+        .iter()
+        .map(|element| element.signed_volume_m3)
+        .sum::<f64>();
+    let centroid = projection.elements[0].centroid_m;
+    let expected_resultant = [volume, 0.0, 0.0];
+    let expected_moment = [
+        0.0,
+        (centroid[2] - about.meters[2]) * volume,
+        -(centroid[1] - about.meters[1]) * volume,
+    ];
+    assert_eq!(resultant.value_shape, ObservationValueShape::Vector3);
+    assert_eq!(moment.value_shape, ObservationValueShape::Vector3);
+    assert!(resultant.entities.is_empty() && moment.entities.is_empty());
+    for (actual, expected) in resultant
+        .field
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .zip(expected_resultant)
+    {
+        assert!((actual - expected).abs() <= 1.0e-12);
+    }
+    for (actual, expected) in moment
+        .field
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .zip(expected_moment)
+    {
+        assert!((actual - expected).abs() <= 1.0e-12);
+    }
+}
+
+#[test]
+fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure_sign() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let face = &projection.boundary_faces[0];
+    let target = ObservationTarget::Spatial(runmat_analysis_core::ExcitationTarget::Region(
+        runmat_analysis_core::RegionTarget::boundary(
+            face.provenance[0].analysis_selection_id().unwrap(),
+        ),
+    ));
+    let definition = RecoveredFieldDefinition::new(
+        "stress.traction",
+        ObservationQuantity::Stress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut observation = spec("stress_resultant", target.clone());
+    observation.quantity = ObservationQuantity::Stress;
+    observation.value_shape = ObservationValueShape::SymmetricTensor3;
+    observation.output_location = FieldLocation::Global;
+    observation.sign_convention = SignConvention::TensionPositive;
+    observation.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_static("stress-resultant");
+    step.observations = vec![ObservationRequest::Reduction(observation)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let tensor = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "stress.traction",
+            vec![projection.nodes.len(), 6],
+            tensor.repeat(projection.nodes.len()),
+        ),
+    )
+    .unwrap();
+    let result = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &StructuralObservationTopology::from_projection(&projection),
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let area = face.oriented_area_vector_m2;
+    let expected = [
+        tensor[0] * area[0] + tensor[3] * area[1] + tensor[5] * area[2],
+        tensor[3] * area[0] + tensor[1] * area[1] + tensor[4] * area[2],
+        tensor[5] * area[0] + tensor[4] * area[1] + tensor[2] * area[2],
+    ];
+    for (actual, expected) in result.field.as_host_f64().unwrap().iter().zip(expected) {
+        assert!((actual - expected).abs() <= 1.0e-12);
+    }
+
+    let pressure_definition = RecoveredFieldDefinition::new(
+        "pressure.ambiguous",
+        ObservationQuantity::ContactPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut pressure = spec("ambiguous_pressure", target);
+    pressure.quantity = ObservationQuantity::ContactPressure;
+    pressure.output_location = FieldLocation::Global;
+    pressure.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_nonlinear("ambiguous-pressure");
+    step.observations = vec![ObservationRequest::Reduction(pressure)];
+    assert!(super::resolve_observation_plan(
+        &step,
+        &projection,
+        &[pressure_definition],
+        ObservationLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("explicitly oriented boundary pressure"));
+}
+
+#[test]
+fn vector_l2_norm_is_scalar_and_partition_equivalent() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "displacement.norm",
+        ObservationQuantity::Displacement,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut observation = spec("displacement_norm", ObservationTarget::WholeModel);
+    observation.quantity = ObservationQuantity::Displacement;
+    observation.value_shape = ObservationValueShape::Vector3;
+    observation.output_location = FieldLocation::Global;
+    observation.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::EuclideanNorm,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_static("vector-norm");
+    step.observations = vec![ObservationRequest::Reduction(observation)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "displacement.norm",
+            vec![projection.nodes.len(), 3],
+            [3.0, 4.0, 0.0].repeat(projection.nodes.len()),
+        ),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let serial = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let split = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+    let volume = projection
+        .elements
+        .iter()
+        .map(|element| element.signed_volume_m3)
+        .sum::<f64>();
+    let expected = 5.0 * volume.sqrt();
+    assert_eq!(serial.value_shape, ObservationValueShape::Scalar);
+    assert!((serial.field.as_host_f64().unwrap()[0] - expected).abs() <= 1.0e-12);
+    assert!((split.field.as_host_f64().unwrap()[0] - expected).abs() <= 1.0e-12);
+    assert_eq!(serial.logical_identity, split.logical_identity);
+}
+
+#[test]
+fn nodal_reaction_resultant_and_moment_are_discrete_partition_equivalent_sums() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "reaction.force",
+        ObservationQuantity::ReactionForce,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut resultant = spec("reaction_resultant", ObservationTarget::WholeModel);
+    resultant.quantity = ObservationQuantity::ReactionForce;
+    resultant.value_shape = ObservationValueShape::Vector3;
+    resultant.output_location = FieldLocation::Global;
+    resultant.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let about = Position::new([0.25, -0.5, 1.0]);
+    let mut moment = resultant.clone();
+    moment.observation_id = ObservationId("reaction_moment".into());
+    moment.reduction.as_mut().unwrap().spatial = SpatialReduction::Moment { about };
+    let mut step = ProcedureStep::structural_static("reaction-reductions");
+    step.observations = vec![
+        ObservationRequest::Reduction(resultant),
+        ObservationRequest::Reduction(moment),
+    ];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let mut values = Vec::with_capacity(projection.nodes.len() * 3);
+    let mut expected_resultant = [0.0; 3];
+    let mut expected_moment = [0.0; 3];
+    for node in &projection.nodes {
+        let force = [
+            node.coordinates_m[0] + 1.0,
+            2.0 * node.coordinates_m[1] - 0.5,
+            -node.coordinates_m[2] + 0.25,
+        ];
+        values.extend(force);
+        for axis in 0..3 {
+            expected_resultant[axis] += force[axis];
+        }
+        let arm = [
+            node.coordinates_m[0] - about.meters[0],
+            node.coordinates_m[1] - about.meters[1],
+            node.coordinates_m[2] - about.meters[2],
+        ];
+        expected_moment[0] += arm[1] * force[2] - arm[2] * force[1];
+        expected_moment[1] += arm[2] * force[0] - arm[0] * force[2];
+        expected_moment[2] += arm[0] * force[1] - arm[1] * force[0];
+    }
+    let field = RecoveredField::new(
+        definition.clone(),
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64("reaction.force", vec![projection.nodes.len(), 3], values),
+    )
+    .unwrap();
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let serial_policy = ObservationExecutionPolicy::serial();
+    let split_policy = ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(4).unwrap());
+    for (observation, expected) in plan
+        .observations
+        .iter()
+        .zip([expected_resultant, expected_moment])
+    {
+        let serial = evaluate_partitioned_observation(
+            &plan,
+            observation,
+            &field,
+            &topology,
+            serial_policy,
+            None,
+        )
+        .unwrap();
+        let split = evaluate_partitioned_observation(
+            &plan,
+            observation,
+            &field,
+            &topology,
+            split_policy,
+            None,
+        )
+        .unwrap();
+        assert_eq!(serial.value_shape, ObservationValueShape::Vector3);
+        assert_eq!(serial.logical_identity, split.logical_identity);
+        for ((serial, split), expected) in serial
+            .field
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .zip(split.field.as_host_f64().unwrap())
+            .zip(expected)
+        {
+            assert!((serial - expected).abs() <= 1.0e-12);
+            assert!((split - expected).abs() <= 1.0e-12);
+        }
+    }
+
+    let mut constraint_resultant = spec(
+        "constraint_reaction",
+        ObservationTarget::Constraint {
+            constraint_id: "fixed-end".into(),
+        },
+    );
+    constraint_resultant.quantity = ObservationQuantity::ReactionForce;
+    constraint_resultant.value_shape = ObservationValueShape::Vector3;
+    constraint_resultant.output_location = FieldLocation::Global;
+    constraint_resultant.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Resultant,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::FirstCanonical,
+    });
+    let mut step = ProcedureStep::structural_static("constraint-reaction");
+    step.observations = vec![ObservationRequest::Reduction(constraint_resultant)];
+    assert!(super::resolve_observation_plan(
+        &step,
+        &projection,
+        &[definition],
+        ObservationLimits::default(),
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("canonical executed constraint plan"));
 }
 
 #[test]

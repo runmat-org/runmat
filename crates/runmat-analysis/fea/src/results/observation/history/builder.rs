@@ -1,8 +1,6 @@
 use std::collections::VecDeque;
 
-use runmat_analysis_core::{
-    IndependentDomain, ObservationId, ObservationValueShape, RetentionPolicy, SamplingPolicy,
-};
+use runmat_analysis_core::{IndependentDomain, ObservationId, RetentionPolicy, SamplingPolicy};
 use runmat_execution::Digest;
 
 use crate::results::field::RecoveredFieldSample;
@@ -162,13 +160,7 @@ impl BoundedObservationHistory {
         }
         let samples = self.samples.into_iter().collect::<Vec<_>>();
         let value_shape = samples.first().map_or_else(
-            || {
-                if self.observation.result_component_count == 1 {
-                    ObservationValueShape::Scalar
-                } else {
-                    self.observation.spec.value_shape.clone()
-                }
-            },
+            || self.observation.result_value_shape.clone(),
             |sample| sample.result.value_shape.clone(),
         );
         let mut manifest = ObservationHistoryManifest {
@@ -210,17 +202,13 @@ fn validate_result_against_observation(
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
     result.validate()?;
-    let expected_shape = if observation.result_component_count == 1 {
-        ObservationValueShape::Scalar
-    } else {
-        observation.spec.value_shape.clone()
-    };
+    let expected_shape = &observation.result_value_shape;
     if result.plan_identity != plan_identity
         || result.topology_digest != topology_digest
         || result.observation_id != observation.spec.observation_id
         || result.quantity != observation.spec.quantity
         || result.location != observation.spec.output_location
-        || result.value_shape != expected_shape
+        || &result.value_shape != expected_shape
         || result.complex_representation != observation.spec.complex_representation
         || result.partial_access != observation.spec.storage.partial_access
     {

@@ -2,8 +2,8 @@ use std::sync::Once;
 
 use runmat_analysis_core::{
     ComplexRepresentation, DiagnosticKind, ExtremaTiePolicy, FieldLocation, ObservationComponent,
-    ObservationPurpose, ObservationQuantity, PartialAccessPolicy, RecoveryPolicy, SeriesReduction,
-    SeriesWeighting, SignConvention, SpatialReduction,
+    ObservationPurpose, ObservationQuantity, PartialAccessPolicy, Position, RecoveryPolicy,
+    SeriesReduction, SeriesWeighting, SignConvention, SpatialReduction,
 };
 
 use super::super::*;
@@ -713,15 +713,43 @@ choices!(
         SPATIAL_RESULTANT_SIGNATURES,
         "fea.SpatialReduction.resultant",
         SpatialReduction::Resultant
-    ),
-    (
-        spatial_moment,
-        SPATIAL_MOMENT_DESCRIPTOR,
-        SPATIAL_MOMENT_SIGNATURES,
-        "fea.SpatialReduction.moment",
-        SpatialReduction::Moment
     )
 );
+
+const SPATIAL_MOMENT_INPUTS: [BuiltinParamDescriptor; 1] = [required(
+    "about",
+    BuiltinParamType::Any,
+    "Typed fea.Position defining the moment reference point.",
+)];
+const SPATIAL_MOMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "value = fea.SpatialReduction.moment(about)",
+    inputs: &SPATIAL_MOMENT_INPUTS,
+    outputs: &OUT_ANY,
+}];
+pub(super) const SPATIAL_MOMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SPATIAL_MOMENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
+#[runtime_builtin(
+    name = "fea.SpatialReduction.moment",
+    category = "fea",
+    summary = "Integrate the moment of a force-like field about an explicit point.",
+    keywords = "fea,observation,reduction,moment,reference point,typed",
+    descriptor(SPATIAL_MOMENT_DESCRIPTOR),
+    integer_audit(CHOICE_INTEGER_AUDIT),
+    builtin_path = "crate::builtins::fea::study_policies::observation"
+)]
+pub async fn spatial_moment(about: Value) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.SpatialReduction.moment";
+    let about = Position::new(super::super::values::position_meters(NAME, &about)?);
+    to_typed_value(
+        NAME,
+        SPATIAL_REDUCTION_CLASS,
+        SpatialReduction::Moment { about },
+    )
+}
 choices!(
     SERIES_REDUCTION_CLASS,
     (
@@ -1334,6 +1362,20 @@ mod tests {
             SeriesReduction::RootMeanSquare {
                 weighting: SeriesWeighting::TrapezoidalIndependentDomain,
             }
+        );
+    }
+
+    #[test]
+    fn moment_reduction_preserves_its_typed_reference_point() {
+        let about = Position::new([1.0, -2.0, 3.5]);
+        let position = block_on(crate::builtins::fea::values::position_meters_builtin(
+            Value::Tensor(Tensor::new_2d(about.meters.to_vec(), 1, 3).unwrap()),
+        ))
+        .unwrap();
+        let reduction = block_on(spatial_moment(position)).unwrap();
+        assert_eq!(
+            spatial_reduction("test", &reduction).unwrap(),
+            SpatialReduction::Moment { about }
         );
     }
 }

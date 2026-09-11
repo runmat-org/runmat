@@ -1,11 +1,14 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{ComplexRepresentation, FieldLocation, SpatialReduction};
+use runmat_analysis_core::{
+    ComplexRepresentation, FieldLocation, ObservationValueShape, SignConvention, SpatialReduction,
+};
 
 use crate::{results::field::RecoveredFieldPartitionSet, topology::AnalysisProjection};
 
 use super::{
-    contract::observation_result_storage_component_count, topology::StructuralObservationTopology,
+    contract::{observation_result_storage_component_count, shape_component_count},
+    topology::StructuralObservationTopology,
     ObservationError, ObservationPartition, ObservationPartitionPayload,
     ObservationPartitionTarget, ResolvedComponentProjection, ResolvedObservation,
 };
@@ -183,7 +186,7 @@ pub(super) fn select_values(
     observation: &ResolvedObservation,
 ) -> Result<Vec<f64>, ObservationError> {
     let components = observation_result_storage_component_count(
-        observation.result_component_count,
+        shape_component_count(&observation.result_value_shape)?,
         observation.spec.complex_representation,
     )?;
     let mut selected = Vec::with_capacity(indices.len().saturating_mul(components));
@@ -288,8 +291,9 @@ pub(super) fn weighted_volume_contribution(
     element_indices: &[usize],
     projection: &AnalysisProjection,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
+    let operation = reduction_operation(observation)?;
     let mut accumulator = WeightedAccumulator::new(observation_result_storage_component_count(
-        observation.result_component_count,
+        shape_component_count(&observation.result_value_shape)?,
         observation.spec.complex_representation,
     )?);
     for &element_index in element_indices {
@@ -307,7 +311,16 @@ pub(super) fn weighted_volume_contribution(
                         point.shape_values(),
                         observation,
                     ) {
-                        Ok(projected) => accumulator.add(&projected, point.volume_weight_m3),
+                        Ok(projected) => {
+                            component_error = accumulate_volume_reduction(
+                                &mut accumulator,
+                                operation,
+                                &projected,
+                                point.position_m,
+                                point.volume_weight_m3,
+                            )
+                            .err()
+                        }
                         Err(error) => component_error = Some(error),
                     },
                 )?;
@@ -322,7 +335,13 @@ pub(super) fn weighted_volume_contribution(
                         "observation source partition is missing an owned element field value",
                     ))?;
                 let projected = project_observation_value(field, value, observation)?;
-                accumulator.add(&projected, element.signed_volume_m3);
+                accumulate_volume_reduction(
+                    &mut accumulator,
+                    operation,
+                    &projected,
+                    element.centroid_m,
+                    element.signed_volume_m3,
+                )?;
             }
             _ => return Err(ObservationError::Unsupported("unsupported field location")),
         }
@@ -336,8 +355,9 @@ pub(super) fn weighted_boundary_contribution(
     face_indices: &[usize],
     projection: &AnalysisProjection,
 ) -> Result<ObservationPartitionPayload, ObservationError> {
+    let operation = reduction_operation(observation)?;
     let mut accumulator = WeightedAccumulator::new(observation_result_storage_component_count(
-        observation.result_component_count,
+        shape_component_count(&observation.result_value_shape)?,
         observation.spec.complex_representation,
     )?);
     for &face_index in face_indices {
@@ -352,13 +372,77 @@ pub(super) fn weighted_boundary_contribution(
                 point.shape_values(),
                 observation,
             ) {
-                Ok(projected) => accumulator.add(&projected, point.area_weight_m2),
+                Ok(projected) => {
+                    component_error = accumulate_boundary_reduction(
+                        &mut accumulator,
+                        observation,
+                        operation,
+                        &projected,
+                        point.position_m,
+                        point.area_vector_weight_m2,
+                        point.area_weight_m2,
+                    )
+                    .err()
+                }
                 Err(error) => component_error = Some(error),
             }
         })?;
         if let Some(error) = component_error {
             return Err(error);
         }
+    }
+    accumulator.finish()
+}
+
+pub(super) fn discrete_reaction_contribution(
+    observation: &ResolvedObservation,
+    field: &RecoveredFieldPartitionSet,
+    node_indices: &[usize],
+    topology: &StructuralObservationTopology,
+) -> Result<ObservationPartitionPayload, ObservationError> {
+    if !matches!(
+        observation.spec.quantity,
+        runmat_analysis_core::ObservationQuantity::ReactionForce
+            | runmat_analysis_core::ObservationQuantity::ReactionMoment
+    ) {
+        return Err(ObservationError::Invalid(
+            "discrete resultant requires a reaction field".into(),
+        ));
+    }
+    let operation = reduction_operation(observation)?;
+    let mut accumulator = WeightedAccumulator::new(3);
+    for &node_index in node_indices {
+        let node = topology
+            .nodes
+            .get(node_index)
+            .ok_or(ObservationError::Identity(
+                "reaction reduction exceeds structural node topology",
+            ))?;
+        let value = field.value(node_index).ok_or(ObservationError::Identity(
+            "reaction reduction is missing an owned nodal value",
+        ))?;
+        let projected = project_observation_value(field, value, observation)?;
+        let vector = weighted_vector(&projected, 1.0)?;
+        let contribution = match operation {
+            SpatialReduction::Resultant => vector,
+            SpatialReduction::Moment { about }
+                if observation.spec.quantity
+                    == runmat_analysis_core::ObservationQuantity::ReactionForce =>
+            {
+                cross(subtract(node.coordinates_m, about.meters), vector)
+            }
+            SpatialReduction::Moment { .. } => {
+                return Err(ObservationError::Invalid(
+                    "a moment reduction cannot take a second moment of reaction moments".into(),
+                ))
+            }
+            _ => {
+                return Err(ObservationError::Invalid(
+                    "discrete reaction contribution requires a resultant or moment".into(),
+                ))
+            }
+        };
+        accumulator.add_resultant(contribution, 1.0)?;
     }
     accumulator.finish()
 }
@@ -378,7 +462,12 @@ impl WeightedAccumulator {
         }
     }
 
-    fn add(&mut self, values: &[f64], weight: f64) {
+    fn add(&mut self, values: &[f64], weight: f64) -> Result<(), ObservationError> {
+        if values.len() != self.linear_sum.len() || !weight.is_finite() || weight <= 0.0 {
+            return Err(ObservationError::Invalid(
+                "weighted reduction component count or measure is invalid".into(),
+            ));
+        }
         for ((linear, square), value) in self
             .linear_sum
             .iter_mut()
@@ -389,6 +478,40 @@ impl WeightedAccumulator {
             square.add(value * value * weight);
         }
         self.measure.add(weight);
+        Ok(())
+    }
+
+    fn add_norm(&mut self, values: &[f64], weight: f64) -> Result<(), ObservationError> {
+        if self.square_sum.len() != 1
+            || values.is_empty()
+            || values.iter().any(|value| !value.is_finite())
+            || !weight.is_finite()
+            || weight <= 0.0
+        {
+            return Err(ObservationError::Invalid(
+                "Euclidean-norm reduction input is invalid".into(),
+            ));
+        }
+        self.square_sum[0].add(values.iter().map(|value| value * value).sum::<f64>() * weight);
+        self.measure.add(weight);
+        Ok(())
+    }
+
+    fn add_resultant(&mut self, value: [f64; 3], measure: f64) -> Result<(), ObservationError> {
+        if self.linear_sum.len() != 3
+            || value.iter().any(|component| !component.is_finite())
+            || !measure.is_finite()
+            || measure <= 0.0
+        {
+            return Err(ObservationError::Invalid(
+                "resultant reduction input is invalid".into(),
+            ));
+        }
+        for (sum, component) in self.linear_sum.iter_mut().zip(value) {
+            sum.add(component);
+        }
+        self.measure.add(measure);
+        Ok(())
     }
 
     fn finish(self) -> Result<ObservationPartitionPayload, ObservationError> {
@@ -420,6 +543,115 @@ impl WeightedAccumulator {
             measure,
         })
     }
+}
+
+fn accumulate_volume_reduction(
+    accumulator: &mut WeightedAccumulator,
+    operation: SpatialReduction,
+    projected: &[f64],
+    position_m: [f64; 3],
+    weight: f64,
+) -> Result<(), ObservationError> {
+    match operation {
+        SpatialReduction::EuclideanNorm => accumulator.add_norm(projected, weight),
+        SpatialReduction::Resultant => {
+            accumulator.add_resultant(weighted_vector(projected, weight)?, weight)
+        }
+        SpatialReduction::Moment { about } => {
+            let force = weighted_vector(projected, weight)?;
+            accumulator.add_resultant(cross(subtract(position_m, about.meters), force), weight)
+        }
+        _ => accumulator.add(projected, weight),
+    }
+}
+
+fn accumulate_boundary_reduction(
+    accumulator: &mut WeightedAccumulator,
+    observation: &ResolvedObservation,
+    operation: SpatialReduction,
+    projected: &[f64],
+    position_m: [f64; 3],
+    area_vector_weight_m2: [f64; 3],
+    area_weight_m2: f64,
+) -> Result<(), ObservationError> {
+    match operation {
+        SpatialReduction::EuclideanNorm => accumulator.add_norm(projected, area_weight_m2),
+        SpatialReduction::Resultant | SpatialReduction::Moment { .. } => {
+            let force = boundary_force(
+                observation,
+                projected,
+                area_vector_weight_m2,
+                area_weight_m2,
+            )?;
+            let value = match operation {
+                SpatialReduction::Moment { about } => {
+                    cross(subtract(position_m, about.meters), force)
+                }
+                SpatialReduction::Resultant => force,
+                _ => unreachable!(),
+            };
+            accumulator.add_resultant(value, area_weight_m2)
+        }
+        _ => accumulator.add(projected, area_weight_m2),
+    }
+}
+
+fn boundary_force(
+    observation: &ResolvedObservation,
+    projected: &[f64],
+    area_vector_weight_m2: [f64; 3],
+    area_weight_m2: f64,
+) -> Result<[f64; 3], ObservationError> {
+    match observation.spec.value_shape {
+        ObservationValueShape::Vector3 => weighted_vector(projected, area_weight_m2),
+        ObservationValueShape::SymmetricTensor3 if projected.len() == 6 => Ok([
+            projected[0] * area_vector_weight_m2[0]
+                + projected[3] * area_vector_weight_m2[1]
+                + projected[5] * area_vector_weight_m2[2],
+            projected[3] * area_vector_weight_m2[0]
+                + projected[1] * area_vector_weight_m2[1]
+                + projected[4] * area_vector_weight_m2[2],
+            projected[5] * area_vector_weight_m2[0]
+                + projected[4] * area_vector_weight_m2[1]
+                + projected[2] * area_vector_weight_m2[2],
+        ]),
+        ObservationValueShape::Scalar if projected.len() == 1 => {
+            let sign = match observation.spec.sign_convention {
+                SignConvention::OutwardPositive => 1.0,
+                SignConvention::InwardPositive => -1.0,
+                _ => {
+                    return Err(ObservationError::Invalid(
+                        "pressure resultant lacks an explicit normal sign convention".into(),
+                    ))
+                }
+            };
+            Ok(area_vector_weight_m2.map(|component| sign * projected[0] * component))
+        }
+        _ => Err(ObservationError::Invalid(
+            "resultant source shape differs from its resolved contract".into(),
+        )),
+    }
+}
+
+fn weighted_vector(values: &[f64], weight: f64) -> Result<[f64; 3], ObservationError> {
+    let [x, y, z] = values else {
+        return Err(ObservationError::Invalid(
+            "vector resultant requires exactly three real components".into(),
+        ));
+    };
+    Ok([x * weight, y * weight, z * weight])
+}
+
+fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
 }
 
 fn interpolate_and_project(

@@ -281,6 +281,32 @@ results retain the canonical node, element, or interpolated path position where 
 `firstCanonical` retains the first exact tie in canonical target order; `allLocations` retains every
 exact tie. This rule is independent of worker count and partition completion order.
 
+Finite-element integrals, root-mean-square values, and L2 norms use the admitted element or face
+quadrature and publish a global result. `resultant` integrates vector fields directly, converts
+boundary stress to Cauchy traction, and converts boundary pressure through its required explicit
+outward- or inward-positive sign convention. A moment always names its reference point; there is no
+implicit model origin:
+
+```matlab
+origin = fea.Position.meters([0 0 0]);
+forceReduction = fea.ReductionPolicy.new( ...
+    fea.SpatialReduction.resultant(), fea.SeriesReduction.none(), ...
+    fea.ExtremaTiePolicy.firstCanonical());
+momentReduction = fea.ReductionPolicy.new( ...
+    fea.SpatialReduction.moment(origin), fea.SeriesReduction.none(), ...
+    fea.ExtremaTiePolicy.firstCanonical());
+```
+
+The source quantity keeps its physical shape while the reduced result has its own derived shape:
+stress and pressure resultants and moments are three-component vectors, and an L2 norm is scalar.
+Partition tasks integrate only their owned cells or faces; canonical compensated reduction makes
+the fan-in order deterministic for the admitted partition plan, with serial/partitioned numerical
+equivalence governed by the observation tolerance. Recovered reaction forces are already discrete
+nodal forces, so their resultants are sums rather than a second finite-element integral; moments sum
+each nodal force crossed with its lever arm. Whole-model and exact-node reaction targets are
+supported. Constraint-target reaction totals remain fail-closed until evaluation supplies the exact
+executed constraint plan, which is the sole authority for constraint membership.
+
 Series reductions operate on a completed canonical history, after any requested spatial reduction.
 Minimum, maximum, absolute maximum, and envelope retain the exact source-history sample, physical
 coordinate, and node, element, or interpolated point for every output lane. An envelope is the

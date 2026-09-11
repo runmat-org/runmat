@@ -1,8 +1,7 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, ObservationId, ObservationValueShape, SamplingPolicy,
-    SpatialReduction,
+    AnalysisField, AnalysisModel, ObservationId, SamplingPolicy, SpatialReduction,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
 use runmat_execution::Digest;
@@ -21,11 +20,12 @@ use crate::{
 use super::{
     contract::{
         observation_result_storage_component_count, observation_result_storage_shape,
-        OBSERVATION_LIMITS, OBSERVATION_PREFIX,
+        shape_component_count, OBSERVATION_LIMITS, OBSERVATION_PREFIX,
     },
     distributed_numeric::{
-        interpolate_values, reduction_operation, required_source_indices, select_values,
-        weighted_boundary_contribution, weighted_volume_contribution, CompensatedSum,
+        discrete_reaction_contribution, interpolate_values, reduction_operation,
+        required_source_indices, select_values, weighted_boundary_contribution,
+        weighted_volume_contribution, CompensatedSum,
     },
     extrema::{
         extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
@@ -629,15 +629,24 @@ fn evaluate_observation_partition_with_attribution(
         ObservationPartitionTarget::Nodes {
             indices,
             identities,
-        } => selected_or_extrema_payload(
-            observation,
-            identities
-                .iter()
-                .copied()
-                .map(ObservationEntity::Node)
-                .collect(),
-            select_values(field, indices, observation)?,
-        )?,
+        } => {
+            if matches!(
+                reduction_operation(observation),
+                Ok(SpatialReduction::Resultant | SpatialReduction::Moment { .. })
+            ) {
+                discrete_reaction_contribution(observation, field, indices, topology)?
+            } else {
+                selected_or_extrema_payload(
+                    observation,
+                    identities
+                        .iter()
+                        .copied()
+                        .map(ObservationEntity::Node)
+                        .collect(),
+                    select_values(field, indices, observation)?,
+                )?
+            }
+        }
         ObservationPartitionTarget::Elements {
             indices,
             identities,
@@ -801,7 +810,7 @@ pub(crate) fn combine_observation_partitions(
         ObservationPartitionPayload::WeightedReduction { .. } => {
             let operation = reduction_operation(observation)?;
             let component_count = observation_result_storage_component_count(
-                observation.result_component_count,
+                shape_component_count(&observation.result_value_shape)?,
                 observation.spec.complex_representation,
             )?;
             let mut linear = vec![CompensatedSum::default(); component_count];
@@ -847,6 +856,17 @@ pub(crate) fn combine_observation_partitions(
                     .into_iter()
                     .map(|sum| (sum.total() / measure).sqrt())
                     .collect(),
+                SpatialReduction::EuclideanNorm => {
+                    let [sum] = square.as_slice() else {
+                        return Err(ObservationError::Identity(
+                            "Euclidean-norm contribution is not scalar",
+                        ));
+                    };
+                    vec![sum.total().sqrt()]
+                }
+                SpatialReduction::Resultant | SpatialReduction::Moment { .. } => {
+                    linear.into_iter().map(CompensatedSum::total).collect()
+                }
                 _ => {
                     return Err(ObservationError::Unsupported(
                         "unsupported partitioned spatial reduction",
@@ -875,12 +895,7 @@ pub(crate) fn combine_observation_partitions(
             (values, entities)
         }
     };
-    let components = observation.result_component_count;
-    let value_shape = if components == 1 {
-        ObservationValueShape::Scalar
-    } else {
-        observation.spec.value_shape.clone()
-    };
+    let value_shape = observation.result_value_shape.clone();
     let shape = observation_result_storage_shape(
         (!entities.is_empty()).then_some(entities.len()),
         &value_shape,
@@ -922,7 +937,7 @@ fn validate_contribution_payload(
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
     let storage_components = observation_result_storage_component_count(
-        observation.result_component_count,
+        shape_component_count(&observation.result_value_shape)?,
         observation.spec.complex_representation,
     )?;
     match (&partition.target, &contribution.payload) {
@@ -947,6 +962,19 @@ fn validate_contribution_payload(
                 ));
             }
         }
+        (
+            ObservationPartitionTarget::Nodes { indices, .. },
+            ObservationPartitionPayload::WeightedReduction {
+                linear_sum,
+                square_sum,
+                measure,
+            },
+        ) if matches!(
+            reduction_operation(observation),
+            Ok(SpatialReduction::Resultant | SpatialReduction::Moment { .. })
+        ) && linear_sum.len() == storage_components
+            && square_sum.len() == storage_components
+            && *measure == indices.len() as f64 => {}
         (
             ObservationPartitionTarget::Elements { identities, .. },
             ObservationPartitionPayload::SelectedValues { entities, values },

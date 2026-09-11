@@ -79404,8 +79404,16 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "value = fea.SpatialReduction.moment()",
-          "inputs": [],
+          "label": "value = fea.SpatialReduction.moment(about)",
+          "inputs": [
+            {
+              "name": "about",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.Position defining the moment reference point."
+            }
+          ],
           "outputs": [
             {
               "name": "result",

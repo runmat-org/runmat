@@ -123,7 +123,7 @@ pub async fn target_volume(region: Value) -> BuiltinResult<Value> {
 )]
 pub async fn target_point(position: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ObservationTarget.point";
-    let position: Position = object_payload(NAME, &position, values::POSITION_CLASS)?;
+    let position = Position::new(values::position_meters(NAME, &position)?);
     to_typed_value(NAME, TARGET_CLASS, ObservationTarget::Point { position })
 }
 #[runtime_builtin(
