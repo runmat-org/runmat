@@ -54,6 +54,12 @@ sampling_descriptor!(
     &INTERVAL
 );
 sampling_descriptor!(
+    SAMPLING_STUDY_PARAMETER_DESCRIPTOR,
+    SAMPLING_STUDY_PARAMETER_SIGNATURES,
+    "policy = fea.SamplingPolicy.studyParameterValues(values)",
+    &VALUES
+);
+sampling_descriptor!(
     SAMPLING_MODES_DESCRIPTOR,
     SAMPLING_MODES_SIGNATURES,
     "policy = fea.SamplingPolicy.modeIndices(values)",
@@ -117,6 +123,12 @@ sampling_values!(
     "fea.SamplingPolicy.loadFactors",
     SAMPLING_LOAD_DESCRIPTOR,
     SamplingPolicy::LoadFactors
+);
+sampling_values!(
+    sampling_study_parameter,
+    "fea.SamplingPolicy.studyParameterValues",
+    SAMPLING_STUDY_PARAMETER_DESCRIPTOR,
+    SamplingPolicy::StudyParameterValues
 );
 #[runtime_builtin(
     name = "fea.SamplingPolicy.modeIndices",

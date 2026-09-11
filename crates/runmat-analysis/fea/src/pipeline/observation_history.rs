@@ -94,6 +94,7 @@ fn required_history_coordinates(
             | SamplingPolicy::FrequencyIntervalHertz { .. }
             | SamplingPolicy::LoadFactors(_)
             | SamplingPolicy::LoadFactorInterval { .. }
+            | SamplingPolicy::StudyParameterValues(_)
             | SamplingPolicy::ModeIndices(_) => {
                 let coordinates = exact_scheduled_coordinates(
                     &spec.sampling,
@@ -138,9 +139,11 @@ fn compare_coordinates(
             RecoveredFieldSample::FrequencyHertz(left),
             RecoveredFieldSample::FrequencyHertz(right),
         )
-        | (RecoveredFieldSample::LoadFactor(left), RecoveredFieldSample::LoadFactor(right)) => {
-            left.total_cmp(&right)
-        }
+        | (RecoveredFieldSample::LoadFactor(left), RecoveredFieldSample::LoadFactor(right))
+        | (
+            RecoveredFieldSample::StudyParameterValue(left),
+            RecoveredFieldSample::StudyParameterValue(right),
+        ) => left.total_cmp(&right),
         (RecoveredFieldSample::ModeIndex(left), RecoveredFieldSample::ModeIndex(right)) => {
             left.cmp(&right)
         }
@@ -154,7 +157,8 @@ fn coordinate_rank(coordinate: RecoveredFieldSample) -> u8 {
         RecoveredFieldSample::TimeSeconds(_) => 1,
         RecoveredFieldSample::FrequencyHertz(_) => 2,
         RecoveredFieldSample::LoadFactor(_) => 3,
-        RecoveredFieldSample::ModeIndex(_) => 4,
+        RecoveredFieldSample::StudyParameterValue(_) => 4,
+        RecoveredFieldSample::ModeIndex(_) => 5,
     }
 }
 

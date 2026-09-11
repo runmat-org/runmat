@@ -117,13 +117,17 @@ pub enum RecoveredFieldSample {
     ModeIndex(usize),
     FrequencyHertz(f64),
     LoadFactor(f64),
+    StudyParameterValue(f64),
 }
 
 impl RecoveredFieldSample {
     pub(super) fn validate(self) -> Result<(), RecoveredFieldError> {
         match self {
             Self::Final | Self::ModeIndex(_) => Ok(()),
-            Self::TimeSeconds(value) | Self::FrequencyHertz(value) | Self::LoadFactor(value)
+            Self::TimeSeconds(value)
+            | Self::FrequencyHertz(value)
+            | Self::LoadFactor(value)
+            | Self::StudyParameterValue(value)
                 if value.is_finite() && value.to_bits() != (-0.0_f64).to_bits() =>
             {
                 Ok(())

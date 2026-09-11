@@ -278,6 +278,7 @@ pub enum SamplingPolicy {
         end: f64,
         interval: f64,
     },
+    StudyParameterValues(Vec<f64>),
     ModeIndices(Vec<usize>),
     Event(ObservationEvent),
     Adaptive {

@@ -597,6 +597,81 @@ fn complex_vector_component_projection_uses_logical_components() {
 }
 
 #[test]
+fn study_parameter_history_keeps_parameter_identity_and_exact_values() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "structural.displacement.parameter-study",
+        ObservationQuantity::Displacement,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec("parameter_history", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Displacement;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.sampling = SamplingPolicy::StudyParameterValues(vec![0.01, 0.05]);
+    request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut step = ProcedureStep::structural_modal("parameter-study");
+    step.procedure = runmat_analysis_core::AnalysisProcedure::ModalResponseSpectrum;
+    step.independent_domain = runmat_analysis_core::IndependentDomain::StudyParameter {
+        parameter_id: "damping_ratio".into(),
+        canonical_values: vec![0.01, 0.02, 0.05],
+    };
+    step.observations = vec![ObservationRequest::History(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("parameter_history".into());
+    let mut builder = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    for value in [0.01, 0.05] {
+        let sample = RecoveredFieldSample::StudyParameterValue(value);
+        let fields = catalog_at_sample(
+            &projection,
+            &definition,
+            sample,
+            vec![4, 3],
+            vec![value; 12],
+        );
+        let result =
+            evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample)
+                .unwrap();
+        builder.push(sample, result).unwrap();
+    }
+    let history = builder.finish().unwrap();
+    assert_eq!(
+        history.manifest().independent_domain,
+        step.independent_domain
+    );
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        vec![
+            RecoveredFieldSample::StudyParameterValue(0.01),
+            RecoveredFieldSample::StudyParameterValue(0.05),
+        ]
+    );
+    assert_eq!(
+        ObservationHistory::from_canonical_bytes(&history.canonical_bytes().unwrap()).unwrap(),
+        history
+    );
+}
+
+#[test]
 fn history_bounds_and_coordinates_fail_closed_before_publication() {
     let projection = projection(ElementOrder::Tet4);
     let definition = scalar_definition();

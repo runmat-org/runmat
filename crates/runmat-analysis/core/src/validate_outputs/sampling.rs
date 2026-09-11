@@ -28,6 +28,7 @@ pub(super) fn validate_sampling(
         | SamplingPolicy::FrequencyIntervalHertz { .. }
         | SamplingPolicy::LoadFactors(_)
         | SamplingPolicy::LoadFactorInterval { .. }
+        | SamplingPolicy::StudyParameterValues(_)
         | SamplingPolicy::ModeIndices(_) => {
             !observation_sampling_matches_domain(&step.independent_domain, sampling)
         }
@@ -133,6 +134,15 @@ pub fn observation_sampling_matches_domain(
                 && !values.contains(&0)
                 && values.windows(2).all(|pair| pair[0] < pair[1])
                 && values.last().is_some_and(|value| value <= requested_count)
+        }
+        (
+            IndependentDomain::StudyParameter {
+                canonical_values, ..
+            },
+            SamplingPolicy::StudyParameterValues(values),
+        ) => {
+            strictly_increasing_finite(values, false)
+                && values.iter().all(|value| canonical_values.contains(value))
         }
         _ => false,
     }
@@ -297,6 +307,18 @@ mod tests {
         assert!(!observation_sampling_matches_domain(
             &modes,
             &SamplingPolicy::ModeIndices(vec![1, 4]),
+        ));
+        let parameter = IndependentDomain::StudyParameter {
+            parameter_id: "damping_ratio".into(),
+            canonical_values: vec![0.01, 0.02, 0.05],
+        };
+        assert!(observation_sampling_matches_domain(
+            &parameter,
+            &SamplingPolicy::StudyParameterValues(vec![0.01, 0.05]),
+        ));
+        assert!(!observation_sampling_matches_domain(
+            &parameter,
+            &SamplingPolicy::StudyParameterValues(vec![0.01, 0.03]),
         ));
     }
 }

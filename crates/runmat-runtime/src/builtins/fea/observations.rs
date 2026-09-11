@@ -218,6 +218,10 @@ pub(super) fn ensure_observation_classes_registered() {
                     "loadFactorInterval",
                     "fea.SamplingPolicy.loadFactorInterval",
                 ),
+                (
+                    "studyParameterValues",
+                    "fea.SamplingPolicy.studyParameterValues",
+                ),
                 ("modeIndices", "fea.SamplingPolicy.modeIndices"),
                 ("event", "fea.SamplingPolicy.event"),
                 ("adaptive", "fea.SamplingPolicy.adaptive"),

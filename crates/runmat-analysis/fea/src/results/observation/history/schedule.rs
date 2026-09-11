@@ -53,7 +53,8 @@ pub(super) fn scheduled_sample_count(
         SamplingPolicy::EveryAcceptedIncrement | SamplingPolicy::Event(_) => None,
         SamplingPolicy::TimeSeconds(values)
         | SamplingPolicy::FrequencyHertz(values)
-        | SamplingPolicy::LoadFactors(values) => Some(values.len()),
+        | SamplingPolicy::LoadFactors(values)
+        | SamplingPolicy::StudyParameterValues(values) => Some(values.len()),
         SamplingPolicy::ModeIndices(values) => Some(values.len()),
         SamplingPolicy::TimeIntervalSeconds {
             start,
@@ -147,9 +148,11 @@ pub(crate) fn sample_matches_policy(
         | (SamplingPolicy::EveryAcceptedIncrement, RecoveredFieldSample::FrequencyHertz(_)) => true,
         (SamplingPolicy::TimeSeconds(values), RecoveredFieldSample::TimeSeconds(value))
         | (SamplingPolicy::FrequencyHertz(values), RecoveredFieldSample::FrequencyHertz(value))
-        | (SamplingPolicy::LoadFactors(values), RecoveredFieldSample::LoadFactor(value)) => {
-            values.contains(&value)
-        }
+        | (SamplingPolicy::LoadFactors(values), RecoveredFieldSample::LoadFactor(value))
+        | (
+            SamplingPolicy::StudyParameterValues(values),
+            RecoveredFieldSample::StudyParameterValue(value),
+        ) => values.contains(&value),
         (
             SamplingPolicy::TimeIntervalSeconds {
                 start,
@@ -217,6 +220,12 @@ pub(crate) fn exact_scheduled_coordinates(
             .copied()
             .map(normalize_zero)
             .map(RecoveredFieldSample::LoadFactor)
+            .collect(),
+        SamplingPolicy::StudyParameterValues(values) => values
+            .iter()
+            .copied()
+            .map(normalize_zero)
+            .map(RecoveredFieldSample::StudyParameterValue)
             .collect(),
         SamplingPolicy::ModeIndices(values) => values
             .iter()
@@ -303,6 +312,12 @@ pub(in crate::results::observation) fn sample_matches_domain(
             IndependentDomain::Eigenvalue { requested_count },
             RecoveredFieldSample::ModeIndex(index),
         ) => index > 0 && index <= *requested_count,
+        (
+            IndependentDomain::StudyParameter {
+                canonical_values, ..
+            },
+            RecoveredFieldSample::StudyParameterValue(value),
+        ) => canonical_values.contains(&value),
         _ => false,
     }
 }
@@ -314,9 +329,11 @@ pub(super) fn coordinate_follows(left: RecoveredFieldSample, right: RecoveredFie
             RecoveredFieldSample::FrequencyHertz(left),
             RecoveredFieldSample::FrequencyHertz(right),
         )
-        | (RecoveredFieldSample::LoadFactor(left), RecoveredFieldSample::LoadFactor(right)) => {
-            left < right
-        }
+        | (RecoveredFieldSample::LoadFactor(left), RecoveredFieldSample::LoadFactor(right))
+        | (
+            RecoveredFieldSample::StudyParameterValue(left),
+            RecoveredFieldSample::StudyParameterValue(right),
+        ) => left < right,
         (RecoveredFieldSample::ModeIndex(left), RecoveredFieldSample::ModeIndex(right)) => {
             left < right
         }
@@ -331,6 +348,7 @@ pub(super) fn validate_coordinate(
         RecoveredFieldSample::TimeSeconds(value)
         | RecoveredFieldSample::FrequencyHertz(value)
         | RecoveredFieldSample::LoadFactor(value)
+        | RecoveredFieldSample::StudyParameterValue(value)
             if value.is_finite() && value.to_bits() != (-0.0_f64).to_bits() =>
         {
             Ok(())

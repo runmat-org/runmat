@@ -263,7 +263,8 @@ fn validate_resources(
         let requested_samples = match &spec.sampling {
             crate::SamplingPolicy::TimeSeconds(values)
             | crate::SamplingPolicy::FrequencyHertz(values)
-            | crate::SamplingPolicy::LoadFactors(values) => Some(values.len()),
+            | crate::SamplingPolicy::LoadFactors(values)
+            | crate::SamplingPolicy::StudyParameterValues(values) => Some(values.len()),
             crate::SamplingPolicy::ModeIndices(values) => Some(values.len()),
             crate::SamplingPolicy::TimeIntervalSeconds {
                 start,
