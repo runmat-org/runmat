@@ -1218,7 +1218,7 @@ fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     // metadata.
     assert!(all.contains(&runmat_mir::MirConstructKind::CaptureSequence));
     assert!(all.contains(&runmat_mir::MirConstructKind::SequenceAssign));
-    assert_eq!(all.len(), 57);
+    assert_eq!(all.len(), 58);
     assert_eq!(
         all.iter()
             .copied()

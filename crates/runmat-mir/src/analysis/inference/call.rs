@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use runmat_hir::{CallableIdentity, FunctionId};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, LiteralContext,
-    LiteralValue, OutputSelection, ValueFact, ValueKindFact,
+    LiteralValue, OutputSelection, ValueFact, ValueKindFact, ValueSequenceFact,
 };
 
 use crate::analysis::dataflow;
-use crate::{MirCall, MirCallee, MirOperand};
+use crate::{MirCall, MirCallArg, MirCallee, MirOperand, MirSequenceLocalId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionSummary {
@@ -21,6 +21,7 @@ pub(crate) struct FunctionSummary {
 pub(crate) fn infer_mir_call(
     call: &MirCall,
     facts: &[Option<ValueFact>],
+    sequences: &BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
     literals: &[LiteralValue],
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     selection: OutputSelection,
@@ -29,8 +30,27 @@ pub(crate) fn infer_mir_call(
         arguments: call
             .args
             .iter()
-            .filter_map(|argument| argument.operand())
-            .map(|operand| operand_fact(operand, facts, summaries))
+            .flat_map(|argument| match argument {
+                MirCallArg::CapturedSequence(id) => {
+                    let sequence = sequences
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(ValueSequenceFact::dynamic);
+                    if sequence.outputs.is_empty() && sequence.variadic {
+                        vec![ValueFact::unknown(DynamicReason::RuntimeValue)]
+                    } else {
+                        sequence.outputs
+                    }
+                }
+                MirCallArg::Single(operand)
+                | MirCallArg::Expansion(
+                    crate::MirExpansionSource::ReturnedOutputs(operand)
+                    | crate::MirExpansionSource::Member { base: operand, .. },
+                ) => vec![operand_fact(operand, facts, summaries)],
+                MirCallArg::Expansion(source) => {
+                    vec![operand_fact(source.base(), facts, summaries)]
+                }
+            })
             .collect(),
         literals: LiteralContext::new(literals.to_vec()),
         outputs: selection,

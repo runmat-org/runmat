@@ -72,6 +72,9 @@ impl RunMatSession {
 
     pub fn import_workspace_state(&mut self, bytes: &[u8]) -> Result<()> {
         let entries = runtime_import_workspace_state(bytes)?;
+        for (_, value) in &entries {
+            runmat_runtime::execution::validate_storable_value(value)?;
+        }
         self.clear_variables();
 
         for (index, (name, value)) in entries.into_iter().enumerate() {

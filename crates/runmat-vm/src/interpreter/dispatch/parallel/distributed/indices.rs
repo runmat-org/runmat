@@ -8,7 +8,7 @@ pub(super) async fn execute(
     requested_outputs: u8,
     mut arguments: Vec<Value>,
     execution: &ExecutionContext,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let lab = if has_lab {
         Some(runmat_runtime::parallel::codistributor::designated_worker(
             &arguments.pop().ok_or_else(|| {
@@ -98,7 +98,7 @@ pub(super) async fn execute(
 fn result(
     selection: &runmat_execution::PartitionSelection,
     requested_outputs: u8,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let indices = match selection {
         runmat_execution::PartitionSelection::Range(range) => (range.start..range.end)
             .map(|index| index + 1)
@@ -137,22 +137,25 @@ fn result(
     };
     if requested_outputs == 1 {
         let length = indices.len();
-        return runmat_value::Tensor::new_integer(
+        let value = runmat_value::Tensor::new_integer(
             runmat_value::IntegerStorage::U64(indices),
             vec![1, length],
         )
         .map(Value::Tensor)
         .map_err(|error| {
             crate::interpreter::errors::mex("GlobalIndicesShape", &error.to_string())
-        });
+        })?;
+        return runmat_value::ValueSequence::single(value)
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime);
     }
     let (first, last) = indices
         .first()
         .copied()
         .zip(indices.last().copied())
         .unwrap_or((1, 0));
-    Ok(Value::OutputList(vec![
+    runmat_value::ValueSequence::comma_separated(vec![
         Value::Int(runmat_value::IntValue::U64(first)),
         Value::Int(runmat_value::IntValue::U64(last)),
-    ]))
+    ])
+    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }

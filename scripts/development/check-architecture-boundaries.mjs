@@ -117,6 +117,121 @@ function enforceBoundedModulePackage({
   }
 }
 
+function productionRust(text) {
+  return text.split(/#\s*\[cfg\s*\(test\)\]/, 1)[0];
+}
+
+function rustFunctionRegions(text) {
+  const regions = [];
+  const declarations = /\bfn\s+([A-Za-z_][A-Za-z0-9_]*)[^;{]*\{/g;
+  for (const match of text.matchAll(declarations)) {
+    const start = match.index;
+    const bodyStart = start + match[0].lastIndexOf("{");
+    let depth = 0;
+    for (let cursor = bodyStart; cursor < text.length; cursor += 1) {
+      if (text[cursor] === "{") depth += 1;
+      else if (text[cursor] === "}") depth -= 1;
+      if (depth === 0) {
+        regions.push({ name: match[1], start, end: cursor + 1 });
+        break;
+      }
+    }
+  }
+  return regions;
+}
+
+function enforceTransientSequenceQuarantine() {
+  const roots = [
+    "crates/runmat-native-executor/src/execute",
+    "crates/runmat-vm/src/interpreter/dispatch",
+  ];
+  const individualFiles = [
+    "crates/runmat-runtime/src/indexing/end_expr.rs",
+    "crates/runmat-runtime/src/indexing/write_slice.rs",
+    "crates/runmat-vm/src/ops/arrays.rs",
+  ];
+  for (const root of roots) {
+    for (const source of rustSources(root)) {
+      if (/\bValue::OutputList\b/.test(productionRust(source.text))) {
+        fail(`${source.path} lets the legacy output-list carrier cross an executor foundation boundary`);
+      }
+    }
+  }
+  for (const sourcePath of individualFiles) {
+    if (/\bValue::OutputList\b/.test(productionRust(read(sourcePath)))) {
+      fail(`${sourcePath} interprets the legacy output-list carrier below sequence resolution`);
+    }
+  }
+  const adapterPath = "crates/runmat-runtime/src/call/arguments.rs";
+  const adapter = productionRust(read(adapterPath));
+  const occurrences = adapter.match(/\bValue::OutputList\b/g)?.length ?? 0;
+  if (
+    !adapter.includes("pub fn adapt_legacy_builtin_result") ||
+    !adapter.includes("pub(crate) fn project_legacy_builtin_value_abi") ||
+    occurrences !== 2
+  ) {
+    fail(`${adapterPath} must contain the sole executor adapter and legacy builtin Value ABI projector`);
+  }
+  for (const source of rustSources("crates")) {
+    if (productionRust(source.text).includes("package_legacy_output_list_at_abi")) {
+      fail(`${source.path} resurrects the forbidden executor/session output-list packaging shim`);
+    }
+  }
+
+  const projectorCallers = new Map([
+    ["crates/runmat-runtime/src/lib.rs", ["dispatch_callable_with_policy", "feval_builtin"]],
+    ["crates/runmat-runtime/src/dispatcher.rs", ["try_distributed_builtin"]],
+    [
+      "crates/runmat-runtime/src/builtins/common/mapped_callable/invoke.rs",
+      ["invoke_resolved", "invoke_external", "invoke_closure"],
+    ],
+    ["crates/runmat-runtime/src/builtins/interop/native_ffi.rs", ["invoke_native"]],
+    ["crates/runmat-runtime/src/builtins/interop/python.rs", ["invoke_python"]],
+  ]);
+  for (const source of rustSources("crates")) {
+    if (source.path === adapterPath) continue;
+    const body = productionRust(source.text);
+    if (!body.includes("project_legacy_builtin_value_abi")) continue;
+    const roles = projectorCallers.get(source.path) ?? [];
+    const regions = rustFunctionRegions(body);
+    const calls = [...body.matchAll(/\bproject_legacy_builtin_value_abi\b/g)];
+    const owners = calls.map((call) =>
+      regions
+        .filter((region) => region.start <= call.index && call.index < region.end)
+        .sort((left, right) => right.start - left.start)[0]?.name,
+    );
+    if (owners.some((owner) => !roles.includes(owner))) {
+      fail(`${source.path} calls the legacy builtin Value projector outside its exact old BuiltinResult boundary`);
+    }
+  }
+
+  const carrier = productionRust(read("crates/runmat-value/src/sequence.rs"));
+  if (/serde::|\bSerialize\b|\bDeserialize\b/.test(carrier)) {
+    fail("runmat-value ValueSequence must remain transient and non-serializable");
+  }
+
+  const rejectionRoots = [
+    "crates/runmat-runtime/src/foreign",
+    "crates/runmat-runtime/src/execution",
+    "crates/runmat-runtime/src/replay",
+    "crates/runmat-core/src/session",
+    "crates/runmat-execution/src/value",
+    "crates/runmat-wasm/src/wire",
+  ];
+  for (const root of rejectionRoots) {
+    for (const source of rustSources(root)) {
+      const lines = productionRust(source.text).split("\n");
+      lines.forEach((line, index) => {
+        if (!line.includes("Value::OutputList")) return;
+        const context = lines.slice(Math.max(0, index - 2), index + 4).join("\n");
+        if (!/Err\(|unreachable!|reject|unsupported|not_portable|transient/i.test(context)) {
+          fail(`${source.path}:${index + 1} handles OutputList outside a named typed rejection path`);
+        }
+      });
+    }
+  }
+}
+
 const upwardValueDependencies = [
   "runmat-builtins",
   "runmat-runtime",
@@ -3061,6 +3176,8 @@ for (const modulePackage of [
 ]) {
   enforceBoundedModulePackage(modulePackage);
 }
+
+enforceTransientSequenceQuarantine();
 
 if (failed) process.exit(1);
 console.log("crate architecture boundaries are valid");

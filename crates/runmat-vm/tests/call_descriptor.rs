@@ -7,7 +7,7 @@ use runmat_runtime::call::descriptor::{
     execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
     CallableDescriptor, CallableTarget,
 };
-use runmat_value::{Closure, StringArray, Tensor, Value};
+use runmat_value::{Closure, StringArray, Tensor, Value, ValueSequence, ValueSequenceKind};
 use runmat_vm::FunctionRegistry;
 use std::sync::Arc;
 
@@ -26,6 +26,15 @@ fn method_identity(name: &str) -> CallableIdentity {
     CallableIdentity::Method(MethodId(name.to_string()))
 }
 
+fn single_sequence(value: Value) -> ValueSequence {
+    ValueSequence::single(value).expect("test output is a valid single-value sequence")
+}
+
+fn assert_single(sequence: &ValueSequence, expected: Value) {
+    assert_eq!(sequence.kind(), ValueSequenceKind::Single);
+    assert_eq!(sequence.as_slice(), std::slice::from_ref(&expected));
+}
+
 #[test]
 fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
     let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0], vec![1, 3]).expect("tensor"));
@@ -37,19 +46,13 @@ fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
         CallableCallKind::Direct,
     );
     let value = block_on(execute_callable_descriptor(descriptor)).expect("execute descriptor");
-    match value {
-        Value::OutputList(values) => assert_eq!(values.len(), 2),
-        other => panic!("expected two-output list from builtin descriptor, got {other:?}"),
-    }
+    assert_eq!(value.kind(), ValueSequenceKind::CommaSeparated);
+    assert_eq!(value.len(), 2);
 }
 
 #[test]
 fn builtin_descriptor_uses_requested_outputs_for_zero_result_calls() {
     let args = vec![Value::Num(9.0)];
-    let expected = block_on(runmat_runtime::call_builtin_async_with_outputs(
-        "sqrt", &args, 0,
-    ))
-    .expect("runtime builtin with explicit zero outputs");
     let descriptor = CallableDescriptor::resolved(
         CallableIdentity::Builtin(BuiltinId("sqrt".to_string())),
         args,
@@ -58,7 +61,8 @@ fn builtin_descriptor_uses_requested_outputs_for_zero_result_calls() {
         CallableCallKind::Direct,
     );
     let value = block_on(execute_callable_descriptor(descriptor)).expect("execute descriptor");
-    assert_eq!(value, expected);
+    assert_eq!(value.kind(), ValueSequenceKind::CommaSeparated);
+    assert!(value.is_empty());
 }
 
 #[test]
@@ -85,7 +89,7 @@ fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
             assert_eq!(function, 7777);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
     let descriptor = CallableDescriptor::resolved(
@@ -100,7 +104,7 @@ fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("external boundary call should resolve through semantic registry");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -144,7 +148,7 @@ fn dynamic_name_descriptor_runtime_name_resolution_can_reach_builtin() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("dynamic runtime name resolution should reach builtin");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -171,7 +175,7 @@ fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
             assert_eq!(function, 6262);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(5.0)]);
-            Box::pin(async { Ok(Value::Num(6.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(6.0))) })
         }),
     ));
     let descriptor = CallableDescriptor::resolved(
@@ -183,7 +187,7 @@ fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("imported identity should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(6.0));
+    assert_single(&value, Value::Num(6.0));
 }
 
 #[test]
@@ -196,7 +200,7 @@ fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
             assert_eq!(function, 9191);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(5.0)]);
-            Box::pin(async { Ok(Value::Num(6.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(6.0))) })
         }),
     ));
     let descriptor = CallableDescriptor::resolved(
@@ -208,7 +212,7 @@ fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("method identity should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(6.0));
+    assert_single(&value, Value::Num(6.0));
 }
 
 #[test]
@@ -273,7 +277,8 @@ fn try_execute_dynamic_name_runtime_name_resolution_can_reach_builtin() {
     );
     let value = block_on(try_execute_callable_descriptor(descriptor))
         .expect("try_execute should allow dynamic builtin fallback");
-    assert_eq!(value, Some(Value::Num(3.0)));
+    let sequence = value.expect("dynamic builtin should produce outputs");
+    assert_single(&sequence, Value::Num(3.0));
 }
 
 #[test]
@@ -314,7 +319,7 @@ fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
             assert_eq!(function, 9393);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
     let descriptor = CallableDescriptor::resolved(
@@ -329,7 +334,8 @@ fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
     );
     let value = block_on(try_execute_callable_descriptor(descriptor))
         .expect("try_execute should use semantic resolver for qualified external identities");
-    assert_eq!(value, Some(Value::Num(3.0)));
+    let sequence = value.expect("qualified external call should produce outputs");
+    assert_single(&sequence, Value::Num(3.0));
 }
 
 #[test]
@@ -340,7 +346,7 @@ fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver(
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, _args, _requested_outputs| {
             assert_eq!(function, 4242);
-            Box::pin(async { Ok(Value::Num(123.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(123.0))) })
         }),
     ));
     let descriptor = CallableDescriptor::from_feval_value(
@@ -351,7 +357,7 @@ fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver(
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("builtin handle feval should execute");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -405,7 +411,7 @@ fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolve
             assert_eq!(function, 5252);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -417,7 +423,7 @@ fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolve
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("method function handle should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -430,7 +436,7 @@ fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
             assert_eq!(function, 5151);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -442,7 +448,7 @@ fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("qualified function handle should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -455,7 +461,7 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
             assert_eq!(function, 4242);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(10.0), Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(12.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
         }),
     ));
 
@@ -471,7 +477,7 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("closure name should resolve through semantic registry");
-    assert_eq!(value, Value::Num(12.0));
+    assert_single(&value, Value::Num(12.0));
 }
 
 #[test]
@@ -484,7 +490,7 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
             assert_eq!(function, 4242);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(10.0), Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(12.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
         }),
     ));
 
@@ -500,7 +506,7 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("embedded semantic identity should take precedence");
-    assert_eq!(value, Value::Num(12.0));
+    assert_single(&value, Value::Num(12.0));
 }
 
 #[test]
@@ -603,7 +609,7 @@ fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
             assert_eq!(function, 7171);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -615,7 +621,7 @@ fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("@handle literal should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -646,7 +652,7 @@ fn feval_string_array_at_handle_can_use_semantic_resolver() {
             assert_eq!(function, 7272);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -661,7 +667,7 @@ fn feval_string_array_at_handle_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("string-array @handle should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -674,7 +680,7 @@ fn feval_external_function_handle_can_use_semantic_resolver() {
             assert_eq!(function, 8181);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -686,7 +692,7 @@ fn feval_external_function_handle_can_use_semantic_resolver() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("external function handle should resolve through semantic resolver");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -699,7 +705,7 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
             assert_eq!(function, 8181);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
     let mut registry = FunctionRegistry::default();
@@ -715,7 +721,7 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("external handle should prefer registry semantic identity");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]
@@ -728,7 +734,7 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
             assert_eq!(function, 4242);
             assert_eq!(requested_outputs, 1);
             assert_eq!(args, &[Value::Num(2.0)]);
-            Box::pin(async { Ok(Value::Num(3.0)) })
+            Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
     ));
 
@@ -743,7 +749,7 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     );
     let value = block_on(execute_callable_descriptor(descriptor))
         .expect("semantic function handle should use embedded semantic function id");
-    assert_eq!(value, Value::Num(3.0));
+    assert_single(&value, Value::Num(3.0));
 }
 
 #[test]

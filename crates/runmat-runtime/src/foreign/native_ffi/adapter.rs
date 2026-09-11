@@ -261,7 +261,10 @@ impl NativeFfiAdapter {
             .map(|report| Value::String(report.alias))
     }
 
-    fn load_report(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    fn load_report(
+        &self,
+        arguments: &[Value],
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         let report = self.load_legacy(arguments)?;
         let count = report.notfound.len();
         let notfound = CellArray::new(
@@ -270,10 +273,11 @@ impl NativeFfiAdapter {
             count,
         )
         .map_err(invalid_call)?;
-        Ok(Value::OutputList(vec![
+        runmat_value::ValueSequence::comma_separated(vec![
             Value::Cell(notfound),
             Value::String(report.warnings),
-        ]))
+        ])
+        .map_err(crate::sequence::sequence_error_to_runtime)
     }
 
     fn load_legacy(&self, arguments: &[Value]) -> Result<LegacyLoadReport, RuntimeError> {
@@ -1007,7 +1011,7 @@ impl NativeFfiAdapter {
         context: RuntimeContext,
         arguments: &[Value],
         requested_outputs: usize,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         if arguments.len() < 2 {
             return Err(invalid_call(
                 "native FFI call expects a library alias, symbol, and its arguments",
@@ -1138,7 +1142,7 @@ impl NativeFfiAdapter {
                 }
             }
         }
-        requested_output_value(outputs, requested_outputs)
+        requested_output_sequence(outputs, requested_outputs)
     }
 
     fn register_opaque_pointer(
@@ -1246,11 +1250,16 @@ impl NativeFfiAdapter {
         &self,
         context: RuntimeContext,
         call: ForeignCall,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         self.reap_released();
-        match call.symbol.as_str() {
+        if call.symbol == "load_report" {
+            return self.load_report(&call.arguments);
+        }
+        if call.symbol == "call" {
+            return self.call(context, &call.arguments, call.requested_outputs);
+        }
+        let value = match call.symbol.as_str() {
             "load" => self.load(&call.arguments),
-            "load_report" => self.load_report(&call.arguments),
             "load_prepared" => self.load_prepared(&call.arguments),
             "unload" => self.unload(&call.arguments),
             "is_loaded" => self.is_loaded(&call.arguments),
@@ -1261,12 +1270,12 @@ impl NativeFfiAdapter {
             "get_member" => self.get_member(&call.arguments),
             "set_member" => self.set_member(&call.arguments),
             "invoke_member" => self.invoke_member(&call.arguments),
-            "call" => self.call(context, &call.arguments, call.requested_outputs),
             "build_interface" => self.build_interface(&call.arguments),
             operation => Err(invalid_call(format!(
                 "unknown native FFI operation `{operation}`"
             ))),
-        }
+        }?;
+        super::super::single_output_sequence(value)
     }
 }
 
@@ -1363,6 +1372,7 @@ impl ForeignAdapter for NativeFfiAdapter {
                         )
                         .await?;
                 }
+                let requested_outputs = call.requested_outputs;
                 let outcome = client
                     .invoke(
                         context,
@@ -1372,7 +1382,8 @@ impl ForeignAdapter for NativeFfiAdapter {
                         released_handles,
                         policy.invocation_timeout,
                     )
-                    .await;
+                    .await
+                    .and_then(|outputs| isolated_outputs(outputs, requested_outputs));
                 let terminal = outcome.as_ref().err().is_some_and(|error| {
                     matches!(
                         error.identifier(),
@@ -1396,6 +1407,20 @@ impl ForeignAdapter for NativeFfiAdapter {
 
     fn is_isolated(&self) -> bool {
         self.isolation_policy.get().isolate
+    }
+}
+
+fn isolated_outputs(
+    mut outputs: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    match (requested_outputs, outputs.len()) {
+        (1, 1) => runmat_value::ValueSequence::single(
+            outputs.pop().expect("one isolated native FFI output"),
+        )
+        .map_err(|error| invalid_call(error.to_string())),
+        _ => runmat_value::ValueSequence::comma_separated(outputs)
+            .map_err(|error| invalid_call(error.to_string())),
     }
 }
 
@@ -1610,19 +1635,52 @@ fn isolated_callback_id(value: &Value) -> Option<u64> {
         .ok()
 }
 
-fn requested_output_value(
+fn requested_output_sequence(
     outputs: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if requested_outputs > outputs.len() {
         return Err(invalid_call(format!(
             "native call provides {} outputs, but {requested_outputs} were requested",
             outputs.len()
         )));
     }
+    let mut selected = outputs
+        .into_iter()
+        .take(requested_outputs)
+        .collect::<Vec<_>>();
     match requested_outputs {
-        0 => Ok(Value::OutputList(Vec::new())),
-        1 => Ok(outputs.into_iter().next().expect("validated output count")),
-        count => Ok(Value::OutputList(outputs.into_iter().take(count).collect())),
+        0 => Ok(runmat_value::ValueSequence::empty()),
+        1 => super::super::single_output_sequence(
+            selected.pop().expect("validated native output count"),
+        ),
+        _ => runmat_value::ValueSequence::comma_separated(selected)
+            .map_err(crate::sequence::sequence_error_to_runtime),
+    }
+}
+
+#[cfg(test)]
+mod output_sequence_tests {
+    use super::*;
+
+    #[test]
+    fn requested_native_outputs_preserve_zero_one_and_many_cardinalities() {
+        let source = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        assert!(requested_output_sequence(source.clone(), 0)
+            .expect("zero outputs")
+            .is_empty());
+        assert_eq!(
+            requested_output_sequence(source.clone(), 1)
+                .expect("one output")
+                .into_values(),
+            vec![Value::Num(1.0)]
+        );
+        assert_eq!(
+            requested_output_sequence(source.clone(), 3)
+                .expect("three outputs")
+                .into_values(),
+            source
+        );
+        assert!(requested_output_sequence(vec![Value::Num(1.0)], 2).is_err());
     }
 }

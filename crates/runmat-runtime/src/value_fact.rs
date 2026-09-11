@@ -190,16 +190,22 @@ pub fn value_fact(value: &Value) -> ValueFact {
             identifier: Some(value.identifier.clone()),
         })),
         Value::Future(_) => execution(ExecutionFact::Future {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
             state: runmat_types::FutureStateFact::Unknown,
         }),
         Value::Task(_) => execution(ExecutionFact::Task {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
             spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
         }),
         Value::Pool(_) => execution(ExecutionFact::Pool),
         Value::Job(_) => execution(ExecutionFact::Job {
-            output: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(
+                DynamicReason::RuntimeValue,
+            )),
         }),
         Value::Distributed(handle) => ValueFact {
             kind: ValueKindFact::Distributed(runmat_types::DistributedFact {

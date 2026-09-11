@@ -19,7 +19,7 @@ pub fn validate_sequence_register_flow(instructions: &[Instr]) -> Result<(), Str
 
 pub(super) fn normal_successors(instructions: &[Instr], pc: usize) -> Result<Vec<usize>, String> {
     let checked_target = |target: usize| {
-        (target < instructions.len())
+        (target <= instructions.len())
             .then_some(target)
             .ok_or_else(|| {
                 format!("bytecode instruction {pc} branches outside the function to {target}")

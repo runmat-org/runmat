@@ -12,7 +12,7 @@ use runmat_runtime::RuntimeError;
 use runmat_types::CollectiveId;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
-use super::protocol::{RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_V4};
+use super::protocol::{RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_VERSION};
 use super::route::RemoteFrameRoute;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -125,7 +125,7 @@ impl RemoteCollectiveChannel {
             .register(key, sender)
             .map_err(transport_error)?;
         let reply = RemoteWorkerReply {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: self.correlation_id.clone(),
             outcome: RemoteWorkerOutcome::CollectiveRequest {
                 attempt_id: self.attempt_id,

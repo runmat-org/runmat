@@ -1,4 +1,8 @@
-use super::Compiler;
+use super::{
+    Compiler, IDENT_MIR_CELL_EXPAND_PLAN_INVALID, IDENT_MIR_CELL_INDEX_PLAN_INVALID,
+    IDENT_MIR_INDEX_CONTEXT_INVALID, IDENT_MIR_PAREN_CELL_PLAN_INVALID,
+    IDENT_MIR_SUBSCRIPT_CHAIN_INVALID,
+};
 use crate::bytecode::{BytecodeSubscriptSelector, BytecodeSubscriptStep, Instr};
 use crate::compiler::CompileError;
 use runmat_mir::{MirIndexComponent, MirIndexing, MirSubscriptChain, MirSubscriptStep};
@@ -25,6 +29,27 @@ impl Compiler {
         capture_slot: Option<usize>,
         to_sequence_register: bool,
     ) -> Result<(), CompileError> {
+        chain.validate().map_err(|error| {
+            let identifier = match error {
+                runmat_mir::MirSubscriptChainError::InvalidReadContext
+                | runmat_mir::MirSubscriptChainError::DottedInvokeMustReadSingle => {
+                    IDENT_MIR_INDEX_CONTEXT_INVALID
+                }
+                runmat_mir::MirSubscriptChainError::ParenthesesWithCellPlan
+                | runmat_mir::MirSubscriptChainError::DottedInvokeMustUseParentheses => {
+                    IDENT_MIR_PAREN_CELL_PLAN_INVALID
+                }
+                runmat_mir::MirSubscriptChainError::BracesWithoutCellPlan => {
+                    IDENT_MIR_CELL_INDEX_PLAN_INVALID
+                }
+                runmat_mir::MirSubscriptChainError::InvalidCellExpandAll => {
+                    IDENT_MIR_CELL_EXPAND_PLAN_INVALID
+                }
+                runmat_mir::MirSubscriptChainError::Empty => IDENT_MIR_SUBSCRIPT_CHAIN_INVALID,
+            };
+            self.compile_error(format!("invalid MIR subscript chain: {error}"))
+                .with_identifier(identifier)
+        })?;
         self.compile_mir_operand(&chain.root)?;
         let mut steps = Vec::with_capacity(chain.steps.len());
         for step in &chain.steps {

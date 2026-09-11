@@ -779,11 +779,12 @@ pub(crate) mod tests {
                 assert!(args.is_empty());
                 assert_eq!(requested_outputs, 3);
                 Box::pin(async {
-                    Ok(Value::OutputList(vec![
+                    crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(1.0),
                         Value::Num(2.0),
                         Value::Num(3.0),
-                    ]))
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)
                 })
             }),
         ));

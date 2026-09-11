@@ -79,7 +79,10 @@ mod tests {
                 assert_eq!(function, 7331);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(2.0)]);
-                Box::pin(async { Ok(Value::Num(3.0)) })
+                Box::pin(async {
+                    runmat_value::ValueSequence::single(Value::Num(3.0))
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+                })
             })),
         );
         let value = block_on(call_method_or_member_index_with_outputs(
@@ -91,7 +94,7 @@ mod tests {
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect("classref external call should resolve through semantic resolver");
-        assert_eq!(value, Value::Num(3.0));
+        assert_eq!(value.into_values(), vec![Value::Num(3.0)]);
     }
 
     #[test]

@@ -218,14 +218,14 @@ mod tests {
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Future {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                     state: runmat_types::FutureStateFact::Lazy,
                 }),
                 "future",
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Task {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                     spawn_safety: runmat_types::SpawnSafetyFact::RequiresIsolation,
                 }),
                 "task",
@@ -236,7 +236,7 @@ mod tests {
             ),
             (
                 ValueKindFact::Execution(runmat_types::ExecutionFact::Job {
-                    output: Box::new(unknown()),
+                    output: runmat_types::ValueSequenceFact::single(unknown()),
                 }),
                 "job",
             ),

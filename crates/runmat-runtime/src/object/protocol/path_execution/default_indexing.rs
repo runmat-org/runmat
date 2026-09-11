@@ -7,7 +7,7 @@ use runmat_value::Value;
 use crate::object::indexing::{
     ObjectIndexKind, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
-use crate::sequence::{SequenceResolutionContext, ValueSequence};
+use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
 use crate::RuntimeError;
 
 mod errors;
@@ -39,10 +39,13 @@ pub(super) async fn read_default_step_sequence(
                 None,
             )
             .await?,
-        )),
+        )
+        .map_err(crate::sequence::sequence_error_to_runtime)?),
         ObjectIndexKind::Paren => read_default_step(base, step, caller)
             .await
-            .map(ValueSequence::single),
+            .and_then(|value| {
+                ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
+            }),
     }
 }
 

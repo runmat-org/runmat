@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -15,8 +16,14 @@ pub(super) async fn commit(
     before_overwrite: &mut dyn FnMut(&Value, &Value),
     after_store: &mut dyn FnMut(usize, &Value),
 ) -> Result<(), RuntimeError> {
-    let values = super::super::object::take_sequence_register(stack, state)?;
-    let partitions = state.output_layout()?.distribute(values)?;
+    let layout = state.output_layout()?;
+    let values = super::super::object::take_sequence_register(stack, state)?.resolve(
+        runmat_types::SequenceUse::SelectDestinationCardinality,
+        runmat_runtime::sequence::SequenceResolutionContext::destination_cardinality(
+            layout.total(),
+        ),
+    )?;
+    let partitions = layout.distribute(values)?;
     let targets = state.take_output_targets();
     let mut retained = Vec::with_capacity(retained_outputs);
     let mut roots = Vec::<(usize, Option<Value>)>::new();

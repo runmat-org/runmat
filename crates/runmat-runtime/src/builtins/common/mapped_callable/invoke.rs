@@ -67,7 +67,9 @@ async fn invoke_resolved(
         requested_outputs,
     );
     if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-        return result.map_err(CallableCallError::Runtime);
+        return result
+            .map(crate::call::arguments::project_legacy_builtin_value_abi)
+            .map_err(CallableCallError::Runtime);
     }
     crate::call_builtin_async_with_outputs(name, arguments, requested_outputs)
         .await
@@ -87,7 +89,9 @@ async fn invoke_external(
         requested_outputs,
     );
     if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-        return result.map_err(CallableCallError::Runtime);
+        return result
+            .map(crate::call::arguments::project_legacy_builtin_value_abi)
+            .map_err(CallableCallError::Runtime);
     }
     Err(CallableCallError::UndefinedExternal { identity })
 }
@@ -103,7 +107,9 @@ async fn invoke_closure(
         let request =
             user_functions::CallableRequest::semantic(function, merged.clone(), requested_outputs);
         if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-            return result.map_err(CallableCallError::Runtime);
+            return result
+                .map(crate::call::arguments::project_legacy_builtin_value_abi)
+                .map_err(CallableCallError::Runtime);
         }
         return Err(CallableCallError::SemanticUnavailable {
             function_name: closure.function_name.clone(),
@@ -116,7 +122,9 @@ async fn invoke_closure(
         let request =
             user_functions::CallableRequest::semantic(function, merged.clone(), requested_outputs);
         if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-            return result.map_err(CallableCallError::Runtime);
+            return result
+                .map(crate::call::arguments::project_legacy_builtin_value_abi)
+                .map_err(CallableCallError::Runtime);
         }
     }
     crate::call_builtin_async_with_outputs(&closure.function_name, &merged, requested_outputs)

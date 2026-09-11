@@ -2,6 +2,19 @@ use crate::*;
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
 
+fn assert_single_output(sequence: &runmat_value::ValueSequence, expected: runmat_value::Value) {
+    assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
+    assert_eq!(sequence.as_slice(), std::slice::from_ref(&expected));
+}
+
+fn assert_output_values(sequence: &runmat_value::ValueSequence, expected: &[runmat_value::Value]) {
+    assert_eq!(
+        sequence.kind(),
+        runmat_value::ValueSequenceKind::CommaSeparated
+    );
+    assert_eq!(sequence.as_slice(), expected);
+}
+
 struct InProcessMultiLabExecutionService {
     serial: runmat_runtime::execution::RuntimeExecutionService,
     maximum_labs: u32,
@@ -148,7 +161,10 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
     fn complete_future(
         &self,
         future: &runmat_execution::FutureHandle,
-        result: Result<runmat_value::Value, runmat_runtime::execution::ExecutionServiceError>,
+        result: Result<
+            runmat_value::ValueSequence,
+            runmat_runtime::execution::ExecutionServiceError,
+        >,
     ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
         runmat_runtime::execution::RuntimeExecutionServices::complete_future(
             &self.serial,
@@ -14316,7 +14332,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         &InvocationControl::default().force_generic_native(),
     ))
     .expect("invoke first publication");
-    assert_eq!(first, runmat_value::Value::Num(3.0));
+    assert_single_output(&first, runmat_value::Value::Num(3.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 
     let repeated = block_on(session.invoke_executable(
@@ -14357,7 +14373,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         &InvocationControl::default().force_generic_native(),
     ))
     .expect("invoke replacement publication");
-    assert_eq!(second, runmat_value::Value::Num(12.0));
+    assert_single_output(&second, runmat_value::Value::Num(12.0));
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
 }
 
@@ -15332,9 +15348,8 @@ fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {
         ))
         .expect("generic-native parfor execution");
         assert_eq!(native, established);
-        let runmat_value::Value::OutputList(outputs) = native else {
-            panic!("expected two parfor outputs");
-        };
+        let outputs = native.as_slice();
+        assert_eq!(outputs.len(), 2, "expected two parfor outputs");
         assert!(matches!(
             &outputs[0],
             runmat_value::Value::Tensor(value)
@@ -15584,16 +15599,16 @@ fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {
         .expect("invoke tiered procedure")
     };
 
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (0, 0));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
-    assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+    assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 
     for _ in 0..32 {
-        assert_eq!(invoke(&mut session), runmat_value::Value::Num(5.0));
+        assert_single_output(&invoke(&mut session), runmat_value::Value::Num(5.0));
         assert_eq!(session.generic_native_cache_counts(), (1, 1));
     }
 
@@ -15826,15 +15841,13 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
         requested_outputs: 1,
     };
 
-    assert_eq!(
-        block_on(session.invoke_executable(
-            &unit,
-            invocation.clone(),
-            &InvocationControl::default(),
-        ))
-        .unwrap(),
-        runmat_value::Value::Num(12.0)
-    );
+    let first = block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &InvocationControl::default(),
+    ))
+    .unwrap();
+    assert_single_output(&first, runmat_value::Value::Num(12.0));
     assert_eq!(session.generic_native_cache_counts(), (0, 0));
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -15845,7 +15858,7 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
             &InvocationControl::default(),
         ))
         .unwrap();
-        assert_eq!(value, runmat_value::Value::Num(12.0));
+        assert_single_output(&value, runmat_value::Value::Num(12.0));
         if session.generic_native_cache_counts() == (1, 1) {
             break;
         }
@@ -15886,10 +15899,8 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
     };
 
     for _ in 0..4 {
-        assert_eq!(
-            invoke(&mut session, runmat_value::Value::Num(4.0)).unwrap(),
-            runmat_value::Value::Num(5.0)
-        );
+        let output = invoke(&mut session, runmat_value::Value::Num(4.0)).unwrap();
+        assert_single_output(&output, runmat_value::Value::Num(5.0));
     }
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
@@ -15942,7 +15953,7 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
             &InvocationControl::default(),
         ))
         .expect("invoke vectorized region fixture");
-        let runmat_value::Value::Tensor(output) = value else {
+        let [runmat_value::Value::Tensor(output)] = value.as_slice() else {
             panic!("vectorized region must return a dense tensor")
         };
         assert_eq!(output.shape, vec![1, 4096]);
@@ -15996,7 +16007,7 @@ fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() 
             &InvocationControl::default(),
         ))
         .expect("invoke numeric-region fallback fixture");
-        let runmat_value::Value::Tensor(output) = value else {
+        let [runmat_value::Value::Tensor(output)] = value.as_slice() else {
             panic!("ordinary specialized execution must return a dense tensor")
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
@@ -16033,15 +16044,13 @@ fn native_tiering_records_exact_loop_header_backedges() {
         requested_outputs: 1,
     };
     for _ in 0..2 {
-        assert_eq!(
-            block_on(session.invoke_executable(
-                &unit,
-                invocation.clone(),
-                &InvocationControl::default(),
-            ))
-            .unwrap(),
-            runmat_value::Value::Num(6.0)
-        );
+        let output = block_on(session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .unwrap();
+        assert_single_output(&output, runmat_value::Value::Num(6.0));
     }
 
     let snapshot = session.native_tiering_snapshot_for_testing();
@@ -16058,11 +16067,10 @@ fn native_tiering_records_exact_loop_header_backedges() {
         .expect("function aggregate feedback");
     assert_eq!(function_site.backedges, 3);
 
-    assert_eq!(
-        block_on(session.invoke_executable(&unit, invocation, &InvocationControl::default(),))
-            .unwrap(),
-        runmat_value::Value::Num(6.0)
-    );
+    let output =
+        block_on(session.invoke_executable(&unit, invocation, &InvocationControl::default()))
+            .unwrap();
+    assert_single_output(&output, runmat_value::Value::Num(6.0));
     assert_eq!(session.generic_native_cache_counts(), (2, 1));
     assert_eq!(session.specialized_native_version_count_for_testing(), 1);
     assert_eq!(session.native_osr_transfer_count_for_testing(), 1);
@@ -16096,12 +16104,12 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
     ))
     .expect("forced generic-native execution");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(35.0),
             runmat_value::Value::Num(6.0),
-        ])
+        ],
     );
 
     for requested_outputs in [0, 1] {
@@ -16123,6 +16131,11 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
         ))
         .expect("native reduced-output execution");
         assert_eq!(native, established);
+        if requested_outputs == 0 {
+            assert_output_values(&native, &[]);
+        } else {
+            assert_single_output(&native, runmat_value::Value::Num(35.0));
+        }
     }
 }
 
@@ -16144,17 +16157,11 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
     for (delta, expected) in [
         (
             2.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(2.0),
-                runmat_value::Value::Num(1.0),
-            ]),
+            vec![runmat_value::Value::Num(2.0), runmat_value::Value::Num(1.0)],
         ),
         (
             3.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(5.0),
-                runmat_value::Value::Num(2.0),
-            ]),
+            vec![runmat_value::Value::Num(5.0), runmat_value::Value::Num(2.0)],
         ),
     ] {
         let invocation = ProcedureInvocation {
@@ -16175,7 +16182,7 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
         ))
         .expect("native state execution");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
     }
 }
 
@@ -16211,7 +16218,7 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
     ))
     .expect("native expansion execution");
     assert_eq!(native, established);
-    assert_eq!(native, runmat_value::Value::Num(60.0));
+    assert_single_output(&native, runmat_value::Value::Num(60.0));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -16232,19 +16239,19 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
     for (arguments, expected) in [
         (
             Vec::new(),
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(6.0),
                 runmat_value::Value::Num(0.0),
                 runmat_value::Value::Num(3.0),
-            ]),
+            ],
         ),
         (
             vec![runmat_value::Value::Num(4.0)],
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(8.0),
                 runmat_value::Value::Num(1.0),
                 runmat_value::Value::Num(3.0),
-            ]),
+            ],
         ),
     ] {
         let invocation = ProcedureInvocation {
@@ -16265,7 +16272,7 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
         ))
         .expect("native function ABI execution");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
     }
 
     let invalid = ProcedureInvocation {
@@ -16324,14 +16331,99 @@ fn forced_generic_native_executable_lane_matches_varargin_and_varargout() {
     ))
     .expect("native variadic execution");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(2.0),
             runmat_value::Value::Num(4.0),
             runmat_value::Value::Num(9.0),
-        ])
+        ],
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn forced_generic_native_matches_prepared_cell_sequence_assignment() {
+    let source = ExecutableSource::new(
+        "core-native-sequence-assignment-test@1",
+        "nativeSequenceAssign.m",
+        "function [dst, members] = nativeSequenceAssign(src)\n\
+         dst = {8, 9};\n\
+         members = struct('value', {8, 9});\n\
+         try\n\
+           [dst{:}] = src{:};\n\
+         catch\n\
+         end\n\
+         try\n\
+           [members.value] = src{:};\n\
+         catch\n\
+         end\n\
+         end\n",
+    );
+    let mut established_session =
+        RunMatSession::with_options(false, false).expect("established session init");
+    let unit = block_on(established_session.compile_executable_unit(source, None))
+        .expect("compile prepared sequence assignment unit");
+    let mut native_session =
+        RunMatSession::with_options(false, false).expect("native session init");
+
+    for (input, expected) in [
+        (
+            runmat_value::Value::Cell(
+                runmat_value::CellArray::new(
+                    vec![runmat_value::Value::Num(1.0), runmat_value::Value::Num(2.0)],
+                    1,
+                    2,
+                )
+                .expect("two-element cell input"),
+            ),
+            vec![runmat_value::Value::Num(1.0), runmat_value::Value::Num(2.0)],
+        ),
+        (
+            runmat_value::Value::Cell(
+                runmat_value::CellArray::new(vec![runmat_value::Value::Num(1.0)], 1, 1)
+                    .expect("one-element cell input"),
+            ),
+            vec![runmat_value::Value::Num(8.0), runmat_value::Value::Num(9.0)],
+        ),
+    ] {
+        let invocation = ProcedureInvocation {
+            target: ProcedureTarget::Function("nativeSequenceAssign".into()),
+            arguments: vec![input],
+            requested_outputs: 2,
+        };
+        let established = block_on(established_session.invoke_executable(
+            &unit,
+            invocation.clone(),
+            &InvocationControl::default(),
+        ))
+        .expect("established prepared sequence assignment");
+        let native = block_on(native_session.invoke_executable(
+            &unit,
+            invocation,
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("native prepared sequence assignment");
+        assert_eq!(native, established);
+        let [runmat_value::Value::Cell(cell), members] = native.as_slice() else {
+            panic!("expected cell and structure outputs, got {native:?}");
+        };
+        assert_eq!(cell.data, expected);
+        let member_values = match members {
+            runmat_value::Value::Struct(value) => value
+                .fields
+                .get("value")
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            runmat_value::Value::StructArray(values) => values
+                .elements()
+                .map(|value| value.fields.get("value").cloned().expect("value field"))
+                .collect::<Vec<_>>(),
+            other => panic!("expected structure output, got {other:?}"),
+        };
+        assert_eq!(member_values, expected);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -16367,7 +16459,7 @@ fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() 
         &InvocationControl::default().force_generic_native(),
     );
     assert_eq!(native, established);
-    assert_eq!(native.0, runmat_value::Value::Num(8.0));
+    assert_single_output(&native.0, runmat_value::Value::Num(8.0));
     assert_eq!(native.1.len(), 1, "disp must execute exactly once");
 }
 
@@ -16378,7 +16470,7 @@ fn invoke_executable_with_console(
     invocation: ProcedureInvocation,
     control: &InvocationControl,
 ) -> (
-    runmat_value::Value,
+    runmat_value::ValueSequence,
     Vec<(runmat_runtime::console::ConsoleStream, String)>,
 ) {
     {
@@ -16514,7 +16606,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native no-error try path");
     assert_eq!(native_no_error, established_no_error);
-    assert_eq!(native_no_error, runmat_value::Value::Num(5.0));
+    assert_single_output(&native_no_error, runmat_value::Value::Num(5.0));
 
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeTry".into()),
@@ -16534,12 +16626,12 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native caught-error path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(-1.0),
             runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+        ],
     );
 
     let nested = ProcedureInvocation {
@@ -16557,28 +16649,25 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ))
     .expect("native nested catch/rethrow path");
     assert_eq!(native_nested, established_nested);
-    assert_eq!(
-        native_nested,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native_nested,
+        &[
             runmat_value::Value::Num(7.0),
             runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+        ],
     );
 
     for (argument, expected) in [
         (
             -1.0,
-            runmat_value::Value::OutputList(vec![
+            vec![
                 runmat_value::Value::Num(0.0),
                 runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-            ]),
+            ],
         ),
         (
             4.0,
-            runmat_value::Value::OutputList(vec![
-                runmat_value::Value::Num(5.0),
-                runmat_value::Value::Num(0.0),
-            ]),
+            vec![runmat_value::Value::Num(5.0), runmat_value::Value::Num(0.0)],
         ),
     ] {
         let nested_control = ProcedureInvocation {
@@ -16599,7 +16688,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
         ))
         .expect("native nested-control try path");
         assert_eq!(native, established);
-        assert_eq!(native, expected);
+        assert_output_values(&native, &expected);
     }
 }
 
@@ -16634,7 +16723,7 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
         ))
         .expect("native async path");
         assert_eq!(native, established);
-        assert_eq!(native, runmat_value::Value::Num(5.0));
+        assert_single_output(&native, runmat_value::Value::Num(5.0));
     }
 
     let reset = ProcedureInvocation {
@@ -16664,12 +16753,9 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     ))
     .expect("native no-replay async path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
-            runmat_value::Value::Num(5.0),
-            runmat_value::Value::Num(1.0),
-        ])
+    assert_output_values(
+        &native,
+        &[runmat_value::Value::Num(5.0), runmat_value::Value::Num(1.0)],
     );
 
     let caught = ProcedureInvocation {
@@ -16687,12 +16773,12 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     ))
     .expect("native caught async failure");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(7.0),
             runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
-        ])
+        ],
     );
 }
 
@@ -16726,15 +16812,15 @@ fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handl
     ))
     .expect("native capture path");
     assert_eq!(native, established);
-    assert_eq!(
-        native,
-        runmat_value::Value::OutputList(vec![
+    assert_output_values(
+        &native,
+        &[
             runmat_value::Value::Num(6.0),
             runmat_value::Value::Num(6.0),
             runmat_value::Value::Num(9.0),
             runmat_value::Value::Num(11.0),
             runmat_value::Value::Num(18.0),
             runmat_value::Value::Num(9.0),
-        ])
+        ],
     );
 }

@@ -10,7 +10,10 @@ pub const PYTHON_HOST_CONFIG_ENV: &str = "RUNMAT_PYTHON_HOST_CONFIG";
 pub const PYTHON_HOST_PROTOCOL: &str = "runmat.python-host";
 pub const PYTHON_HOST_SECRET_ENV: &str = "RUNMAT_PYTHON_HOST_SECRET";
 pub const PYTHON_HOST_SNAPSHOT_ROOT_ENV: &str = "RUNMAT_PYTHON_SNAPSHOT_ROOT";
-pub const PYTHON_HOST_SCHEMA_VERSION: u16 = 1;
+#[cfg(test)]
+pub const PYTHON_HOST_SCHEMA_V1: u16 = 1;
+pub const PYTHON_HOST_SCHEMA_V2: u16 = 2;
+pub const PYTHON_HOST_SCHEMA_VERSION: u16 = PYTHON_HOST_SCHEMA_V2;
 pub const PYTHON_HOST_MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;
 pub const PYTHON_HOST_INLINE_VALUE_BYTES: usize = 128 * 1024;
 pub const PYTHON_HOST_MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
@@ -52,7 +55,6 @@ pub enum PythonWireValue {
     Portable(PythonValueTransfer),
     Foreign(PythonRemoteReference),
     Callback { id: u64 },
-    OutputList(Vec<PythonWireValue>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -95,7 +97,7 @@ pub struct PythonInvocationRequest {
 #[serde(deny_unknown_fields)]
 pub struct PythonInvocationResult {
     pub request_id: u64,
-    pub outcome: Result<PythonWireValue, PythonWireError>,
+    pub outcome: Result<Vec<PythonWireValue>, PythonWireError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,6 +106,7 @@ pub struct PythonCallbackRequest {
     pub request_id: u64,
     pub callback_id: u64,
     pub depth: u16,
+    pub requested_outputs: u32,
     pub arguments: Vec<PythonWireValue>,
 }
 
@@ -112,7 +115,7 @@ pub struct PythonCallbackRequest {
 pub struct PythonCallbackResult {
     pub request_id: u64,
     pub callback_id: u64,
-    pub outcome: Result<PythonWireValue, PythonWireError>,
+    pub outcome: Result<Vec<PythonWireValue>, PythonWireError>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -164,6 +167,9 @@ impl PythonInvocationRequest {
             return Err("Python argument count exceeds the protocol limit".into());
         }
         if self.requested_outputs as usize > PYTHON_HOST_MAX_OUTPUTS {
+            return Err("Python callback output count exceeds the protocol limit".into());
+        }
+        if self.requested_outputs as usize > PYTHON_HOST_MAX_OUTPUTS {
             return Err("Python output count exceeds the protocol limit".into());
         }
         validate_releases(&self.releases)?;
@@ -177,7 +183,7 @@ impl PythonInvocationResult {
     fn validate(&self) -> Result<(), String> {
         validate_id(self.request_id, "request")?;
         match &self.outcome {
-            Ok(value) => value.validate(0),
+            Ok(values) => validate_outputs(values),
             Err(error) => error.validate(),
         }
     }
@@ -204,7 +210,7 @@ impl PythonCallbackResult {
         validate_id(self.request_id, "request")?;
         validate_id(self.callback_id, "callback")?;
         match &self.outcome {
-            Ok(value) => value.validate(0),
+            Ok(values) => validate_outputs(values),
             Err(error) => error.validate(),
         }
     }
@@ -248,11 +254,15 @@ impl PythonWireValue {
             }
             Self::Foreign(reference) => validate_id(reference.id, "foreign resource"),
             Self::Callback { id } => validate_id(*id, "callback"),
-            Self::OutputList(values) => values
-                .iter()
-                .try_for_each(|value| value.validate(depth + 1)),
         }
     }
+}
+
+fn validate_outputs(values: &[PythonWireValue]) -> Result<(), String> {
+    if values.len() > PYTHON_HOST_MAX_OUTPUTS {
+        return Err("Python output count exceeds the protocol limit".into());
+    }
+    values.iter().try_for_each(|value| value.validate(0))
 }
 
 fn validate_releases(releases: &[u64]) -> Result<(), String> {
@@ -277,5 +287,58 @@ fn validate_text(value: &str, label: &str) -> Result<(), String> {
         Err(format!("{label} is invalid"))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frozen_v1_nested_output_list_is_not_a_v2_wire_value() {
+        assert_eq!(PYTHON_HOST_SCHEMA_V1, 1);
+        assert_eq!(PYTHON_HOST_SCHEMA_VERSION, 2);
+        let frozen = r#"{"kind":"output_list","value":[]}"#;
+        let current = runmat_process_host::ipc::HostHandshake::new(
+            PYTHON_HOST_PROTOCOL,
+            PYTHON_HOST_SCHEMA_VERSION,
+            PYTHON_HOST_MAX_MESSAGE_BYTES,
+        );
+        let stale = runmat_process_host::ipc::HostHandshake::new(
+            PYTHON_HOST_PROTOCOL,
+            PYTHON_HOST_SCHEMA_V1,
+            PYTHON_HOST_MAX_MESSAGE_BYTES,
+        );
+        assert!(runmat_process_host::ipc::negotiate_handshake(&current, &stale).is_err());
+        assert!(serde_json::from_str::<PythonWireValue>(frozen).is_err());
+    }
+
+    #[test]
+    fn top_level_output_vectors_are_bounded() {
+        let result = PythonInvocationResult {
+            request_id: 1,
+            outcome: Ok(vec![
+                PythonWireValue::Callback { id: 1 };
+                PYTHON_HOST_MAX_OUTPUTS + 1
+            ]),
+        };
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn current_top_level_output_vectors_preserve_zero_one_and_many_values() {
+        for count in [0, 1, 3] {
+            let result = PythonInvocationResult {
+                request_id: 1,
+                outcome: Ok((1..=count)
+                    .map(|id| PythonWireValue::Callback { id })
+                    .collect()),
+            };
+            result.validate().expect("valid output vector");
+            let encoded = serde_json::to_vec(&result).expect("encode output vector");
+            let decoded: PythonInvocationResult =
+                serde_json::from_slice(&encoded).expect("decode output vector");
+            assert_eq!(decoded, result);
+        }
     }
 }

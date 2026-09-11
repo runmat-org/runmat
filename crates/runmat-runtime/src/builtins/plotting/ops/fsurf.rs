@@ -1068,7 +1068,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(f(a, b))) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(a, b))) })
             },
         )))
     }
@@ -1243,7 +1243,7 @@ mod tests {
     fn fsurf_resident_integer_callback_is_gated_before_provider_access() {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
-                Box::pin(async {
+                crate::sequence::single_value_future(async {
                     let handle = runmat_accelerate_api::GpuTensorHandle {
                         shape: vec![1, 1],
                         device_id: 999_992,
@@ -1389,7 +1389,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected second scalar argument, got {other:?}"),
                 };
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(match _function {
                         11 => Value::Num(u),
                         12 => Value::Num(v),

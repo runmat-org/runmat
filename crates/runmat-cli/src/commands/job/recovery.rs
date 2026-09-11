@@ -281,8 +281,8 @@ async fn recover(
             );
         } else {
             match result {
-                ProgramExecutionResponse::Success { value } => {
-                    println!("{}", serde_json::to_string_pretty(&value)?);
+                ProgramExecutionResponse::Success { outputs } => {
+                    println!("{}", serde_json::to_string_pretty(&outputs)?);
                 }
                 ProgramExecutionResponse::ExternalizedSuccess { .. } => {
                     bail!("recovered result requires an artifact-aware consumer")

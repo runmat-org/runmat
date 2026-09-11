@@ -77,6 +77,7 @@ pub(crate) fn rvalue_contract_with_facts(
             let inference = infer_mir_call(
                 call,
                 facts,
+                &BTreeMap::new(),
                 &literals,
                 summaries,
                 OutputSelection::new(call.requested_outputs),

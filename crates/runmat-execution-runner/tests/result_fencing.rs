@@ -9,7 +9,7 @@ use runmat_execution_runner::port::BackendReport;
 
 fn resident_value(worker_id: WorkerId) -> ValuePayload {
     ValuePayload::Object(Box::new(ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"resident-value"]),
         logical_digest: runmat_execution::Digest::sha256(b"resident-value"),
         encoded_length: 128,

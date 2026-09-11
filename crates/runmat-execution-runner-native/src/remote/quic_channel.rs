@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::protocol::{
     RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, RemoteWorkerRequest,
-    REMOTE_WORKER_PROTOCOL_V4,
+    REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::{QuicFrameRoute, RemoteFrameRoute};
 use super::{
@@ -128,9 +128,14 @@ impl QuicRemoteWorkerChannel {
                     Ok(plaintext) => plaintext,
                     Err(_) => break,
                 };
+                if super::protocol_schema::admit_remote_worker_bytes(&plaintext).is_err() {
+                    continue;
+                }
                 let reply: RemoteWorkerReply =
                     match serde_json::from_slice::<RemoteWorkerReply>(&plaintext) {
-                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_V4 => reply,
+                        Ok(reply) if reply.schema_version == REMOTE_WORKER_PROTOCOL_VERSION => {
+                            reply
+                        }
                         _ => break,
                     };
                 if let RemoteWorkerOutcome::Progress {
@@ -210,7 +215,7 @@ impl QuicRemoteWorkerChannel {
             _ => None,
         };
         let request = RemoteWorkerRequest {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: correlation_id.clone(),
             driver_fence: self.driver_fence,
             command,

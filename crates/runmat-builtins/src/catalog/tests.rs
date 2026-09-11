@@ -1064,7 +1064,7 @@ fn parallel_surface_retains_pool_future_and_fetch_facts() {
         ValueKindFact::Execution(ExecutionFact::Future {
             output,
             state: FutureStateFact::Unknown,
-        }) if **output == callable_output
+        }) if output.outputs == vec![callable_output.clone()] && !output.variadic
     ));
 
     let fetched = infer_catalog_call(

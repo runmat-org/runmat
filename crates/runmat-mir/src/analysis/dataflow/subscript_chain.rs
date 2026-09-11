@@ -65,7 +65,12 @@ pub(crate) fn infer(
                 );
                 diagnostics.extend(member_inference.diagnostics);
                 let (inference, call_effects, call_capabilities) =
-                    dotted_invoke::infer(&member_inference.fact, indexing, terminal_use, facts);
+                    dotted_invoke::infer_legacy_value(
+                        &member_inference.fact,
+                        indexing,
+                        terminal_use,
+                        facts,
+                    );
                 effects.0.extend(call_effects.0);
                 capabilities.0.extend(call_capabilities.0);
                 inference
@@ -82,6 +87,114 @@ pub(crate) fn infer(
         disposition: SubscriptPathDisposition::DefaultOnly,
         effects,
         capabilities,
+    }
+}
+
+pub(crate) fn infer_sequence(
+    chain: &MirSubscriptChain,
+    facts: &[Option<ValueFact>],
+) -> runmat_types::SequenceFactInference {
+    let mut current = simple_operand_fact(&chain.root, facts);
+    let mut diagnostics = Vec::new();
+    for (position, step) in chain.steps.iter().enumerate() {
+        if matches!(
+            current.kind,
+            ValueKindFact::Object(_) | ValueKindFact::Unknown
+        ) {
+            return runmat_types::SequenceFactInference {
+                sequence: runmat_types::ValueSequenceFact::dynamic(),
+                diagnostics,
+            };
+        }
+        let terminal = position + 1 == chain.steps.len();
+        if terminal {
+            let mut inferred = match step {
+                MirSubscriptStep::Index(indexing) => runmat_types::infer_index_sequence(
+                    &current,
+                    indexing.kind,
+                    &index_selectors(indexing, facts),
+                    indexing.result_context,
+                ),
+                MirSubscriptStep::Member(member) => {
+                    runmat_types::infer_member_sequence(&current, member)
+                }
+                MirSubscriptStep::DynamicMember(member) => {
+                    let Some(name) = constant_member_name(member) else {
+                        return runmat_types::SequenceFactInference {
+                            sequence: runmat_types::ValueSequenceFact::dynamic(),
+                            diagnostics,
+                        };
+                    };
+                    runmat_types::infer_member_sequence(&current, &runmat_types::MemberName(name))
+                }
+                MirSubscriptStep::DottedInvoke { member, indexing } => {
+                    let member_inference = runmat_types::infer_member_read(
+                        &current,
+                        member,
+                        runmat_types::SequenceUse::RequireSingle,
+                    );
+                    diagnostics.extend(member_inference.diagnostics);
+                    let (inferred, _, _) = dotted_invoke::infer_sequence(
+                        &member_inference.fact,
+                        indexing,
+                        chain.sequence_use,
+                        facts,
+                    );
+                    inferred
+                }
+            };
+            diagnostics.append(&mut inferred.diagnostics);
+            inferred.diagnostics = diagnostics;
+            return inferred;
+        }
+
+        let inference = match step {
+            MirSubscriptStep::Index(indexing) => runmat_types::infer_index(
+                &current,
+                indexing.kind,
+                &index_selectors(indexing, facts),
+                indexing.result_context,
+            ),
+            MirSubscriptStep::Member(member) => runmat_types::infer_member_read(
+                &current,
+                member,
+                runmat_types::SequenceUse::RequireSingle,
+            ),
+            MirSubscriptStep::DynamicMember(member) => {
+                let Some(name) = constant_member_name(member) else {
+                    return runmat_types::SequenceFactInference {
+                        sequence: runmat_types::ValueSequenceFact::dynamic(),
+                        diagnostics,
+                    };
+                };
+                runmat_types::infer_member_read(
+                    &current,
+                    &runmat_types::MemberName(name),
+                    runmat_types::SequenceUse::RequireSingle,
+                )
+            }
+            MirSubscriptStep::DottedInvoke { member, indexing } => {
+                let member_inference = runmat_types::infer_member_read(
+                    &current,
+                    member,
+                    runmat_types::SequenceUse::RequireSingle,
+                );
+                diagnostics.extend(member_inference.diagnostics);
+                let (inference, _, _) = dotted_invoke::infer_legacy_value(
+                    &member_inference.fact,
+                    indexing,
+                    runmat_types::SequenceUse::RequireSingle,
+                    facts,
+                );
+                inference
+            }
+        };
+        diagnostics.extend(inference.diagnostics);
+        current = inference.fact;
+    }
+    runmat_types::SequenceFactInference {
+        sequence: runmat_types::ValueSequenceFact::single(current),
+        diagnostics,
     }
 }
 

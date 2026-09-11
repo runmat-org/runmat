@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Arc};
 
 use runmat_native_executor::execute::{NativeExecution, NativeWorkspaceInput};
 use runmat_types::ProgramFunctionId;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 pub async fn invoke(
     executor: Rc<runmat_native_executor::NativeExecutor>,
@@ -139,7 +139,7 @@ impl ProgramInvocationGuards {
                         .await
                         .map_err(native_error)?;
                     Ok(runmat_runtime::call::lexical::LexicalCallResult {
-                        value: normalize_outputs(execution.outputs, call.requested_outputs)
+                        outputs: normalize_outputs(execution.outputs, call.requested_outputs)
                             .map_err(|error| *error)?,
                         captures: execution.captures,
                     })
@@ -194,19 +194,25 @@ fn isolated_runtime(
 }
 
 fn normalize_outputs(
-    mut outputs: Vec<Value>,
+    outputs: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+) -> Result<ValueSequence, Box<runmat_runtime::RuntimeError>> {
     if outputs.len() != requested_outputs {
         return Err(Box::new(native_error(format!(
             "native execution produced {} outputs for a request of {requested_outputs}",
             outputs.len()
         ))));
     }
-    Ok(match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        1 => outputs.remove(0),
-        _ => Value::OutputList(outputs),
+    Ok(if requested_outputs == 1 {
+        ValueSequence::single(
+            outputs
+                .into_iter()
+                .next()
+                .expect("one output was validated"),
+        )
+        .map_err(|error| Box::new(native_error(error)))?
+    } else {
+        ValueSequence::comma_separated(outputs).map_err(|error| Box::new(native_error(error)))?
     })
 }
 

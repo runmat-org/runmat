@@ -83,6 +83,7 @@ const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvali
 const IDENT_MIR_CELL_INDEX_PLAN_INVALID: &str = "RunMat:MirCellIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextInvalid";
 const IDENT_MIR_INDEX_CONTEXT_INVALID: &str = "RunMat:MirIndexContextInvalid";
+const IDENT_MIR_SUBSCRIPT_CHAIN_INVALID: &str = "RunMat:MirSubscriptChainInvalid";
 const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
     "RunMat:MirMultiAssignOutputCountMismatch";
 const IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID: &str = "RunMat:MirDeleteAssignmentRhsInvalid";
@@ -1347,25 +1348,28 @@ impl Compiler {
             }
             _ => self.compile_mir_rvalue(value)?,
         }
-        let emits_requested_values = matches!(
-            value,
-            MirRvalue::Index { indexing, .. }
-                if indexing.kind == IndexKind::Brace
-                    && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
-        ) || matches!(
-            value,
-            MirRvalue::Member {
-                sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
-                ..
-            } | MirRvalue::DynamicMember {
-                sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
-                ..
-            } if *count == output_count
-        ) || matches!(
-            value,
-            MirRvalue::SubscriptChain(chain)
-                if matches!(chain.sequence_use, runmat_types::SequenceUse::SelectPrefix { count } if count == output_count)
-        );
+        let emits_requested_values = matches!(value, MirRvalue::Call(_))
+            || matches!(
+                value,
+                MirRvalue::Index { indexing, .. }
+                    if indexing.kind == IndexKind::Brace
+                        && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
+            )
+            || matches!(
+                value,
+                MirRvalue::Member {
+                    sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
+                    ..
+                } | MirRvalue::DynamicMember {
+                    sequence_use: runmat_types::SequenceUse::SelectPrefix { count },
+                    ..
+                } if *count == output_count
+            )
+            || matches!(
+                value,
+                MirRvalue::SubscriptChain(chain)
+                    if matches!(chain.sequence_use, runmat_types::SequenceUse::SelectPrefix { count } if count == output_count)
+            );
         if !emits_requested_values {
             self.emit(Instr::Unpack(targets.targets.len()));
         }
@@ -1425,7 +1429,6 @@ impl Compiler {
                     && indexing.result_context == IndexResultContext::ReadCommaList =>
             {
                 self.compile_mir_cell_list(base, indexing)?;
-                self.emit(Instr::CaptureCallOutputSequence);
             }
             MirRvalue::SubscriptChain(chain) => {
                 self.compile_subscript_chain_to_register(chain)?;
@@ -3992,16 +3995,16 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
         }
 
-        if indexing.kind == IndexKind::Brace
-            && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
-        {
-            return self.compile_mir_cell_list(base, indexing);
-        }
-
         self.compile_mir_operand(base)?;
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
+                // A generic rvalue has a scalar stack contract even when the HIR
+                // records that brace syntax can denote a comma-separated list.
+                // Sequence-aware owners (argument capture and prepared output
+                // assignment) lower that syntax through their explicit carriers;
+                // emitting IndexCellList here would leave the transient sequence
+                // register live across the scalar consumer's store instructions.
                 self.compile_mir_cell_index_components(indexing, indexing.result_context)?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),

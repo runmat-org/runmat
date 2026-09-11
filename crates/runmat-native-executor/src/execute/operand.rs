@@ -1,5 +1,6 @@
 use runmat_mir::{MirConstant, MirOperand, MirRvalue};
 use runmat_runtime::native::NativeValueRef;
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 fn sequence_resolution_context(
@@ -245,9 +246,7 @@ pub(super) fn evaluate_rvalue(
             ..
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
-            runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
-                arguments.clone(),
-            ))?;
+            runmat_runtime::execution::validate_spawn_captures(&arguments)?;
             let program = if state.runtime.execution().requires_program_capture() {
                 Some(state.program_capture.clone().ok_or_else(|| {
                     NativeExecutorError::Host(

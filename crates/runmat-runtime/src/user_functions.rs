@@ -1,16 +1,16 @@
 use crate::RuntimeError;
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::{CallableFallbackPolicy, CallableIdentity, SourceId};
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
+pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>>>>;
 pub type DynamicFunctionLoadFuture =
-    Pin<Box<dyn Future<Output = Option<Result<Value, RuntimeError>>>>>;
+    Pin<Box<dyn Future<Output = Option<Result<ValueSequence, RuntimeError>>>>>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
 pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
 #[derive(Debug, Clone)]
@@ -432,7 +432,7 @@ pub async fn try_call_semantic_function(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<ValueSequence, RuntimeError>> {
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
     Some(invoker(function, args, requested_outputs).await)
@@ -440,7 +440,7 @@ pub async fn try_call_semantic_function(
 
 pub async fn try_call_external_function(
     call: ExternalFunctionCall,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<ValueSequence, RuntimeError>> {
     let invoker = current_external_function_invoker()?;
     Some(invoker(call).await)
 }
@@ -456,7 +456,7 @@ pub async fn try_call_semantic_function_by_name(
     name: &str,
     args: &[Value],
     requested_outputs: usize,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<ValueSequence, RuntimeError>> {
     let function = resolve_semantic_function_by_name(name)?;
     try_call_semantic_function(function, args, requested_outputs).await
 }
@@ -471,7 +471,7 @@ pub async fn try_load_and_call_dynamic_function(
     args: Vec<Value>,
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<ValueSequence, RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let loader = context.state().call.borrow().dynamic_loader.clone()?;
     loader(context, name, args, requested_outputs, phase).await
@@ -506,7 +506,7 @@ fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
 
 pub async fn try_call_semantic_descriptor(
     request: CallableRequest,
-) -> Option<Result<Value, RuntimeError>> {
+) -> Option<Result<ValueSequence, RuntimeError>> {
     let CallableRequest {
         identity,
         fallback_policy,
@@ -627,7 +627,7 @@ mod lexical_tests {
                 assert_eq!(call.arguments, vec![Value::Num(2.0)]);
                 call.captures[0].value = Value::Num(5.0);
                 Ok(LexicalCallResult {
-                    value: Value::Num(7.0),
+                    outputs: runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap(),
                     captures: call.captures,
                 })
             })
@@ -643,7 +643,7 @@ mod lexical_tests {
         }))
         .expect("lexical invoker is installed")
         .expect("lexical call succeeds");
-        assert_eq!(result.value, Value::Num(7.0));
+        assert_eq!(result.outputs.into_values(), vec![Value::Num(7.0)]);
         assert_eq!(result.captures[0].value, Value::Num(5.0));
         drop(guard);
         assert!(current_lexical_function_invoker().is_none());
@@ -653,7 +653,7 @@ mod lexical_tests {
     fn external_invoker_preserves_identity_kind_and_restores_scope() {
         assert!(current_external_function_invoker().is_none());
         let guard = install_external_function_invoker(Some(Arc::new(|call| {
-            Box::pin(async move {
+            crate::sequence::single_value_future(async move {
                 assert_eq!(call.function, 0);
                 assert_eq!(call.display_name, "published");
                 assert_eq!(call.arguments, vec![Value::Num(2.0)]);
@@ -670,7 +670,7 @@ mod lexical_tests {
             }))
             .expect("external invoker is installed")
             .expect("external call succeeds");
-        assert_eq!(result, Value::Num(12.0));
+        assert_eq!(result.into_values(), vec![Value::Num(12.0)]);
         drop(guard);
         assert!(current_external_function_invoker().is_none());
     }

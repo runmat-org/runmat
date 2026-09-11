@@ -12,7 +12,7 @@ use super::{
 };
 use crate::protocol::{
     CollectiveProcessResult, StoredProgram, WorkerDriverMessage, WorkerProcessMessage,
-    WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 
 pub(super) fn execute_attempt(
@@ -30,7 +30,7 @@ pub(super) fn execute_attempt(
     let stored: StoredProgram = serde_json::from_slice(&stored)
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: stored.recipe,
         artifact: stored.artifact,
         callable: request.task.callable.program.clone(),
@@ -155,8 +155,8 @@ async fn run_process(
         .validate_against(&request)
         .map_err(|error| TransferFailure::Infrastructure(error.to_string()))?;
     match response {
-        WorkerResponse::Success { value } => Ok(AttemptSuccess::Values {
-            outputs: vec![value],
+        WorkerResponse::Success { outputs } => Ok(AttemptSuccess::Values {
+            outputs,
             result_objects: Vec::new(),
         }),
         WorkerResponse::ExternalizedSuccess {
@@ -268,7 +268,7 @@ mod tests {
         )
         .expect("program artifact");
         WorkerRequest {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(ProgramFunctionId(0), None),

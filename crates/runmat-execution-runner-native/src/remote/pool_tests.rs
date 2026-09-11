@@ -21,7 +21,7 @@ use runmat_execution::{
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
     ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, PoolSpec, TaskSubmission, WorkerSpec,
@@ -872,12 +872,12 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     let value = ValuePayload::Inline(Box::new(InlineValue::String("transferred".into())));
     let encoded_value = serde_json::to_vec(&value).unwrap();
     let value_reference = runmat_execution::value::ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: runmat_execution::identity::ValueId::derive(&[b"quic-value"]),
         logical_digest: value.logical_digest().unwrap(),
         encoded_length: encoded_value.len() as u64,
         media_type: "application/vnd.runmat.value+json".into(),
-        value_schema: "runmat-value-payload-v1".into(),
+        value_schema: "runmat-value-payload-v2".into(),
         encryption_context: Digest::sha256(b"worker-session"),
         kind: runmat_execution::value::ValueRefKind::DriverObject,
         authorization_scope: "run-quic-worker".into(),
@@ -1300,7 +1300,7 @@ fn accelerator_device() -> AcceleratorDevice {
 
 fn object_reference(authorization_scope: &str, bytes: &[u8]) -> runmat_execution::value::ValueRef {
     runmat_execution::value::ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: runmat_execution::identity::ValueId::derive(&[b"remote-execution-object", bytes]),
         logical_digest: Digest::sha256(bytes),
         encoded_length: bytes.len() as u64,
@@ -1486,7 +1486,7 @@ end
         .unwrap();
     let callable = ProgramCallable::parallel_region(region.contract.id);
     let program = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable,
@@ -1661,10 +1661,11 @@ async fn build_executable_bundle(
         .unwrap();
     let envelope = unit.portable_envelope_for(Some("answer")).unwrap();
     let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+    let entrypoint = envelope.manifest.identity.entrypoint.clone();
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
-        entrypoint: function.to_string(),
+        entrypoint,
         outputs: OutputContract {
             requested_outputs: 1,
         },
@@ -1700,7 +1701,7 @@ async fn build_executable_bundle(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let program = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(

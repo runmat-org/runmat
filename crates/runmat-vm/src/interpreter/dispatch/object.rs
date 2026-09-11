@@ -1,8 +1,9 @@
 use runmat_runtime::object::resolve as obj_resolve;
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
-fn write_sequence_register(
+pub(super) fn write_sequence_register(
     stack: &mut Vec<Value>,
     register: &mut super::SequenceState,
     values: Vec<Value>,
@@ -23,7 +24,7 @@ fn write_sequence_register(
 pub(super) fn take_sequence_register(
     stack: &mut Vec<Value>,
     register: &mut super::SequenceState,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let window = register
         .assignment
         .take()
@@ -44,7 +45,8 @@ pub(super) fn take_sequence_register(
             "sequence register did not remain the top operand-stack window",
         ));
     }
-    Ok(stack.split_off(window.start))
+    runmat_value::ValueSequence::comma_separated(stack.split_off(window.start))
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }
 
 pub struct ObjectDispatchContext<'a> {
@@ -356,15 +358,7 @@ pub async fn dispatch_object(
             Ok(true)
         }
         crate::bytecode::Instr::CaptureCallOutputSequence => {
-            let legacy = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            let values = match legacy {
-                Value::OutputList(values) => values,
-                value => vec![value],
-            };
-            write_sequence_register(stack, sequence_register, values)?;
+            sequence_register.capture_call_outputs()?;
             Ok(true)
         }
         crate::bytecode::Instr::CaptureScalarSequence => {
@@ -454,7 +448,7 @@ pub async fn dispatch_object(
             let values = runmat_runtime::call::arguments::materialize_expansion(
                 runtime,
                 runmat_runtime::call::arguments::MaterializedExpansionSource::ReturnedOutputs(
-                    value,
+                    runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?,
                 ),
             )
             .await?
@@ -553,7 +547,7 @@ pub async fn dispatch_object(
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberSequence(field) => {
-            let values = take_sequence_register(stack, sequence_register)?;
+            let values = take_sequence_register(stack, sequence_register)?.into_values();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -569,7 +563,7 @@ pub async fn dispatch_object(
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamicSequence => {
-            let values = take_sequence_register(stack, sequence_register)?;
+            let values = take_sequence_register(stack, sequence_register)?.into_values();
             let name: String = (&stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",

@@ -34,7 +34,9 @@ fn bsxfun_does_not_logicalize_shadowed_callback_names() {
             (name == "gt").then_some(17)
         })));
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-        |_function, _args, _requested_outputs| Box::pin(async move { Ok(Value::Num(2.0)) }),
+        |_function, _args, _requested_outputs| {
+            Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(2.0)) })
+        },
     )));
     let result = call(
         Value::FunctionHandle("gt".to_string()),
@@ -56,7 +58,7 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, args, _requested_outputs| {
             let args = args.to_vec();
-            Box::pin(async move {
+            crate::sequence::single_value_future(async move {
                 let a = match &args[0] {
                     Value::Num(value) => *value,
                     _ => 0.0,
@@ -96,7 +98,7 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
 fn bsxfun_rejects_non_scalar_callback_output() {
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, _args, _requested_outputs| {
-            Box::pin(async move {
+            crate::sequence::single_value_future(async move {
                 Ok(Value::Tensor(
                     Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
                 ))

@@ -72,7 +72,7 @@ async fn call_identity_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     Box::pin(execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
         args,
@@ -88,7 +88,7 @@ async fn try_call_identity_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
-) -> Result<Option<Value>, RuntimeError> {
+) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     Box::pin(try_execute_callable_descriptor(
         CallableDescriptor::resolved(
             identity,
@@ -108,7 +108,7 @@ async fn call_member_index_on_object_like(
     args: Vec<Value>,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if args.is_empty() {
         let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
             caller_function_name,
@@ -226,7 +226,12 @@ async fn call_member_index_on_object_like(
         ));
     }
 
-    call_getfield_with_indices(receiver, name, args, requested_outputs).await
+    call_getfield_with_indices(receiver, name, args, requested_outputs)
+        .await
+        .and_then(|value| {
+            runmat_value::ValueSequence::single(value)
+                .map_err(crate::sequence::sequence_error_to_runtime)
+        })
 }
 
 pub async fn call_rhs_operator_method_ordered_with_outputs(
@@ -235,7 +240,7 @@ pub async fn call_rhs_operator_method_ordered_with_outputs(
     name: String,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let class_name = match &rhs {
         Value::Object(obj) => obj.class_name.clone(),
         Value::HandleObject(handle) => handle.class_name.clone(),
@@ -346,15 +351,17 @@ pub async fn call_object_operator_method(
     method: &str,
     arg: Value,
 ) -> Result<Value, RuntimeError> {
-    call_method_or_member_index_with_outputs(
-        base,
-        CallableIdentity::Method(MethodId(method.to_string())),
-        vec![arg],
-        1,
-        None,
-        CallableFallbackPolicy::ObjectDispatch,
+    require_single(
+        call_method_or_member_index_with_outputs(
+            base,
+            CallableIdentity::Method(MethodId(method.to_string())),
+            vec![arg],
+            1,
+            None,
+            CallableFallbackPolicy::ObjectDispatch,
+        )
+        .await?,
     )
-    .await
 }
 
 pub async fn call_rhs_object_operator_method_ordered(
@@ -362,7 +369,10 @@ pub async fn call_rhs_object_operator_method_ordered(
     rhs: Value,
     method: &str,
 ) -> Result<Value, RuntimeError> {
-    call_rhs_operator_method_ordered_with_outputs(lhs, rhs, method.to_string(), 1, None).await
+    require_single(
+        call_rhs_operator_method_ordered_with_outputs(lhs, rhs, method.to_string(), 1, None)
+            .await?,
+    )
 }
 
 pub async fn call_object_named_method_with_outputs(
@@ -370,7 +380,7 @@ pub async fn call_object_named_method_with_outputs(
     method: String,
     args: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::Method(MethodId(method.clone())),
@@ -386,7 +396,7 @@ pub async fn call_object_property_getter_with_outputs(
     base: Value,
     field: &str,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
         crate::object_property_getter_name(field),
@@ -401,7 +411,7 @@ pub async fn call_object_property_setter_with_outputs(
     field: &str,
     value: Value,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
         crate::object_property_setter_name(field),
@@ -420,9 +430,9 @@ async fn call_object_member_method(
     let resolution = resolve_object_index_protocol(&base, op, None)?;
     let path = ObjectSubscriptPath::single(ObjectSubscript::member(field));
     match op {
-        ObjectIndexOp::Subsref => {
-            invoke_resolved_object_index_path_method(&resolution, base, path, 1).await
-        }
+        ObjectIndexOp::Subsref => require_single(
+            invoke_resolved_object_index_path_method(&resolution, base, path, 1).await?,
+        ),
         ObjectIndexOp::Subsasgn => {
             let crate::object::protocol::ProtocolResolution::Method(method) = resolution else {
                 return Err(semantic_error(
@@ -479,7 +489,7 @@ pub async fn invoke_resolved_object_index_path_method(
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     crate::object::protocol::invoke_resolved_object_protocol(
         resolution,
         base,
@@ -496,7 +506,7 @@ pub async fn call_method_or_member_index_with_outputs(
     requested_outputs: usize,
     caller_function_name: Option<&str>,
     _fallback_policy: CallableFallbackPolicy,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
         semantic_error(
             "MethodCallCalleeInvalid",
@@ -521,7 +531,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
     args: Vec<Value>,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
@@ -590,8 +600,27 @@ pub async fn call_method_or_member_index_named_with_outputs(
         Value::Foreign(reference) => {
             crate::foreign::invoke_foreign_method(reference, name, args, requested_outputs).await
         }
-        other => call_getfield_with_indices(other, name, args, requested_outputs).await,
+        other => call_getfield_with_indices(other, name, args, requested_outputs)
+            .await
+            .and_then(|value| {
+                runmat_value::ValueSequence::single(value)
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            }),
     }
+}
+
+fn require_single(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+    use crate::sequence::ResolveValueSequence;
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    values.pop().ok_or_else(|| {
+        semantic_error(
+            "CommaSeparatedListRequiresSingleValue",
+            "object operation requires one value",
+        )
+    })
 }
 
 fn build_cell_array_with_shape(

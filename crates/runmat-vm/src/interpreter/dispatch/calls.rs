@@ -17,19 +17,38 @@ use runmat_types::MemberAccess;
 use runmat_value::{MException, Value};
 
 pub enum BuiltinHandling {
-    Completed,
+    Completed(runmat_value::ValueSequence),
     Caught,
     Uncaught(Box<RuntimeError>),
 }
 
 pub enum MethodHandling {
     Completed,
+    Outputs(runmat_value::ValueSequence),
 }
 
 pub enum UserCallHandling {
-    Completed,
+    Completed(runmat_value::ValueSequence),
     Caught,
     Uncaught(Box<RuntimeError>),
+}
+
+pub(super) fn publish_fixed_outputs(
+    stack: &mut Vec<Value>,
+    sequence: runmat_value::ValueSequence,
+    requested_outputs: impl std::borrow::Borrow<usize>,
+) -> Result<(), RuntimeError> {
+    use runmat_runtime::sequence::ResolveValueSequence;
+
+    let requested_outputs = *requested_outputs.borrow();
+    let values = sequence.resolve(
+        runmat_types::SequenceUse::SelectPrefix {
+            count: requested_outputs,
+        },
+        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    )?;
+    stack.extend(values);
+    Ok(())
 }
 
 pub struct MethodExpandCallContext<'a> {
@@ -39,18 +58,6 @@ pub struct MethodExpandCallContext<'a> {
     pub requested_outputs: usize,
     pub current_function_name: &'a str,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
-}
-
-pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
-    // Preserve values for non-singleton requests (including zero). Statement-level
-    // display/public-result policy is decided later by core/session plumbing.
-    if requested_outputs != 1 {
-        return value;
-    }
-    match value {
-        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
-        other => other,
-    }
 }
 
 pub struct ExceptionRouteContext<'a> {
@@ -184,8 +191,8 @@ pub async fn build_user_function_expand_multi_args(
 pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
-    output_hint: usize,
-    stack: &mut Vec<Value>,
+    _output_hint: usize,
+    _stack: &mut Vec<Value>,
     ctx: ExceptionRouteContext<'_>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
@@ -197,13 +204,13 @@ pub fn handle_builtin_outcome(
     } = ctx;
     match result {
         Ok(result) => {
-            stack.push(normalize_requested_outputs(result, output_hint));
-            Ok(BuiltinHandling::Completed)
+            let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?;
+            Ok(BuiltinHandling::Completed(sequence))
         }
         Err(err) => match imported {
             ImportedBuiltinResolution::Resolved(value) => {
-                stack.push(normalize_requested_outputs(value, output_hint));
-                Ok(BuiltinHandling::Completed)
+                let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?;
+                Ok(BuiltinHandling::Completed(sequence))
             }
             ImportedBuiltinResolution::Ambiguous(err) => Err(err),
             ImportedBuiltinResolution::NotFound => Ok(
@@ -331,7 +338,7 @@ pub async fn handle_prepared_user_function_call(
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
     let UserCallContext {
-        stack,
+        stack: _,
         identity,
         fallback_policy,
         out_count,
@@ -430,8 +437,7 @@ pub async fn handle_prepared_user_function_call(
                             CallableCallKind::Direct,
                         );
                         let result = execute_callable_descriptor(static_descriptor).await?;
-                        stack.push(normalize_requested_outputs(result, out_count));
-                        return Ok(UserCallHandling::Completed);
+                        return Ok(UserCallHandling::Completed(result));
                     }
                 }
             }
@@ -498,8 +504,7 @@ pub async fn handle_prepared_user_function_call(
                     CallableCallKind::Direct,
                 );
                 let result = execute_callable_descriptor(static_descriptor).await?;
-                stack.push(normalize_requested_outputs(result, out_count));
-                return Ok(UserCallHandling::Completed);
+                return Ok(UserCallHandling::Completed(result));
             }
         }
     }
@@ -548,8 +553,7 @@ pub async fn handle_prepared_user_function_call(
                         CallableCallKind::Direct,
                     );
                     let result = execute_callable_descriptor(static_descriptor).await?;
-                    stack.push(normalize_requested_outputs(result, out_count));
-                    return Ok(UserCallHandling::Completed);
+                    return Ok(UserCallHandling::Completed(result));
                 }
             }
         }
@@ -566,10 +570,7 @@ pub async fn handle_prepared_user_function_call(
         .clone()
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     match execute_callable_descriptor(descriptor).await {
-        Ok(result) => {
-            stack.push(normalize_requested_outputs(result, out_count));
-            Ok(UserCallHandling::Completed)
-        }
+        Ok(result) => Ok(UserCallHandling::Completed(result)),
         Err(err) => Ok(
             match redirect_exception_to_catch(
                 err,
@@ -617,13 +618,15 @@ pub async fn handle_workspace_first_prepared_call(
 
     if let Some(base) = crate::runtime::workspace::workspace_lookup(workspace_name) {
         if bare_identifier && args.is_empty() {
-            stack.push(normalize_requested_outputs(base, out_count));
-            return Ok(UserCallHandling::Completed);
+            return Ok(UserCallHandling::Completed(
+                runmat_value::ValueSequence::single(base)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
+            ));
         }
         let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
         let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
         let result =
-            super::indexing::paren_index_value(base, args, out_count, function_registry).await;
+            super::indexing::paren_index_sequence(base, args, out_count, function_registry).await;
         let ExceptionRouteContext {
             try_stack,
             vars,
@@ -631,10 +634,7 @@ pub async fn handle_workspace_first_prepared_call(
             pc,
         } = exception;
         return match result {
-            Ok(value) => {
-                stack.push(normalize_requested_outputs(value, out_count));
-                Ok(UserCallHandling::Completed)
-            }
+            Ok(sequence) => Ok(UserCallHandling::Completed(sequence)),
             Err(err) => Ok(
                 match redirect_exception_to_catch(
                     err,
@@ -672,8 +672,9 @@ pub async fn handle_workspace_first_prepared_call(
             } = exception;
             return match result {
                 Ok(value) => {
-                    stack.push(normalize_requested_outputs(value, out_count));
-                    Ok(UserCallHandling::Completed)
+                    let sequence =
+                        runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?;
+                    Ok(UserCallHandling::Completed(sequence))
                 }
                 Err(err) => Ok(
                     match redirect_exception_to_catch(
@@ -743,7 +744,7 @@ async fn handle_method_or_member_index_call_inner(
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = Box::pin(
+    let outputs = Box::pin(
         runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
             base,
             identity,
@@ -754,8 +755,7 @@ async fn handle_method_or_member_index_call_inner(
         ),
     )
     .await?;
-    stack.push(normalize_requested_outputs(value, requested_outputs));
-    Ok(MethodHandling::Completed)
+    Ok(MethodHandling::Outputs(outputs))
 }
 
 pub async fn handle_method_or_member_index_expand_multi_call(
@@ -783,7 +783,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         runmat_runtime::class_registry::class_context_for_function(context.current_function_name);
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    let value = Box::pin(
+    let outputs = Box::pin(
         runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs(
             base,
             context.identity,
@@ -794,11 +794,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ),
     )
     .await?;
-    stack.push(normalize_requested_outputs(
-        value,
-        context.requested_outputs,
-    ));
-    Ok(MethodHandling::Completed)
+    Ok(MethodHandling::Outputs(outputs))
 }
 
 pub fn handle_load_method(
@@ -888,21 +884,45 @@ pub fn handle_register_class(
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
+    use super::{handle_builtin_outcome, publish_fixed_outputs, ExceptionRouteContext};
     use crate::call::builtins::ImportedBuiltinResolution;
     use crate::interpreter::errors::mex;
     use runmat_value::Value;
 
     #[test]
-    fn normalize_requested_outputs_collapses_singleton_for_single_request() {
-        let value = normalize_requested_outputs(Value::OutputList(vec![Value::Num(7.0)]), 1);
-        assert_eq!(value, Value::Num(7.0));
+    fn fixed_outputs_publish_values_without_a_transient_carrier() {
+        let mut stack = Vec::new();
+        publish_fixed_outputs(
+            &mut stack,
+            runmat_value::ValueSequence::comma_separated(vec![Value::Num(7.0)]).unwrap(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(stack, vec![Value::Num(7.0)]);
     }
 
     #[test]
-    fn normalize_requested_outputs_preserves_value_for_zero_request() {
-        let value = normalize_requested_outputs(Value::Num(7.0), 0);
-        assert_eq!(value, Value::Num(7.0));
+    fn fixed_zero_outputs_leave_no_stack_value() {
+        let mut stack = Vec::new();
+        publish_fixed_outputs(
+            &mut stack,
+            runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap(),
+            0,
+        )
+        .unwrap();
+        assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn checked_sequence_rejects_nested_legacy_carriers_before_publication() {
+        let error = runmat_value::ValueSequence::comma_separated(vec![Value::OutputList(vec![
+            Value::Num(7.0),
+        ])])
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            runmat_value::ValueSequenceError::TransientValue(_)
+        ));
     }
 
     #[test]

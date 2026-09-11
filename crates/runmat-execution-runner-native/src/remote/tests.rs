@@ -17,7 +17,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_transport_native::control::{
     DriverArtifactDownload, DriverArtifactKind, DriverAuthority, DriverBootstrap,
@@ -207,10 +207,13 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
         .build()
         .unwrap();
     let response = run_encrypted_remote_request("run-remote-test-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("remote driver rejected an exact test workload: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -315,10 +318,13 @@ async fn encrypted_registry_dependency_executes_without_worker_registry_credenti
 
     let response =
         run_encrypted_remote_request("run-private-registry-package-conformance", bundle).await;
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("credential-free remote private package execution failed: {response:?}");
     };
-    let execution = decode_execution(&value).unwrap();
+    let [value] = outputs.as_slice() else {
+        panic!("expected one test output")
+    };
+    let execution = decode_execution(value).unwrap();
     assert_eq!(
         execution.result.state.disposition,
         TerminalDisposition::Passed,
@@ -456,7 +462,7 @@ async fn run_encrypted_remote_request(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable: ProgramCallable::semantic(ProgramFunctionId(0), None),
@@ -464,7 +470,7 @@ async fn run_encrypted_remote_request(
     })
     .unwrap();
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: Vec::new(),
     })

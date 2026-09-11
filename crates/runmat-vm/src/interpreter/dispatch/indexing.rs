@@ -17,6 +17,7 @@ use runmat_runtime::object::dispatch::{
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
 
@@ -30,6 +31,14 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
+fn resolve_single_sequence(sequence: runmat_value::ValueSequence) -> Result<Value, RuntimeError> {
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        runmat_runtime::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
 }
 
 /// Materializes an integer scalar for indexed assignment without routing it
@@ -241,7 +250,7 @@ async fn assign_object_scalar_indices(
             &method,
             base,
             path,
-            vec![rhs],
+            runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?.into_values(),
         )
         .await;
     }
@@ -258,7 +267,10 @@ async fn invoke_object_brace_read(
         ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
             components: indices.into_iter().map(Into::into).collect(),
         }));
-    invoke_resolved_object_index_path_method(&resolution, base, path, requested_outputs).await
+    let sequence =
+        invoke_resolved_object_index_path_method(&resolution, base, path, requested_outputs)
+            .await?;
+    resolve_single_sequence(sequence)
 }
 
 async fn invoke_object_brace_assignment(
@@ -281,7 +293,7 @@ async fn invoke_object_brace_assignment(
         &method,
         base,
         path,
-        vec![rhs],
+        runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?.into_values(),
     )
     .await
 }
@@ -393,7 +405,7 @@ async fn execute_brace_operation(
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<BraceIndexOutcome, RuntimeError> {
     if matches!(
-        base,
+        &base,
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
@@ -462,7 +474,7 @@ async fn execute_brace_operation(
             if let Value::Composite(handle) = base {
                 return read_composite_entry(runtime, *handle, raw_indices)
                     .await
-                    .map(BraceIndexOutcome::Value);
+                    .map(|value| BraceIndexOutcome::Expanded(vec![value]));
             }
             if !matches!(
                 base,
@@ -474,12 +486,7 @@ async fn execute_brace_operation(
                 ));
             }
             let values = expand_brace_values(base, raw_indices, None).await?;
-            let value = if values.len() == 1 {
-                values.into_iter().next().unwrap_or(Value::Num(0.0))
-            } else {
-                Value::OutputList(values)
-            };
-            Ok(BraceIndexOutcome::Value(value))
+            Ok(BraceIndexOutcome::Expanded(values))
         }
         BraceIndexOperation::Store { rhs } => {
             let value = match base {
@@ -512,29 +519,33 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
+                    let rhs = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
+                    let rhs_kind = rhs.kind();
+                    let mut rhs_values = rhs.into_values();
                     if raw_indices.len() > 1 {
                         let indices = resolve_cell_indices(raw_indices).await?;
-                        match rhs {
-                            Value::OutputList(values) if values.len() == 1 => {
+                        match rhs_kind {
+                            runmat_value::ValueSequenceKind::CommaSeparated
+                                if rhs_values.len() == 1 => {
                                 runmat_runtime::object::cell::assign_cell_value(
                                     ca,
                                     &indices,
-                                    values.into_iter().next().unwrap_or(Value::Num(0.0)),
+                                    rhs_values.pop().unwrap_or(Value::Num(0.0)),
                                     |oldv, newv| {
                                         runmat_gc::gc_record_write(oldv, newv);
                                     },
                                 )?
                             }
-                            Value::OutputList(_) => {
+                            runmat_value::ValueSequenceKind::CommaSeparated => {
                                 return Err(crate::interpreter::errors::mex(
                                     "CellAssignmentArityMismatch",
                                     "Cell brace assignment target count does not match source value count",
                                 ))
                             }
-                            other => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single => runmat_runtime::object::cell::assign_cell_value(
                                 ca,
                                 &indices,
-                                other,
+                                rhs_values.pop().unwrap_or(Value::Num(0.0)),
                                 |oldv, newv| {
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
@@ -546,19 +557,19 @@ async fn execute_brace_operation(
                                 &ca,
                                 raw_indices,
                             )?;
-                        match rhs {
-                            Value::OutputList(values) => runmat_runtime::object::cell::assign_cell_value_multi(
+                        match rhs_kind {
+                            runmat_value::ValueSequenceKind::CommaSeparated => runmat_runtime::object::cell::assign_cell_value_multi(
                                 ca,
                                 &positions,
-                                &values,
+                                &rhs_values,
                                 |oldv, newv| {
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
                             )?,
-                            other if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value(
                                 ca,
                                 &positions,
-                                other,
+                                rhs_values.pop().unwrap_or(Value::Num(0.0)),
                                 |oldv, newv| {
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
@@ -668,35 +679,59 @@ async fn execute_brace_operation_from_stack(
     Ok(())
 }
 
-pub async fn paren_index_value(
+pub async fn paren_index_sequence(
     base: Value,
     raw_indices: Vec<Value>,
     requested_outputs: usize,
     function_registry: &crate::bytecode::FunctionRegistry,
-) -> Result<Value, RuntimeError> {
-    match &base {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    if matches!(
+        &base,
+        Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_)
+    ) {
+        let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
+        if matches!(
+            resolution,
+            runmat_runtime::object::protocol::ProtocolResolution::Method(_)
+        ) {
+            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
+                ObjectIndexSelector::IndexValues {
+                    components: raw_indices.into_iter().map(Into::into).collect(),
+                },
+            ));
+            return invoke_resolved_object_index_path_method(
+                &resolution,
+                base,
+                path,
+                requested_outputs,
+            )
+            .await;
+        }
+    }
+    if matches!(
+        &base,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::Closure(_)
+    ) {
+        return match crate::call::feval::execute_feval(
+            base,
+            raw_indices,
+            requested_outputs,
+            function_registry,
+        )
+        .await?
+        {
+            crate::call::feval::FevalDispatch::Completed(sequence) => Ok(sequence),
+        };
+    }
+    let value = match &base {
         Value::Foreign(reference) => {
             runmat_runtime::foreign::index_foreign_resource(reference.clone(), raw_indices).await
         }
         Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_) => {
-            let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-            if matches!(
-                resolution,
-                runmat_runtime::object::protocol::ProtocolResolution::Method(_)
-            ) {
-                let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
-                    ObjectIndexSelector::IndexValues {
-                        components: raw_indices.into_iter().map(Into::into).collect(),
-                    },
-                ));
-                return invoke_resolved_object_index_path_method(
-                    &resolution,
-                    base,
-                    path,
-                    requested_outputs,
-                )
-                .await;
-            }
             let shape = runmat_runtime::indexing::object::shape(&base)
                 .expect("object-like values have an object-array shape");
             let selectors =
@@ -713,16 +748,7 @@ pub async fn paren_index_value(
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_) => match crate::call::feval::execute_feval(
-            base,
-            raw_indices,
-            requested_outputs,
-            function_registry,
-        )
-        .await?
-        {
-            crate::call::feval::FevalDispatch::Completed(value) => Ok(value),
-        },
+        | Value::Closure(_) => unreachable!("callable values returned above"),
         Value::Symbolic(expr) => {
             if let Some((name, parameters)) = expr.function_reference_signature() {
                 apply_symbolic_function_reference(name, parameters, &raw_indices)
@@ -746,7 +772,20 @@ pub async fn paren_index_value(
                 idx_read_linear::generic_index(&base, &indices).await
             }
         }
-    }
+    }?;
+    runmat_value::ValueSequence::single(value)
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
+}
+
+pub async fn paren_index_value(
+    base: Value,
+    raw_indices: Vec<Value>,
+    requested_outputs: usize,
+    function_registry: &crate::bytecode::FunctionRegistry,
+) -> Result<Value, RuntimeError> {
+    let sequence =
+        paren_index_sequence(base, raw_indices, requested_outputs, function_registry).await?;
+    resolve_single_sequence(sequence)
 }
 
 fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
@@ -806,7 +845,7 @@ pub async fn dispatch_indexing(
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,
-    _clear_value_residency: impl FnMut(&Value),
+    sequence_register: &mut super::SequenceState,
 ) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Index(num_indices) => {
@@ -863,19 +902,18 @@ pub async fn dispatch_indexing(
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellList { num_indices } => {
-            execute_brace_operation_from_stack(
-                stack,
-                vars,
-                BraceStackRequest {
-                    num_indices: *num_indices,
-                    operation: BraceIndexOperation::List,
-                    expectation: BraceOutcomeExpectation::SingleValue {
-                        invalid_message: "IndexCellList expected a single list value",
-                    },
-                },
-                runtime,
-            )
-            .await?;
+            let raw_indices = pop_index_values(stack, *num_indices)?;
+            let base = pop_index_base(stack)?;
+            let BraceIndexOutcome::Expanded(values) =
+                execute_brace_operation(base, &raw_indices, BraceIndexOperation::List, runtime)
+                    .await?
+            else {
+                return Err(crate::interpreter::errors::mex(
+                    "InvalidBraceIndexOutcome",
+                    "IndexCellList expected a transient value sequence",
+                ));
+            };
+            super::object::write_sequence_register(stack, sequence_register, values)?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell { num_indices }
@@ -1139,10 +1177,10 @@ pub async fn dispatch_indexing(
                         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
                             object_slice_selector(*dims, *colon_mask, *end_mask, &numeric)?,
                         ));
-                        stack.push(
+                        let sequence =
                             invoke_resolved_object_index_path_method(&resolution, base, path, 1)
-                                .await?,
-                        );
+                                .await?;
+                        stack.push(resolve_single_sequence(sequence)?);
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -1170,7 +1208,9 @@ pub async fn dispatch_indexing(
                     match crate::call::feval::execute_feval(base, args, 1, function_registry)
                         .await?
                     {
-                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
+                        crate::call::feval::FevalDispatch::Completed(sequence) => {
+                            stack.push(resolve_single_sequence(sequence)?)
+                        }
                     }
                 }
                 Value::Symbolic(expr) => {
@@ -1330,7 +1370,8 @@ pub async fn dispatch_indexing(
                                 &method,
                                 base,
                                 path,
-                                vec![rhs],
+                                runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?
+                                    .into_values(),
                             )
                             .await?,
                         );

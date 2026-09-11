@@ -6,7 +6,6 @@ pub(crate) const MAX_DATA_PREVIEW: usize = 4096;
 const MAX_STRUCT_FIELDS: usize = 64;
 const MAX_OBJECT_FIELDS: usize = 64;
 const MAX_OBJECT_ARRAY_ITEMS: usize = 256;
-const MAX_OUTPUT_LIST_ITEMS: usize = 64;
 const MAX_RECURSION_DEPTH: usize = 2;
 
 pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
@@ -226,20 +225,11 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "cols": ca.cols,
             "length": ca.data.len(),
         }),
-        Value::OutputList(values) => {
-            let truncated = values.len() > MAX_OUTPUT_LIST_ITEMS;
-            let items: Vec<JsonValue> = values
-                .iter()
-                .take(MAX_OUTPUT_LIST_ITEMS)
-                .map(|v| value_to_json(v, depth + 1))
-                .collect();
-            json!({
-                "kind": "output-list",
-                "length": values.len(),
-                "items": items,
-                "truncated": truncated,
-            })
-        }
+        Value::OutputList(_) => json!({
+            "kind": "unavailable",
+            "identifier": "TransientSequenceNotPortable",
+            "message": "transient output sequences cannot be stored or serialized as values",
+        }),
         Value::Struct(st) => struct_to_json(st, depth + 1),
         // The existing product-value JSON contract has no typed structure-array
         // form. Keep its established display fallback until that boundary has
@@ -518,6 +508,14 @@ fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_output_sequence_is_not_projected_as_a_portable_value() {
+        let json = value_to_json(&Value::OutputList(vec![Value::Num(1.0)]), 0);
+        assert_eq!(json["kind"], "unavailable");
+        assert_eq!(json["identifier"], "TransientSequenceNotPortable");
+        assert!(json.get("items").is_none());
+    }
     use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, ObjectArray, ObjectInstance,
         SparseTensor, StructArray, StructValue, Tensor,

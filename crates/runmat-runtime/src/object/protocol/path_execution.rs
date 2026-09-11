@@ -7,7 +7,7 @@ use runmat_value::Value;
 use super::{resolve_object_protocol, ObjectProtocol, ProtocolResolution};
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
-use crate::sequence::{SequenceResolutionContext, ValueSequence};
+use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
 use crate::RuntimeError;
 
 mod default_indexing;
@@ -136,7 +136,7 @@ fn read_default_steps<'a>(
             }
             base = read_default_step(base, &step, caller_function_name).await?;
         }
-        Ok(ValueSequence::single(base))
+        ValueSequence::single(base).map_err(crate::sequence::sequence_error_to_runtime)
     })
 }
 
@@ -159,17 +159,13 @@ async fn invoke_prepared_subsref(
             .count
         }
     };
-    let value = super::invoke_resolved_object_protocol(
+    super::invoke_resolved_object_protocol(
         &ProtocolResolution::Method(method),
         base,
         path,
         requested_outputs,
     )
-    .await?;
-    Ok(ValueSequence::from_callable_result(
-        value,
-        requested_outputs,
-    ))
+    .await
 }
 
 fn resolve_single(sequence: ValueSequence) -> Result<Value, RuntimeError> {

@@ -72,10 +72,12 @@ pub(super) async fn dispatch(
             let mut arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let futures = arguments.remove(0);
             let uniform_output = tasks::fetch_outputs_options(&arguments)?;
-            stack.push(
+            super::calls::publish_fixed_outputs(
+                stack,
                 tasks::fetch_outputs(execution, &futures, *requested_outputs, uniform_output)
                     .await?,
-            );
+                *requested_outputs,
+            )?;
         }
         Instr::FetchNext {
             has_timeout,
@@ -87,7 +89,11 @@ pub(super) async fn dispatch(
                 .map(tasks::timeout_seconds)
                 .transpose()?;
             let futures = pop(stack, "fetchNext expected a future array on the stack")?;
-            stack.push(tasks::fetch_next(execution, &futures, timeout, *requested_outputs).await?);
+            super::calls::publish_fixed_outputs(
+                stack,
+                tasks::fetch_next(execution, &futures, timeout, *requested_outputs).await?,
+                *requested_outputs,
+            )?;
         }
         Instr::EnsurePool(arg_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
@@ -170,12 +176,32 @@ pub(super) async fn dispatch(
         Instr::Collective { id, operation } => {
             let arguments =
                 crate::call::builtins::collect_call_args(stack, operation.operand_count())?;
-            stack.push(collective::execute(bytecode, *id, *operation, arguments, execution).await?);
+            let requested_outputs = match operation {
+                crate::BytecodeCollectiveOp::Receive {
+                    requested_outputs, ..
+                } => usize::from(*requested_outputs),
+                _ => 1,
+            };
+            super::calls::publish_fixed_outputs(
+                stack,
+                collective::execute(bytecode, *id, *operation, arguments, execution).await?,
+                requested_outputs,
+            )?;
         }
         Instr::Distributed(operation) => {
             let arguments =
                 crate::call::builtins::collect_call_args(stack, operation.operand_count())?;
-            stack.push(distributed::execute(bytecode, operation, arguments, execution).await?);
+            let requested_outputs = match operation {
+                crate::BytecodeDistributedOp::GlobalIndices {
+                    requested_outputs, ..
+                } => usize::from(*requested_outputs),
+                _ => 1,
+            };
+            super::calls::publish_fixed_outputs(
+                stack,
+                distributed::execute(bytecode, operation, arguments, execution).await?,
+                requested_outputs,
+            )?;
         }
         _ => return Ok(None),
     }

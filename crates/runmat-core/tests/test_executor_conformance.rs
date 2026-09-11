@@ -61,7 +61,7 @@ async fn execute_portable_envelope(
     )
     .unwrap();
     runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
         callable: runmat_execution::ProgramCallable::semantic(function, None),

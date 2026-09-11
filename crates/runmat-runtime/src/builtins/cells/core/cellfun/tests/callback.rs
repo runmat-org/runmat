@@ -13,7 +13,7 @@ fn bound_callback_uses_semantic_identity() {
                 panic!("unexpected callback arguments: {arguments:?}");
             };
             let result = seed + value;
-            Box::pin(async move { Ok(Value::Num(result)) })
+            Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(result)) })
         },
     )));
     let callback = Value::Closure(Closure {
@@ -42,7 +42,7 @@ fn name_callback_resolves_to_semantic_function() {
                 panic!("unexpected arguments")
             };
             let result = value * 2.0;
-            Box::pin(async move { Ok(Value::Num(result)) })
+            Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(result)) })
         },
     )));
     let result = call(
@@ -63,7 +63,7 @@ fn error_handler_receives_callback_failure() {
             };
             assert!(context.fields.contains_key("identifier"));
             let seed = arguments[0].clone();
-            Box::pin(async move { Ok(seed) })
+            crate::sequence::single_value_future(async move { Ok(seed) })
         },
     )));
     let handler = Value::Closure(Closure {

@@ -138,7 +138,7 @@ fn invoke_request(
     request: PythonInvocationRequest,
     snapshots: &SharedSnapshotStore,
     resources: &Rc<RefCell<RemoteResources>>,
-) -> Result<PythonWireValue, PythonWireError> {
+) -> Result<Vec<PythonWireValue>, PythonWireError> {
     resources.borrow_mut().release(&request.releases);
     let arguments = request
         .arguments
@@ -155,7 +155,25 @@ fn invoke_request(
         },
     )))
     .map_err(runtime_wire_error)?;
-    encode_host_value(value, snapshots, resources)
+    encode_host_outputs(value, snapshots, resources)
+}
+
+fn encode_host_outputs(
+    sequence: runmat_value::ValueSequence,
+    snapshots: &SharedSnapshotStore,
+    resources: &Rc<RefCell<RemoteResources>>,
+) -> Result<Vec<PythonWireValue>, PythonWireError> {
+    let values = sequence.into_values();
+    if values.len() > super::PYTHON_HOST_MAX_OUTPUTS {
+        return Err(wire_error(
+            "RunMat:Python:HostProtocol",
+            "Python output count exceeds the protocol limit",
+        ));
+    }
+    values
+        .into_iter()
+        .map(|value| encode_host_value(value, snapshots, resources))
+        .collect()
 }
 
 fn decode_host_value(
@@ -174,11 +192,6 @@ fn decode_host_value(
         PythonWireValue::Callback { id } => {
             Ok(Value::FunctionHandle(format!("{CALLBACK_PREFIX}{id}")))
         }
-        PythonWireValue::OutputList(values) => values
-            .into_iter()
-            .map(|value| decode_host_value(value, snapshots, resources))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::OutputList),
     }
 }
 
@@ -216,11 +229,10 @@ fn encode_host_value(
                 lifetime: reference.lifetime,
             }))
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| encode_host_value(value, snapshots, resources))
-            .collect::<Result<Vec<_>, _>>()
-            .map(PythonWireValue::OutputList),
+        Value::OutputList(_) => Err(wire_error(
+            "RunMat:TransientSequenceNotPortable",
+            "transient output sequences cannot be encoded as nested Python values",
+        )),
         other => encode_portable(&other, snapshots).map(PythonWireValue::Portable),
     }
 }
@@ -241,7 +253,8 @@ impl RuntimeCallService for HostCallbackRouter {
     fn invoke(
         &self,
         request: RuntimeCallRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<runmat_value::ValueSequence, RuntimeError>> + 'static>>
+    {
         let result = self
             .invoke_now(request)
             .map_err(super::client::runtime_error);
@@ -250,7 +263,10 @@ impl RuntimeCallService for HostCallbackRouter {
 }
 
 impl HostCallbackRouter {
-    fn invoke_now(&self, request: RuntimeCallRequest) -> Result<Value, PythonWireError> {
+    fn invoke_now(
+        &self,
+        request: RuntimeCallRequest,
+    ) -> Result<runmat_value::ValueSequence, PythonWireError> {
         let callback_id = callback_id(&request.identity).ok_or_else(|| {
             wire_error(
                 "RunMat:Python:CallbackProtocol",
@@ -284,6 +300,12 @@ impl HostCallbackRouter {
                     request_id,
                     callback_id,
                     depth,
+                    requested_outputs: u32::try_from(request.requested_outputs).map_err(|_| {
+                        wire_error(
+                            "RunMat:Python:CallbackProtocol",
+                            "Python callback output count exceeds u32",
+                        )
+                    })?,
                     arguments,
                 }))
                 .map_err(|error| wire_error("RunMat:Python:HostTransport", error))?;
@@ -297,8 +319,26 @@ impl HostCallbackRouter {
                     PythonDriverMessage::CallbackResult(result)
                         if result.request_id == request_id && result.callback_id == callback_id =>
                     {
-                        let value = result.outcome?;
-                        return decode_host_value(value, &self.snapshots, &self.resources);
+                        let values = result
+                            .outcome?
+                            .into_iter()
+                            .map(|value| decode_host_value(value, &self.snapshots, &self.resources))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        return if request.requested_outputs == 1 && values.len() == 1 {
+                            runmat_value::ValueSequence::single(
+                                values
+                                    .into_iter()
+                                    .next()
+                                    .expect("one Python callback output"),
+                            )
+                            .map_err(|error| {
+                                wire_error("RunMat:Python:CallbackProtocol", error.to_string())
+                            })
+                        } else {
+                            runmat_value::ValueSequence::comma_separated(values).map_err(|error| {
+                                wire_error("RunMat:Python:CallbackProtocol", error.to_string())
+                            })
+                        };
                     }
                     PythonDriverMessage::Invoke(nested) => {
                         let nested_id = nested.request_id;

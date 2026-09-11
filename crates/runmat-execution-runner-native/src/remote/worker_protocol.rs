@@ -3,7 +3,7 @@ use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind,
 use tokio::sync::Mutex;
 
 use super::protocol::{
-    RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_V4,
+    RemoteWorkerCommand, RemoteWorkerOutcome, RemoteWorkerReply, REMOTE_WORKER_PROTOCOL_VERSION,
 };
 use super::route::RemoteFrameRoute;
 use crate::{NativeExecutionError, NativeExecutionResult, ProgramProgress};
@@ -46,7 +46,7 @@ pub(super) async fn reply_progress(
         sender,
         limits,
         RemoteWorkerReply {
-            schema_version: REMOTE_WORKER_PROTOCOL_V4,
+            schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
             correlation_id: correlation_id.into(),
             outcome: RemoteWorkerOutcome::Progress {
                 attempt_id,
@@ -68,7 +68,7 @@ pub(super) fn command_frame_kind(command: &RemoteWorkerCommand) -> FrameKind {
 
 pub(super) fn acknowledged(correlation_id: String) -> RemoteWorkerReply {
     RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
         correlation_id,
         outcome: RemoteWorkerOutcome::Acknowledged,
     }
@@ -76,7 +76,7 @@ pub(super) fn acknowledged(correlation_id: String) -> RemoteWorkerReply {
 
 pub(super) fn rejected(correlation_id: String, message: impl Into<String>) -> RemoteWorkerReply {
     RemoteWorkerReply {
-        schema_version: REMOTE_WORKER_PROTOCOL_V4,
+        schema_version: REMOTE_WORKER_PROTOCOL_VERSION,
         correlation_id,
         outcome: RemoteWorkerOutcome::Rejected {
             message: message.into(),

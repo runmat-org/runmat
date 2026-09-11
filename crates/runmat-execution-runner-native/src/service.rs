@@ -11,7 +11,7 @@ use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, ExecutionServiceError, RuntimeExecutionServices,
     SpmdExecutionMode,
 };
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 use crate::config::fresh_scope_id;
 use crate::driver::{LocalDriver, TaskCompletion};
@@ -24,7 +24,7 @@ static NEXT_NATIVE_SCOPE: AtomicU64 = AtomicU64::new(1);
 enum FutureState {
     Deferred(Box<DeferredCall>),
     Running(Arc<TaskCompletion>),
-    Completed(Result<Value, ExecutionServiceError>),
+    Completed(Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>),
     Cancelled,
 }
 
@@ -620,7 +620,13 @@ impl RuntimeExecutionServices for NativeExecutionService {
 
     fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
         if let Value::Job(handle) = &value {
-            return self.await_job(handle).map(AwaitAction::Completed);
+            return self
+                .await_job(handle)
+                .and_then(|value| {
+                    ValueSequence::single(value)
+                        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+                })
+                .map(AwaitAction::Completed);
         }
         let original = value.clone();
         let future = match self.future_for_value(value)? {
@@ -651,7 +657,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 FutureState::Running(completion) => Arc::clone(completion),
                 FutureState::Completed(result) => {
                     let result = result.clone();
-                    return result.map(AwaitAction::Completed);
+                    return result.map(|value| AwaitAction::Completed(value.value().clone()));
                 }
                 FutureState::Cancelled => return Err(ExecutionServiceError::Cancelled),
             }
@@ -666,20 +672,23 @@ impl RuntimeExecutionServices for NativeExecutionService {
                         "SPMD task result requires the typed gang execution path".into(),
                     ));
                 };
-                let [payload] = outputs else {
-                    return Err(crate::driver::TransferFailure::Infrastructure(
-                        "native runtime call did not return exactly one output value".into(),
-                    ));
-                };
                 if !result_objects.is_empty() {
                     return Err(crate::driver::TransferFailure::Infrastructure(
                         "native runtime call returned externalized objects without an artifact consumer"
                             .into(),
                     ));
                 }
-                runmat_runtime::execution::value_codec::decode_inline_value(payload)
+                outputs
+                    .iter()
+                    .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                    .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| {
                         crate::driver::TransferFailure::Infrastructure(error.to_string())
+                    })
+                    .and_then(|values| {
+                        ValueSequence::comma_separated(values).map_err(|error| {
+                            crate::driver::TransferFailure::Infrastructure(error.to_string())
+                        })
                     })
             })
             .map_err(|failure| match failure {
@@ -698,23 +707,29 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 }
             });
         let mut state = self.state.lock().expect("native service poisoned");
+        let rooted = result.and_then(runmat_runtime::execution::RootedValueSequence::new);
         state
             .futures
-            .insert(future.id, FutureState::Completed(result.clone()));
-        result.map(AwaitAction::Completed)
+            .insert(future.id, FutureState::Completed(rooted.clone()));
+        rooted.map(|value| AwaitAction::Completed(value.value().clone()))
     }
 
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<Value, ExecutionServiceError>,
+        result: Result<ValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         self.state
             .lock()
             .expect("native service poisoned")
             .futures
-            .insert(future.id, FutureState::Completed(result));
+            .insert(
+                future.id,
+                FutureState::Completed(
+                    result.and_then(runmat_runtime::execution::RootedValueSequence::new),
+                ),
+            );
         let mut state = self.state.lock().expect("native service poisoned");
         record_native_completion(&mut state, future.id);
         Ok(())

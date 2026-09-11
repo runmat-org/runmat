@@ -19,7 +19,7 @@ use runmat_types::{
 };
 
 pub fn recipe(mut recipe: ProgramBuildRecipe) -> ProgramBuildRecipe {
-    recipe.entrypoint = "0".into();
+    recipe.entrypoint = "main".into();
     recipe.target =
         runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3");
     let envelope =

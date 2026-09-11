@@ -1323,12 +1323,13 @@ mod tests {
                     _ => 0.0,
                 };
                 if requested_outputs == 2 {
-                    Ok(Value::OutputList(vec![
+                    crate::sequence::ValueSequence::comma_separated(vec![
                         Value::Num(base + 1.0),
                         Value::Num(base + 2.0),
-                    ]))
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)
                 } else {
-                    Ok(Value::Num(base + 1.0))
+                    crate::sequence::single_value_sequence(Value::Num(base + 1.0))
                 }
             })
         })
@@ -1354,7 +1355,7 @@ mod tests {
     fn echo_first_invoker() -> Arc<crate::user_functions::FunctionInvoker> {
         Arc::new(move |_function, args, _requested_outputs| {
             let first = args.first().cloned().unwrap_or(Value::Num(0.0));
-            Box::pin(async move { Ok(first) })
+            crate::sequence::single_value_future(async move { Ok(first) })
         })
     }
 

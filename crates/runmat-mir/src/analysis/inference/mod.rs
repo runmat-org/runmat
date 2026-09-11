@@ -11,5 +11,8 @@ pub(crate) use contract::{
 };
 pub(crate) use legacy_builtin::infer_legacy_builtin;
 pub(crate) use mutation::assign_place;
-pub(crate) use parallel::{collective_fact, distributed_fact};
-pub(crate) use value::{infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal};
+pub(crate) use parallel::{collective_fact, distributed_fact, distributed_output_sequence};
+pub(crate) use value::{
+    append_inference_diagnostics, infer_expansion_sequence, infer_rvalue, infer_rvalue_outputs,
+    operand_fact, rvalue_literal,
+};

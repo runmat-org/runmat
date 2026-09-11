@@ -5,7 +5,7 @@ use std::pin::Pin;
 use crate::context::{RuntimeCallRequest, RuntimeContext};
 use crate::RuntimeError;
 use runmat_types::CallableIdentity;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 #[derive(Debug, Clone)]
 pub struct ForeignCallbackRequest {
@@ -57,7 +57,7 @@ pub fn foreign_callback_request(
 pub fn invoke_foreign_callback(
     context: RuntimeContext,
     request: ForeignCallbackRequest,
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>> {
+) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
     Box::pin(async move {
         if context
             .cancellation()
@@ -105,9 +105,13 @@ mod tests {
         fn invoke(
             &self,
             request: RuntimeCallRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>> {
+        ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
             self.requests.borrow_mut().push(request);
-            Box::pin(async { Ok(Value::Num(42.0)) })
+            Box::pin(async {
+                ValueSequence::single(Value::Num(42.0)).map_err(|error| {
+                    crate::runtime_error::semantic_error("ForeignCallbackOutput", error.to_string())
+                })
+            })
         }
     }
 
@@ -126,7 +130,7 @@ mod tests {
         ))
         .unwrap();
 
-        assert_eq!(result, Value::Num(42.0));
+        assert_eq!(result.into_values(), vec![Value::Num(42.0)]);
         let requests = service.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].requested_outputs, 1);

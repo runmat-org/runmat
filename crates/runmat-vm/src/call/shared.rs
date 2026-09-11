@@ -44,7 +44,11 @@ pub async fn build_expanded_args_from_specs(
             }
             ArgumentSpec::Expansion(ArgumentExpansionSpec::ReturnedOutputs) => {
                 arguments.push(MaterializedArgument::Expansion(
-                    MaterializedExpansionSource::ReturnedOutputs(pop_argument(stack)?),
+                    MaterializedExpansionSource::ReturnedOutputs(
+                        runmat_runtime::call::arguments::adapt_legacy_builtin_result(
+                            pop_argument(stack)?,
+                        )?,
+                    ),
                 ));
             }
             ArgumentSpec::Expansion(ArgumentExpansionSpec::Member(member)) => {
@@ -70,7 +74,8 @@ pub async fn build_expanded_args_from_specs(
                     )
                 })?;
                 arguments.push(MaterializedArgument::Sequence(
-                    runmat_runtime::sequence::ValueSequence::comma_separated(values),
+                    runmat_runtime::sequence::ValueSequence::comma_separated(values)
+                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
                 ));
             }
         }

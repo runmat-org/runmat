@@ -1,6 +1,7 @@
 use crate::MirOperand;
 use runmat_hir::{IndexKind, IndexResultContext};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirSubscriptChain {
@@ -21,7 +22,80 @@ pub enum MirSubscriptStep {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirSubscriptChainError {
+    Empty,
+    InvalidReadContext,
+    ParenthesesWithCellPlan,
+    BracesWithoutCellPlan,
+    InvalidCellExpandAll,
+    DottedInvokeMustUseParentheses,
+    DottedInvokeMustReadSingle,
+}
+
+impl fmt::Display for MirSubscriptChainError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Empty => "subscript chain has no path steps",
+            Self::InvalidReadContext => {
+                "subscript chain index step does not have a read result context"
+            }
+            Self::ParenthesesWithCellPlan => "parentheses subscript step uses a cell index plan",
+            Self::BracesWithoutCellPlan => "braces subscript step does not use a cell index plan",
+            Self::InvalidCellExpandAll => {
+                "cell expansion marker does not match an all-colon braces step"
+            }
+            Self::DottedInvokeMustUseParentheses => {
+                "dotted invocation step does not use parentheses indexing"
+            }
+            Self::DottedInvokeMustReadSingle => {
+                "dotted invocation step does not have single-value read context"
+            }
+        })
+    }
+}
+
+impl MirSubscriptStep {
+    /// Call syntax represented directly by this ordered path step.
+    pub fn call_syntax(&self) -> Option<runmat_hir::CallSyntax> {
+        match self {
+            Self::DottedInvoke { .. } => Some(runmat_hir::CallSyntax::DottedInvoke),
+            Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
+        }
+    }
+
+    /// Fallback policy attached to a call-shaped ordered path step.
+    pub fn fallback_policy(&self) -> Option<runmat_hir::CallableFallbackPolicy> {
+        match self {
+            Self::DottedInvoke { .. } => Some(runmat_hir::CallableFallbackPolicy::ObjectDispatch),
+            Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
+        }
+    }
+}
+
 impl MirSubscriptChain {
+    pub fn validate(&self) -> Result<(), MirSubscriptChainError> {
+        if self.steps.is_empty() {
+            return Err(MirSubscriptChainError::Empty);
+        }
+        for step in &self.steps {
+            match step {
+                MirSubscriptStep::Index(indexing) => validate_index_step(indexing)?,
+                MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                    if indexing.kind != IndexKind::Paren {
+                        return Err(MirSubscriptChainError::DottedInvokeMustUseParentheses);
+                    }
+                    if indexing.result_context != IndexResultContext::ReadSingle {
+                        return Err(MirSubscriptChainError::DottedInvokeMustReadSingle);
+                    }
+                    validate_index_plan(indexing)?;
+                }
+                MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
+            }
+        }
+        Ok(())
+    }
+
     pub fn contains_contextual_end(&self) -> bool {
         self.steps.iter().any(|step| match step {
             MirSubscriptStep::Index(indexing)
@@ -101,6 +175,37 @@ impl MirSubscriptChain {
             }
         }
     }
+}
+
+fn validate_index_step(indexing: &MirIndexing) -> Result<(), MirSubscriptChainError> {
+    if !matches!(
+        indexing.result_context,
+        IndexResultContext::ReadSingle | IndexResultContext::ReadCommaList
+    ) {
+        return Err(MirSubscriptChainError::InvalidReadContext);
+    }
+    validate_index_plan(indexing)
+}
+
+fn validate_index_plan(indexing: &MirIndexing) -> Result<(), MirSubscriptChainError> {
+    match (indexing.kind, indexing.plan) {
+        (IndexKind::Paren, MirIndexPlan::Cell) => {
+            return Err(MirSubscriptChainError::ParenthesesWithCellPlan)
+        }
+        (IndexKind::Brace, MirIndexPlan::Scalar | MirIndexPlan::Slice) => {
+            return Err(MirSubscriptChainError::BracesWithoutCellPlan)
+        }
+        (IndexKind::Paren, MirIndexPlan::Scalar | MirIndexPlan::Slice)
+        | (IndexKind::Brace, MirIndexPlan::Cell) => {}
+    }
+    let all_colon = indexing
+        .components
+        .iter()
+        .all(|component| matches!(component, MirIndexComponent::Colon));
+    if indexing.cell_expand_all != (indexing.kind == IndexKind::Brace && all_colon) {
+        return Err(MirSubscriptChainError::InvalidCellExpandAll);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

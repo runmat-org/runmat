@@ -369,6 +369,16 @@ async fn dispatch_named_with_requested_outputs(
     call_builtin_async_with_outputs(name, args, requested_outputs).await
 }
 
+fn require_single_sequence(sequence: runmat_value::ValueSequence) -> BuiltinResult<Value> {
+    use crate::sequence::ResolveValueSequence;
+
+    let mut values = sequence.resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    Ok(values.remove(0))
+}
+
 pub(crate) async fn dispatch_callable_with_policy(
     identity: runmat_types::CallableIdentity,
     fallback_policy: runmat_types::CallableFallbackPolicy,
@@ -382,7 +392,7 @@ pub(crate) async fn dispatch_callable_with_policy(
         requested_outputs,
     );
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
-        return result;
+        return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
     }
 
     if let Some(name) = fallback_policy.vm_fallback_name_for(&identity) {
@@ -1043,7 +1053,7 @@ pub async fn call_super_constructor(
         else {
             return Ok::<Option<Value>, RuntimeError>(None);
         };
-        Ok::<Option<Value>, RuntimeError>(Some(result?))
+        Ok::<Option<Value>, RuntimeError>(Some(require_single_sequence(result?)?))
     })
     .await?;
     let Some(ctor_result) = ctor_result else {
@@ -1196,7 +1206,7 @@ pub async fn call_super_method(
                 .build(),
         );
     };
-    result
+    result.and_then(require_single_sequence)
 }
 
 // handle-object builtins removed for now
@@ -1636,7 +1646,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
             );
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
-                return result;
+                return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
             }
             Err(runtime_descriptor_error_with_detail(
                 "feval",
@@ -1656,7 +1666,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
                 {
-                    return result;
+                    return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
                 }
                 return Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1705,7 +1715,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
                 {
-                    return result;
+                    return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
                 }
             }
             call_by_name(&c.function_name, &args, requested_outputs).await
@@ -1839,7 +1849,7 @@ mod tests {
                 assert_eq!(function, 42);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(2.0)]);
-                Box::pin(async { Ok(Value::Num(7.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(7.0)) })
             },
         )));
         let closure = Value::Closure(runmat_value::Closure {
@@ -1860,7 +1870,7 @@ mod tests {
                 assert_eq!(function, 43);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(3.0)]);
-                Box::pin(async { Ok(Value::Num(9.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(9.0)) })
             },
         )));
         let handle = Value::BoundFunctionHandle {
@@ -1903,7 +1913,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -1926,7 +1936,7 @@ mod tests {
                 assert_eq!(function, 5045);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(15.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(15.0)) })
             }),
         ));
 
@@ -1960,7 +1970,7 @@ mod tests {
                 assert_eq!(function, 145);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(9.0), Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(13.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(13.0)) })
             }),
         ));
 
@@ -2020,7 +2030,7 @@ mod tests {
                 assert_eq!(function, 4501);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(12.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(12.0)) })
             }),
         ));
 
@@ -2064,7 +2074,7 @@ mod tests {
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args.len(), 1);
                 let output = args[0].clone();
-                Box::pin(async move { Ok(output) })
+                crate::sequence::single_value_future(async move { Ok(output) })
             }),
         ));
 
@@ -2151,7 +2161,7 @@ mod tests {
                 assert_eq!(function, 9876);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(12.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(12.0)) })
             }),
         ));
 
@@ -2623,7 +2633,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2651,7 +2661,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2667,7 +2677,7 @@ mod tests {
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
             .expect("runtime resolution should attempt semantic resolver")
             .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        assert_eq!(result.into_values(), vec![Value::Num(11.0)]);
     }
 
     #[test]
@@ -2681,7 +2691,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2709,7 +2719,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2737,7 +2747,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2754,7 +2764,7 @@ mod tests {
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
             .expect("external boundary policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        assert_eq!(result.into_values(), vec![Value::Num(11.0)]);
     }
 
     #[test]
@@ -2768,7 +2778,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2796,7 +2806,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2812,7 +2822,7 @@ mod tests {
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
             .expect("post-object-probe runtime-name policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        assert_eq!(result.into_values(), vec![Value::Num(11.0)]);
     }
 
     #[test]
@@ -2826,7 +2836,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2842,7 +2852,7 @@ mod tests {
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
             .expect("method runtime-name policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        assert_eq!(result.into_values(), vec![Value::Num(11.0)]);
     }
 
     #[test]
@@ -2856,7 +2866,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -2879,7 +2889,7 @@ mod tests {
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
             .expect("imported runtime-name policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        assert_eq!(result.into_values(), vec![Value::Num(11.0)]);
     }
 
     #[test]
@@ -2897,7 +2907,7 @@ mod tests {
                 assert_eq!(function, 45);
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args, &[Value::Num(4.0)]);
-                Box::pin(async { Ok(Value::Num(11.0)) })
+                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(11.0)) })
             }),
         ));
 
@@ -3089,7 +3099,7 @@ mod tests {
     }
 
     #[test]
-    fn subsref_rejects_non_object_receiver_with_identifier() {
+    fn subsref_uses_default_indexing_for_non_object_receiver() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsref(
                 Value::Num(1.0),
@@ -3099,13 +3109,13 @@ mod tests {
                 ),
             ),
         )
-        .expect_err("non-object subsref receiver should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+        .expect_err("scalar numeric index two should be out of bounds");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 
     #[test]
-    fn subsasgn_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(
+    fn subsasgn_uses_default_numeric_growth_for_non_object_receiver() {
+        let result = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsasgn(
                 Value::Num(1.0),
                 standard_subscript(
@@ -3115,13 +3125,17 @@ mod tests {
                 Value::Num(3.0),
             ),
         )
-        .expect_err("non-object subsasgn receiver should fail");
-        assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+        .expect("numeric subsasgn should use canonical default growth");
+        let Value::Tensor(result) = result else {
+            panic!("numeric scalar growth must materialize a tensor")
+        };
+        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 3.0]);
     }
 
     #[test]
-    fn subsref_missing_protocol_errors_with_identifier() {
-        let err = block_on(
+    fn subsref_missing_protocol_uses_default_object_indexing() {
+        let result = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsref(
                 Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsrefProtocolClass".to_string(),
@@ -3132,12 +3146,16 @@ mod tests {
                 ),
             ),
         )
-        .expect_err("missing subsref protocol should fail");
-        assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+        .expect("missing subsref protocol should use default object indexing");
+        assert!(matches!(
+            result,
+            Value::Object(object)
+                if object.class_name.display_name() == "NoSubsrefProtocolClass"
+        ));
     }
 
     #[test]
-    fn subsasgn_missing_protocol_errors_with_identifier() {
+    fn subsasgn_missing_protocol_uses_default_object_array_validation() {
         let err = block_on(
             crate::builtins::introspection::object_indexing::dispatch_subsasgn(
                 Value::Object(runmat_value::ObjectInstance::new(
@@ -3150,8 +3168,8 @@ mod tests {
                 Value::Num(3.0),
             ),
         )
-        .expect_err("missing subsasgn protocol should fail");
-        assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+        .expect_err("default object assignment must preserve the receiver class");
+        assert_eq!(err.identifier(), Some("RunMat:ObjectArrayClassMismatch"));
     }
 
     #[test]
@@ -3190,24 +3208,21 @@ mod tests {
     }
 
     #[test]
-    fn overidx_subsref_unsupported_payload_errors_with_identifier() {
-        let err = block_on(overidx_subsref(
+    fn overidx_subsref_accepts_standard_substruct_payload() {
+        let result = block_on(overidx_subsref(
             Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             standard_subscript(
                 OBJECT_INDEX_PAREN,
                 Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
             ),
         ))
-        .expect_err("OverIdx.subsref unsupported payload should fail");
-        assert_eq!(
-            err.identifier(),
-            Some("RunMat:OverIdxSubsrefPayloadUnsupported")
-        );
+        .expect("OverIdx.subsref should accept a standard substruct payload");
+        assert_eq!(result, Value::Num(99.0));
     }
 
     #[test]
-    fn overidx_subsasgn_unsupported_payload_errors_with_identifier() {
-        let err = block_on(overidx_subsasgn(
+    fn overidx_subsasgn_accepts_standard_substruct_payload() {
+        let result = block_on(overidx_subsasgn(
             Value::Object(runmat_value::ObjectInstance::new("OverIdx".to_string())),
             standard_subscript(
                 OBJECT_INDEX_PAREN,
@@ -3215,24 +3230,28 @@ mod tests {
             ),
             Value::Num(2.0),
         ))
-        .expect_err("OverIdx.subsasgn unsupported payload should fail");
-        assert_eq!(
-            err.identifier(),
-            Some("RunMat:OverIdxSubsasgnPayloadUnsupported")
-        );
+        .expect("OverIdx.subsasgn should accept a standard substruct payload");
+        let Value::Object(object) = result else {
+            panic!("expected updated OverIdx object")
+        };
+        assert_eq!(object.properties.get("last"), Some(&Value::Num(2.0)));
     }
 
     #[test]
-    fn feval_object_receiver_routes_to_subsref_identifier() {
+    fn feval_object_receiver_uses_default_indexing_when_subsref_is_absent() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let err = block_on(feval_builtin(
+        let result = block_on(feval_builtin(
             Value::Object(runmat_value::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
             )),
             vec![Value::Num(1.0)],
         ))
-        .expect_err("feval(object, ...) should route through subsref dispatch");
-        assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+        .expect("an object without subsref should use default scalar indexing");
+        assert!(matches!(
+            result,
+            Value::Object(object)
+                if object.class_name.display_name() == "NoSubsrefProtocolClass"
+        ));
     }
 
     #[test]
@@ -3586,7 +3605,7 @@ mod tests {
                     assert_eq!(args.len(), 1);
                     assert!(matches!(args[0], Value::HandleObject(_)));
                     seen_calls.fetch_add(1, Ordering::SeqCst);
-                    Box::pin(async { Ok(Value::Num(0.0)) })
+                    Box::pin(async { crate::sequence::single_value_sequence(Value::Num(0.0)) })
                 },
             )));
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
@@ -3658,7 +3677,7 @@ mod tests {
                 assert_eq!(function, 46);
                 assert_eq!(requested_outputs, 0);
                 assert_eq!(args, &[Value::Num(5.0)]);
-                Box::pin(async { Ok(Value::OutputList(Vec::new())) })
+                Box::pin(async { Ok(crate::sequence::ValueSequence::empty()) })
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
@@ -3679,7 +3698,13 @@ mod tests {
                 assert_eq!(function, 47);
                 assert_eq!(requested_outputs, 2);
                 assert_eq!(args, &[Value::Num(6.0)]);
-                Box::pin(async { Ok(Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])) })
+                Box::pin(async {
+                    crate::sequence::ValueSequence::comma_separated(vec![
+                        Value::Num(1.0),
+                        Value::Num(2.0),
+                    ])
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+                })
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));

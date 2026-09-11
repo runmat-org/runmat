@@ -113,7 +113,7 @@ pub async fn invoke_semantic_function_value(
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let runtime = active_or_standalone_runtime_context();
     let (value, _) = invoke_semantic_function_value_with_input_residency(
         function,
@@ -133,7 +133,7 @@ pub async fn invoke_semantic_function_value_in_context(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<Value, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let (value, _) = invoke_semantic_function_value_with_input_residency(
         function,
         args,
@@ -152,7 +152,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(Value, Vec<Value>), RuntimeError> {
+) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
     invoke_semantic_function_value_with_input_residency(
         function,
         args,
@@ -180,7 +180,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     function_registry: &FunctionRegistry,
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(Value, Vec<Value>), RuntimeError> {
+) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
     runtime
         .scope(invoke_semantic_function_value_with_input_residency_inner(
             function,
@@ -200,7 +200,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     function_registry: &FunctionRegistry,
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
-) -> Result<(Value, Vec<Value>), RuntimeError> {
+) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
@@ -374,16 +374,25 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         input_residency,
     );
     Ok((
-        output_value(output_values, requested_outputs),
+        output_sequence(output_values, requested_outputs)?,
         updated_captures,
     ))
 }
 
-fn output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
+fn output_sequence(
+    output_values: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        1 => output_values.into_iter().next().unwrap_or(Value::Num(0.0)),
-        _ => Value::OutputList(output_values.into_iter().take(requested_outputs).collect()),
+        0 => Ok(runmat_value::ValueSequence::empty()),
+        1 => runmat_value::ValueSequence::single(
+            output_values.into_iter().next().unwrap_or(Value::Num(0.0)),
+        )
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
+        _ => runmat_value::ValueSequence::comma_separated(
+            output_values.into_iter().take(requested_outputs).collect(),
+        )
+        .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
     }
 }
 
@@ -404,9 +413,8 @@ fn clear_semantic_function_temp_residency(
     }
     keep_values.extend(updated_captures.iter().cloned());
     keep_values.extend(runtime_globals::collect_thread_roots());
-    let keep = Value::OutputList(keep_values);
     for value in result_vars {
-        if let Err(err) = accel_residency::clear_value_excluding(value, &keep) {
+        if let Err(err) = accel_residency::clear_value_excluding_values(value, &keep_values) {
             log::warn!("failed to clear temporary semantic function GPU residency: {err}");
         }
     }
@@ -1208,9 +1216,8 @@ async fn run_interpreter_inner(
         live_values.extend(vars.iter().cloned());
         live_values.extend(context.locals.iter().cloned());
         live_values.extend(runtime_globals::collect_thread_roots());
-        let live_values = Value::OutputList(live_values);
         for value in &stack {
-            if let Err(err) = accel_residency::clear_value_excluding(value, &live_values) {
+            if let Err(err) = accel_residency::clear_value_excluding_values(value, &live_values) {
                 log::warn!("failed to clear stack GPU residency: {err}");
             }
         }
@@ -1516,7 +1523,7 @@ async fn interpret_function_with_counts_in_context_inner(
 #[cfg(test)]
 mod tests {
     use super::{
-        interpret_resume_in_context, interpret_with_vars, output_value, run_interpreter_inner,
+        interpret_resume_in_context, interpret_with_vars, output_sequence, run_interpreter_inner,
     };
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
@@ -1554,17 +1561,17 @@ mod tests {
     }
 
     #[test]
-    fn output_value_zero_requested_is_empty_output_list() {
-        let value = output_value(vec![Value::Num(1.0)], 0);
-        assert_eq!(value, Value::OutputList(Vec::new()));
+    fn output_sequence_zero_requested_is_empty() {
+        let sequence = output_sequence(vec![Value::Num(1.0)], 0).unwrap();
+        assert!(sequence.is_empty());
     }
 
     #[test]
-    fn output_value_multi_requested_returns_output_list() {
-        let value = output_value(vec![Value::Num(1.0), Value::Num(2.0)], 2);
+    fn output_sequence_multi_requested_remains_transient() {
+        let sequence = output_sequence(vec![Value::Num(1.0), Value::Num(2.0)], 2).unwrap();
         assert_eq!(
-            value,
-            Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+            sequence.into_values(),
+            vec![Value::Num(1.0), Value::Num(2.0)]
         );
     }
 

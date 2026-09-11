@@ -922,7 +922,7 @@ mod tests {
                 };
                 assert_eq!(argument.numeric_dtype(), runmat_value::NumericDType::F32);
                 let residual = argument.materialize_f64()[0] - std::f64::consts::PI;
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(Value::Tensor(
                         Tensor::new_with_dtype(
                             vec![residual],
@@ -961,7 +961,7 @@ mod tests {
                     Value::Num(value) => *value,
                     _ => unreachable!(),
                 };
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(Value::Tensor(
                         Tensor::new_with_dtype(
                             vec![x - 1.0],
@@ -1062,7 +1062,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x - 2.0)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 2.0)) })
             },
         )));
 

@@ -82,7 +82,7 @@ async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<
             .require_foreign(operation)
             .map_err(|error| error.into_runtime_error())?
             .clone();
-        context
+        let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
@@ -92,7 +92,10 @@ async fn invoke_python(operation: &str, arguments: Vec<Value>) -> BuiltinResult<
                     requested_outputs: crate::current_requested_outputs(),
                 },
             ))
-            .await
+            .await?;
+        Ok(crate::call::arguments::project_legacy_builtin_value_abi(
+            sequence,
+        ))
     }
 }
 

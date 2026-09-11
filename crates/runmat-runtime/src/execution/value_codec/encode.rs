@@ -123,13 +123,7 @@ fn encode(value: &Value, path: &str) -> Result<ValuePayload, ValueCodecError> {
                 "event listeners are session-bound and cannot be transferred",
             ))
         }
-        Value::OutputList(values) => InlineValue::OutputList(
-            values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| encode(value, &index_path(path, index)))
-                .collect::<Result<_, _>>()?,
-        ),
+        Value::OutputList(_) => return Err(ValueCodecError::transient_not_portable(path)),
         Value::FunctionHandle(name) => callable("workspace", name, Vec::new()),
         Value::ExternalFunctionHandle(name) => callable("external", name, Vec::new()),
         Value::MethodFunctionHandle(name) => callable("method", name, Vec::new()),

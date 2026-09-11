@@ -24,7 +24,7 @@ pub enum NativeOperation {
 #[serde(rename_all = "snake_case", tag = "kind", content = "arity")]
 pub enum NativeRvalueResult {
     Assignment,
-    MultiAssignment(u32),
+    MultiAssignment(runmat_mir::MirOutputTargetList),
     SequenceAssignment(runmat_mir::MirSequenceTarget),
     Expression,
     Discard,

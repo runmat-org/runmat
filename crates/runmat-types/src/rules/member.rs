@@ -1,6 +1,6 @@
 use crate::{
     DynamicReason, FactInference, FactJoin, InferenceDiagnostic, MemberName, OutputListFact,
-    ValueFact, ValueKindFact,
+    SequenceFactInference, ValueFact, ValueKindFact, ValueSequenceFact,
 };
 
 pub fn infer_member_read(
@@ -8,18 +8,20 @@ pub fn infer_member_read(
     member: &MemberName,
     sequence_use: crate::SequenceUse,
 ) -> FactInference {
+    resolve_sequence_fact(infer_member_sequence(base, member), sequence_use)
+}
+
+pub fn infer_member_sequence(base: &ValueFact, member: &MemberName) -> SequenceFactInference {
     match &base.kind {
         ValueKindFact::Struct(structure) => {
             let field = structure.fields.get(&member.0).cloned();
             if field.is_none() && structure.fields_complete {
-                return missing_member(member);
+                return missing_member_sequence(member);
             }
             if base.is_scalar() {
-                return resolve_sequence_fact(
-                    vec![field.unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))],
-                    false,
-                    sequence_use,
-                );
+                return SequenceFactInference::exact(ValueSequenceFact::single(
+                    field.unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue)),
+                ));
             }
             let (outputs, variadic) = if structure.elements_complete {
                 let outputs = structure
@@ -36,23 +38,21 @@ pub fn infer_member_read(
             } else {
                 (field.into_iter().collect(), true)
             };
-            resolve_sequence_fact(outputs, variadic, sequence_use)
+            SequenceFactInference::exact(ValueSequenceFact { outputs, variadic })
         }
         ValueKindFact::Object(object) => object.properties.get(&member.0).cloned().map_or_else(
             || {
                 if object.properties_complete {
-                    missing_member(member)
+                    missing_member_sequence(member)
                 } else {
-                    FactInference::exact(ValueFact::unknown(DynamicReason::DynamicDispatch))
+                    SequenceFactInference::exact(ValueSequenceFact::dynamic())
                 }
             },
-            FactInference::exact,
+            |fact| SequenceFactInference::exact(ValueSequenceFact::single(fact)),
         ),
-        ValueKindFact::Unknown => {
-            FactInference::exact(ValueFact::unknown(DynamicReason::DynamicDispatch))
-        }
-        _ => FactInference {
-            fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+        ValueKindFact::Unknown => SequenceFactInference::exact(ValueSequenceFact::dynamic()),
+        _ => SequenceFactInference {
+            sequence: ValueSequenceFact::dynamic(),
             diagnostics: vec![InferenceDiagnostic::error(
                 "RM-TYPE-MEMBER-READ",
                 "member access requires a struct or object value",
@@ -62,59 +62,84 @@ pub fn infer_member_read(
 }
 
 fn resolve_sequence_fact(
-    mut outputs: Vec<ValueFact>,
-    variadic: bool,
+    inference: SequenceFactInference,
     sequence_use: crate::SequenceUse,
 ) -> FactInference {
+    let ValueSequenceFact {
+        mut outputs,
+        variadic,
+    } = inference.sequence;
+    let diagnostics = inference.diagnostics;
     match sequence_use {
-        crate::SequenceUse::Discard => FactInference::exact(ValueFact::scalar(
-            ValueKindFact::OutputList(OutputListFact {
-                outputs: Vec::new(),
-                variadic: false,
-            }),
-        )),
+        crate::SequenceUse::Discard => FactInference {
+            fact: ValueFact::scalar(ValueKindFact::Void),
+            diagnostics,
+        },
         crate::SequenceUse::RequireSingle => {
             if !variadic && outputs.len() != 1 {
-                return sequence_arity_error(outputs.len(), 1, true);
+                return sequence_arity_error(outputs.len(), 1, true, diagnostics);
             }
             if outputs.len() == 1 {
-                FactInference::exact(outputs.remove(0))
+                FactInference {
+                    fact: outputs.remove(0),
+                    diagnostics,
+                }
             } else {
-                FactInference::exact(ValueFact::unknown(DynamicReason::RuntimeValue))
+                FactInference {
+                    fact: ValueFact::unknown(DynamicReason::RuntimeValue),
+                    diagnostics,
+                }
             }
         }
         crate::SequenceUse::SelectPrefix { count } => {
             if !variadic && outputs.len() < count {
-                return sequence_arity_error(outputs.len(), count, false);
+                return sequence_arity_error(outputs.len(), count, false, diagnostics);
             }
             outputs.truncate(count);
-            FactInference::exact(ValueFact::scalar(ValueKindFact::OutputList(
-                OutputListFact {
+            FactInference {
+                fact: ValueFact::scalar(ValueKindFact::OutputList(OutputListFact {
                     outputs,
                     variadic: variadic && count > 0,
-                },
-            )))
+                })),
+                diagnostics,
+            }
         }
         crate::SequenceUse::ExpandAll
         | crate::SequenceUse::SelectCurrentFunctionOutputs
-        | crate::SequenceUse::SelectDestinationCardinality => {
-            FactInference::exact(ValueFact::scalar(ValueKindFact::OutputList(
-                OutputListFact { outputs, variadic },
-            )))
-        }
+        | crate::SequenceUse::SelectDestinationCardinality => FactInference {
+            fact: ValueFact::scalar(ValueKindFact::OutputList(OutputListFact {
+                outputs,
+                variadic,
+            })),
+            diagnostics,
+        },
     }
 }
 
-fn sequence_arity_error(actual: usize, requested: usize, exact: bool) -> FactInference {
+fn missing_member_sequence(member: &MemberName) -> SequenceFactInference {
+    let missing = missing_member(member);
+    SequenceFactInference {
+        sequence: ValueSequenceFact::dynamic(),
+        diagnostics: missing.diagnostics,
+    }
+}
+
+fn sequence_arity_error(
+    actual: usize,
+    requested: usize,
+    exact: bool,
+    mut diagnostics: Vec<InferenceDiagnostic>,
+) -> FactInference {
     let requirement = if exact { "exactly" } else { "at least" };
+    diagnostics.push(InferenceDiagnostic::error(
+        "RM-TYPE-COMMA-LIST-ARITY",
+        format!(
+            "value sequence contains {actual} values; this context requires {requirement} {requested}"
+        ),
+    ));
     FactInference {
         fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
-        diagnostics: vec![InferenceDiagnostic::error(
-            "RM-TYPE-COMMA-LIST-ARITY",
-            format!(
-                "value sequence contains {actual} values; this context requires {requirement} {requested}"
-            ),
-        )],
+        diagnostics,
     }
 }
 

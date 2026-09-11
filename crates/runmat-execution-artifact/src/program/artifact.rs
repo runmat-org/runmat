@@ -109,10 +109,11 @@ impl ProgramArtifact {
         self.target.validate_form(self.form)?;
         if let Some(admission) = self.executable_unit_admission()? {
             if admission.identity.program != recipe.program_revision
+                || admission.identity.entrypoint != recipe.entrypoint
                 || admission.interop != recipe.interop
             {
                 return Err(ArtifactError::Identity(
-                    "executable unit does not match its exact program revision and interop manifest"
+                    "executable unit does not match its exact program revision, entrypoint, and interop manifest"
                         .into(),
                 ));
             }

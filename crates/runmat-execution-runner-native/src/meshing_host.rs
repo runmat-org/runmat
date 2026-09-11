@@ -115,6 +115,8 @@ pub async fn run_meshing_worker_stdio(
     };
     let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint();
     let payload = read_payload(&mut reader, frame_limits).await?;
+    runmat_execution_artifact::admit_program_execution_request_bytes(&payload)
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let request: ProgramExecutionRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let store = NativeObjectStore::open(object_store_root, limits.inventory.max_object_bytes)

@@ -206,7 +206,7 @@ async fn invoke_native(
             .require_foreign(operation)
             .map_err(|error| error.into_runtime_error())?
             .clone();
-        context
+        let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
@@ -216,7 +216,10 @@ async fn invoke_native(
                     requested_outputs,
                 },
             ))
-            .await
+            .await?;
+        Ok(crate::call::arguments::project_legacy_builtin_value_abi(
+            sequence,
+        ))
     }
 }
 

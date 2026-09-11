@@ -6,6 +6,8 @@ pub enum ValueCodecError {
     Unsupported { path: String, rule: &'static str },
     #[error("invalid value payload at `{path}`: {message}")]
     Invalid { path: String, message: String },
+    #[error("TransientSequenceNotPortable: transient output sequence at `{path}` cannot cross a persistence or transport boundary")]
+    TransientSequenceNotPortable { path: String },
 }
 
 impl ValueCodecError {
@@ -20,6 +22,12 @@ impl ValueCodecError {
         Self::Invalid {
             path: path.to_owned(),
             message: message.into(),
+        }
+    }
+
+    pub(super) fn transient_not_portable(path: &str) -> Self {
+        Self::TransientSequenceNotPortable {
+            path: path.to_owned(),
         }
     }
 }

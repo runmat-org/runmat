@@ -61,9 +61,7 @@ pub(super) async fn execute(
     let execution_result = async {
         let rank_results = match execution.runtime.execution().spmd_execution_mode() {
             runmat_runtime::execution::SpmdExecutionMode::IsolatedWorkers => {
-                runmat_runtime::execution::validate_spawn_capture(&Value::OutputList(
-                    captures.clone(),
-                ))?;
+                runmat_runtime::execution::validate_spawn_captures(&captures)?;
                 let program = crate::encode_interpreter_script_v2(bytecode).map_err(|error| {
                     crate::interpreter::errors::mex(
                         "ExecutionProgram",

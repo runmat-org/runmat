@@ -70,13 +70,13 @@ pub(super) async fn try_execute(
             let step = ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
                 components: arguments.into_iter().map(Into::into).collect(),
             });
-            super::read_default_step(member_value, &step, caller_function_name).await?
+            ValueSequence::single(
+                super::read_default_step(member_value, &step, caller_function_name).await?,
+            )
+            .map_err(crate::sequence::sequence_error_to_runtime)?
         }
     };
-    Ok(Some(ValueSequence::from_callable_result(
-        result,
-        requested_outputs,
-    )))
+    Ok(Some(result))
 }
 
 fn prefix(

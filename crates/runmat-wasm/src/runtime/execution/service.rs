@@ -11,7 +11,7 @@ use runmat_execution::{
     PoolSnapshot, TaskHandle, TaskId, TaskResultClaim,
 };
 use runmat_execution_artifact::{
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -256,12 +256,20 @@ impl BrowserExecutionService {
         response: Result<ProgramExecutionResponse, String>,
     ) {
         let (future_id, result, report) = match response {
-            Ok(ProgramExecutionResponse::Success { value }) => {
-                let decoded = runmat_runtime::execution::value_codec::decode_inline_value(&value)
-                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()));
+            Ok(ProgramExecutionResponse::Success { outputs }) => {
+                let decoded = outputs
+                    .iter()
+                    .map(runmat_runtime::execution::value_codec::decode_inline_value)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+                    .and_then(|values| {
+                        runmat_value::ValueSequence::comma_separated(values)
+                            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))
+                    })
+                    .and_then(runmat_runtime::execution::RootedValueSequence::new);
                 let report = AttemptReport::Succeeded {
                     result: AttemptSuccess::Values {
-                        outputs: vec![value],
+                        outputs,
                         result_objects: Vec::new(),
                     },
                 };
@@ -473,7 +481,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             })
             .map_err(driver_error)?;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe: recipe.clone(),
             artifact: artifact.clone(),
             callable: callable.clone(),
@@ -681,7 +689,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             )),
             FutureState::Completed(result) => {
                 let result = result.clone();
-                result.map(AwaitAction::Completed)
+                result.map(|value| AwaitAction::Completed(value.value().clone()))
             }
             FutureState::Cancelled => Err(ExecutionServiceError::Cancelled),
         }
@@ -690,7 +698,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
     fn complete_future(
         &self,
         future: &FutureHandle,
-        result: Result<Value, ExecutionServiceError>,
+        result: Result<runmat_value::ValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.borrow_mut();
@@ -700,7 +708,10 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .ok_or(ExecutionServiceError::UnknownHandle)?;
         match record {
             FutureState::ExecutingInCaller => {
-                *record = FutureState::Completed(result);
+                *record = FutureState::Completed(match result {
+                    Ok(value) => runmat_runtime::execution::RootedValueSequence::new(value),
+                    Err(error) => Err(error),
+                });
                 if let Some(task_id) = state
                     .tasks
                     .iter()

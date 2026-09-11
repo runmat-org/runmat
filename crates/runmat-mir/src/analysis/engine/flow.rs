@@ -14,8 +14,9 @@ use crate::{
 use super::state::FlowState;
 use crate::analysis::inference::FunctionSummary;
 use crate::analysis::inference::{
-    apply_rvalue_contract, assign_place, infer_rvalue, infer_rvalue_outputs, operand_fact,
-    rvalue_literal, statement_contract_with_facts,
+    append_inference_diagnostics, apply_rvalue_contract, assign_place, infer_expansion_sequence,
+    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal,
+    statement_contract_with_facts,
 };
 use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
 
@@ -255,10 +256,21 @@ fn transfer_statement(
             }
             apply_rvalue_contract(value, state, summaries);
         }
-        MirStmtKind::CaptureSequence { source, .. } => {
+        MirStmtKind::CaptureSequence {
+            destination,
+            source,
+        } => {
             source.visit_outer_operands(|operand| {
                 let _ = operand_fact(operand, state);
             });
+            let inferred = infer_expansion_sequence(source, state, summaries);
+            append_inference_diagnostics(
+                &inferred.diagnostics,
+                statement.span,
+                "sequence-inference",
+                diagnostics,
+            );
+            state.set_sequence(*destination, inferred.sequence);
             let facts = state.value_facts();
             let (effects, capabilities) =
                 statement_contract_with_facts(statement, summaries, &facts);
@@ -404,7 +416,7 @@ fn edge_states(
                     output, ..
                 })
                 | ValueKindFact::Execution(runmat_types::ExecutionFact::Task { output, .. }) => {
-                    *output
+                    output.first_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
                 }
                 _ => dynamic_value(),
             };

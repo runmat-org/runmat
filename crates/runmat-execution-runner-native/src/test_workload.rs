@@ -37,7 +37,9 @@ pub(crate) async fn execute_host_program_request_with_project_and_collective(
     }
     match execute_test_attempt(&request, materialized).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
-            Ok(value) => ProgramExecutionResponse::Success { value },
+            Ok(value) => ProgramExecutionResponse::Success {
+                outputs: vec![value],
+            },
             Err(message) => ProgramExecutionResponse::Failure { message },
         },
         Err(message) => ProgramExecutionResponse::Failure { message },
@@ -300,7 +302,7 @@ mod tests {
         ExecutableForm, ExecutionBundleBuilder, ForeignArtifactClosure, LogicalObject,
         ObjectNamespace, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
         ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
     use runmat_test::descriptor::TestSelector;
     use runmat_test::discovery::{FrozenTestRunSnapshot, SavedRunSource};
@@ -342,10 +344,13 @@ mod tests {
                 .unwrap(),
         )
         .await;
-        let ProgramExecutionResponse::Success { value } = response else {
+        let ProgramExecutionResponse::Success { outputs } = response else {
             panic!("test-capable host rejected a valid workload: {response:?}");
         };
-        let execution = decode_execution(&value).unwrap();
+        let [value] = outputs.as_slice() else {
+            panic!("test-capable host returned an invalid output count");
+        };
+        let execution = decode_execution(value).unwrap();
         assert_eq!(
             execution.result.state.disposition,
             TerminalDisposition::Passed,
@@ -394,10 +399,11 @@ mod tests {
             .portable_envelope_for_with_interop(None, interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let entrypoint = envelope.manifest.identity.entrypoint.clone();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: unit.revision().program_revision.clone(),
-            entrypoint: function.to_string(),
+            entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
             },
@@ -417,7 +423,7 @@ mod tests {
         )
         .unwrap();
         let response = execute_host_program_request(ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
             callable: ProgramCallable::semantic(
@@ -505,10 +511,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let entrypoint = envelope.manifest.identity.entrypoint.clone();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: unit.revision().program_revision.clone(),
-            entrypoint: function.to_string(),
+            entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
             },
@@ -570,7 +577,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(
@@ -589,7 +596,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         assert_eq!(
             response,
             ProgramExecutionResponse::Success {
-                value: ValuePayload::Inline(Box::new(InlineValue::F64Bits(73.0_f64.to_bits()))),
+                outputs: vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
+                    73.0_f64.to_bits(),
+                )))],
             }
         );
     }
@@ -693,10 +702,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             .portable_envelope_for_with_interop(Some("main"), interop.clone())
             .unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
+        let entrypoint = envelope.manifest.identity.entrypoint.clone();
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: revision.clone(),
-            entrypoint: function.to_string(),
+            entrypoint,
             outputs: runmat_execution::OutputContract {
                 requested_outputs: 1,
             },
@@ -742,7 +752,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let artifact = bundle.manifest.artifacts.first().cloned().unwrap();
         let response = execute_host_program_request_with_project(
             ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V5,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                 recipe,
                 artifact,
                 callable: ProgramCallable::semantic(
@@ -761,7 +771,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         assert_eq!(
             response,
             ProgramExecutionResponse::Success {
-                value: ValuePayload::Inline(Box::new(InlineValue::I32(146))),
+                outputs: vec![ValuePayload::Inline(Box::new(InlineValue::I32(146)))],
             }
         );
     }

@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use runmat_types::InteropManifest;
-use runmat_value::Value;
+use runmat_value::ValueSequence;
 
 use super::{
     admit_interop_manifest, foreign_error, ForeignAdapterDescriptor, ForeignErrorKind,
@@ -16,7 +16,7 @@ use crate::context::{ForeignCall, RuntimeContext, RuntimeForeignService};
 use crate::RuntimeError;
 
 pub type ForeignAdapterFuture =
-    Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>>;
+    Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>>;
 
 pub trait ForeignAdapter {
     fn descriptor(&self) -> ForeignAdapterDescriptor;
@@ -166,6 +166,14 @@ impl RuntimeForeignService for ForeignRuntime {
                     format!("foreign call {} was cancelled", call.symbol),
                 ));
             }
+            for argument in &call.arguments {
+                runmat_value::validate_no_transient_sequence(argument).map_err(|_| {
+                    crate::runtime_error::semantic_error(
+                        "TransientSequenceNotPortable",
+                        "transient output sequences cannot cross a foreign adapter boundary",
+                    )
+                })?;
+            }
             let descriptor = adapter.descriptor();
             if descriptor.execution_stack == runmat_types::ExecutionStackRequirement::Process
                 && context.execution_stack() != crate::context::RuntimeExecutionStack::Process
@@ -207,6 +215,8 @@ mod tests {
     use crate::context::{RuntimeExecutionStack, RuntimeServicePorts};
     use crate::execution::RuntimeExecutionService;
     use runmat_types::{CapabilityRequirement, ExecutionStackRequirement, ForeignCapability};
+    use runmat_value::{CellArray, Value};
+    use std::cell::Cell;
     use std::collections::BTreeSet;
 
     struct ProcessStackAdapter;
@@ -226,7 +236,10 @@ mod tests {
         }
 
         fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
-            Box::pin(async { Ok(Value::Num(1.0)) })
+            Box::pin(async {
+                ValueSequence::single(runmat_value::Value::Num(1.0))
+                    .map_err(|error| RuntimeError::new(error.to_string()))
+            })
         }
     }
 
@@ -254,6 +267,68 @@ mod tests {
         assert_eq!(
             error.identifier(),
             Some("RunMat:Foreign:ExecutionStackViolation")
+        );
+    }
+
+    struct RecordingAdapter {
+        invoked: Rc<Cell<bool>>,
+    }
+
+    impl ForeignAdapter for RecordingAdapter {
+        fn descriptor(&self) -> ForeignAdapterDescriptor {
+            ForeignAdapterDescriptor {
+                adapter: runmat_types::ForeignAdapterId::new("recording-test").unwrap(),
+                version: 1,
+                capabilities: BTreeSet::from([CapabilityRequirement::ForeignRuntime]),
+                foreign_capabilities: BTreeSet::from([ForeignCapability::Invoke]),
+                artifact_identities: BTreeSet::new(),
+                supports_wasm: false,
+                supports_host_bridge: false,
+                execution_stack: ExecutionStackRequirement::Any,
+            }
+        }
+
+        fn invoke(&self, _context: RuntimeContext, _call: ForeignCall) -> ForeignAdapterFuture {
+            self.invoked.set(true);
+            Box::pin(async { Ok(ValueSequence::empty()) })
+        }
+    }
+
+    #[test]
+    fn nested_transient_sequences_are_rejected_before_adapter_invocation() {
+        let invoked = Rc::new(Cell::new(false));
+        let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
+        foreign
+            .register_adapter(Rc::new(RecordingAdapter {
+                invoked: Rc::clone(&invoked),
+            }))
+            .expect("register adapter");
+        let services = RuntimeServicePorts::default().with_foreign(foreign.clone());
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(services);
+        let nested = Value::Cell(
+            CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1)
+                .expect("valid cell fixture"),
+        );
+
+        let error = futures::executor::block_on(foreign.invoke(
+            runtime,
+            ForeignCall {
+                adapter: "recording-test".into(),
+                symbol: "invoke".into(),
+                arguments: vec![nested],
+                requested_outputs: 0,
+            },
+        ))
+        .expect_err("nested transient sequence must be rejected");
+
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TransientSequenceNotPortable")
+        );
+        assert!(
+            !invoked.get(),
+            "adapter must not observe rejected arguments"
         );
     }
 }

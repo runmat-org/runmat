@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::RuntimeContext;
 use crate::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
+use crate::sequence::ResolveValueSequence;
 use crate::{runtime_error::semantic_error, RuntimeError};
-use runmat_value::{CellArray, IntValue, Value};
+use runmat_value::{CellArray, IntValue, Value, ValueSequence};
 
 /// Describes one source-level call argument after lowering.
 ///
@@ -51,7 +52,7 @@ impl ArgumentSpec {
 pub enum MaterializedArgument {
     Single(Value),
     Expansion(MaterializedExpansionSource),
-    Sequence(crate::sequence::ValueSequence),
+    Sequence(ValueSequence),
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +62,7 @@ pub enum MaterializedExpansionSource {
         indices: Vec<Value>,
         expand_all: bool,
     },
-    ReturnedOutputs(Value),
+    ReturnedOutputs(ValueSequence),
     Member {
         base: Value,
         member: runmat_types::MemberName,
@@ -144,15 +145,7 @@ pub async fn materialize_expansion(
                 }
             }
         }
-        MaterializedExpansionSource::ReturnedOutputs(value) => match value {
-            Value::OutputList(values) => values,
-            _ => {
-                return Err(semantic_error(
-                    "InvalidReturnedOutputExpansion",
-                    "call-result expansion requires a multiple-output result",
-                ));
-            }
-        },
+        MaterializedExpansionSource::ReturnedOutputs(sequence) => return Ok(sequence),
         MaterializedExpansionSource::Member { base, member } => {
             return crate::object::resolve::read_member_sequence_with_context(
                 Some(runtime),
@@ -176,7 +169,31 @@ pub async fn materialize_expansion(
             .await;
         }
     };
-    Ok(crate::sequence::ValueSequence::comma_separated(values))
+    crate::sequence::ValueSequence::comma_separated(values)
+        .map_err(crate::sequence::sequence_error_to_runtime)
+}
+
+/// The sole executor bridge from legacy builtin multi-output values into the
+/// transient sequence carrier. Builtins remain unmigrated for now, but an
+/// OutputList can never be accepted as one of another OutputList's outputs.
+pub fn adapt_legacy_builtin_result(value: Value) -> Result<ValueSequence, RuntimeError> {
+    match value {
+        Value::OutputList(values) => ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime),
+        value => ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime),
+    }
+}
+
+/// Projects typed execution outputs only where an unmigrated public builtin
+/// ABI still requires one `Value`. Callers must return that value immediately;
+/// executor, session, and service state must retain `ValueSequence`.
+pub(crate) fn project_legacy_builtin_value_abi(sequence: ValueSequence) -> Value {
+    let kind = sequence.kind();
+    let mut values = sequence.into_values();
+    match kind {
+        runmat_value::ValueSequenceKind::Single => values.remove(0),
+        runmat_value::ValueSequenceKind::CommaSeparated => Value::OutputList(values),
+    }
 }
 
 async fn expand_composite_values(
@@ -270,10 +287,7 @@ pub async fn expand_brace_values(
                 pad_to_outputs.unwrap_or(1),
             )
             .await?;
-            match value {
-                Value::OutputList(values) => values,
-                value => vec![value],
-            }
+            value.into_values()
         }
         _ => {
             return Err(semantic_error(
@@ -295,7 +309,7 @@ pub async fn expand_brace_values(
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
-    use runmat_value::{CellArray, Value};
+    use runmat_value::{CellArray, Value, ValueSequence};
 
     use super::{expand_arguments, MaterializedArgument, MaterializedExpansionSource};
 
@@ -333,18 +347,27 @@ mod tests {
     }
 
     #[test]
-    fn output_list_index_expansion_uses_cell_index_semantics() {
+    fn returned_output_sequence_expands_without_becoming_a_value() {
         let values = block_on(expand_arguments(
             &runtime(),
             vec![MaterializedArgument::Expansion(
-                MaterializedExpansionSource::ReturnedOutputs(Value::OutputList(vec![
-                    Value::Num(9.0),
-                    Value::Num(2.0),
-                ])),
+                MaterializedExpansionSource::ReturnedOutputs(
+                    ValueSequence::comma_separated(vec![Value::Num(9.0), Value::Num(2.0)]).unwrap(),
+                ),
             )],
         ))
         .expect("expand output list");
         assert_eq!(values, vec![Value::Num(9.0), Value::Num(2.0)]);
+    }
+
+    #[test]
+    fn legacy_builtin_adapter_rejects_nested_output_lists() {
+        let error =
+            super::adapt_legacy_builtin_result(Value::OutputList(vec![Value::OutputList(vec![
+                Value::Num(1.0),
+            ])]))
+            .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:NestedLegacyOutputList"));
     }
 
     #[test]

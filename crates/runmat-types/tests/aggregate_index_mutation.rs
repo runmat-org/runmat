@@ -1,9 +1,10 @@
 use runmat_types::{
-    infer_cell_aggregate, infer_concatenate, infer_index, infer_index_mutation, infer_member_read,
-    infer_member_write, infer_mutation, infer_struct, infer_tensor_aggregate,
-    AssignmentCreationPolicy, AssignmentShapePolicy, IndexKind, IndexResultContext,
-    IndexSelectorFact, MemberName, MutationContract, NumericClass, NumericDomain, NumericFact,
-    PlaceMutationKind, SequenceUse, ShapeFact, ValueFact, ValueKindFact,
+    infer_cell_aggregate, infer_concatenate, infer_index, infer_index_mutation,
+    infer_index_sequence, infer_member_read, infer_member_sequence, infer_member_write,
+    infer_mutation, infer_struct, infer_tensor_aggregate, AssignmentCreationPolicy,
+    AssignmentShapePolicy, IndexKind, IndexResultContext, IndexSelectorFact, MemberName,
+    MutationContract, NumericClass, NumericDomain, NumericFact, PlaceMutationKind, SequenceUse,
+    ShapeFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -14,6 +15,52 @@ fn numeric(class: NumericClass, shape: ShapeFact) -> ValueFact {
     }));
     fact.shape = shape;
     fact
+}
+
+#[test]
+fn sequence_inference_keeps_zero_one_and_many_outputs_outside_value_facts() {
+    let empty = infer_cell_aggregate(&[]).fact;
+    let empty_sequence = infer_index_sequence(
+        &empty,
+        IndexKind::Brace,
+        &[IndexSelectorFact::Colon],
+        IndexResultContext::ReadCommaList,
+    );
+    assert!(empty_sequence.sequence.outputs.is_empty());
+    assert!(!empty_sequence.sequence.variadic);
+
+    let first = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let second = numeric(NumericClass::UInt64, ShapeFact::Scalar);
+    let cell = infer_cell_aggregate(&[vec![first.clone(), second.clone()]]).fact;
+    let one = infer_index_sequence(
+        &cell,
+        IndexKind::Brace,
+        &[IndexSelectorFact::KnownOneBasedIndex(1)],
+        IndexResultContext::ReadCommaList,
+    );
+    assert_eq!(one.sequence.outputs, vec![first.clone()]);
+    assert!(!one.sequence.variadic);
+
+    let many = infer_index_sequence(
+        &cell,
+        IndexKind::Brace,
+        &[IndexSelectorFact::Colon],
+        IndexResultContext::ReadCommaList,
+    );
+    assert_eq!(many.sequence.outputs, vec![first, second]);
+    assert!(!many.sequence.variadic);
+
+    let struct_array = infer_struct(BTreeMap::from([(
+        "field".to_owned(),
+        numeric(NumericClass::UInt8, ShapeFact::Scalar),
+    )]))
+    .fact;
+    let member = infer_member_sequence(&struct_array, &MemberName("field".to_owned()));
+    assert_eq!(member.sequence.outputs.len(), 1);
+    assert!(!matches!(
+        member.sequence.outputs[0].kind,
+        ValueKindFact::OutputList(_)
+    ));
 }
 
 #[test]

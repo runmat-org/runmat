@@ -968,7 +968,7 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                Box::pin(async move {
+                crate::sequence::single_value_future(async move {
                     Ok(tensor(
                         vec![x[0] - 2.0, x[1] - 3.0, x[0] + x[1] - 5.0],
                         vec![3, 1],
@@ -1002,7 +1002,9 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
                 };
-                Box::pin(async move { Ok(tensor(vec![x - 2.0, x - 2.0], vec![1, 2])) })
+                crate::sequence::single_value_future(async move {
+                    Ok(tensor(vec![x - 2.0, x - 2.0], vec![1, 2]))
+                })
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
@@ -1037,7 +1039,7 @@ mod tests {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
                 };
-                Box::pin(async move { Ok(Value::Num(x - 3.0)) })
+                Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 3.0)) })
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
@@ -1063,7 +1065,9 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                Box::pin(async move { Ok(tensor(vec![x[0] - 2.0, x[1] - 5.0], vec![2, 1])) })
+                crate::sequence::single_value_future(async move {
+                    Ok(tensor(vec![x[0] - 2.0, x[1] - 5.0], vec![2, 1]))
+                })
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
@@ -1094,7 +1098,9 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                Box::pin(async move { Ok(tensor(vec![x[0] - 1.0, 2.0 * x[1] - 4.0], vec![1, 2])) })
+                crate::sequence::single_value_future(async move {
+                    Ok(tensor(vec![x[0] - 1.0, 2.0 * x[1] - 4.0], vec![1, 2]))
+                })
             },
         )));
         let mut options = StructValue::new();
@@ -1148,7 +1154,9 @@ mod tests {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
                 };
-                Box::pin(async move { Ok(tensor(vec![x[0] - 4.0, x[1] - 5.0], vec![2, 1])) })
+                crate::sequence::single_value_future(async move {
+                    Ok(tensor(vec![x[0] - 4.0, x[1] - 5.0], vec![2, 1]))
+                })
             },
         )));
         let mut problem = StructValue::new();

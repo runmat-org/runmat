@@ -234,9 +234,11 @@ impl JavaAdapter {
         &self,
         context: &RuntimeContext,
         call: ForeignCall,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         if call.symbol == "classpath" {
-            return self.classpath_value(call.arguments);
+            return self
+                .classpath_value(call.arguments)
+                .and_then(super::super::single_output_sequence);
         }
         if call.symbol == "has_classpath" {
             let snapshot = self
@@ -245,20 +247,26 @@ impl JavaAdapter {
                 .as_ref()
                 .map(|session| session.classpath())
                 .unwrap_or_else(|| self.initial_classpath.borrow().snapshot());
-            return Ok(Value::Bool(
+            return super::super::single_output_sequence(Value::Bool(
                 !snapshot.bootstrap.is_empty()
                     || !snapshot.project.is_empty()
                     || !snapshot.dynamic.is_empty(),
             ));
         }
         if call.symbol == "status" {
-            return self.status_value();
+            return self
+                .status_value()
+                .and_then(super::super::single_output_sequence);
         }
         if call.symbol == "usejava" {
-            return self.usejava_value(call.arguments);
+            return self
+                .usejava_value(call.arguments)
+                .and_then(super::super::single_output_sequence);
         }
         if call.symbol == "configure" {
-            return self.configure_value(call.arguments);
+            return self
+                .configure_value(call.arguments)
+                .and_then(super::super::single_output_sequence);
         }
         if matches!(
             call.symbol.as_str(),
@@ -373,7 +381,7 @@ impl JavaAdapter {
                 self.with_session(|session| {
                     session.set_field_resolved(java_handle, &field, &value)
                 })?;
-                return Ok(Value::Foreign(reference));
+                return super::super::single_output_sequence(Value::Foreign(reference));
             }
             "add_classpath" => {
                 let entry = string_argument(arguments.next(), "Java classpath entry")?;
@@ -391,14 +399,14 @@ impl JavaAdapter {
                     }
                 };
                 self.with_session(|session| session.add_dynamic_classpath_at(entry, at_end))?;
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(runmat_value::ValueSequence::empty());
             }
             "remove_classpath" => {
                 let entry = string_argument(arguments.next(), "Java classpath entry")?;
                 self.with_session(|session| {
                     session.remove_dynamic_classpath(std::path::Path::new(&entry))
                 })?;
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(runmat_value::ValueSequence::empty());
             }
             "set_classpath" => {
                 let entries = arguments
@@ -409,7 +417,7 @@ impl JavaAdapter {
                         entries.into_iter().map(std::path::PathBuf::from),
                     )
                 })?;
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(runmat_value::ValueSequence::empty());
             }
             "new_array" => {
                 let class = string_argument(arguments.next(), "Java array class")?;
@@ -426,6 +434,7 @@ impl JavaAdapter {
             }
         };
         self.value_from_java(result)
+            .and_then(super::super::single_output_sequence)
     }
 
     fn with_session<T>(
@@ -525,11 +534,20 @@ impl JavaAdapter {
                         requested_outputs,
                     )
                     .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
-                    let result = pollster::block_on(invoke_foreign_callback(context, request))
+                    let sequence = pollster::block_on(invoke_foreign_callback(context, request))
                         .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
+                    let mut values = crate::sequence::ResolveValueSequence::resolve(
+                        sequence,
+                        runmat_types::SequenceUse::SelectPrefix {
+                            count: requested_outputs,
+                        },
+                        crate::sequence::SequenceResolutionContext::default(),
+                    )
+                    .map_err(|error| JavaInvocationError::Callback(error.to_string()))?;
                     if !invocation.returns_value {
                         return Ok(JavaValue::Null);
                     }
+                    let result = values.pop().expect("one Java callback output was selected");
                     value_to_java(result)
                         .map_err(|error| JavaInvocationError::Callback(error.to_string()))
                 })

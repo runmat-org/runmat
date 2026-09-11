@@ -1,6 +1,7 @@
 use runmat_mir::{MirCall, MirCallArg, MirCallee, MirExpansionSource, MirSequenceLocalId};
 use runmat_runtime::call::arguments::{MaterializedArgument, MaterializedExpansionSource};
 use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
+use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -82,7 +83,7 @@ fn evaluate_inner(
             }
         }
     }
-    let result = match &call.callee {
+    match &call.callee {
         MirCallee::Static(identity) => {
             if let Some(function) = local_program_function(identity)? {
                 if let Some(captures) = state.lexical_captures(function)? {
@@ -105,7 +106,7 @@ fn evaluate_inner(
                         "nested lexical call",
                     )?;
                     state.apply_lexical_captures(result.captures)?;
-                    return normalize_outputs(result.value, requested_outputs);
+                    return normalize_sequence_outputs(result.outputs, requested_outputs);
                 }
             }
             let descriptor = CallableDescriptor::resolved(
@@ -115,16 +116,16 @@ fn evaluate_inner(
                 call.fallback_policy,
                 CallableCallKind::Direct,
             );
-            return complete_call(
+            complete_call(
                 state,
                 embedded.cloned(),
                 runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
                 requested_outputs,
-            );
+            )
         }
         MirCallee::Dynamic(operand) => {
             let target = materialize_operand(state, operand)?;
-            super::sync::complete(
+            let value = super::sync::complete(
                 &state.runtime,
                 runmat_runtime::call_feval_async_with_outputs(
                     target,
@@ -132,14 +133,15 @@ fn evaluate_inner(
                     requested_outputs,
                 ),
                 "dynamic call",
-            )
+            )?;
+            normalize_legacy_outputs(value, requested_outputs)
         }
         MirCallee::SuperConstructor {
             current_class,
             super_class,
         } => {
             let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
-            super::sync::complete(
+            let value = super::sync::complete(
                 &state.runtime,
                 runmat_runtime::call_super_constructor(
                     current_class.clone(),
@@ -147,7 +149,8 @@ fn evaluate_inner(
                     arguments,
                 ),
                 "superclass constructor call",
-            )
+            )?;
+            normalize_legacy_outputs(value, requested_outputs)
         }
         MirCallee::SuperMethod {
             current_class,
@@ -155,7 +158,7 @@ fn evaluate_inner(
             method,
         } => {
             let _outputs = runmat_runtime::output_context::push_output_count(requested_outputs);
-            super::sync::complete(
+            let value = super::sync::complete(
                 &state.runtime,
                 runmat_runtime::call_super_method(
                     current_class.clone(),
@@ -164,10 +167,10 @@ fn evaluate_inner(
                     arguments,
                 ),
                 "superclass method call",
-            )
+            )?;
+            normalize_legacy_outputs(value, requested_outputs)
         }
-    }?;
-    normalize_outputs(result, requested_outputs)
+    }
 }
 
 fn local_program_function(
@@ -215,7 +218,8 @@ fn materialize_argument(
         MirCallArg::CapturedSequence(sequence) => {
             let values = take_captured_sequence(state, *sequence)?;
             Ok(MaterializedArgument::Sequence(
-                runmat_runtime::sequence::ValueSequence::comma_separated(values),
+                runmat_runtime::sequence::ValueSequence::comma_separated(values)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
             ))
         }
     }
@@ -304,7 +308,11 @@ fn materialize_expansion_source(
             super::indexing::materialize_cell_expansion_source(state, base, indexing)?
         }
         runmat_mir::MirExpansionSource::ReturnedOutputs(base) => {
-            MaterializedExpansionSource::ReturnedOutputs(materialize_operand(state, base)?)
+            MaterializedExpansionSource::ReturnedOutputs(
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(materialize_operand(
+                    state, base,
+                )?)?,
+            )
         }
         runmat_mir::MirExpansionSource::Member { base, member } => {
             MaterializedExpansionSource::Member {
@@ -356,12 +364,13 @@ fn builtin_inner(
         {
             let name = name.to_owned();
             async move {
-                runmat_runtime::call_builtin_async_with_outputs(
+                let value = runmat_runtime::call_builtin_async_with_outputs(
                     &name,
                     &arguments,
                     requested_outputs,
                 )
-                .await
+                .await?;
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)
             }
         },
         requested_outputs,
@@ -371,7 +380,9 @@ fn builtin_inner(
 fn complete_call(
     state: &mut HostState,
     embedded: Option<super::state::EmbeddedOperationIdentity>,
-    future: impl std::future::Future<Output = Result<Value, runmat_runtime::RuntimeError>> + 'static,
+    future: impl std::future::Future<
+            Output = Result<runmat_value::ValueSequence, runmat_runtime::RuntimeError>,
+        > + 'static,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
     let runtime = state.runtime.clone();
@@ -379,26 +390,35 @@ fn complete_call(
         state,
         embedded,
         Box::pin(async move {
-            let value = runtime.scope(future).await?;
-            normalize_outputs(value, requested_outputs)
+            let sequence = runtime.scope(future).await?;
+            normalize_sequence_outputs(sequence, requested_outputs)
         }),
     )
 }
 
-fn normalize_outputs(result: Value, requested_outputs: usize) -> NativeExecutorResult<Vec<Value>> {
+fn normalize_legacy_outputs(
+    result: Value,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?;
+    normalize_sequence_outputs(sequence, requested_outputs)
+}
+
+fn normalize_sequence_outputs(
+    sequence: runmat_value::ValueSequence,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    let values = sequence.into_values();
     if requested_outputs == 0 {
         return Ok(Vec::new());
     }
-    match result {
-        Value::OutputList(values) if values.len() == requested_outputs => Ok(values),
-        Value::OutputList(values) => Err(NativeExecutorError::Host(format!(
+    if values.len() == requested_outputs {
+        Ok(values)
+    } else {
+        Err(NativeExecutorError::Host(format!(
             "runtime returned {} outputs for a {}-output call",
             values.len(),
             requested_outputs
-        ))),
-        value if requested_outputs == 1 => Ok(vec![value]),
-        _ => Err(NativeExecutorError::Host(format!(
-            "runtime did not return an output list for a {requested_outputs}-output call"
-        ))),
+        )))
     }
 }

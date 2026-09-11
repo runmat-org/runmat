@@ -306,8 +306,8 @@ async fn commit_response(
     response: ProgramExecutionResponse,
 ) -> NativeExecutionResult<()> {
     match response {
-        ProgramExecutionResponse::Success { value } => {
-            let plaintext = serde_json::to_vec(&ProgramExecutionResponse::Success { value })
+        ProgramExecutionResponse::Success { outputs } => {
+            let plaintext = serde_json::to_vec(&ProgramExecutionResponse::Success { outputs })
                 .map_err(protocol)?;
             let result = store_encrypted(
                 control,

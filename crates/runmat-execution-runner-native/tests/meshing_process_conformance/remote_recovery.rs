@@ -318,7 +318,7 @@ async fn start_remote_worker(
 
 fn execution_object_reference(authorization_scope: &str, bytes: &[u8]) -> ValueRef {
     ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"remote-meshing-prerequisite", bytes]),
         logical_digest: Digest::sha256(bytes),
         encoded_length: bytes.len() as u64,

@@ -2,15 +2,16 @@ use super::{ObjectProtocolCallingConvention, ProtocolResolution, ResolvedObjectM
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::object::indexing::ObjectSubscriptPath;
 use crate::runtime_error::semantic_error;
+use crate::sequence::{ResolveValueSequence, SequenceResolutionContext};
 use crate::RuntimeError;
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 pub async fn invoke_resolved_object_protocol(
     resolution: &ProtocolResolution,
     base: Value,
     path: ObjectSubscriptPath,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<ValueSequence, RuntimeError> {
     let ProtocolResolution::Method(method) = resolution else {
         return Err(semantic_error(
             "MissingObjectProtocol",
@@ -32,14 +33,25 @@ pub async fn invoke_resolved_object_assignment(
 ) -> Result<Value, RuntimeError> {
     let mut arguments = invocation_arguments(method, base, path)?;
     arguments.extend(values);
-    invoke_resolved_object_method(method, arguments, 1).await
+    let mut values = invoke_resolved_object_method(method, arguments, 1)
+        .await?
+        .resolve(
+            runmat_types::SequenceUse::RequireSingle,
+            SequenceResolutionContext::default(),
+        )?;
+    values.pop().ok_or_else(|| {
+        semantic_error(
+            "ObjectAssignmentOutput",
+            "object assignment protocol did not return its updated receiver",
+        )
+    })
 }
 
 pub async fn invoke_resolved_object_method(
     method: &ResolvedObjectMethod,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> Result<ValueSequence, RuntimeError> {
     if !super::resolved_method_is_current(method) {
         return Err(semantic_error(
             "StaleObjectProtocolResolution",
@@ -104,7 +116,7 @@ pub async fn invoke_prepared_object_end(
             "object end component metadata exceeds exact double range",
         ));
     }
-    invoke_resolved_object_method(
+    let mut values = invoke_resolved_object_method(
         method,
         vec![
             receiver,
@@ -113,7 +125,17 @@ pub async fn invoke_prepared_object_end(
         ],
         1,
     )
-    .await
+    .await?
+    .resolve(
+        runmat_types::SequenceUse::RequireSingle,
+        SequenceResolutionContext::default(),
+    )?;
+    values.pop().ok_or_else(|| {
+        semantic_error(
+            "ObjectEndOutput",
+            "object end protocol did not return one scalar value",
+        )
+    })
 }
 
 fn invocation_arguments(
