@@ -3,6 +3,7 @@ use runmat_analysis_core::{IndependentDomain, RetentionPolicy, SamplingPolicy};
 use crate::results::field::RecoveredFieldSample;
 
 use super::super::contract::{ObservationError, ObservationSampleBounds};
+use super::attribution::ObservationEventAttribution;
 
 pub(in crate::results::observation) fn resolve_history_sample_bounds(
     sampling: &SamplingPolicy,
@@ -190,6 +191,21 @@ pub(crate) fn sample_matches_policy(
         }
         _ => false,
     })
+}
+
+pub(crate) fn sample_matches_history_policy(
+    sampling: &SamplingPolicy,
+    coordinate: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<bool, ObservationError> {
+    match (sampling, event_attribution) {
+        (SamplingPolicy::Event(expected), Some(attribution)) => {
+            attribution.validate()?;
+            Ok(attribution.sample() == coordinate && attribution.event() == *expected)
+        }
+        (SamplingPolicy::Event(_), None) | (_, Some(_)) => Ok(false),
+        (_, None) => sample_matches_policy(sampling, coordinate),
+    }
 }
 
 pub(crate) fn exact_scheduled_coordinates(

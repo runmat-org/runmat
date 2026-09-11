@@ -165,6 +165,7 @@ fn canonical_partition_plan_covers_a_selected_field_once() {
         &field,
         &topology,
         ObservationExecutionPolicy::serial(),
+        None,
     )
     .unwrap();
     let split = evaluate_partitioned_observation(
@@ -173,6 +174,7 @@ fn canonical_partition_plan_covers_a_selected_field_once() {
         &field,
         &topology,
         ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
     )
     .unwrap();
     assert_eq!(single.logical_identity, split.logical_identity);
@@ -215,6 +217,7 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
         &field,
         &topology,
         ObservationExecutionPolicy::serial(),
+        None,
     )
     .unwrap();
     let split = evaluate_partitioned_observation(
@@ -223,6 +226,7 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
         &field,
         &topology,
         ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
     )
     .unwrap();
     let split_plan = ObservationPartitionPlan::derive(

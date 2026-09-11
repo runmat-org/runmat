@@ -30,14 +30,16 @@ pub use distributed::{
     ObservationPartitionEvidenceIdentity, ObservationPartitionPayload,
 };
 pub use evaluate::{
-    evaluate_observation_sample, evaluate_observations, evaluate_structural_observation_sample,
+    evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,
+    evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
     evaluate_structural_observations,
 };
 pub(crate) use history::{exact_scheduled_coordinates, sample_matches_policy};
 pub use history::{
-    BoundedObservationHistory, ObservationHistory, ObservationHistoryEntry,
-    ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
-    ObservationHistorySampleIdentity,
+    AccuracyEventAttribution, BoundedObservationHistory, ObservationEventAttribution,
+    ObservationHistory, ObservationHistoryEntry, ObservationHistoryIdentity,
+    ObservationHistoryManifest, ObservationHistorySample, ObservationHistorySampleIdentity,
+    SeriesEventAttribution, SolverEventAttribution, SolverEventSource,
 };
 pub use partition::{
     ObservationExecutionPolicy, ObservationPartition, ObservationPartitionIdentity,

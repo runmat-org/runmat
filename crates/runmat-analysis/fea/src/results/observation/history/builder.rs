@@ -12,11 +12,11 @@ use super::super::contract::{
     ResolvedObservationPlanIdentity,
 };
 use super::contract::{
-    derive_history_identity, ObservationHistory, ObservationHistoryEntry,
+    derive_history_identity, history_position_follows, ObservationHistory, ObservationHistoryEntry,
     ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
 };
 use super::schedule::{
-    coordinate_follows, exact_scheduled_sample_count, sample_matches_domain, sample_matches_policy,
+    exact_scheduled_sample_count, sample_matches_domain, sample_matches_history_policy,
     validate_history_policy,
 };
 
@@ -70,12 +70,33 @@ impl BoundedObservationHistory {
         coordinate: RecoveredFieldSample,
         result: ObservationResult,
     ) -> Result<(), ObservationError> {
+        self.push_sample(ObservationHistorySample::new(coordinate, result)?)
+    }
+
+    pub fn push_event(&mut self, sample: ObservationHistorySample) -> Result<(), ObservationError> {
+        if sample.event_attribution.is_none() {
+            return Err(ObservationError::Invalid(
+                "event history requires source attribution".into(),
+            ));
+        }
+        self.push_sample(sample)
+    }
+
+    fn push_sample(&mut self, sample: ObservationHistorySample) -> Result<(), ObservationError> {
+        sample.validate()?;
+        let coordinate = sample.coordinate;
+        let event_attribution = sample.event_attribution;
         if self.observed_sample_count
             >= u64::try_from(self.maximum_produced_samples).unwrap_or(u64::MAX)
         {
             return Err(ObservationError::Limit("history produced sample count"));
         }
-        if !sample_matches_policy(&self.observation.spec.sampling, coordinate)? {
+        let policy_matches = sample_matches_history_policy(
+            &self.observation.spec.sampling,
+            coordinate,
+            event_attribution,
+        )?;
+        if !policy_matches {
             return Err(ObservationError::Invalid(
                 "history sample coordinate differs from its sampling policy".into(),
             ));
@@ -86,19 +107,23 @@ impl BoundedObservationHistory {
             ));
         }
         if let Some(previous) = self.samples.back() {
-            if !coordinate_follows(previous.coordinate, coordinate) {
+            if !history_position_follows(
+                previous.coordinate,
+                previous.event_attribution,
+                coordinate,
+                event_attribution,
+            ) {
                 return Err(ObservationError::Invalid(
                     "history sample coordinates must be strictly increasing in one domain".into(),
                 ));
             }
         }
         validate_result_against_observation(
-            &result,
+            &sample.result,
             self.plan_identity,
             self.topology_digest,
             &self.observation,
         )?;
-        let sample = ObservationHistorySample::new(coordinate, result)?;
         self.observed_sample_count = self
             .observed_sample_count
             .checked_add(1)
@@ -156,6 +181,7 @@ impl BoundedObservationHistory {
                 .map(|sample| ObservationHistoryEntry {
                     sample: sample.identity,
                     coordinate: sample.coordinate,
+                    event_attribution: sample.event_attribution,
                     result: sample.result.logical_identity,
                 })
                 .collect(),

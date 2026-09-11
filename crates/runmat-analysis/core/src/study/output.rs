@@ -291,11 +291,29 @@ pub enum SamplingPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationEvent {
+    Solver(SolverObservationEvent),
+    Series(SeriesObservationEvent),
+    Accuracy(AccuracyObservationEvent),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SolverObservationEvent {
     FirstYield,
     ContactStatusChange,
-    PeakResponse,
     ConvergenceFailure,
-    AccuracyCriterionCrossing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesObservationEvent {
+    PeakResponse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccuracyObservationEvent {
+    CriterionCrossing,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

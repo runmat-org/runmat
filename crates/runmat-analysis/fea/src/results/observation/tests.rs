@@ -1,10 +1,11 @@
 use runmat_analysis_core::{
-    ComplexRepresentation, CompressionPolicy, CoordinateFrame, ExtremaTiePolicy, FieldLocation,
-    ObservationComponent, ObservationCostEstimate, ObservationId, ObservationPurpose,
+    AccuracyObservationEvent, AccuracyPlan, ComplexRepresentation, CompressionPolicy,
+    CoordinateFrame, ExtremaTiePolicy, FieldLocation, ObservationComponent,
+    ObservationCostEstimate, ObservationEvent, ObservationId, ObservationPurpose,
     ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
     ObservationTarget, ObservationValueShape, PartialAccessPolicy, Position, ProcedureStep,
-    RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesReduction,
-    SignConvention, SignalPrecision, SpatialReduction,
+    RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent,
+    SeriesReduction, SignConvention, SignalPrecision, SolverObservationEvent, SpatialReduction,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -14,8 +15,8 @@ use crate::{
     execution::{
         AccuracyIdentity, AnalysisResultIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
         ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-        NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity, StepIdentity,
-        StudyIdentity,
+        NumericalPlanIdentity, OperatorIdentity, ProblemIdentity, SequenceIdentity,
+        SolverResultIdentity, StepIdentity, StudyIdentity,
     },
     fixtures::{fixture_model, FixtureId},
     planning::resource::{Count, ObservationResourceFacts},
@@ -369,6 +370,211 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
     let mut invalid_manifest = serde_json::to_value(history.manifest()).unwrap();
     invalid_manifest["maximum_retained_samples"] = serde_json::json!(3);
     assert!(serde_json::from_value::<ObservationHistoryManifest>(invalid_manifest).is_err());
+}
+
+#[test]
+fn typed_event_histories_preserve_source_attribution_and_ordering() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = RecoveredFieldDefinition::new(
+        "structural.displacement.event",
+        ObservationQuantity::Displacement,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let event = ObservationEvent::Solver(SolverObservationEvent::FirstYield);
+    let mut request = spec("first_yield_displacement", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Displacement;
+    request.value_shape = ObservationValueShape::Vector3;
+    request.sampling = SamplingPolicy::Event(event);
+    request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut step = ProcedureStep::structural_nonlinear("event-history");
+    step.accuracy.resources.maximum_samples = 4;
+    step.observations = vec![ObservationRequest::History(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("first_yield_displacement".into());
+    let sample = RecoveredFieldSample::LoadFactor(0.75);
+    let fields = catalog_at_sample(&projection, &definition, sample, vec![4, 3], vec![2.0; 12]);
+    let sequence = SequenceIdentity::new(Digest::sha256("event-sequence")).unwrap();
+    let producer = StepIdentity::new(sequence, Digest::sha256("event-step")).unwrap();
+    let source_result =
+        SolverResultIdentity::from_step_result(producer, Digest::sha256("event-result")).unwrap();
+    let attribution = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::FirstYield,
+        sample,
+        occurrence_index: 0,
+        source: SolverEventSource::CompletedResult {
+            result: source_result,
+        },
+    });
+
+    assert!(
+        evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample,).is_err()
+    );
+    let event_sample = evaluate_observation_event_sample(
+        &plan,
+        &observation_id,
+        &projection,
+        &fields,
+        attribution,
+    )
+    .unwrap();
+    let substituted_source =
+        SolverResultIdentity::from_step_result(producer, Digest::sha256("other-event-result"))
+            .unwrap();
+    let mut substituted_sample = event_sample.clone();
+    substituted_sample.event_attribution = Some(ObservationEventAttribution::Solver(
+        SolverEventAttribution {
+            event: SolverObservationEvent::FirstYield,
+            sample,
+            occurrence_index: 0,
+            source: SolverEventSource::CompletedResult {
+                result: substituted_source,
+            },
+        },
+    ));
+    assert!(substituted_sample.validate().is_err());
+    let mut builder = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    assert!(builder.push(sample, event_sample.result.clone()).is_err());
+    builder.push_event(event_sample).unwrap();
+    let history = builder.finish().unwrap();
+    assert_eq!(history.samples()[0].event_attribution, Some(attribution));
+    assert_eq!(
+        ObservationHistory::from_canonical_bytes(&history.canonical_bytes().unwrap()).unwrap(),
+        history
+    );
+
+    let wrong_event = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::ContactStatusChange,
+        sample,
+        occurrence_index: 0,
+        source: SolverEventSource::CompletedResult {
+            result: source_result,
+        },
+    });
+    assert!(evaluate_observation_event_sample(
+        &plan,
+        &observation_id,
+        &projection,
+        &fields,
+        wrong_event,
+    )
+    .is_err());
+    let invalid_source = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::ConvergenceFailure,
+        sample,
+        occurrence_index: 0,
+        source: SolverEventSource::CompletedResult {
+            result: source_result,
+        },
+    });
+    assert!(invalid_source.validate().is_err());
+    let repeated_first_yield = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::FirstYield,
+        sample,
+        occurrence_index: 1,
+        source: SolverEventSource::CompletedResult {
+            result: source_result,
+        },
+    });
+    assert!(repeated_first_yield.validate().is_err());
+
+    let mut contact_request = spec("contact_changes", ObservationTarget::WholeModel);
+    contact_request.quantity = ObservationQuantity::Displacement;
+    contact_request.value_shape = ObservationValueShape::Vector3;
+    contact_request.sampling = SamplingPolicy::Event(ObservationEvent::Solver(
+        SolverObservationEvent::ContactStatusChange,
+    ));
+    contact_request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut contact_step = ProcedureStep::structural_nonlinear("contact-events");
+    contact_step.accuracy.resources.maximum_samples = 4;
+    contact_step.observations = vec![ObservationRequest::History(contact_request)];
+    let contact_plan = resolve_observation_plan(
+        &contact_step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let contact_id = ObservationId("contact_changes".into());
+    let mut contact_builder = BoundedObservationHistory::new(&contact_plan, &contact_id).unwrap();
+    for occurrence_index in [0, 1] {
+        let attribution = ObservationEventAttribution::Solver(SolverEventAttribution {
+            event: SolverObservationEvent::ContactStatusChange,
+            sample,
+            occurrence_index,
+            source: SolverEventSource::CompletedResult {
+                result: source_result,
+            },
+        });
+        let event_sample = evaluate_observation_event_sample(
+            &contact_plan,
+            &contact_id,
+            &projection,
+            &fields,
+            attribution,
+        )
+        .unwrap();
+        contact_builder.push_event(event_sample).unwrap();
+    }
+    let contact_history = contact_builder.finish().unwrap();
+    assert_ne!(
+        contact_history.samples()[0].identity,
+        contact_history.samples()[1].identity
+    );
+    assert_eq!(
+        contact_history.samples()[1]
+            .event_attribution
+            .unwrap()
+            .occurrence_index(),
+        1
+    );
+
+    let series_attribution = ObservationEventAttribution::Series(SeriesEventAttribution {
+        event: SeriesObservationEvent::PeakResponse,
+        sample,
+        source_history: history.manifest().identity,
+    });
+    assert_eq!(
+        series_attribution.event(),
+        ObservationEvent::Series(SeriesObservationEvent::PeakResponse)
+    );
+    series_attribution.validate().unwrap();
+    let accuracy = crate::results::accuracy::evaluate_accuracy(
+        &AccuracyPlan::experimental_baseline("event-accuracy"),
+        &[],
+    )
+    .unwrap();
+    let accuracy_attribution = ObservationEventAttribution::Accuracy(AccuracyEventAttribution {
+        event: AccuracyObservationEvent::CriterionCrossing,
+        sample,
+        source_report: accuracy.identity(),
+    });
+    assert_eq!(
+        accuracy_attribution.event(),
+        ObservationEvent::Accuracy(AccuracyObservationEvent::CriterionCrossing)
+    );
+    accuracy_attribution.validate().unwrap();
 }
 
 #[test]

@@ -228,7 +228,11 @@ magnitude/phase/complex representation are also explicit. Unsupported combinatio
 validation instead of being approximated silently.
 
 Sampling can select the final sample, every accepted increment, explicit or interval-based time,
-frequency, or load-factor samples, mode indices, solver events, or a bounded adaptive policy.
+frequency, or load-factor samples, mode indices, typed solver, derived-series, or accuracy events,
+or a bounded adaptive policy. Event attribution is separate from the physical time, frequency,
+load-factor, mode, or study-parameter coordinate: a solver event names its completed result or
+failed attempt, a derived-series event names its source history, and an accuracy event names its
+source report.
 `fea.ReductionPolicy.none()` preserves the requested data. `fea.ReductionPolicy.new(...)` combines
 a typed spatial reduction, series reduction, and extrema-tie policy.
 

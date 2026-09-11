@@ -121,13 +121,14 @@ pub use study::accuracy::{
 };
 pub use study::is_exposed_analysis_identity;
 pub use study::output::{
-    ComplexRepresentation, CompressionPolicy, DiagnosticKind, DiagnosticObservation,
-    ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation, MonitorStopCondition,
-    ObservationComponent, ObservationCostEstimate, ObservationEvent, ObservationId,
-    ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
+    AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy, DiagnosticKind,
+    DiagnosticObservation, ExtremaTiePolicy, FieldLocation, MonitorCadence, MonitorObservation,
+    MonitorStopCondition, ObservationComponent, ObservationCostEstimate, ObservationEvent,
+    ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
     ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
     PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
-    SeriesReduction, SignConvention, SpatialReduction,
+    SeriesObservationEvent, SeriesReduction, SignConvention, SolverObservationEvent,
+    SpatialReduction,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,

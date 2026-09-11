@@ -1,7 +1,8 @@
 use crate::{
     AnalysisProcedure, AnalysisValidationError, CompressionPolicy, IndependentDomain,
-    ObservationPurpose, ObservationRequest, ObservationSpec, PartialAccessPolicy, ProcedureStep,
-    RetentionPolicy, SamplingPolicy, SeriesReduction, SpatialReduction,
+    ObservationEvent, ObservationPurpose, ObservationRequest, ObservationSpec, PartialAccessPolicy,
+    ProcedureStep, RetentionPolicy, SamplingPolicy, SeriesReduction, SolverObservationEvent,
+    SpatialReduction,
 };
 
 use super::observation_error;
@@ -70,7 +71,20 @@ pub fn observation_sampling_matches_domain(
             | IndependentDomain::LoadFactor { .. },
             SamplingPolicy::EveryAcceptedIncrement | SamplingPolicy::Adaptive { .. },
         ) => true,
-        (domain, SamplingPolicy::Event(_)) => !matches!(domain, IndependentDomain::Static),
+        (
+            IndependentDomain::TimeSeconds { .. } | IndependentDomain::LoadFactor { .. },
+            SamplingPolicy::Event(ObservationEvent::Solver(
+                SolverObservationEvent::FirstYield | SolverObservationEvent::ContactStatusChange,
+            )),
+        ) => true,
+        (
+            domain,
+            SamplingPolicy::Event(
+                ObservationEvent::Solver(SolverObservationEvent::ConvergenceFailure)
+                | ObservationEvent::Series(_)
+                | ObservationEvent::Accuracy(_),
+            ),
+        ) => !matches!(domain, IndependentDomain::Static),
         (
             IndependentDomain::TimeSeconds { start, end, .. },
             SamplingPolicy::TimeSeconds(values),
@@ -274,7 +288,10 @@ pub(super) fn validate_retention(
 
 #[cfg(test)]
 mod tests {
-    use crate::{IndependentDomain, SamplingPolicy};
+    use crate::{
+        IndependentDomain, ObservationEvent, SamplingPolicy, SeriesObservationEvent,
+        SolverObservationEvent,
+    };
 
     use super::{observation_sampling_matches_domain, valid_interval};
 
@@ -319,6 +336,35 @@ mod tests {
         assert!(!observation_sampling_matches_domain(
             &parameter,
             &SamplingPolicy::StudyParameterValues(vec![0.01, 0.03]),
+        ));
+    }
+
+    #[test]
+    fn solver_transition_events_require_a_physical_progress_domain() {
+        let first_yield =
+            SamplingPolicy::Event(ObservationEvent::Solver(SolverObservationEvent::FirstYield));
+        let time = IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 1.0,
+        };
+        assert!(observation_sampling_matches_domain(&time, &first_yield));
+        assert!(observation_sampling_matches_domain(
+            &IndependentDomain::LoadFactor {
+                start: 0.0,
+                end: 1.0,
+            },
+            &first_yield,
+        ));
+        assert!(!observation_sampling_matches_domain(
+            &IndependentDomain::FrequencyHertz(vec![10.0]),
+            &first_yield,
+        ));
+        assert!(!observation_sampling_matches_domain(
+            &IndependentDomain::Static,
+            &SamplingPolicy::Event(ObservationEvent::Series(
+                SeriesObservationEvent::PeakResponse,
+            )),
         ));
     }
 }

@@ -12,9 +12,11 @@ use super::super::contract::{
     ObservationError, ObservationResult, ObservationResultIdentity,
     ResolvedObservationPlanIdentity, OBSERVATION_LIMITS, OBSERVATION_PREFIX,
 };
+use super::attribution::ObservationEventAttribution;
 use super::schedule::{
     coordinate_follows, exact_scheduled_sample_count, resolve_history_sample_bounds,
-    sample_matches_domain, sample_matches_policy, validate_coordinate, validate_history_policy,
+    sample_matches_domain, sample_matches_history_policy, validate_coordinate,
+    validate_history_policy,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ pub struct ObservationHistorySample {
     pub schema_version: u16,
     pub identity: ObservationHistorySampleIdentity,
     pub coordinate: RecoveredFieldSample,
+    pub event_attribution: Option<ObservationEventAttribution>,
     pub result: ObservationResult,
 }
 
@@ -52,6 +55,7 @@ struct ObservationHistorySampleWire {
     schema_version: u16,
     identity: ObservationHistorySampleIdentity,
     coordinate: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
     result: ObservationResult,
 }
 
@@ -63,6 +67,7 @@ impl TryFrom<ObservationHistorySampleWire> for ObservationHistorySample {
             schema_version: wire.schema_version,
             identity: wire.identity,
             coordinate: wire.coordinate,
+            event_attribution: wire.event_attribution,
             result: wire.result,
         };
         sample.validate()?;
@@ -75,23 +80,53 @@ impl ObservationHistorySample {
         coordinate: RecoveredFieldSample,
         result: ObservationResult,
     ) -> Result<Self, ObservationError> {
+        Self::new_with_attribution(coordinate, None, result)
+    }
+
+    pub fn new_with_attribution(
+        coordinate: RecoveredFieldSample,
+        event_attribution: Option<ObservationEventAttribution>,
+        result: ObservationResult,
+    ) -> Result<Self, ObservationError> {
         validate_coordinate(coordinate)?;
+        if let Some(attribution) = event_attribution {
+            attribution.validate()?;
+            if attribution.sample() != coordinate {
+                return Err(ObservationError::Identity(
+                    "event attribution names a different physical sample",
+                ));
+            }
+        }
         result.validate()?;
-        let identity = derive_sample_identity(coordinate, result.logical_identity)?;
+        let identity =
+            derive_sample_identity(coordinate, event_attribution, result.logical_identity)?;
         Ok(Self {
             schema_version: 1,
             identity,
             coordinate,
+            event_attribution,
             result,
         })
     }
 
     pub fn validate(&self) -> Result<(), ObservationError> {
         validate_coordinate(self.coordinate)?;
+        if let Some(attribution) = self.event_attribution {
+            attribution.validate()?;
+            if attribution.sample() != self.coordinate {
+                return Err(ObservationError::Identity(
+                    "event attribution names a different physical sample",
+                ));
+            }
+        }
         self.result.validate()?;
         if self.schema_version != 1
             || self.identity
-                != derive_sample_identity(self.coordinate, self.result.logical_identity)?
+                != derive_sample_identity(
+                    self.coordinate,
+                    self.event_attribution,
+                    self.result.logical_identity,
+                )?
         {
             return Err(ObservationError::Identity(
                 "history sample identity does not converge",
@@ -125,6 +160,7 @@ impl ObservationHistorySample {
 pub struct ObservationHistoryEntry {
     pub sample: ObservationHistorySampleIdentity,
     pub coordinate: RecoveredFieldSample,
+    pub event_attribution: Option<ObservationEventAttribution>,
     pub result: ObservationResultIdentity,
 }
 
@@ -360,6 +396,7 @@ fn validate_manifest_samples(
         || manifest.samples.iter().zip(samples).any(|(entry, sample)| {
             entry.sample != sample.identity
                 || entry.coordinate != sample.coordinate
+                || entry.event_attribution != sample.event_attribution
                 || entry.result != sample.result.logical_identity
         })
     {
@@ -376,16 +413,30 @@ fn validate_manifest_samples(
 fn validate_entry_order(entries: &[ObservationHistoryEntry]) -> Result<(), ObservationError> {
     for entry in entries {
         validate_coordinate(entry.coordinate)?;
-        if entry.sample != derive_sample_identity(entry.coordinate, entry.result)? {
+        if let Some(attribution) = entry.event_attribution {
+            attribution.validate()?;
+            if attribution.sample() != entry.coordinate {
+                return Err(ObservationError::Identity(
+                    "history entry attribution names a different physical sample",
+                ));
+            }
+        }
+        if entry.sample
+            != derive_sample_identity(entry.coordinate, entry.event_attribution, entry.result)?
+        {
             return Err(ObservationError::Identity(
                 "history manifest entry identity does not converge",
             ));
         }
     }
-    if entries
-        .windows(2)
-        .any(|pair| !coordinate_follows(pair[0].coordinate, pair[1].coordinate))
-    {
+    if entries.windows(2).any(|pair| {
+        !history_position_follows(
+            pair[0].coordinate,
+            pair[0].event_attribution,
+            pair[1].coordinate,
+            pair[1].event_attribution,
+        )
+    }) {
         return Err(ObservationError::Invalid(
             "history manifest coordinates must be strictly increasing in one domain".into(),
         ));
@@ -398,6 +449,11 @@ fn validate_sample_against_manifest(
     manifest: &ObservationHistoryManifest,
 ) -> Result<(), ObservationError> {
     sample.validate()?;
+    let policy_matches = sample_matches_history_policy(
+        &manifest.sampling,
+        sample.coordinate,
+        sample.event_attribution,
+    )?;
     if sample.result.plan_identity != manifest.plan_identity
         || sample.result.topology_digest != manifest.topology_digest
         || sample.result.observation_id != manifest.observation_id
@@ -406,7 +462,7 @@ fn validate_sample_against_manifest(
         || sample.result.value_shape != manifest.value_shape
         || sample.result.complex_representation != manifest.complex_representation
         || sample.result.partial_access != manifest.partial_access
-        || !sample_matches_policy(&manifest.sampling, sample.coordinate)?
+        || !policy_matches
         || !sample_matches_domain(&manifest.independent_domain, sample.coordinate)
     {
         return Err(ObservationError::Identity(
@@ -418,15 +474,33 @@ fn validate_sample_against_manifest(
 
 fn derive_sample_identity(
     coordinate: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
     result: ObservationResultIdentity,
 ) -> Result<ObservationHistorySampleIdentity, ObservationError> {
     let bytes = encode_contract(
         OBSERVATION_PREFIX,
         "observation-history-sample-identity",
-        &(coordinate, result),
+        &(coordinate, event_attribution, result),
         OBSERVATION_LIMITS,
     )?;
     Ok(ObservationHistorySampleIdentity(Digest::sha256(bytes)))
+}
+
+pub(super) fn history_position_follows(
+    left_coordinate: RecoveredFieldSample,
+    left_attribution: Option<ObservationEventAttribution>,
+    right_coordinate: RecoveredFieldSample,
+    right_attribution: Option<ObservationEventAttribution>,
+) -> bool {
+    if coordinate_follows(left_coordinate, right_coordinate) {
+        return true;
+    }
+    left_coordinate == right_coordinate
+        && left_attribution
+            .zip(right_attribution)
+            .is_some_and(|(left, right)| {
+                left.event() == right.event() && left.occurrence_index() < right.occurrence_index()
+            })
 }
 
 pub(super) fn derive_history_identity(

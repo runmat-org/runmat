@@ -28,10 +28,10 @@ use super::{
         weighted_boundary_contribution, weighted_volume_contribution, CompensatedSum,
     },
     topology::StructuralObservationTopology,
-    ObservationEntity, ObservationError, ObservationExecutionPolicy, ObservationPartition,
-    ObservationPartitionIdentity, ObservationPartitionPlan, ObservationPartitionPlanIdentity,
-    ObservationPartitionTarget, ObservationResult, ObservationResultIdentity, ResolvedObservation,
-    ResolvedObservationPlan,
+    ObservationEntity, ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
+    ObservationPartition, ObservationPartitionIdentity, ObservationPartitionPlan,
+    ObservationPartitionPlanIdentity, ObservationPartitionTarget, ObservationResult,
+    ObservationResultIdentity, ResolvedObservation, ResolvedObservationPlan,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -352,6 +352,7 @@ pub(crate) fn evaluate_partitioned_observation(
     field: &RecoveredField,
     topology: &StructuralObservationTopology,
     execution_policy: ObservationExecutionPolicy,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
     let partition_plan =
         ObservationPartitionPlan::derive(plan, &observation.spec.observation_id, execution_policy)?;
@@ -366,7 +367,14 @@ pub(crate) fn evaluate_partitioned_observation(
                 field,
                 topology,
             )?;
-            evaluate_observation_partition(plan, &partition_plan, partition, &source, topology)
+            evaluate_observation_partition_with_attribution(
+                plan,
+                &partition_plan,
+                partition,
+                &source,
+                topology,
+                event_attribution,
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
     combine_observation_partitions(plan, &partition_plan, contributions)
@@ -520,6 +528,24 @@ pub(crate) fn evaluate_observation_partition(
     field: &RecoveredFieldPartitionSet,
     topology: &StructuralObservationTopology,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
+    evaluate_observation_partition_with_attribution(
+        plan,
+        partition_plan,
+        partition,
+        field,
+        topology,
+        None,
+    )
+}
+
+fn evaluate_observation_partition_with_attribution(
+    plan: &ResolvedObservationPlan,
+    partition_plan: &ObservationPartitionPlan,
+    partition: &ObservationPartition,
+    field: &RecoveredFieldPartitionSet,
+    topology: &StructuralObservationTopology,
+    event_attribution: Option<ObservationEventAttribution>,
+) -> Result<ObservationPartitionContribution, ObservationError> {
     partition_plan.validate_for(plan)?;
     let expected_partition = partition_plan
         .partitions
@@ -549,10 +575,13 @@ pub(crate) fn evaluate_observation_partition(
         ));
     }
     let sample_matches = if observation.spec.sampling == SamplingPolicy::Final {
-        field.sample == RecoveredFieldSample::Final
+        event_attribution.is_none() && field.sample == RecoveredFieldSample::Final
     } else {
-        super::history::sample_matches_policy(&observation.spec.sampling, field.sample)?
-            && super::history::sample_matches_domain(&plan.independent_domain, field.sample)
+        super::history::sample_matches_history_policy(
+            &observation.spec.sampling,
+            field.sample,
+            event_attribution,
+        )? && super::history::sample_matches_domain(&plan.independent_domain, field.sample)
     };
     if !sample_matches {
         return Err(ObservationError::Invalid(

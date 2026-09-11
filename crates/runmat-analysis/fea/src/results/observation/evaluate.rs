@@ -10,7 +10,10 @@ use super::contract::{
     ObservationError, ObservationResult, ResolvedObservation, ResolvedObservationPlan,
     ResolvedObservationTarget,
 };
-use super::history::{sample_matches_domain, sample_matches_policy};
+use super::history::{
+    sample_matches_domain, sample_matches_history_policy, ObservationEventAttribution,
+    ObservationHistorySample,
+};
 use super::topology::StructuralObservationTopology;
 
 pub fn evaluate_observations(
@@ -67,6 +70,7 @@ fn evaluate_observations_for_topology(
                 topology,
                 fields,
                 RecoveredFieldSample::Final,
+                None,
             )
         })
         .collect()
@@ -80,7 +84,27 @@ pub fn evaluate_observation_sample(
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
     let topology = StructuralObservationTopology::from_projection(projection);
-    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample)
+    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample, None)
+}
+
+pub fn evaluate_observation_event_sample(
+    plan: &ResolvedObservationPlan,
+    observation_id: &ObservationId,
+    projection: &AnalysisProjection,
+    fields: &RecoveredFieldCatalog,
+    attribution: ObservationEventAttribution,
+) -> Result<ObservationHistorySample, ObservationError> {
+    let topology = StructuralObservationTopology::from_projection(projection);
+    let sample = attribution.sample();
+    let result = evaluate_observation_sample_for_topology(
+        plan,
+        observation_id,
+        &topology,
+        fields,
+        sample,
+        Some(attribution),
+    )?;
+    ObservationHistorySample::new_with_attribution(sample, Some(attribution), result)
 }
 
 pub fn evaluate_structural_observation_sample(
@@ -92,7 +116,28 @@ pub fn evaluate_structural_observation_sample(
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
     let topology = StructuralObservationTopology::derive(model, mesh)?;
-    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample)
+    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample, None)
+}
+
+pub fn evaluate_structural_observation_event_sample(
+    plan: &ResolvedObservationPlan,
+    observation_id: &ObservationId,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    fields: &RecoveredFieldCatalog,
+    attribution: ObservationEventAttribution,
+) -> Result<ObservationHistorySample, ObservationError> {
+    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    let sample = attribution.sample();
+    let result = evaluate_observation_sample_for_topology(
+        plan,
+        observation_id,
+        &topology,
+        fields,
+        sample,
+        Some(attribution),
+    )?;
+    ObservationHistorySample::new_with_attribution(sample, Some(attribution), result)
 }
 
 fn evaluate_observation_sample_for_topology(
@@ -101,6 +146,7 @@ fn evaluate_observation_sample_for_topology(
     topology: &StructuralObservationTopology,
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
     plan.validate_identity()?;
     if plan.topology_digest != topology.digest() || fields.topology_digest() != topology.digest() {
@@ -123,7 +169,7 @@ fn evaluate_observation_sample_for_topology(
             "a final-only observation cannot be appended to a history".into(),
         ));
     }
-    if !sample_matches_policy(&observation.spec.sampling, sample)? {
+    if !sample_matches_history_policy(&observation.spec.sampling, sample, event_attribution)? {
         return Err(ObservationError::Invalid(
             "sample coordinate differs from the resolved observation schedule".into(),
         ));
@@ -133,7 +179,14 @@ fn evaluate_observation_sample_for_topology(
             "sample coordinate differs from the resolved independent domain".into(),
         ));
     }
-    evaluate_sample(plan, observation, topology, fields, sample)
+    evaluate_sample(
+        plan,
+        observation,
+        topology,
+        fields,
+        sample,
+        event_attribution,
+    )
 }
 
 fn evaluate_sample(
@@ -142,6 +195,7 @@ fn evaluate_sample(
     topology: &StructuralObservationTopology,
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
     let source = fields
         .get(observation.source_field_definition_identity, sample)
@@ -164,7 +218,7 @@ fn evaluate_sample(
             "recovered-field sample differs from the requested coordinate",
         ));
     }
-    evaluate_one(plan, observation, source, topology)
+    evaluate_one(plan, observation, source, topology, event_attribution)
 }
 
 fn validate_plan_targets(
@@ -266,6 +320,7 @@ fn evaluate_one(
     observation: &ResolvedObservation,
     field: &crate::results::field::RecoveredField,
     topology: &StructuralObservationTopology,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationResult, ObservationError> {
     super::distributed::evaluate_partitioned_observation(
         plan,
@@ -273,5 +328,6 @@ fn evaluate_one(
         field,
         topology,
         super::ObservationExecutionPolicy::serial(),
+        event_attribution,
     )
 }

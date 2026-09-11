@@ -1,11 +1,12 @@
 use std::sync::Once;
 
 use runmat_analysis_core::{
-    CompressionPolicy, DiagnosticObservation, ExcitationTarget, MonitorCadence, MonitorObservation,
-    MonitorStopCondition, ObservationCostEstimate, ObservationEvent, ObservationId,
-    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
-    ObservationTarget, ObservationThreshold, ObservationValueShape, Position, ReductionPolicy,
-    RetentionPolicy, SamplingPolicy, SignalPrecision,
+    AccuracyObservationEvent, CompressionPolicy, DiagnosticObservation, ExcitationTarget,
+    MonitorCadence, MonitorObservation, MonitorStopCondition, ObservationCostEstimate,
+    ObservationEvent, ObservationId, ObservationQuantity, ObservationRequest, ObservationSpec,
+    ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
+    Position, ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent,
+    SignalPrecision, SolverObservationEvent,
 };
 
 use super::*;

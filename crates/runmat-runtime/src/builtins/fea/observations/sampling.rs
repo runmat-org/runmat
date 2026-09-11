@@ -209,7 +209,7 @@ event_choice!(
     EVENT_FIRST_YIELD_DESCRIPTOR,
     EVENT_FIRST_YIELD_SIGNATURES,
     "event = fea.ObservationEvent.firstYield()",
-    ObservationEvent::FirstYield
+    ObservationEvent::Solver(SolverObservationEvent::FirstYield)
 );
 event_choice!(
     event_contact,
@@ -217,7 +217,7 @@ event_choice!(
     EVENT_CONTACT_DESCRIPTOR,
     EVENT_CONTACT_SIGNATURES,
     "event = fea.ObservationEvent.contactStatusChange()",
-    ObservationEvent::ContactStatusChange
+    ObservationEvent::Solver(SolverObservationEvent::ContactStatusChange)
 );
 event_choice!(
     event_peak,
@@ -225,7 +225,7 @@ event_choice!(
     EVENT_PEAK_DESCRIPTOR,
     EVENT_PEAK_SIGNATURES,
     "event = fea.ObservationEvent.peakResponse()",
-    ObservationEvent::PeakResponse
+    ObservationEvent::Series(SeriesObservationEvent::PeakResponse)
 );
 event_choice!(
     event_failure,
@@ -233,7 +233,7 @@ event_choice!(
     EVENT_FAILURE_DESCRIPTOR,
     EVENT_FAILURE_SIGNATURES,
     "event = fea.ObservationEvent.convergenceFailure()",
-    ObservationEvent::ConvergenceFailure
+    ObservationEvent::Solver(SolverObservationEvent::ConvergenceFailure)
 );
 event_choice!(
     event_accuracy,
@@ -241,12 +241,12 @@ event_choice!(
     EVENT_ACCURACY_DESCRIPTOR,
     EVENT_ACCURACY_SIGNATURES,
     "event = fea.ObservationEvent.accuracyCriterionCrossing()",
-    ObservationEvent::AccuracyCriterionCrossing
+    ObservationEvent::Accuracy(AccuracyObservationEvent::CriterionCrossing)
 );
 #[runtime_builtin(
     name = "fea.SamplingPolicy.event",
     category = "fea",
-    summary = "Sample when a typed solver event occurs.",
+    summary = "Sample when a typed observation event occurs.",
     keywords = "fea,observation,sampling,event,typed",
     descriptor(SAMPLING_EVENT_DESCRIPTOR),
     integer_audit(STRUCTURAL_AUDIT),
@@ -285,4 +285,48 @@ pub async fn sampling_adaptive(
             relative_change: values::finite_numeric_scalar(NAME, &relative, "relativeChange")?,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::executor::block_on;
+
+    use super::*;
+
+    fn event_payload(value: &Value) -> ObservationEvent {
+        object_payload::<TypedStudyValue<ObservationEvent>>("test", value, EVENT_CLASS)
+            .unwrap()
+            .value
+    }
+
+    #[test]
+    fn event_constructors_preserve_their_domain_owner() {
+        assert_eq!(
+            event_payload(&block_on(event_first_yield()).unwrap()),
+            ObservationEvent::Solver(SolverObservationEvent::FirstYield)
+        );
+        assert_eq!(
+            event_payload(&block_on(event_peak()).unwrap()),
+            ObservationEvent::Series(SeriesObservationEvent::PeakResponse)
+        );
+        assert_eq!(
+            event_payload(&block_on(event_accuracy()).unwrap()),
+            ObservationEvent::Accuracy(AccuracyObservationEvent::CriterionCrossing)
+        );
+    }
+
+    #[test]
+    fn sampling_event_keeps_the_typed_event() {
+        let event = block_on(event_contact()).unwrap();
+        let policy = block_on(sampling_event(event)).unwrap();
+        let payload =
+            object_payload::<TypedStudyValue<SamplingPolicy>>("test", &policy, SAMPLING_CLASS)
+                .unwrap();
+        assert_eq!(
+            payload.value,
+            SamplingPolicy::Event(ObservationEvent::Solver(
+                SolverObservationEvent::ContactStatusChange,
+            ))
+        );
+    }
 }
