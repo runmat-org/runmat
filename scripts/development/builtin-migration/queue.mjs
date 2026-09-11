@@ -2,6 +2,10 @@ import { compareCodePoint } from "./constants.mjs";
 import { findAuthoredCollisions } from "./control-graph.mjs";
 import { exact, kind, nonempty, object, stableId } from "./schema.mjs";
 
+const CONTROL_RESOLVED_INVENTORY_FIELDS = new Set([
+  "disposition", "domain", "domain-conflict", "family", "family-conflict",
+]);
+
 export function buildQueue(inventory, control, state = emptyQueueState()) {
   validateQueueState(state, control);
   const inventoryByIdentity = new Map(inventory.identities.map((entry) => [entry.identity, entry]));
@@ -40,7 +44,9 @@ function queueRow(bundle, control, inventory, state) {
   }
   for (let index = 0; index < observed.length; index += 1) {
     if (!observed[index]) blockers.push(`missing-inventory:${bundle.identities[index]}`);
-    else if (observed[index].unresolved.length) blockers.push(`unresolved-inventory:${bundle.identities[index]}`);
+    else if (unresolvedOutsideControl(observed[index]).length) {
+      blockers.push(`unresolved-inventory:${bundle.identities[index]}`);
+    }
   }
   const recorded = state.bundles[bundle.id]?.state ?? null;
   const cohorts = [...new Set(controlled.map((entry) => entry.cohort))];
@@ -67,6 +73,10 @@ function queueRow(bundle, control, inventory, state) {
       source_metrics: entry?.source_metrics ?? null,
     })),
   };
+}
+
+function unresolvedOutsideControl(entry) {
+  return entry.unresolved.filter((field) => !CONTROL_RESOLVED_INVENTORY_FIELDS.has(field));
 }
 
 function requiredMaturity(maturity) {

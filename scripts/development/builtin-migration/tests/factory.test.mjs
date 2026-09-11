@@ -484,6 +484,21 @@ test("queue is derived by bundle and carries prerequisite, scope, and maturity f
   assert.ok(queue.rows[0].applicable_maturity.foo.includes("catalog-contract"));
 });
 
+test("reviewed control resolves disposition and package-layout inventory ambiguity", () => {
+  const fixture = controlledFixture();
+  fixture.inventory.identities[0].unresolved = [
+    "disposition", "domain", "domain-conflict", "family", "family-conflict",
+  ];
+  const queue = buildQueue(fixture.inventory, fixture.control);
+  assert.equal(queue.rows[0].migration_state, "ready");
+  assert.deepEqual(queue.rows[0].blockers, []);
+  assert.deepEqual(queue.rows[0].inventory_observations[0].unresolved, fixture.inventory.identities[0].unresolved);
+
+  fixture.inventory.identities[0].unresolved.push("future-unreviewed-field");
+  const blocked = buildQueue(fixture.inventory, fixture.control);
+  assert.deepEqual(blocked.rows[0].blockers, ["unresolved-inventory:foo"]);
+});
+
 test("lease rejects integration output authorship and paths outside reviewed scope", () => {
   const fixture = controlledFixture();
   assert.throws(() => validateLeaseDiff(fixture.lease.bundle, ["README.md"]), /lease violation/);
