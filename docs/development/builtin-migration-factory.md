@@ -12,12 +12,14 @@ The factory consumes two complementary inventories:
 Export the compiled snapshot for the exact build configuration being migrated, then pass it to every inventory-derived command:
 
 ```sh
-cargo run -p runmat-runtime --bin export_builtin_migration_inventory \
-  > /tmp/runmat-compiled-inventory.json
+cargo run -p runmat-runtime --bin export_builtin_migration_inventory -- \
+  --output /tmp/runmat-compiled-inventory.json
 node scripts/development/builtin-migration-factory.mjs inventory \
   --compiled-inventory /tmp/runmat-compiled-inventory.json \
   --output /tmp/runmat-builtin-inventory.json
 ```
+
+The exporter writes to stdout when no argument is supplied, which is the interface used by reviewed gate plans. `--output` creates a new artifact and refuses to replace an existing path. `--help` prints usage without constructing the inventory; every other argument is rejected.
 
 The factory rejects a missing snapshot, a future schema version, unknown fields at any nesting level, malformed enum or record payloads, noncanonical ordering, inconsistent binding/provenance relationships, structurally invalid producer validation, or a snapshot whose SHA-256 digest does not match its contents. Migration-readiness findings are different from structural errors: the factory preserves every typed finding in inventory evidence and requires the control manifest to give it an exact reviewed disposition. A legacy GPU or fusion registry group remains a reviewed raw key rather than being guessed into a callable identity. Inventory v2 pins the source revision, the complete ordered source-root and file snapshot, a separate digest over every scanner-consumed path, the compiled snapshot digest, the migration-finding digest, and the reviewed identity-disposition digest.
 
