@@ -316,6 +316,16 @@ test("gate evidence rejects stale storage, filesystem identity, and forged proce
   assert.throws(() => parseGateResult(filesystem, expected), /differs from reviewed/);
   const forged = gate(fixture, "architecture"); forged.producer_evidence.process.exit_code = 1;
   assert.throws(() => parseGateResult(forged, expected), /conflicts|inconsistent/);
+  const artifactExpected = { ...expected, gate_plans: fixture.control.bundles.get(fixture.bundleId).gate_plans, compiled_build: fixture.inventory.compiled_inventory.build, repository: fixture.repository };
+  const missing = gate(fixture, "catalog-contract"); missing.artifacts = [];
+  assert.throws(() => parseGateResult(missing, artifactExpected), /does not cover the reviewed artifact roles/);
+  const unreviewed = gate(fixture, "architecture");
+  const unreviewedPath = path.join(fixture.repository, "..", "unreviewed-artifact.json");
+  const unreviewedBytes = Buffer.from("{}\n"); fs.writeFileSync(unreviewedPath, unreviewedBytes);
+  unreviewed.artifacts.push({ role: "invented", path: unreviewedPath, byte_length: unreviewedBytes.length, content_digest: contentDigest(unreviewedBytes) });
+  assert.throws(() => parseGateResult(unreviewed, artifactExpected), /unreviewed artifact role/);
+  const tampered = gate(fixture, "runtime-binding"); fs.appendFileSync(tampered.artifacts[0].path, "tamper");
+  assert.throws(() => parseGateResult(tampered, artifactExpected), /artifact bytes differ/);
 });
 
 test("queue is derived by bundle and carries prerequisite, scope, and maturity facts", () => {

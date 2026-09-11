@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseCompiledInventory } from "./compiled-inventory.mjs";
 import { parseControlManifest } from "./control.mjs";
-import { contentDigest, evidenceDigest } from "./evidence.mjs";
+import { canonicalJson, contentDigest, evidenceDigest } from "./evidence.mjs";
 import { GATE_PRODUCERS, parseGateResult } from "./gate-result.mjs";
 import { parseInventoryEvidence } from "./inventory.mjs";
 import { buildDocumentationCutoverArtifact, documentationCutoverChecks, parseDocumentationCutoverArtifact } from "./documentation-cutover.mjs";
@@ -40,7 +40,9 @@ export function runGateProducer(input) {
   const status = processResult.status;
   if (status === null) throw new Error(`${input.gate}: producer terminated by signal ${processResult.signal ?? "unknown"}`);
   const identities = [...bundle.identities];
-  const checks = parser(stdout, stderr, status, identities);
+  const parsed = parser(stdout, stderr, status, identities);
+  const checks = parsed.checks;
+  const artifacts = parsed.artifacts;
   const result = status === 0 && checks.every((entry) => entry.result === "pass") ? "pass" : "fail";
   const processEvidence = {
     exit_code: status, signal: processResult.signal,
@@ -68,7 +70,7 @@ export function runGateProducer(input) {
     artifact_id: input.artifact_id, produced_at: new Date().toISOString(),
     source_revision: inventory.source.revision, source_digest: inventory.source.digest,
     inventory_digest: inventory.digest, control_manifest_digest: control.digest,
-    bundle_id: bundle.id, identities, gate: input.gate, result, checks,
+    bundle_id: bundle.id, identities, gate: input.gate, result, checks, artifacts,
     storage_admission: observeStorage(control.value.storage_policy),
   }, expected);
 }
@@ -98,18 +100,24 @@ function pinnedSourceDigest(repository, sourcePath, expected, inventory) {
 }
 
 function parserFor(kind, gate, context) {
-  if (kind === "exit_status") return (_stdout, _stderr, status, identities) => primaryChecks(gate, identities, status === 0);
+  if (kind === "exit_status") return (_stdout, _stderr, status, identities) => ({
+    checks: primaryChecks(gate, identities, status === 0), artifacts: [],
+  });
   if (kind === "compiled_inventory") return (stdout, _stderr, status, identities) => {
-    if (status !== 0) return primaryChecks(gate, identities, false);
+    if (status !== 0) return failedProducer(gate, identities);
+    const artifactOutput = producerArtifactOutput(context, gate);
     const compiled = parseCompiledInventory(JSON.parse(stdout));
-    return identities.map((identity) => ({
-      id: `${gate}:${identity}`,
-      result: compiledCheck(gate, authority(compiled, identity)) ? "pass" : "fail",
-      evidence_digest: compiled.digest,
-    }));
+    return {
+      checks: identities.map((identity) => ({
+        id: `${gate}:${identity}`,
+        result: compiledCheck(gate, authority(compiled, identity)) ? "pass" : "fail",
+        evidence_digest: compiled.digest,
+      })),
+      artifacts: [writeProducerArtifact(artifactOutput, "compiled-inventory", stdout)],
+    };
   };
   if (kind === "documentation_cutover") return (stdout, _stderr, status, identities) => {
-    if (status !== 0) return primaryChecks(gate, identities, false);
+    if (status !== 0) return failedProducer(gate, identities);
     if (!context.input.inputs) throw new Error(`${gate}: documentation producer requires reviewed source disposition inputs`);
     exact(context.input.inputs, ["source_dispositions", "artifact_output"], "documentation producer inputs");
     const artifact = buildDocumentationCutoverArtifact({
@@ -144,19 +152,27 @@ function parserFor(kind, gate, context) {
     });
     const artifactOutput = canonicalPotentialPath(absolutePath(context.input.inputs.artifact_output, "documentation evidence output"));
     if (isWithin(REPOSITORY, artifactOutput)) throw new Error("documentation evidence output must be outside the canonical repository");
-    fs.writeFileSync(artifactOutput, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-    return documentationCutoverChecks(artifact);
+    const artifactBytes = `${JSON.stringify(artifact, null, 2)}\n`;
+    return {
+      checks: documentationCutoverChecks(artifact),
+      artifacts: [writeProducerArtifact(artifactOutput, "documentation-reconciliation", artifactBytes)],
+    };
   };
   if (kind === "generated_products") return (stdout, _stderr, status, identities) => {
-    if (status !== 0) return primaryChecks(gate, identities, false);
+    if (status !== 0) return failedProducer(gate, identities);
+    const artifactOutput = producerArtifactOutput(context, gate);
     const proof = parseGeneratedProductsProof(JSON.parse(stdout), {
       integration_outputs: context.bundle.integration_outputs,
       source_files: context.inventory.source.files,
     });
-    return generatedProductChecks(proof, identities);
+    return {
+      checks: generatedProductChecks(proof, identities),
+      artifacts: [writeProducerArtifact(artifactOutput, "generated-products", stdout)],
+    };
   };
   if (kind === "inventory_delta") return (stdout, _stderr, status, identities) => {
-    if (status !== 0) return primaryChecks(gate, identities, false);
+    if (status !== 0) return failedProducer(gate, identities);
+    const artifactOutput = producerArtifactOutput(context, gate);
     const proof = buildInventoryDeltaProof(REPOSITORY, context.inventory, {
       ...context.control,
       active_bundle_id: context.bundle.id,
@@ -164,9 +180,29 @@ function parserFor(kind, gate, context) {
     if (JSON.stringify(proof.identities.map((entry) => entry.identity)) !== JSON.stringify(identities)) {
       throw new Error(`${gate}: inventory delta identity coverage differs from the reviewed bundle`);
     }
-    return inventoryDeltaChecks(proof);
+    return {
+      checks: inventoryDeltaChecks(proof),
+      artifacts: [writeProducerArtifact(artifactOutput, "inventory-delta", `${canonicalJson(proof)}\n`)],
+    };
   };
   throw new Error(`${gate}: reviewed parser ${kind} has no authoritative machine contract`);
+}
+
+function failedProducer(gate, identities) {
+  return { checks: primaryChecks(gate, identities, false), artifacts: [] };
+}
+
+function producerArtifactOutput(context, gate) {
+  if (!context.input.inputs) throw new Error(`${gate}: producer requires an external artifact output`);
+  exact(context.input.inputs, ["artifact_output"], `${gate} producer inputs`);
+  return canonicalPotentialPath(absolutePath(context.input.inputs.artifact_output, `${gate} evidence output`));
+}
+
+function writeProducerArtifact(output, role, contents) {
+  if (isWithin(REPOSITORY, output)) throw new Error(`${role} evidence output must be outside the canonical repository`);
+  const bytes = Buffer.from(contents);
+  fs.writeFileSync(output, bytes, { flag: "wx" });
+  return { role, path: output, byte_length: bytes.length, content_digest: contentDigest(bytes) };
 }
 
 function compiledCheck(gate, authorityValue) {
