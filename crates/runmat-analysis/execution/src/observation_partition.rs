@@ -7,8 +7,9 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
-    structural_observation_partition_source_indices, ObservationPartition,
-    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
+    structural_observation_partition_source_indices, ObservationEventAttribution,
+    ObservationPartition, ObservationPartitionContribution, ObservationPartitionPlan,
+    ObservationResult,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -72,6 +73,7 @@ pub struct PreparedStructuralObservationReduction {
     pub partition_plan: ObservationPartitionPlan,
     pub resource_plan: FeaResourcePlan,
     pub resource_plan_objects: PreparedAnalysisObjects,
+    pub event_attribution: Option<ObservationEventAttribution>,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -88,10 +90,27 @@ pub fn prepare_structural_observation_fanout(
     source: &impl CacheImport,
     preparation: StructuralObservationPreparation,
     sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> AnalysisBridgeResult<PreparedStructuralObservationFanout> {
     let admitted = admit_structural_observation(&preparation)?;
+    if let Some(attribution) = event_attribution {
+        attribution
+            .validate()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if attribution.sample() != sample {
+            return Err(AnalysisBridgeError::Identity(
+                "observation fan-out event differs from its source sample",
+            ));
+        }
+    }
     let mut prepared = Vec::new();
     for observation in &admitted.request.plan.observations {
+        match (&observation.spec.sampling, event_attribution) {
+            (runmat_analysis_core::SamplingPolicy::Event(expected), Some(attribution))
+                if attribution.event() == *expected => {}
+            (runmat_analysis_core::SamplingPolicy::Event(_), _) | (_, Some(_)) => continue,
+            (_, None) => {}
+        }
         let plan = ObservationPartitionPlan::derive(
             &admitted.request.plan,
             &observation.spec.observation_id,
@@ -148,6 +167,7 @@ pub fn prepare_structural_observation_fanout(
                 plan.clone(),
                 partition.clone(),
                 source_fields,
+                event_attribution,
             )?);
         }
     }
@@ -193,6 +213,7 @@ pub fn import_observation_partition_contribution(
         || contribution.partition != prepared.partition.identity
         || contribution.partition_ordinal != prepared.partition.ordinal
         || contribution.source_field != prepared.source_fields.source_field
+        || contribution.event_attribution != prepared.request.event_attribution
         || contribution.source_partitions
             != prepared
                 .source_fields
@@ -231,6 +252,7 @@ pub fn prepare_structural_observation_reduction(
         .iter()
         .map(|imported| imported.contribution.clone())
         .collect::<Vec<_>>();
+    let event_attribution = contributions[0].event_attribution;
     let request = ObservationPartitionReductionRequest::new(
         &preparation.source_request,
         &preparation.partition_plan,
@@ -292,6 +314,7 @@ pub fn prepare_structural_observation_reduction(
         partition_plan: preparation.partition_plan,
         resource_plan,
         resource_plan_objects: preparation.resource_plan,
+        event_attribution,
         host,
         program,
         inputs,
@@ -326,6 +349,7 @@ pub fn import_reduced_observation(
         || result.plan_identity != prepared.source_request.plan.identity
         || result.topology_digest != prepared.source_request.plan.topology_digest
         || result.partition_evidence.partition_plan != prepared.partition_plan.identity
+        || result.partition_evidence.event_attribution != prepared.event_attribution
     {
         return Err(AnalysisBridgeError::Identity(
             "reduced observation differs from its admitted request",
@@ -344,12 +368,14 @@ fn prepare_partition_workload(
     partition_plan: ObservationPartitionPlan,
     partition: ObservationPartition,
     source_fields: RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> AnalysisBridgeResult<PreparedStructuralObservationPartition> {
     let request = ObservationPartitionEvaluationRequest::new(
         &admitted.request,
         &partition_plan,
         &partition,
         &source_fields,
+        event_attribution,
         &admitted.resource_plan,
     )?;
     let source_request_objects = prepare_analysis_objects(

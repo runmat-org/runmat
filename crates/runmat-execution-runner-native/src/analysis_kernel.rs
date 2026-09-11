@@ -301,6 +301,7 @@ fn execute_observation_partition(
         &partition_plan,
         partition,
         &fields,
+        request.event_attribution,
         &resource_plan,
     )?;
     if source_request.identity().digest() != source_request_identity
@@ -328,6 +329,7 @@ fn execute_observation_partition(
         &workload.model,
         mesh.as_ref(),
         &fields,
+        request.event_attribution,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     Ok(vec![AnalysisKernelOutput::whole(
@@ -1317,6 +1319,7 @@ mod tests {
                 &partition_plan,
                 partition,
                 &source_fields,
+                None,
                 &resource_plan,
             )
             .unwrap();

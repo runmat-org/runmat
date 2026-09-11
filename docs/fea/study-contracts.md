@@ -270,7 +270,11 @@ completed solve are not relabeled as failed solves. If the requested event never
 publishes a valid history with zero samples. That distinction lets callers tell “observed no event”
 from “the observation did not run.” For example, use
 `fea.SamplingPolicy.event(fea.ObservationEvent.firstYield())` as the sampling argument of a
-nonlinear displacement history.
+nonlinear displacement history. When observation evaluation is partitioned, each event occurrence
+is a separate fan-out. The occurrence attribution is part of every task, contribution, and reduction
+evidence identity, so workers cannot combine samples from different occurrences or substitute a
+different completed result. An event that does not occur produces no partition tasks and retains the
+same canonical empty-history meaning.
 `fea.ReductionPolicy.none()` preserves the requested data. `fea.ReductionPolicy.new(...)` combines
 a typed spatial reduction, series reduction, and extrema-tie policy. Spatial minimum and maximum
 results retain the canonical node, element, or interpolated path position where the value occurs.

@@ -91,6 +91,7 @@ pub struct ObservationPartitionEvidence {
     pub partition_plan: ObservationPartitionPlanIdentity,
     pub source_field: RecoveredFieldIdentity,
     pub sample: RecoveredFieldSample,
+    pub event_attribution: Option<ObservationEventAttribution>,
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub contributions: Vec<ObservationPartitionContributionIdentity>,
     pub combination: ObservationPartitionCombination,
@@ -104,6 +105,7 @@ struct ObservationPartitionEvidenceWire {
     partition_plan: ObservationPartitionPlanIdentity,
     source_field: RecoveredFieldIdentity,
     sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     contributions: Vec<ObservationPartitionContributionIdentity>,
     combination: ObservationPartitionCombination,
@@ -119,6 +121,7 @@ impl TryFrom<ObservationPartitionEvidenceWire> for ObservationPartitionEvidence 
             partition_plan: wire.partition_plan,
             source_field: wire.source_field,
             sample: wire.sample,
+            event_attribution: wire.event_attribution,
             source_partitions: wire.source_partitions,
             contributions: wire.contributions,
             combination: wire.combination,
@@ -133,6 +136,7 @@ impl ObservationPartitionEvidence {
         partition_plan: ObservationPartitionPlanIdentity,
         source_field: RecoveredFieldIdentity,
         sample: RecoveredFieldSample,
+        event_attribution: Option<ObservationEventAttribution>,
         source_partitions: Vec<RecoveredFieldPartitionIdentity>,
         contributions: Vec<ObservationPartitionContributionIdentity>,
         combination: ObservationPartitionCombination,
@@ -143,6 +147,7 @@ impl ObservationPartitionEvidence {
             partition_plan,
             source_field,
             sample,
+            event_attribution,
             source_partitions,
             contributions,
             combination,
@@ -174,6 +179,14 @@ impl ObservationPartitionEvidence {
                 collective_count as usize == self.contributions.len().saturating_sub(1)
             }
         };
+        if let Some(attribution) = self.event_attribution {
+            attribution.validate()?;
+            if attribution.sample() != self.sample {
+                return Err(ObservationError::Invalid(
+                    "observation partition evidence event differs from its source sample".into(),
+                ));
+            }
+        }
         if self.schema_version != 1
             || self.source_partitions.is_empty()
             || !source_partitions_are_unique
@@ -197,6 +210,7 @@ impl ObservationPartitionEvidence {
                 self.partition_plan,
                 self.source_field,
                 self.sample,
+                self.event_attribution,
                 &self.source_partitions,
                 &self.contributions,
                 self.combination,
@@ -221,6 +235,7 @@ pub struct ObservationPartitionContribution {
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub source_entity_count: usize,
     pub sample: RecoveredFieldSample,
+    pub event_attribution: Option<ObservationEventAttribution>,
     pub payload: ObservationPartitionPayload,
 }
 
@@ -238,6 +253,7 @@ struct ObservationPartitionContributionWire {
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     source_entity_count: usize,
     sample: RecoveredFieldSample,
+    event_attribution: Option<ObservationEventAttribution>,
     payload: ObservationPartitionPayload,
 }
 
@@ -257,6 +273,7 @@ impl TryFrom<ObservationPartitionContributionWire> for ObservationPartitionContr
             source_partitions: wire.source_partitions,
             source_entity_count: wire.source_entity_count,
             sample: wire.sample,
+            event_attribution: wire.event_attribution,
             payload: wire.payload,
         };
         contribution.validate()?;
@@ -308,6 +325,15 @@ impl ObservationPartitionContribution {
                     && *measure > 0.0
             }
         };
+        if let Some(attribution) = self.event_attribution {
+            attribution.validate()?;
+            if attribution.sample() != self.sample {
+                return Err(ObservationError::Invalid(
+                    "observation partition contribution event differs from its source sample"
+                        .into(),
+                ));
+            }
+        }
         if self.schema_version != 1
             || self.observation_id.0.trim().is_empty()
             || self.source_entity_count == 0
@@ -347,6 +373,7 @@ impl ObservationPartitionContribution {
                 &self.source_partitions,
                 self.source_entity_count,
                 self.sample,
+                self.event_attribution,
                 &self.payload,
             ),
             OBSERVATION_LIMITS,
@@ -398,6 +425,7 @@ pub fn evaluate_structural_observation_partition(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
     field: &RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
     let topology = StructuralObservationTopology::derive(model, mesh)?;
     if topology.digest() != plan.topology_digest {
@@ -405,7 +433,14 @@ pub fn evaluate_structural_observation_partition(
             "observation partition topology differs from its resolved plan",
         ));
     }
-    evaluate_observation_partition(plan, partition_plan, partition, field, &topology)
+    evaluate_observation_partition_with_attribution(
+        plan,
+        partition_plan,
+        partition,
+        field,
+        &topology,
+        event_attribution,
+    )
 }
 
 pub fn evaluate_solid_observation_partition(
@@ -414,6 +449,7 @@ pub fn evaluate_solid_observation_partition(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
     field: &RecoveredFieldPartitionSet,
+    event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
     let topology = StructuralObservationTopology::from_projection(projection);
     if topology.digest() != plan.topology_digest {
@@ -421,7 +457,14 @@ pub fn evaluate_solid_observation_partition(
             "observation partition topology differs from its resolved plan",
         ));
     }
-    evaluate_observation_partition(plan, partition_plan, partition, field, &topology)
+    evaluate_observation_partition_with_attribution(
+        plan,
+        partition_plan,
+        partition,
+        field,
+        &topology,
+        event_attribution,
+    )
 }
 
 pub fn reduce_observation_partitions(
@@ -530,23 +573,6 @@ fn prepare_observation_field_partition(
         observation_id: observation.spec.observation_id.0.clone(),
         reason: error.to_string(),
     })
-}
-
-pub(crate) fn evaluate_observation_partition(
-    plan: &ResolvedObservationPlan,
-    partition_plan: &ObservationPartitionPlan,
-    partition: &ObservationPartition,
-    field: &RecoveredFieldPartitionSet,
-    topology: &StructuralObservationTopology,
-) -> Result<ObservationPartitionContribution, ObservationError> {
-    evaluate_observation_partition_with_attribution(
-        plan,
-        partition_plan,
-        partition,
-        field,
-        topology,
-        None,
-    )
 }
 
 fn evaluate_observation_partition_with_attribution(
@@ -673,6 +699,7 @@ fn evaluate_observation_partition_with_attribution(
             .collect(),
         source_entity_count: field.source_indices().count(),
         sample: field.sample,
+        event_attribution,
         payload,
     };
     contribution.identity = contribution.derive_identity()?;
@@ -715,11 +742,14 @@ pub(crate) fn combine_observation_partitions(
     }
     let first_source = contributions[0].source_field;
     let first_sample = contributions[0].sample;
+    let first_event_attribution = contributions[0].event_attribution;
     if contributions.iter().any(|contribution| {
-        contribution.source_field != first_source || contribution.sample != first_sample
+        contribution.source_field != first_source
+            || contribution.sample != first_sample
+            || contribution.event_attribution != first_event_attribution
     }) {
         return Err(ObservationError::Identity(
-            "observation contributions name different source fields or samples",
+            "observation contributions name different source fields, samples, or events",
         ));
     }
     let source_partitions = contributions
@@ -860,6 +890,7 @@ pub(crate) fn combine_observation_partitions(
         partition_plan.identity,
         first_source,
         first_sample,
+        first_event_attribution,
         source_partitions,
         contribution_identities,
         combination,

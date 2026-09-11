@@ -2210,9 +2210,7 @@ fn solver_pipeline_without_an_event_detector_rejects_event_histories() {
         },
     )
     .expect_err("a pipeline cannot publish an empty history for a detector it did not run");
-    assert!(error
-        .to_string()
-        .contains("does not own an event detector"));
+    assert!(error.to_string().contains("does not own an event detector"));
 }
 
 #[test]

@@ -1,14 +1,16 @@
 use runmat_analysis_core::{
     AnalysisField, ComplexRepresentation, CompressionPolicy, CoordinateFrame, ExtremaTiePolicy,
-    FieldLocation, ObservationComponent, ObservationCostEstimate, ObservationId,
+    FieldLocation, ObservationComponent, ObservationCostEstimate, ObservationEvent, ObservationId,
     ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
     ObservationStoragePolicy, ObservationTarget, ObservationValueShape, PartialAccessPolicy,
     Position, ProcedureStep, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
-    SeriesReduction, SignConvention, SignalPrecision, SpatialReduction,
+    SeriesReduction, SignConvention, SignalPrecision, SolverObservationEvent, SpatialReduction,
 };
+use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 use crate::{
+    execution::{SequenceIdentity, SolverResultIdentity, StepIdentity},
     results::field::{
         RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
         RecoveredFieldEntityDomain, RecoveredFieldNumericRepresentation,
@@ -21,8 +23,9 @@ use super::{
     distributed::{combine_observation_partitions, evaluate_partitioned_observation},
     evaluate_solid_observation_partition, prepare_solid_observation_field_partition,
     topology::StructuralObservationTopology,
-    ObservationExecutionPolicy, ObservationLimits, ObservationPartitionContribution,
-    ObservationPartitionPlan,
+    ObservationEventAttribution, ObservationExecutionPolicy, ObservationLimits,
+    ObservationPartitionContribution, ObservationPartitionPlan, SolverEventAttribution,
+    SolverEventSource,
 };
 
 fn definition() -> RecoveredFieldDefinition {
@@ -427,6 +430,7 @@ fn reduction_rejects_missing_duplicate_and_substituted_contributions() {
                 partition,
                 &projection,
                 &source,
+                None,
             )
             .unwrap();
             ObservationPartitionContribution::from_canonical_bytes(
@@ -452,4 +456,134 @@ fn reduction_rejects_missing_duplicate_and_substituted_contributions() {
     substituted_cost.resource_cost.transfer_bytes += 1;
     assert!(substituted_cost.validate_for(&plan).is_err());
     assert!(substituted_cost.canonical_bytes().is_err());
+}
+
+#[test]
+fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = definition();
+    let sample = RecoveredFieldSample::TimeSeconds(0.5);
+    let mut request = spec("first_yield_temperature", ObservationTarget::WholeModel);
+    request.sampling =
+        SamplingPolicy::Event(ObservationEvent::Solver(SolverObservationEvent::FirstYield));
+    request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut step = ProcedureStep::thermal_transient("partitioned-event");
+    step.accuracy.resources.maximum_samples = 4;
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 1.0,
+    };
+    step.observations = vec![ObservationRequest::History(request)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = projection
+        .nodes
+        .iter()
+        .map(|node| node.coordinates_m.iter().sum())
+        .collect::<Vec<_>>();
+    let field = RecoveredField::new(
+        definition,
+        sample,
+        AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+    )
+    .unwrap();
+    let sequence = SequenceIdentity::new(Digest::sha256("partition-event-sequence")).unwrap();
+    let producer = StepIdentity::new(sequence, Digest::sha256("partition-event-step")).unwrap();
+    let source =
+        SolverResultIdentity::from_step_result(producer, Digest::sha256("partition-event-result"))
+            .unwrap();
+    let attribution = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::FirstYield,
+        sample,
+        occurrence_index: 0,
+        source: SolverEventSource::CompletedResult { result: source },
+    });
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let single = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        Some(attribution),
+    )
+    .unwrap();
+    let split_policy = ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap());
+    let split = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        split_policy,
+        Some(attribution),
+    )
+    .unwrap();
+    assert_eq!(single.logical_identity, split.logical_identity);
+    assert_eq!(
+        split.partition_evidence.event_attribution,
+        Some(attribution)
+    );
+
+    let partition_plan = ObservationPartitionPlan::derive(
+        &plan,
+        &ObservationId("first_yield_temperature".into()),
+        split_policy,
+    )
+    .unwrap();
+    let mut contributions = partition_plan
+        .partitions
+        .iter()
+        .map(|partition| {
+            let source = prepare_solid_observation_field_partition(
+                &plan,
+                &partition_plan,
+                partition,
+                &projection,
+                &field,
+            )
+            .unwrap();
+            let contribution = evaluate_solid_observation_partition(
+                &plan,
+                &partition_plan,
+                partition,
+                &projection,
+                &source,
+                Some(attribution),
+            )
+            .unwrap();
+            ObservationPartitionContribution::from_canonical_bytes(
+                &contribution.canonical_bytes().unwrap(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let substituted_attribution = ObservationEventAttribution::Solver(SolverEventAttribution {
+        event: SolverObservationEvent::FirstYield,
+        sample,
+        occurrence_index: 0,
+        source: SolverEventSource::CompletedResult {
+            result: SolverResultIdentity::from_step_result(
+                producer,
+                Digest::sha256("substituted-partition-event-result"),
+            )
+            .unwrap(),
+        },
+    });
+    contributions[0].event_attribution = Some(substituted_attribution);
+    assert!(contributions[0].validate().is_err());
+    assert!(combine_observation_partitions(&plan, &partition_plan, contributions).is_err());
 }

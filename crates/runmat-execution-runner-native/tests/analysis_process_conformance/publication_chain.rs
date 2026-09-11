@@ -139,6 +139,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             inventory_limits: limits,
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
+        None,
     )
     .unwrap();
     let responses = driver

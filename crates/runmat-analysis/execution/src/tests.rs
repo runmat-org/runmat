@@ -1496,6 +1496,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             inventory_limits: ObjectInventoryLimits::default(),
         },
         runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
+        None,
     )
     .unwrap();
     assert_eq!(observation_fanout.partitions.len(), 4);
@@ -1561,6 +1562,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 &solve.model,
                 Some(&mesh),
                 &partition.source_fields,
+                None,
             )
             .unwrap();
         partition.program.write_to(&mut store).unwrap();
