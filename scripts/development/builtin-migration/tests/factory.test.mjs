@@ -101,6 +101,30 @@ test("inventory rejects absent, future, or tampered compiled semantic authority"
   assert.throws(() => buildInventory(repository, undefined, { revision: REVISION, compiledInventory: collision }), /spellings collide case-insensitively/);
 });
 
+test("compiled constants supply public spellings only when no callable form exists", () => {
+  const repository = repositoryFixture({ identity: "other" });
+  const constantOnly = compiledInventoryFixture("eps");
+  constantOnly.snapshot.declared.catalog_entries = [];
+  constantOnly.snapshot.declared.catalog_provenance = [];
+  constantOnly.snapshot.declared.constants = [{ name: "eps", kind: "real_double" }];
+  constantOnly.snapshot.observed.runtime_bindings = [];
+  constantOnly.snapshot.observed.implementation_provenance = [];
+  constantOnly.snapshot.observed.runtime_constants = [{ name: "eps" }];
+  constantOnly.digest.value = contentDigest(Buffer.from(JSON.stringify(constantOnly.snapshot))).slice("sha256:".length);
+  const constantInventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory: constantOnly });
+  assert.deepEqual(constantInventory.identities.find((entry) => entry.identity === "eps").spellings, ["eps"]);
+
+  const dual = compiledInventoryFixture("inf");
+  dual.snapshot.declared.constants = [
+    { name: "Inf", kind: "real_double" },
+    { name: "inf", kind: "real_double" },
+  ];
+  dual.snapshot.observed.runtime_constants = [{ name: "Inf" }, { name: "inf" }];
+  dual.digest.value = contentDigest(Buffer.from(JSON.stringify(dual.snapshot))).slice("sha256:".length);
+  const dualInventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory: dual });
+  assert.deepEqual(dualInventory.identities.find((entry) => entry.identity === "inf").spellings, ["inf"]);
+});
+
 test("compiled authority rejects unknown or malformed nested records even with a recomputed digest", () => {
   const repository = repositoryFixture();
   const cases = [

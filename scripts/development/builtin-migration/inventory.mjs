@@ -6,7 +6,7 @@ import { createRecords } from "./records.mjs";
 import { attachWasmEvidence, scanSurfaces } from "./surfaces.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { sourceSnapshot } from "./snapshot.mjs";
-import { authorityFor, parseCompiledInventory } from "./compiled-inventory.mjs";
+import { authorityFor, parseCompiledInventory, publicSpellingsFor } from "./compiled-inventory.mjs";
 import { migrationFinding } from "./compiled-runtime-schema.mjs";
 import { migrationFindingsDigest } from "./migration-findings.mjs";
 import { array, digest, exact, kind } from "./schema.mjs";
@@ -18,7 +18,10 @@ export function buildInventory(repository, dispositionInput = emptyDispositionIn
   const { records, record } = createRecords();
   const diagnostics = [];
   scanSurfaces(repository, record, diagnostics);
-  for (const identity of compiled.identities) record(identity);
+  for (const identity of compiled.identities) {
+    const item = record(identity);
+    for (const spelling of publicSpellingsFor(compiled, identity)) item.spellings.add(spelling);
+  }
   attachWasmEvidence(repository, records);
   for (const [identity, input] of Object.entries(dispositionInput.identities)) record(identity).input = normalizeDisposition(input);
   validateReviewedRelationships(records, diagnostics);
