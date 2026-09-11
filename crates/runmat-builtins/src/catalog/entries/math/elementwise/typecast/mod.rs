@@ -59,6 +59,5 @@ pub const TYPECAST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     integer_audit: None,
     suppress_auto_output: false,
 };
-
 pub(in crate::catalog) use inference::infer;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TYPECAST_CATALOG_ENTRY];
