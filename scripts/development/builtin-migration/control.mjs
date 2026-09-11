@@ -278,10 +278,39 @@ function validateBaseline(baseline, current, identities) {
   const observed = current.identities.map((entry) => entry.identity).sort();
   const reviewed = [...identities.keys()].sort();
   if (JSON.stringify(observed) !== JSON.stringify(reviewed)) throw new Error("control manifest identities do not exactly cover the baseline inventory");
+  const inventoryIdentities = new Map(current.identities.map((entry) => [entry.identity, entry]));
+  for (const [id, entry] of identities) {
+    validateReviewedClassification(entry, inventoryIdentities.get(id));
+  }
   const sourceFiles = new Map(current.source.files.map((entry) => [entry.path, entry.content_digest]));
   for (const entry of identities.values()) for (const removal of entry.expected_removals) {
     const proof = entry.baseline_evidence.find((candidate) => candidate.path === removal.path && candidate.digest === removal.baseline_digest);
     if (proof.locator !== null || sourceFiles.get(removal.path) !== removal.baseline_digest) throw new Error(`${entry.identity}: file removal baseline does not match the content-derived source snapshot`);
+  }
+}
+
+function validateReviewedClassification(control, inventory) {
+  if (inventory.classification_input.review.status !== "reviewed") {
+    throw new Error(`${control.identity}: baseline identity disposition is not reviewed`);
+  }
+  if (!inventory.spellings.includes(control.public_spelling)) {
+    throw new Error(`${control.identity}: public spelling differs from the reviewed inventory`);
+  }
+  if (inventory.domain !== control.domain || inventory.family !== control.family) {
+    throw new Error(`${control.identity}: domain or family differs from the reviewed inventory`);
+  }
+  const observed = inventory.disposition;
+  if (observed.kind !== control.disposition.kind) {
+    throw new Error(`${control.identity}: disposition differs from the reviewed inventory`);
+  }
+  if (observed.kind === "canonical" && control.disposition.target !== control.identity) {
+    throw new Error(`${control.identity}: canonical target differs from the reviewed inventory`);
+  }
+  if (observed.kind === "alias" && observed.canonical !== control.disposition.target.toLowerCase()) {
+    throw new Error(`${control.identity}: alias target differs from the reviewed inventory`);
+  }
+  if (observed.kind === "internal" && observed.reason !== control.disposition.reason) {
+    throw new Error(`${control.identity}: internal reason differs from the reviewed inventory`);
   }
 }
 
