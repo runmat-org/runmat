@@ -133,6 +133,7 @@ fn prove_impl(
         element_operator,
         connector_operator,
         combined_operator,
+        None,
         constrained_dofs,
     )
 }

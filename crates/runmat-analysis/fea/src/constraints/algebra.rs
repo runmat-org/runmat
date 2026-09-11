@@ -100,13 +100,15 @@ impl ResolvedConstraintMatrix {
                 CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => 5,
             };
             match owner {
-                CanonicalStructuralDofOwner::MeshNode(identity) => (component < 3).then(|| {
-                    node_indices
-                        .get(&identity)
-                        .copied()?
-                        .checked_mul(3)?
-                        .checked_add(component)
-                })?,
+                CanonicalStructuralDofOwner::StructuralNode(identity) => {
+                    (component < 3).then(|| {
+                        node_indices
+                            .get(&identity)
+                            .copied()?
+                            .checked_mul(3)?
+                            .checked_add(component)
+                    })?
+                }
                 CanonicalStructuralDofOwner::ReferencePoint(identity) => reference_indices
                     .get(&identity)
                     .copied()?

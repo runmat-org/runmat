@@ -34,6 +34,20 @@ impl StructuralDofKind {
             StructuralDofKind::Rx | StructuralDofKind::Ry | StructuralDofKind::Rz
         )
     }
+
+    pub(crate) const fn from_constraint(dof: crate::constraints::CanonicalStructuralDof) -> Self {
+        use crate::constraints::CanonicalStructuralDof;
+        use runmat_analysis_core::{StructuralRotationDof, StructuralTranslationDof};
+
+        match dof {
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux) => Self::Ux,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy) => Self::Uy,
+            CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz) => Self::Uz,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rx) => Self::Rx,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Ry) => Self::Ry,
+            CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => Self::Rz,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

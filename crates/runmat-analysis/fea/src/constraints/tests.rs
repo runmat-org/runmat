@@ -343,14 +343,17 @@ fn rotated_periodic_relation_rotates_displacements_with_geometry() {
         .find(|row| {
             row.terms.iter().any(|term| {
                 term.owner
-                    == CanonicalStructuralDofOwner::MeshNode(mesh.topology.nodes[3].stable_identity)
+                    == CanonicalStructuralDofOwner::StructuralNode(
+                        mesh.topology.nodes[3].stable_identity,
+                    )
                     && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uz)
                     && term.coefficient == 1.0
             })
         })
         .unwrap();
     assert!(uz_row.terms.iter().any(|term| {
-        term.owner == CanonicalStructuralDofOwner::MeshNode(mesh.topology.nodes[2].stable_identity)
+        term.owner
+            == CanonicalStructuralDofOwner::StructuralNode(mesh.topology.nodes[2].stable_identity)
             && term.dof == CanonicalStructuralDof::Translation(StructuralTranslationDof::Uy)
             && (term.coefficient + 1.0).abs() <= 1.0e-12
     }));
@@ -525,13 +528,20 @@ fn conflicting_prescriptions_fail_with_both_constraint_identities() {
         })
         .collect();
 
-    assert_eq!(
-        CanonicalStructuralConstraintPlan::compile(&model, &mesh),
-        Err(ConstraintPlanError::ConflictingRow {
-            first_constraint_id: "first".into(),
-            second_constraint_id: "second".into(),
-        })
-    );
+    let error = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap_err();
+    assert!(matches!(
+        error,
+        ConstraintPlanError::ConflictingRow {
+            first_constraint_id,
+            second_constraint_id,
+            conflicting_dof: Some(CanonicalStructuralDofAddress {
+                owner: CanonicalStructuralDofOwner::StructuralNode(identity),
+                dof: CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux),
+            }),
+        } if first_constraint_id == "first"
+            && second_constraint_id == "second"
+            && identity != StableDigest::ZERO
+    ));
 }
 
 #[test]
@@ -628,7 +638,7 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
         .collect::<std::collections::BTreeMap<_, _>>();
     let matrix =
         ResolvedConstraintMatrix::from_plan(&plan, mesh.topology.nodes.len() * 3, |owner, dof| {
-            let CanonicalStructuralDofOwner::MeshNode(node) = owner else {
+            let CanonicalStructuralDofOwner::StructuralNode(node) = owner else {
                 return None;
             };
             let component = match dof {
@@ -652,7 +662,9 @@ fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
     let kind = &constraint.structural().unwrap().kind;
     let terms = (1_u8..=33)
         .map(|identity| CanonicalStructuralConstraintTerm {
-            owner: CanonicalStructuralDofOwner::MeshNode(StableDigest::from_bytes([identity; 32])),
+            owner: CanonicalStructuralDofOwner::StructuralNode(StableDigest::from_bytes(
+                [identity; 32],
+            )),
             dof: CanonicalStructuralDof::Translation(StructuralTranslationDof::Ux),
             coefficient: 1.0,
         })
@@ -662,6 +674,7 @@ fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
         constraint_id: "global".into(),
         terms,
         right_hand_side: 0.0,
+        residual_quantity: ConstraintResidualQuantity::Displacement,
         reaction_recovery: ReactionRecovery::ConstraintMultiplier,
     }];
 
@@ -724,6 +737,7 @@ fn dependent_equations_are_evidenced_and_inconsistent_equations_fail() {
         Err(ConstraintPlanError::ConflictingRow {
             first_constraint_id: "first".into(),
             second_constraint_id: "second".into(),
+            conflicting_dof: None,
         })
     );
 }
@@ -786,7 +800,7 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
         .find(|group| group.constraint_id == "relative_x")
         .unwrap();
     assert_eq!(equation.row_reactions.len(), 1);
-    assert!(equation.maximum_prescribed_error_meters <= 1.0e-10);
+    assert!(equation.maximum_displacement_error_meters <= 1.0e-10);
     assert!(equation.row_reactions[0].generalized_reaction.is_finite());
 }
 
@@ -895,7 +909,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         .iter()
         .find(|group| group.constraint_id == "relative_x")
         .unwrap();
-    assert!(equation.maximum_prescribed_error_meters <= 1.0e-9);
+    assert!(equation.maximum_displacement_error_meters <= 1.0e-9);
     assert!(equation.row_reactions[0].generalized_reaction.is_finite());
 }
 
@@ -1310,7 +1324,8 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
         .nodes
         .iter()
         .position(|node| {
-            owner.terms[0].owner == CanonicalStructuralDofOwner::MeshNode(node.stable_identity)
+            owner.terms[0].owner
+                == CanonicalStructuralDofOwner::StructuralNode(node.stable_identity)
         })
         .unwrap();
     reactions[node_index * 3] = 10.0;
@@ -1330,7 +1345,8 @@ fn result_evidence_aggregates_only_canonical_reaction_owners() {
     let result = CanonicalStructuralConstraintResult::recover(&plan, &mesh, &fields).unwrap();
 
     assert_eq!(result.resultant_force_newtons, [10.0, 0.0, 0.0]);
-    assert_eq!(result.maximum_prescribed_error_meters, 0.0);
+    assert_eq!(result.maximum_displacement_error_meters, 0.0);
+    assert_eq!(result.maximum_rotation_error_radians, 0.0);
     let redundant = result
         .groups
         .iter()

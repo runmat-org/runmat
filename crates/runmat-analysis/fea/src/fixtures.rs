@@ -1,21 +1,21 @@
-#[cfg(test)]
 use runmat_analysis_core::{
-    AnalysisConnector, ConformalSolidAttachment, ConnectorKind, ElectricCurrent, ElectricPotential,
-    Position, ReferencePoint, Rotation, RotationDofValue, Stiffness, StructuralRotationDof,
-    Temperature, Traction,
-};
-use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisExcitation, AnalysisModel, AnalysisModelId, AnalysisSequence,
-    BeamElementModel, BeamSectionModel, BodyForceDensity, CoordinateFrame, Direction, Displacement,
+    AnalysisConnector, AnalysisConstraint, AnalysisExcitation, AnalysisModel, AnalysisModelId,
+    AnalysisSequence, BeamElementModel, BeamSectionModel, BodyForceDensity,
+    ConformalSolidAttachment, ConnectorKind, CoordinateFrame, Direction, Displacement,
     EvidenceConfidence, ExcitationAction, ExcitationCase, ExcitationCaseActivation,
     ExcitationCaseId, ExcitationDistribution, ExcitationId, ExcitationKinematics, ExcitationTarget,
     Force, MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
     Moment, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue, Pressure, ProcedureStep,
-    ProjectionRequirement, RegionTarget, ShellElementModel, ShellSectionModel, Signal,
-    SignalApproximationEvidence, SignalId, SignalPrecision, SignalProvenance, SignalRepresentation,
-    SignalShape, SignalValue, StructuralConstraint, StructuralConstraintKind, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode, StructuralTranslationDof,
+    ProjectionRequirement, RegionTarget, Rotation, RotationDofValue, ShellElementModel,
+    ShellSectionModel, Signal, SignalApproximationEvidence, SignalId, SignalPrecision,
+    SignalProvenance, SignalRepresentation, SignalShape, SignalValue, Stiffness,
+    StructuralConstraint, StructuralConstraintKind, StructuralElement, StructuralElementKind,
+    StructuralModel, StructuralNode, StructuralRotationDof, StructuralTranslationDof,
     TranslationDofValue,
+};
+#[cfg(test)]
+use runmat_analysis_core::{
+    ElectricCurrent, ElectricPotential, Position, ReferencePoint, Temperature, Traction,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -54,8 +54,7 @@ pub(crate) fn replace_fixture_excitations(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel {
+pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.structural = Some(StructuralModel {
         nodes: vec![

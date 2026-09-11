@@ -4,6 +4,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 
 use crate::assembly::dofs::StructuralDofLayout;
+use crate::constraints::ResolvedConstraintMatrix;
 
 use super::{
     digest, numerical_rank, rigid_body::RigidBodyFrame, verify_null_mode, NullspaceAnchoring,
@@ -28,11 +29,13 @@ pub(super) fn prove(
     element_operator: &RealSparseMatrix,
     connector_operator: Option<&RealSparseMatrix>,
     combined_operator: &RealSparseMatrix,
+    constraints: Option<&ResolvedConstraintMatrix>,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     if topology.positions_m.len() != topology.node_identities.len()
         || layout.node_count() != topology.positions_m.len()
         || layout.total_dof_count() != combined_operator.rows()
+        || constraints.is_some_and(|matrix| matrix.full_dof_count != combined_operator.rows())
         || constrained_dofs.len() != combined_operator.rows()
     {
         return Err(NullspaceEvidenceError::DimensionMismatch);
@@ -83,13 +86,34 @@ pub(super) fn prove(
             .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
         verify_null_mode(element_operator, mode, &applied)?;
     }
-    let mut projected = constrained_dofs
-        .iter()
-        .copied()
-        .enumerate()
-        .filter(|(_, constrained)| *constrained)
-        .map(|(column, _)| rigid_mode_response(column, &context))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut projected = if let Some(constraints) = constraints {
+        constraints
+            .validate()
+            .map_err(|error| NullspaceEvidenceError::Encoding(error.to_string()))?;
+        (0..constraints.row_count())
+            .map(|row| {
+                let start = constraints.row_offsets[row];
+                let end = constraints.row_offsets[row + 1];
+                let mut response = vec![0.0; mode_count];
+                for entry in start..end {
+                    let column = constraints.column_indices[entry];
+                    let coefficient = constraints.coefficients[entry];
+                    for (mode, value) in modes.iter().enumerate() {
+                        response[mode] += coefficient * value[column];
+                    }
+                }
+                response
+            })
+            .collect::<Vec<_>>()
+    } else {
+        constrained_dofs
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, constrained)| *constrained)
+            .map(|(column, _)| rigid_mode_response(column, &context))
+            .collect::<Result<Vec<_>, _>>()?
+    };
     if let Some(operator) = connector_operator {
         let applied_modes = modes
             .iter()
@@ -142,7 +166,10 @@ pub(super) fn prove(
         topology.kind,
         topology.topology_identity,
         combined_operator,
-        digest(CONSTRAINT_DOMAIN, &constrained_dofs)?,
+        match constraints {
+            Some(matrix) => digest(CONSTRAINT_DOMAIN, matrix)?,
+            None => digest(CONSTRAINT_DOMAIN, &constrained_dofs)?,
+        },
         constrained_dofs,
         components,
     )

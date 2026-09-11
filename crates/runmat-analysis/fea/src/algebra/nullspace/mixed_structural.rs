@@ -24,6 +24,7 @@ pub(super) fn prove(
         element_operator,
         connector_operator,
         combined_operator,
+        constraints,
         constrained_dofs,
     } = input;
     if topology.solid_node_count != mesh.topology.nodes.len()
@@ -34,6 +35,7 @@ pub(super) fn prove(
         || combined_operator.rows() != layout.total_dof_count()
         || element_operator.columns() != element_operator.rows()
         || combined_operator.columns() != combined_operator.rows()
+        || constraints.full_dof_count != combined_operator.rows()
         || constrained_dofs.len() != combined_operator.rows()
     {
         return Err(NullspaceEvidenceError::DimensionMismatch);
@@ -89,6 +91,7 @@ pub(super) fn prove(
         element_operator,
         connector_operator,
         combined_operator,
+        Some(constraints),
         constrained_dofs,
     )
 }

@@ -15,7 +15,9 @@ use serde::Serialize;
 
 use super::contract::*;
 use super::enforcement;
-use super::row::{compare_rows, row_identity, term_key, validate_row_classification};
+use super::row::{
+    compare_rows, residual_quantity, row_identity, term_key, validate_row_classification,
+};
 use super::target::validate_resolved_target;
 
 const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
@@ -28,12 +30,21 @@ impl CanonicalStructuralConstraintPlan {
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, ConstraintPlanError> {
-        super::compile::compile(model, mesh)
+        if model
+            .structural
+            .as_ref()
+            .is_some_and(|structural| !structural.elements.is_empty())
+            && !mesh.topology.volume_elements.is_empty()
+        {
+            super::mixed::compile(model, mesh)
+        } else {
+            super::compile::compile(model, mesh)
+        }
     }
 
     pub fn validate(&self) -> Result<(), ConstraintPlanError> {
         if self.schema_version != 1
-            || self.topology_digest == StableDigest::ZERO
+            || !self.topology.has_valid_identity()
             || self.geometry_source_digest == StableDigest::ZERO
             || self.geometry_revision == 0
             || self.persistent_mapping_version == 0
@@ -96,7 +107,19 @@ impl CanonicalStructuralConstraintPlan {
                 .iter()
                 .filter(|row| row.constraint_id == group.constraint_id)
                 .collect::<Vec<_>>();
+            let implementation_is_valid = match self.topology {
+                CanonicalStructuralConstraintTopology::Solid { .. } => {
+                    group.implementation
+                        == runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
+                }
+                CanonicalStructuralConstraintTopology::ConformalMixed { .. } => matches!(
+                    group.implementation,
+                    runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
+                        | runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity
+                ),
+            };
             if group.constraint_id.is_empty()
+                || !implementation_is_valid
                 || group.targets.is_empty()
                 || group.row_count != group_rows.len()
                 || !group
@@ -185,6 +208,7 @@ impl CanonicalStructuralConstraintPlan {
                 || row.terms.is_empty()
                 || !row.right_hand_side.is_finite()
                 || row.identity != row_identity(row)?
+                || row.residual_quantity != residual_quantity(&row.terms)
             {
                 return Err(ConstraintPlanError::Invalid(
                     "constraint row identity or numerical content is invalid".into(),
@@ -192,7 +216,7 @@ impl CanonicalStructuralConstraintPlan {
             }
             if row.terms.iter().any(|term| {
                 let invalid_owner = match term.owner {
-                    CanonicalStructuralDofOwner::MeshNode(identity) => {
+                    CanonicalStructuralDofOwner::StructuralNode(identity) => {
                         identity == StableDigest::ZERO
                     }
                     CanonicalStructuralDofOwner::ReferencePoint(identity) => {
@@ -227,7 +251,7 @@ impl CanonicalStructuralConstraintPlan {
         mesh: &SolverMeshArtifact,
     ) -> Result<(), ConstraintPlanError> {
         self.validate()?;
-        if self.topology_digest != mesh.canonical_digest
+        if self.topology.mesh_digest() != mesh.canonical_digest
             || self.geometry_source_digest != mesh.geometry.source_digest
             || self.geometry_revision != mesh.geometry.geometry_revision
             || self.persistent_mapping_version != mesh.geometry.persistent_mapping_version

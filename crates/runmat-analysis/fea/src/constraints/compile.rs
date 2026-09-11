@@ -10,9 +10,10 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 use super::contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
-    ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralConstraintTopology,
+    CanonicalStructuralDof, CanonicalStructuralDofOwner, CanonicalStructuralReferencePoint,
+    ConstraintCouplingEvidence, ConstraintCouplingKind, ConstraintEnforcement,
+    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
     ConstraintPlanEvidence, ResolvedConstraintTarget,
 };
 use super::coupling::compile_reference_coupling;
@@ -69,6 +70,8 @@ pub(super) fn compile(
         groups.push(ConstraintGroupEvidence {
             constraint_id: constraint.constraint_id.clone(),
             source_digest: source_digest(constraint)?,
+            implementation:
+                runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
             targets,
             reference_point_identities: coupling
                 .iter()
@@ -85,7 +88,9 @@ pub(super) fn compile(
     let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
     let plan = CanonicalStructuralConstraintPlan {
         schema_version: 1,
-        topology_digest: mesh.canonical_digest,
+        topology: CanonicalStructuralConstraintTopology::Solid {
+            mesh_digest: mesh.canonical_digest,
+        },
         geometry_source_digest: mesh.geometry.source_digest,
         geometry_revision: mesh.geometry.geometry_revision,
         persistent_mapping_version: mesh.geometry.persistent_mapping_version,
@@ -200,7 +205,7 @@ fn compile_constraint(
                         .matched_node_identities
                         .iter()
                         .map(|node_identity| CanonicalStructuralConstraintTerm {
-                            owner: CanonicalStructuralDofOwner::MeshNode(*node_identity),
+                            owner: CanonicalStructuralDofOwner::StructuralNode(*node_identity),
                             dof: term.dof.into(),
                             coefficient: term.coefficient,
                         }),
@@ -402,7 +407,7 @@ fn compile_pair(
             CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
         {
             let mut terms = vec![CanonicalStructuralConstraintTerm {
-                owner: CanonicalStructuralDofOwner::MeshNode(pairing.secondary_node_identity),
+                owner: CanonicalStructuralDofOwner::StructuralNode(pairing.secondary_node_identity),
                 dof: secondary_dof,
                 coefficient: 1.0,
             }];
@@ -413,7 +418,7 @@ fn compile_pair(
                         .zip(transformed_direction)
                         .filter(|(_, coefficient)| *coefficient != 0.0)
                         .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-                            owner: CanonicalStructuralDofOwner::MeshNode(
+                            owner: CanonicalStructuralDofOwner::StructuralNode(
                                 weight.primary_node_identity,
                             ),
                             dof,

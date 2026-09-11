@@ -11,6 +11,7 @@ mod coupling;
 mod enforcement;
 mod frame;
 mod matrix_apply;
+mod mixed;
 mod normal;
 mod pairing;
 mod plan;
@@ -24,15 +25,16 @@ mod vector;
 
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralConstraintTopology,
+    CanonicalStructuralDof, CanonicalStructuralDofAddress, CanonicalStructuralDofOwner,
     CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
     ConstraintCouplingWeight, ConstraintEnforcement, ConstraintGroupEvidence,
     ConstraintPairingEvidence, ConstraintPairingWeight, ConstraintPlanError,
-    ConstraintPlanEvidence, ReactionRecovery, ResolvedConstraintTarget,
+    ConstraintPlanEvidence, ConstraintResidualQuantity, ReactionRecovery, ResolvedConstraintTarget,
 };
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintReferencePointResult,
-    ConstraintResultError, ConstraintRowReaction,
+    ConstraintResultError, ConstraintRowReaction, ConstraintViolation,
 };
 
 #[cfg(test)]

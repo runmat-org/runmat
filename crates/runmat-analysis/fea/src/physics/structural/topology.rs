@@ -3,6 +3,7 @@ use runmat_canonical_codec::{encode_contract, CanonicalCodecError, CanonicalLimi
 use runmat_execution::Digest;
 
 pub(crate) mod mixed;
+pub(crate) mod mixed_target;
 
 const EXPLICIT_TOPOLOGY_PREFIX: &[u8] = b"runmat-fea-explicit-structural-topology/v1\0";
 const EXPLICIT_TOPOLOGY_LIMITS: CanonicalLimits =

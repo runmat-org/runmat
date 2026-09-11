@@ -1,4 +1,6 @@
-use runmat_analysis_core::{RegionTarget, StructuralRotationDof, StructuralTranslationDof};
+use runmat_analysis_core::{
+    BoundaryTransferImplementation, RegionTarget, StructuralRotationDof, StructuralTranslationDof,
+};
 use runmat_execution::Digest;
 use runmat_meshing_core::{PersistentEntityId, StableDigest};
 use serde::{Deserialize, Serialize};
@@ -61,6 +63,7 @@ pub struct ResolvedConstraintTarget {
 pub struct ConstraintGroupEvidence {
     pub constraint_id: String,
     pub source_digest: Digest,
+    pub implementation: BoundaryTransferImplementation,
     pub targets: Vec<ResolvedConstraintTarget>,
     pub reference_point_identities: Vec<Digest>,
     pub coupling: Option<ConstraintCouplingEvidence>,
@@ -117,8 +120,58 @@ pub struct CanonicalStructuralConstraintTerm {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanonicalStructuralDofOwner {
-    MeshNode(StableDigest),
+    StructuralNode(StableDigest),
     ReferencePoint(Digest),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CanonicalStructuralDofAddress {
+    pub owner: CanonicalStructuralDofOwner,
+    pub dof: CanonicalStructuralDof,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CanonicalStructuralConstraintTopology {
+    Solid {
+        mesh_digest: StableDigest,
+    },
+    ConformalMixed {
+        mesh_digest: StableDigest,
+        structural_topology_digest: Digest,
+    },
+}
+
+impl CanonicalStructuralConstraintTopology {
+    pub const fn mesh_digest(self) -> StableDigest {
+        match self {
+            Self::Solid { mesh_digest } | Self::ConformalMixed { mesh_digest, .. } => mesh_digest,
+        }
+    }
+
+    pub fn structural_digest(self) -> Digest {
+        match self {
+            Self::Solid { mesh_digest } => Digest::from_bytes(*mesh_digest.bytes()),
+            Self::ConformalMixed {
+                structural_topology_digest,
+                ..
+            } => structural_topology_digest,
+        }
+    }
+
+    pub fn has_valid_identity(self) -> bool {
+        self.mesh_digest() != StableDigest::ZERO
+            && match self {
+                Self::Solid { .. } => true,
+                Self::ConformalMixed {
+                    structural_topology_digest,
+                    ..
+                } => {
+                    structural_topology_digest.bytes() != &[0; 32]
+                        && structural_topology_digest != Digest::sha256([])
+                }
+            }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -136,7 +189,15 @@ pub struct CanonicalStructuralConstraintRow {
     pub constraint_id: String,
     pub terms: Vec<CanonicalStructuralConstraintTerm>,
     pub right_hand_side: f64,
+    pub residual_quantity: ConstraintResidualQuantity,
     pub reaction_recovery: ReactionRecovery,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintResidualQuantity {
+    Displacement,
+    Rotation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -153,7 +214,7 @@ pub struct ConstraintPlanEvidence {
 #[serde(deny_unknown_fields)]
 pub struct CanonicalStructuralConstraintPlan {
     pub schema_version: u16,
-    pub topology_digest: StableDigest,
+    pub topology: CanonicalStructuralConstraintTopology,
     pub geometry_source_digest: StableDigest,
     pub geometry_revision: u64,
     pub persistent_mapping_version: u32,
@@ -214,10 +275,11 @@ pub enum ConstraintPlanError {
     ScheduledValue { constraint_id: String },
     #[error("constraint `{constraint_id}` contains a non-finite prescribed value")]
     NonFiniteValue { constraint_id: String },
-    #[error("constraints `{first_constraint_id}` and `{second_constraint_id}` prescribe conflicting values on the same solver DOF")]
+    #[error("constraints `{first_constraint_id}` and `{second_constraint_id}` prescribe conflicting values in the same canonical row space")]
     ConflictingRow {
         first_constraint_id: String,
         second_constraint_id: String,
+        conflicting_dof: Option<CanonicalStructuralDofAddress>,
     },
     #[error("constraint plan topology does not match the solver mesh")]
     TopologyMismatch,

@@ -7,7 +7,7 @@ use runmat_meshing_core::StableDigest;
 
 use super::contract::{
     CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
-    CanonicalStructuralDofOwner, ConstraintPlanError, ReactionRecovery,
+    CanonicalStructuralDofOwner, ConstraintPlanError, ConstraintResidualQuantity, ReactionRecovery,
 };
 use super::{plan::canonical_digest, rank};
 
@@ -23,7 +23,7 @@ pub(super) fn new_singleton(
     new_sparse(
         constraint_id,
         vec![CanonicalStructuralConstraintTerm {
-            owner: CanonicalStructuralDofOwner::MeshNode(node_identity),
+            owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
             dof,
             coefficient,
         }],
@@ -42,7 +42,7 @@ pub(super) fn new_direction(
         .zip(direction)
         .filter(|(_, coefficient)| *coefficient != 0.0)
         .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-            owner: CanonicalStructuralDofOwner::MeshNode(node_identity),
+            owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
             dof,
             coefficient,
         })
@@ -78,11 +78,13 @@ pub(super) fn new_sparse(
     } else {
         ReactionRecovery::ConstraintMultiplier
     };
+    let residual_quantity = residual_quantity(&combined);
     let mut row = CanonicalStructuralConstraintRow {
         identity: Digest::from_bytes([0; 32]),
         constraint_id: constraint_id.into(),
         terms: combined,
         right_hand_side,
+        residual_quantity,
         reaction_recovery,
     };
     row.identity = row_identity(&row)?;
@@ -98,9 +100,23 @@ pub(super) fn row_identity(
             &row.constraint_id,
             &row.terms,
             row.right_hand_side,
+            row.residual_quantity,
             row.reaction_recovery,
         ),
     )
+}
+
+pub(super) fn residual_quantity(
+    terms: &[CanonicalStructuralConstraintTerm],
+) -> ConstraintResidualQuantity {
+    if terms
+        .iter()
+        .all(|term| matches!(term.dof, CanonicalStructuralDof::Rotation(_)))
+    {
+        ConstraintResidualQuantity::Rotation
+    } else {
+        ConstraintResidualQuantity::Displacement
+    }
 }
 
 pub(super) fn term_key(

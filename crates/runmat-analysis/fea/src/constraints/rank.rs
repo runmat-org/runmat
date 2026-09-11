@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    CanonicalStructuralConstraintRow, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-    ConstraintPlanError, ReactionRecovery,
+    CanonicalStructuralConstraintRow, CanonicalStructuralDof, CanonicalStructuralDofAddress,
+    CanonicalStructuralDofOwner, ConstraintPlanError, ReactionRecovery,
 };
 
 type DofKey = (CanonicalStructuralDofOwner, CanonicalStructuralDof);
@@ -23,6 +23,10 @@ pub(super) fn classify(
     let mut redundant = 0;
 
     for row in rows {
+        let conflicting_dof = (row.terms.len() == 1).then(|| CanonicalStructuralDofAddress {
+            owner: row.terms[0].owner,
+            dof: row.terms[0].dof,
+        });
         let scale = row
             .terms
             .iter()
@@ -66,6 +70,7 @@ pub(super) fn classify(
                 return Err(ConstraintPlanError::ConflictingRow {
                     first_constraint_id,
                     second_constraint_id: row.constraint_id.clone(),
+                    conflicting_dof,
                 });
             }
             row.reaction_recovery = ReactionRecovery::RedundantEquation;

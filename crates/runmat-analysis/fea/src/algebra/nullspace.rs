@@ -304,6 +304,7 @@ pub(crate) struct MixedStructuralNullspaceInput<'a> {
     pub element_operator: &'a RealSparseMatrix,
     pub connector_operator: Option<&'a RealSparseMatrix>,
     pub combined_operator: &'a RealSparseMatrix,
+    pub constraints: &'a ResolvedConstraintMatrix,
     pub constrained_dofs: &'a [bool],
 }
 

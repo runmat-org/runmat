@@ -210,6 +210,7 @@ pub fn prepare_structural_linear_program(
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = build_structural_resource_plan(
+        &preparation.mesh,
         &projection,
         &constraint_plan,
         &observation_plan,

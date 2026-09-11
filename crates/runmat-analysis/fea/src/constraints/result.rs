@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, AnalysisModel};
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
@@ -8,10 +8,21 @@ use thiserror::Error;
 
 use super::{
     reaction::solve_constraint_multipliers,
-    result_state::{nodal_vector_field, owner_dof_index, translation_component},
-    CanonicalStructuralConstraintPlan, CanonicalStructuralDofOwner, ReactionRecovery,
+    result_state::{
+        dof_component, nodal_vector_field, nodal_vector_field_for_count, owner_dof_index,
+        translation_component, ConstraintNodeState,
+    },
+    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology,
+    CanonicalStructuralDof, CanonicalStructuralDofOwner, ReactionRecovery,
 };
-use crate::contracts::{FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE};
+use crate::{
+    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
+    contracts::{
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_ROTATION,
+    },
+    physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,7 +33,8 @@ pub struct ConstraintGroupResult {
     pub resultant_force_newtons: [f64; 3],
     pub resultant_moment_about_global_origin_newton_meters: [f64; 3],
     pub constraint_work_joules: f64,
-    pub maximum_prescribed_error_meters: f64,
+    pub maximum_displacement_error_meters: f64,
+    pub maximum_rotation_error_radians: f64,
     pub row_reactions: Vec<ConstraintRowReaction>,
 }
 
@@ -31,7 +43,23 @@ pub struct ConstraintGroupResult {
 pub struct ConstraintRowReaction {
     pub row_identity: Digest,
     pub generalized_reaction: f64,
-    pub violation_meters: f64,
+    pub violation: ConstraintViolation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "quantity", content = "magnitude")]
+pub enum ConstraintViolation {
+    DisplacementMeters(f64),
+    RotationRadians(f64),
+}
+
+impl ConstraintViolation {
+    fn is_valid(self) -> bool {
+        let magnitude = match self {
+            Self::DisplacementMeters(value) | Self::RotationRadians(value) => value,
+        };
+        magnitude.is_finite() && magnitude >= 0.0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -39,13 +67,14 @@ pub struct ConstraintRowReaction {
 pub struct CanonicalStructuralConstraintResult {
     pub schema_version: u16,
     pub constraint_plan_digest: Digest,
-    pub topology_digest: StableDigest,
+    pub topology: CanonicalStructuralConstraintTopology,
     pub reference_points: Vec<ConstraintReferencePointResult>,
     pub groups: Vec<ConstraintGroupResult>,
     pub resultant_force_newtons: [f64; 3],
     pub resultant_moment_about_global_origin_newton_meters: [f64; 3],
     pub constraint_work_joules: f64,
-    pub maximum_prescribed_error_meters: f64,
+    pub maximum_displacement_error_meters: f64,
+    pub maximum_rotation_error_radians: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -95,6 +124,80 @@ impl CanonicalStructuralConstraintResult {
         Self::recover_from_solver_state(plan, mesh, displacement, reaction)
     }
 
+    pub fn recover_for_model(
+        plan: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+        fields: &[AnalysisField],
+    ) -> Result<Self, ConstraintResultError> {
+        if matches!(
+            plan.topology,
+            CanonicalStructuralConstraintTopology::Solid { .. }
+        ) {
+            return Self::recover(plan, mesh, fields);
+        }
+        if !plan.reference_points.is_empty() {
+            return Err(ConstraintResultError::GeneralizedStateRequired);
+        }
+        let structural = model.structural.as_ref().ok_or_else(|| {
+            ConstraintResultError::InvalidPlan(
+                "mixed constraint recovery requires explicit structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
+            .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
+        if plan.topology.structural_digest() != topology.identity {
+            return Err(ConstraintResultError::TopologyMismatch);
+        }
+        let layout = mixed_dof_layout(&topology);
+        let node_count = topology.nodes.len();
+        let translations =
+            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT, node_count)?;
+        let rotations =
+            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_ROTATION, node_count)?;
+        let forces =
+            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE, node_count)?;
+        let moments =
+            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT, node_count)?;
+        let mut displacement = vec![0.0; layout.total_dof_count()];
+        let mut reaction = vec![0.0; layout.total_dof_count()];
+        let mut nodes = BTreeMap::new();
+        for (node_index, node) in topology.nodes.iter().enumerate() {
+            let mut dof_indices = [None; 6];
+            for (component, kind) in StructuralDofKind::ORDER.into_iter().enumerate() {
+                if let Some(row) = layout.index(node_index, kind) {
+                    dof_indices[component] = Some(row);
+                    let values = if kind.is_rotational() {
+                        rotations
+                    } else {
+                        translations
+                    };
+                    let reactions = if kind.is_rotational() {
+                        moments
+                    } else {
+                        forces
+                    };
+                    displacement[row] = values[node_index * 3 + component % 3];
+                    reaction[row] = reactions[node_index * 3 + component % 3];
+                }
+            }
+            nodes.insert(
+                node.identity,
+                ConstraintNodeState {
+                    coordinates_m: node.coordinates_m,
+                    dof_indices,
+                },
+            );
+        }
+        Self::recover_resolved(
+            plan,
+            &nodes,
+            layout.total_dof_count(),
+            &displacement,
+            &reaction,
+        )
+    }
+
     pub fn recover_from_solver_state(
         plan: &CanonicalStructuralConstraintPlan,
         mesh: &SolverMeshArtifact,
@@ -105,7 +208,7 @@ impl CanonicalStructuralConstraintResult {
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
         mesh.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
-        if plan.topology_digest != mesh.canonical_digest {
+        if plan.topology.mesh_digest() != mesh.canonical_digest {
             return Err(ConstraintResultError::TopologyMismatch);
         }
         let expected_dofs = mesh.topology.nodes.len() * 3 + plan.reference_points.len() * 6;
@@ -121,8 +224,39 @@ impl CanonicalStructuralConstraintResult {
             .nodes
             .iter()
             .enumerate()
-            .map(|(index, node)| (node.stable_identity, (index, node.coordinates_m)))
+            .map(|(index, node)| {
+                (
+                    node.stable_identity,
+                    ConstraintNodeState {
+                        coordinates_m: node.coordinates_m,
+                        dof_indices: [
+                            Some(index * 3),
+                            Some(index * 3 + 1),
+                            Some(index * 3 + 2),
+                            None,
+                            None,
+                            None,
+                        ],
+                    },
+                )
+            })
             .collect::<BTreeMap<_, _>>();
+        Self::recover_resolved(
+            plan,
+            &nodes,
+            mesh.topology.nodes.len() * 3,
+            displacement,
+            reaction,
+        )
+    }
+
+    fn recover_resolved(
+        plan: &CanonicalStructuralConstraintPlan,
+        nodes: &BTreeMap<StableDigest, ConstraintNodeState>,
+        reference_dof_offset: usize,
+        displacement: &[f64],
+        reaction: &[f64],
+    ) -> Result<Self, ConstraintResultError> {
         let mut groups = plan
             .groups
             .iter()
@@ -136,7 +270,8 @@ impl CanonicalStructuralConstraintResult {
                         resultant_force_newtons: [0.0; 3],
                         resultant_moment_about_global_origin_newton_meters: [0.0; 3],
                         constraint_work_joules: 0.0,
-                        maximum_prescribed_error_meters: 0.0,
+                        maximum_displacement_error_meters: 0.0,
+                        maximum_rotation_error_radians: 0.0,
                         row_reactions: Vec::new(),
                     },
                 )
@@ -155,7 +290,13 @@ impl CanonicalStructuralConstraintResult {
                     .iter()
                     .map(|term| {
                         Ok((
-                            owner_dof_index(plan, &nodes, term.owner, term.dof)?,
+                            owner_dof_index(
+                                plan,
+                                nodes,
+                                reference_dof_offset,
+                                term.owner,
+                                term.dof,
+                            )?,
                             term.coefficient,
                         ))
                     })
@@ -206,7 +347,13 @@ impl CanonicalStructuralConstraintResult {
                 .iter()
                 .map(|term| {
                     Ok(term.coefficient
-                        * displacement[owner_dof_index(plan, &nodes, term.owner, term.dof)?])
+                        * displacement[owner_dof_index(
+                            plan,
+                            nodes,
+                            reference_dof_offset,
+                            term.owner,
+                            term.dof,
+                        )?])
                 })
                 .collect::<Result<Vec<_>, ConstraintResultError>>()?
                 .into_iter()
@@ -214,25 +361,45 @@ impl CanonicalStructuralConstraintResult {
             let error = (equation_value - row.right_hand_side).abs();
             group.active_row_count += 1;
             for term in &row.terms {
-                if let CanonicalStructuralDofOwner::MeshNode(identity) = term.owner {
-                    let (_, coordinates) = nodes[&identity];
-                    let component = translation_component(term.dof)?;
-                    let force = term.coefficient * multiplier;
-                    group.resultant_force_newtons[component] += force;
-                    add_cross_product(
-                        &mut group.resultant_moment_about_global_origin_newton_meters,
-                        coordinates,
-                        component_vector(component, force),
-                    );
+                if let CanonicalStructuralDofOwner::StructuralNode(identity) = term.owner {
+                    let node = nodes
+                        .get(&identity)
+                        .ok_or(ConstraintResultError::NodeAbsent)?;
+                    let generalized_reaction = term.coefficient * multiplier;
+                    match term.dof {
+                        CanonicalStructuralDof::Translation(_) => {
+                            let component = translation_component(term.dof)?;
+                            group.resultant_force_newtons[component] += generalized_reaction;
+                            add_cross_product(
+                                &mut group.resultant_moment_about_global_origin_newton_meters,
+                                node.coordinates_m,
+                                component_vector(component, generalized_reaction),
+                            );
+                        }
+                        CanonicalStructuralDof::Rotation(_) => {
+                            group.resultant_moment_about_global_origin_newton_meters
+                                [dof_component(term.dof) - 3] += generalized_reaction;
+                        }
+                    }
                 }
             }
             group.constraint_work_joules += multiplier * row.right_hand_side;
-            group.maximum_prescribed_error_meters =
-                group.maximum_prescribed_error_meters.max(error);
+            let violation = match row.residual_quantity {
+                super::ConstraintResidualQuantity::Displacement => {
+                    group.maximum_displacement_error_meters =
+                        group.maximum_displacement_error_meters.max(error);
+                    ConstraintViolation::DisplacementMeters(error)
+                }
+                super::ConstraintResidualQuantity::Rotation => {
+                    group.maximum_rotation_error_radians =
+                        group.maximum_rotation_error_radians.max(error);
+                    ConstraintViolation::RotationRadians(error)
+                }
+            };
             group.row_reactions.push(ConstraintRowReaction {
                 row_identity: row.identity,
                 generalized_reaction: multiplier,
-                violation_meters: error,
+                violation,
             });
         }
 
@@ -241,7 +408,7 @@ impl CanonicalStructuralConstraintResult {
             .iter()
             .enumerate()
             .map(|(index, point)| {
-                let base = mesh.topology.nodes.len() * 3 + index * 6;
+                let base = reference_dof_offset + index * 6;
                 ConstraintReferencePointResult {
                     identity: point.identity,
                     reference_point_id: point.reference_point_id.clone(),
@@ -274,12 +441,13 @@ impl CanonicalStructuralConstraintResult {
             constraint_plan_digest: plan
                 .content_digest()
                 .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?,
-            topology_digest: mesh.canonical_digest,
+            topology: plan.topology,
             reference_points,
             resultant_force_newtons: [0.0; 3],
             resultant_moment_about_global_origin_newton_meters: [0.0; 3],
             constraint_work_joules: 0.0,
-            maximum_prescribed_error_meters: 0.0,
+            maximum_displacement_error_meters: 0.0,
+            maximum_rotation_error_radians: 0.0,
             groups,
         };
         for group in &result.groups {
@@ -290,9 +458,12 @@ impl CanonicalStructuralConstraintResult {
                     group.resultant_moment_about_global_origin_newton_meters[component];
             }
             result.constraint_work_joules += group.constraint_work_joules;
-            result.maximum_prescribed_error_meters = result
-                .maximum_prescribed_error_meters
-                .max(group.maximum_prescribed_error_meters);
+            result.maximum_displacement_error_meters = result
+                .maximum_displacement_error_meters
+                .max(group.maximum_displacement_error_meters);
+            result.maximum_rotation_error_radians = result
+                .maximum_rotation_error_radians
+                .max(group.maximum_rotation_error_radians);
         }
         result.validate_against(plan)?;
         Ok(result)
@@ -308,7 +479,7 @@ impl CanonicalStructuralConstraintResult {
                 != plan
                     .content_digest()
                     .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?
-            || self.topology_digest != plan.topology_digest
+            || self.topology != plan.topology
             || self.groups.len() != plan.groups.len()
             || self.reference_points.len() != plan.reference_points.len()
             || self
@@ -361,7 +532,7 @@ impl CanonicalStructuralConstraintResult {
     pub fn validate(&self) -> Result<(), ConstraintResultError> {
         if self.schema_version != 1
             || self.constraint_plan_digest.bytes() == &[0; 32]
-            || self.topology_digest == StableDigest::ZERO
+            || !self.topology.has_valid_identity()
             || self.groups.iter().any(|group| !group_is_finite(group))
             || self.reference_points.iter().any(|point| {
                 point.identity.bytes() == &[0; 32]
@@ -382,15 +553,18 @@ impl CanonicalStructuralConstraintResult {
             || !all_finite(&self.resultant_force_newtons)
             || !all_finite(&self.resultant_moment_about_global_origin_newton_meters)
             || !self.constraint_work_joules.is_finite()
-            || !self.maximum_prescribed_error_meters.is_finite()
-            || self.maximum_prescribed_error_meters < 0.0
+            || !self.maximum_displacement_error_meters.is_finite()
+            || self.maximum_displacement_error_meters < 0.0
+            || !self.maximum_rotation_error_radians.is_finite()
+            || self.maximum_rotation_error_radians < 0.0
         {
             return Err(ConstraintResultError::InvalidEvidence);
         }
         let mut force = [0.0; 3];
         let mut moment = [0.0; 3];
         let mut work = 0.0;
-        let mut error: f64 = 0.0;
+        let mut displacement_error: f64 = 0.0;
+        let mut rotation_error: f64 = 0.0;
         for group in &self.groups {
             for component in 0..3 {
                 force[component] += group.resultant_force_newtons[component];
@@ -398,12 +572,14 @@ impl CanonicalStructuralConstraintResult {
                     group.resultant_moment_about_global_origin_newton_meters[component];
             }
             work += group.constraint_work_joules;
-            error = error.max(group.maximum_prescribed_error_meters);
+            displacement_error = displacement_error.max(group.maximum_displacement_error_meters);
+            rotation_error = rotation_error.max(group.maximum_rotation_error_radians);
         }
         if force != self.resultant_force_newtons
             || moment != self.resultant_moment_about_global_origin_newton_meters
             || work != self.constraint_work_joules
-            || error != self.maximum_prescribed_error_meters
+            || displacement_error != self.maximum_displacement_error_meters
+            || rotation_error != self.maximum_rotation_error_radians
         {
             return Err(ConstraintResultError::InvalidEvidence);
         }
@@ -428,13 +604,14 @@ fn group_is_finite(group: &ConstraintGroupResult) -> bool {
         && all_finite(&group.resultant_force_newtons)
         && all_finite(&group.resultant_moment_about_global_origin_newton_meters)
         && group.constraint_work_joules.is_finite()
-        && group.maximum_prescribed_error_meters.is_finite()
-        && group.maximum_prescribed_error_meters >= 0.0
+        && group.maximum_displacement_error_meters.is_finite()
+        && group.maximum_displacement_error_meters >= 0.0
+        && group.maximum_rotation_error_radians.is_finite()
+        && group.maximum_rotation_error_radians >= 0.0
         && group.row_reactions.iter().all(|row| {
             row.row_identity.bytes() != &[0; 32]
                 && row.generalized_reaction.is_finite()
-                && row.violation_meters.is_finite()
-                && row.violation_meters >= 0.0
+                && row.violation.is_valid()
         })
 }
 

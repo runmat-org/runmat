@@ -1,10 +1,17 @@
 use std::collections::BTreeSet;
 
+use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
+use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    algebra::SparsePattern, constraints::CanonicalStructuralConstraintPlan,
+    algebra::SparsePattern,
+    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology},
+    physics::structural::topology::{
+        mixed::CanonicalMixedStructuralTopology, mixed_target::resolve_mixed_structural_target,
+    },
     topology::AnalysisProjection,
 };
 
@@ -15,13 +22,15 @@ const SYMBOLIC_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 64, 6
 const TRANSLATIONAL_DOF_COUNT: usize = 3;
 const REFERENCE_POINT_DOF_COUNT: usize = 6;
 
-/// Material-independent sparse storage bounds for a structural solid solve.
+/// Material-independent sparse storage bounds for a structural solve.
 ///
 /// The stiffness pattern contains every coupling that element assembly may emit, including
-/// coefficients that happen to evaluate to zero for a particular material or geometry. Mass and
-/// damping follow the currently admitted diagonal storage contracts. This plan is derived before
-/// numerical assembly and therefore can be used for allocation admission without doing the work
-/// it is intended to guard.
+/// coefficients that happen to evaluate to zero for a particular material or geometry. Solid-only
+/// mass and damping follow their admitted diagonal storage contracts. Mixed systems conservatively
+/// reserve the complete element-and-connector stiffness bound for all three operators because
+/// explicit consistent mass and Rayleigh damping can populate those couplings. This plan is derived
+/// before numerical assembly and therefore can be used for allocation admission without doing the
+/// work it is intended to guard.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StructuralSymbolicOperators {
     stiffness_upper_bound: SparsePattern,
@@ -34,11 +43,19 @@ impl StructuralSymbolicOperators {
     pub fn derive(
         projection: &AnalysisProjection,
         constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
     ) -> Result<Self, ResourcePlanningError> {
-        if constraints.topology_digest != projection.mesh_digest {
+        if constraints.topology.mesh_digest() != projection.mesh_digest {
             return Err(ResourcePlanningError::Invalid(
                 "constraint plan and analysis projection name different topology".into(),
             ));
+        }
+        if matches!(
+            constraints.topology,
+            CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+        ) {
+            return Self::derive_mixed(projection, constraints, model, mesh);
         }
         let mesh_dofs = projection
             .nodes
@@ -106,6 +123,153 @@ impl StructuralSymbolicOperators {
         })
     }
 
+    fn derive_mixed(
+        projection: &AnalysisProjection,
+        constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+    ) -> Result<Self, ResourcePlanningError> {
+        let structural = model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "mixed symbolic planning requires explicit structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if constraints.topology.structural_digest() != topology.identity {
+            return Err(ResourcePlanningError::Invalid(
+                "constraint plan and mixed structural topology differ".into(),
+            ));
+        }
+        if !constraints.reference_points.is_empty() {
+            return Err(ResourcePlanningError::Invalid(
+                "mixed reference-point symbolic planning is not complete".into(),
+            ));
+        }
+        let layout = mixed_dof_layout(&topology);
+        let total_dofs = layout.total_dof_count();
+        let mut rows = (0..total_dofs)
+            .map(|_| BTreeSet::<usize>::new())
+            .collect::<Vec<_>>();
+        for element in &projection.elements {
+            let element_dofs = element
+                .node_indices
+                .iter()
+                .flat_map(|node| {
+                    [
+                        StructuralDofKind::Ux,
+                        StructuralDofKind::Uy,
+                        StructuralDofKind::Uz,
+                    ]
+                    .into_iter()
+                    .filter_map(|dof| layout.index(*node, dof))
+                })
+                .collect::<Vec<_>>();
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        for element in &structural.elements {
+            let explicit_nodes = match &element.kind {
+                StructuralElementKind::Beam(beam) => beam.node_ids.as_slice(),
+                StructuralElementKind::Shell(shell) => shell.node_ids.as_slice(),
+            };
+            let mut element_dofs = Vec::new();
+            for node_id in explicit_nodes {
+                let explicit = structural
+                    .nodes
+                    .iter()
+                    .position(|node| node.node_id == *node_id)
+                    .ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "element `{}` references absent node {}",
+                            element.element_id, node_id
+                        ))
+                    })?;
+                let canonical = topology.explicit_node_indices[explicit];
+                element_dofs.extend(
+                    StructuralDofKind::ORDER
+                        .into_iter()
+                        .filter_map(|dof| layout.index(canonical, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        for connector in &model.connectors {
+            let mut connector_nodes = resolve_mixed_structural_target(
+                &connector.primary.region_id,
+                mesh,
+                structural,
+                &topology,
+            )
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+            .canonical_nodes()
+            .to_vec();
+            if let Some(secondary) = &connector.secondary {
+                connector_nodes.extend_from_slice(
+                    resolve_mixed_structural_target(
+                        &secondary.region_id,
+                        mesh,
+                        structural,
+                        &topology,
+                    )
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+                    .canonical_nodes(),
+                );
+            }
+            connector_nodes.sort_unstable();
+            connector_nodes.dedup();
+            let mut connector_dofs = Vec::new();
+            for node in connector_nodes {
+                connector_dofs.extend(
+                    [
+                        StructuralDofKind::Ux,
+                        StructuralDofKind::Uy,
+                        StructuralDofKind::Uz,
+                    ]
+                    .into_iter()
+                    .filter_map(|dof| layout.index(node, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &connector_dofs);
+        }
+        for (row, columns) in rows.iter_mut().enumerate() {
+            columns.insert(row);
+        }
+        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        let mass = stiffness_upper_bound.clone();
+        let damping = stiffness_upper_bound.clone();
+        Self::from_patterns(stiffness_upper_bound, mass, damping)
+    }
+
+    fn from_patterns(
+        stiffness_upper_bound: SparsePattern,
+        mass: SparsePattern,
+        damping: SparsePattern,
+    ) -> Result<Self, ResourcePlanningError> {
+        let pattern_identities = (
+            stiffness_upper_bound
+                .identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            mass.identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            damping
+                .identity()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        );
+        let encoded = encode_contract(
+            SYMBOLIC_PREFIX,
+            "structural-symbolic-operators",
+            &pattern_identities,
+            SYMBOLIC_LIMITS,
+        )
+        .map_err(ResourcePlanningError::from)?;
+        Ok(Self {
+            stiffness_upper_bound,
+            mass,
+            damping,
+            identity: Digest::sha256(encoded),
+        })
+    }
+
     pub const fn identity(&self) -> Digest {
         self.identity
     }
@@ -116,6 +280,12 @@ impl StructuralSymbolicOperators {
 
     pub fn patterns(&self) -> [&SparsePattern; 3] {
         [&self.stiffness_upper_bound, &self.mass, &self.damping]
+    }
+}
+
+fn add_dense_element_pattern(rows: &mut [BTreeSet<usize>], element_dofs: &[usize]) {
+    for &row in element_dofs {
+        rows[row].extend(element_dofs.iter().copied());
     }
 }
 

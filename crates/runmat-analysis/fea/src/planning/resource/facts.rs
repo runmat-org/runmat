@@ -1,7 +1,9 @@
+use crate::physics::structural::topology::mixed::CanonicalMixedStructuralTopology;
 use crate::{
     algebra::SparsePattern, constraints::CanonicalStructuralConstraintPlan,
     results::observation::ResolvedObservationPlan, topology::AnalysisProjection,
 };
+use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 
 use super::contract::{
     ByteCount, ConstraintResourceFacts, Count, ObservationResourceFacts, ResourcePlanningError,
@@ -37,6 +39,93 @@ impl TopologyResourceFacts {
             node_neighbor_references: count(node_neighbor_references, "node-neighbor references")?,
             estimated_resident_bytes: estimate_projection_resident_bytes(
                 projection,
+                element_node_references,
+                boundary_node_references,
+                node_neighbor_references,
+            )?,
+        })
+    }
+
+    pub(crate) fn from_mixed_projection(
+        projection: &AnalysisProjection,
+        structural: &StructuralModel,
+        topology: &CanonicalMixedStructuralTopology,
+    ) -> Result<Self, ResourcePlanningError> {
+        let solid_element_references = sum_lengths(
+            projection
+                .elements
+                .iter()
+                .map(|element| element.node_indices.len()),
+            "solid element-node references",
+        )?;
+        let explicit_element_references = sum_lengths(
+            structural
+                .elements
+                .iter()
+                .map(|element| match &element.kind {
+                    StructuralElementKind::Beam(beam) => beam.node_ids.len(),
+                    StructuralElementKind::Shell(shell) => shell.node_ids.len(),
+                }),
+            "explicit element-node references",
+        )?;
+        let element_node_references = solid_element_references
+            .checked_add(explicit_element_references)
+            .ok_or(ResourcePlanningError::Overflow(
+                "mixed element-node references",
+            ))?;
+        let boundary_node_references = sum_lengths(
+            projection
+                .boundary_faces
+                .iter()
+                .map(|face| face.node_indices.len()),
+            "boundary-node references",
+        )?;
+        let explicit_neighbor_references =
+            structural
+                .elements
+                .iter()
+                .try_fold(0usize, |total, element| {
+                    let node_count = match &element.kind {
+                        StructuralElementKind::Beam(beam) => beam.node_ids.len(),
+                        StructuralElementKind::Shell(shell) => shell.node_ids.len(),
+                    };
+                    total
+                        .checked_add(node_count.saturating_mul(node_count.saturating_sub(1)))
+                        .ok_or(ResourcePlanningError::Overflow(
+                            "mixed node-neighbor references",
+                        ))
+                })?;
+        let node_neighbor_references = sum_lengths(
+            projection.node_neighbors.iter().map(Vec::len),
+            "solid node-neighbor references",
+        )?
+        .checked_add(explicit_neighbor_references)
+        .ok_or(ResourcePlanningError::Overflow(
+            "mixed node-neighbor references",
+        ))?;
+        let node_count = topology.nodes.len();
+        let element_count = projection
+            .elements
+            .len()
+            .checked_add(structural.elements.len())
+            .ok_or(ResourcePlanningError::Overflow("mixed element count"))?;
+        Ok(Self {
+            nodes: count(node_count, "mixed node count")?,
+            elements: count(element_count, "mixed element count")?,
+            boundary_faces: count(projection.boundary_faces.len(), "boundary-face count")?,
+            element_node_references: count(
+                element_node_references,
+                "mixed element-node references",
+            )?,
+            boundary_node_references: count(boundary_node_references, "boundary-node references")?,
+            node_neighbor_references: count(
+                node_neighbor_references,
+                "mixed node-neighbor references",
+            )?,
+            estimated_resident_bytes: estimate_topology_resident_bytes(
+                node_count,
+                element_count,
+                projection.boundary_faces.len(),
                 element_node_references,
                 boundary_node_references,
                 node_neighbor_references,
@@ -112,11 +201,29 @@ fn estimate_projection_resident_bytes(
     boundary_node_references: usize,
     node_neighbor_references: usize,
 ) -> Result<ByteCount, ResourcePlanningError> {
-    let node_count = u64::try_from(projection.nodes.len())
+    estimate_topology_resident_bytes(
+        projection.nodes.len(),
+        projection.elements.len(),
+        projection.boundary_faces.len(),
+        element_node_references,
+        boundary_node_references,
+        node_neighbor_references,
+    )
+}
+
+fn estimate_topology_resident_bytes(
+    node_count: usize,
+    element_count: usize,
+    boundary_count: usize,
+    element_node_references: usize,
+    boundary_node_references: usize,
+    node_neighbor_references: usize,
+) -> Result<ByteCount, ResourcePlanningError> {
+    let node_count = u64::try_from(node_count)
         .map_err(|_| ResourcePlanningError::Overflow("projection nodes"))?;
-    let element_count = u64::try_from(projection.elements.len())
+    let element_count = u64::try_from(element_count)
         .map_err(|_| ResourcePlanningError::Overflow("projection elements"))?;
-    let boundary_count = u64::try_from(projection.boundary_faces.len())
+    let boundary_count = u64::try_from(boundary_count)
         .map_err(|_| ResourcePlanningError::Overflow("projection boundary faces"))?;
     let references = [
         element_node_references,

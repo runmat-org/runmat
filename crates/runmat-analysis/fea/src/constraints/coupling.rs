@@ -378,7 +378,7 @@ fn mesh_term(
     coefficient: f64,
 ) -> CanonicalStructuralConstraintTerm {
     CanonicalStructuralConstraintTerm {
-        owner: CanonicalStructuralDofOwner::MeshNode(identity),
+        owner: CanonicalStructuralDofOwner::StructuralNode(identity),
         dof: CanonicalStructuralDof::TRANSLATIONS[component],
         coefficient,
     }

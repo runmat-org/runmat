@@ -6,7 +6,6 @@ mod explicit_constraints;
 mod explicit_elements;
 mod explicit_loads;
 mod mixed_structural;
-mod mixed_targets;
 mod moment_projection;
 mod reduced_rhs;
 mod solid_matrix;
@@ -15,6 +14,8 @@ mod solver_solid_boundary;
 mod structural_inputs;
 
 use std::{collections::BTreeMap, fmt};
+
+pub(crate) use mixed_structural::mixed_dof_layout;
 
 use runmat_analysis_core::{
     AnalysisModel, BoundaryTransferImplementation, SourceImplementation, StructuralElementKind,
@@ -799,17 +800,11 @@ fn assemble_linear_system_impl(
         .unwrap_or(0);
     if structural_requirement.is_some() && explicit_element_count > 0 {
         if let Some(solver_mesh) = solver_mesh.as_ref() {
-            if supplied_constraint_plan.is_some() {
-                return Err(LinearAssemblyError::ConstraintPlan(
-                    ConstraintPlanError::Invalid(
-                        "mixed structural constraint-plan projection is not complete".into(),
-                    ),
-                ));
-            }
             return mixed_structural::assemble_mixed_structural_system(
                 model,
                 excitations,
                 solver_mesh,
+                supplied_constraint_plan,
             );
         }
         if supplied_constraint_plan.is_some() {
@@ -1884,7 +1879,7 @@ fn lower_solid_direct_constraints(
                 constraint_kind: "general_constraint_equation",
             });
         };
-        let CanonicalStructuralDofOwner::MeshNode(node_identity) = term.owner else {
+        let CanonicalStructuralDofOwner::StructuralNode(node_identity) = term.owner else {
             return Err(StructuralAssemblyError::ConstraintPlanNodeAbsent);
         };
         let node_index = node_indices
@@ -2506,6 +2501,7 @@ mod tests {
                     ),
                 },
             ));
+        let shared_node_identity = mesh.topology.nodes[0].stable_identity;
         let error = assemble_structural_system(
             &conflicting,
             &static_excitations(&conflicting),
@@ -2515,16 +2511,81 @@ mod tests {
         .expect_err("solid and explicit prescriptions must not disagree on a shared row");
         assert!(matches!(
             error,
-            LinearAssemblyError::Structural(
-                StructuralAssemblyError::ConflictingDirectConstraints {
-                    first_constraint_id,
-                    second_constraint_id,
-                    node_index: 0,
-                    dof: StructuralDofKind::Ux,
-                }
-            ) if first_constraint_id == "conflicting_shared_translation"
+            LinearAssemblyError::ConstraintPlan(ConstraintPlanError::ConflictingRow {
+                first_constraint_id,
+                second_constraint_id,
+                conflicting_dof: Some(crate::constraints::CanonicalStructuralDofAddress {
+                    owner: CanonicalStructuralDofOwner::StructuralNode(identity),
+                    dof: CanonicalStructuralDof::Translation(
+                        runmat_analysis_core::StructuralTranslationDof::Ux,
+                    ),
+                }),
+            }) if first_constraint_id == "conflicting_shared_translation"
                 && second_constraint_id == "fixed_root"
+                && identity == shared_node_identity
         ));
+    }
+
+    #[test]
+    fn mixed_affine_rows_anchor_rigid_modes_without_connector_support() {
+        let mut mesh = tetrahedron4_mesh();
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
+            kind: PersistentEntityKind::Vertex,
+            source_topology_id: "beam_root".into(),
+            assembly_path: vec!["root".into()],
+        }];
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        set_boundary_regions(&mut mesh, 1, &["solid_load"]);
+        reseal(&mut mesh);
+
+        let mut model = mixed_solid_beam_model(attached_coordinates);
+        model.connectors.clear();
+        model
+            .constraints
+            .push(runmat_analysis_core::AnalysisConstraint::Structural(
+                runmat_analysis_core::StructuralConstraint {
+                    constraint_id: "solid_beam_ux_relation".into(),
+                    frame: runmat_analysis_core::CoordinateFrame::Global,
+                    kind: runmat_analysis_core::StructuralConstraintKind::Equation(
+                        runmat_analysis_core::StructuralConstraintEquation {
+                            terms: vec![
+                                runmat_analysis_core::StructuralConstraintEquationTerm {
+                                    target: runmat_analysis_core::RegionTarget::point("node:1"),
+                                    dof: runmat_analysis_core::StructuralTranslationDof::Ux,
+                                    coefficient: 1.0,
+                                },
+                                runmat_analysis_core::StructuralConstraintEquationTerm {
+                                    target: runmat_analysis_core::RegionTarget::point("node:102"),
+                                    dof: runmat_analysis_core::StructuralTranslationDof::Ux,
+                                    coefficient: -1.0,
+                                },
+                            ],
+                            right_hand_side: runmat_analysis_core::Displacement::new(0.0),
+                        },
+                    ),
+                },
+            ));
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            Some(mesh),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("canonical mixed affine constraints must anchor the physical topology");
+
+        assert!(summary.affine_constraint_reduction.is_some());
+        assert!(summary.constraint_matrix.is_some());
+        assert!(summary.operator.nullspace_evidence().is_some());
+        let solve = crate::solve::linear::solve_linear_system(
+            &summary,
+            crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            &crate::solve::backend::cpu_reference::CpuReferenceBackend,
+            None,
+        );
+        assert!(solve.converged, "{:?}", solve.diagnostics);
     }
 
     #[test]

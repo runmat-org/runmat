@@ -1,11 +1,17 @@
 use crate::{
     algebra::CoercivitySymbolicPlan,
-    constraints::{CanonicalStructuralConstraintPlan, ResolvedConstraintMatrix},
+    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
+    constraints::{
+        CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology,
+        CanonicalStructuralDofOwner, ResolvedConstraintMatrix,
+    },
     execution::StructuralLinearWorkload,
+    physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
     results::observation::ResolvedObservationPlan,
     solve::preconditioner::SpdPreconditionerKind,
     topology::AnalysisProjection,
 };
+use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
     build_resource_plan, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
@@ -28,6 +34,7 @@ const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 8;
 /// This function does no assembly and accepts no caller-supplied topology, sparse, constraint, or
 /// observation counts. It is therefore safe to run before allocations and expensive kernels.
 pub fn build_structural_resource_plan(
+    mesh: &SolverMeshArtifact,
     projection: &AnalysisProjection,
     constraints: &CanonicalStructuralConstraintPlan,
     observations: &ResolvedObservationPlan,
@@ -41,7 +48,8 @@ pub fn build_structural_resource_plan(
             "observation plan and analysis projection name different topology".into(),
         ));
     }
-    let symbolic = StructuralSymbolicOperators::derive(projection, constraints)?;
+    let symbolic =
+        StructuralSymbolicOperators::derive(projection, constraints, &workload.model, mesh)?;
     let sparse = SparseResourceFacts::from_patterns(symbolic.patterns())?;
     let contribution_nonzeros =
         u64::try_from(symbolic.stiffness_upper_bound().column_indices().len())
@@ -55,14 +63,7 @@ pub fn build_structural_resource_plan(
     let observations = ObservationResourceFacts::from_plan(observations)?;
     let dofs = sparse.rows.0;
     let stiffness_nonzeros = sparse.maximum_nonzeros();
-    let node_identities = projection
-        .nodes
-        .iter()
-        .map(|node| node.stable_identity)
-        .collect::<Vec<_>>();
-    let constraint_matrix =
-        ResolvedConstraintMatrix::from_solid_plan(constraints, &node_identities)
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let constraint_matrix = resolve_constraint_matrix(mesh, constraints, workload)?;
     let admission_pattern = if constraints.rows.iter().any(|row| row.terms.len() > 1) {
         constraint_matrix
             .affine_reduction()
@@ -79,11 +80,42 @@ pub fn build_structural_resource_plan(
         stiffness_nonzeros,
         &admission,
     )?;
-    let recovery_values = projection
-        .nodes
+    let mixed_topology = if matches!(
+        constraints.topology,
+        CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+    ) {
+        let structural = workload.model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "mixed resource planning requires explicit structural topology".into(),
+            )
+        })?;
+        Some((
+            structural,
+            CanonicalMixedStructuralTopology::derive(mesh, structural)
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        ))
+    } else {
+        None
+    };
+    let recovery_node_count = mixed_topology
+        .as_ref()
+        .map(|(_, topology)| topology.nodes.len())
+        .unwrap_or(projection.nodes.len());
+    let recovery_element_count = projection
+        .elements
         .len()
+        .checked_add(
+            mixed_topology
+                .as_ref()
+                .map(|(structural, _)| structural.elements.len())
+                .unwrap_or(0),
+        )
+        .ok_or(ResourcePlanningError::Overflow(
+            "structural recovery element count",
+        ))?;
+    let recovery_values = recovery_node_count
         .checked_mul(6)
-        .and_then(|value| value.checked_add(projection.elements.len().checked_mul(13)?))
+        .and_then(|value| value.checked_add(recovery_element_count.checked_mul(13)?))
         .ok_or(ResourcePlanningError::Overflow(
             "structural recovery value count",
         ))?;
@@ -103,11 +135,20 @@ pub fn build_structural_resource_plan(
     let step = workload
         .procedure_step()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let topology_facts = if let Some((structural, topology)) = mixed_topology.as_ref() {
+        TopologyResourceFacts::from_mixed_projection(projection, structural, topology)?
+    } else {
+        TopologyResourceFacts::from_projection(projection)?
+    };
+    let topology_digest = mixed_topology
+        .as_ref()
+        .map(|(_, topology)| topology.identity)
+        .unwrap_or(projection.projection_digest);
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
-        topology_digest: projection.projection_digest,
+        topology_digest,
         operator_pattern_digest: symbolic.identity(),
-        topology: TopologyResourceFacts::from_projection(projection)?,
+        topology: topology_facts,
         sparse,
         constraints: ConstraintResourceFacts::from_plan(constraints)?,
         assembly: AssemblyResourcePolicy {
@@ -149,6 +190,49 @@ pub fn build_structural_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
+}
+
+fn resolve_constraint_matrix(
+    mesh: &SolverMeshArtifact,
+    constraints: &CanonicalStructuralConstraintPlan,
+    workload: &StructuralLinearWorkload,
+) -> Result<ResolvedConstraintMatrix, ResourcePlanningError> {
+    if !matches!(
+        constraints.topology,
+        CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+    ) {
+        let node_identities = mesh
+            .topology
+            .nodes
+            .iter()
+            .map(|node| node.stable_identity)
+            .collect::<Vec<_>>();
+        return ResolvedConstraintMatrix::from_solid_plan(constraints, &node_identities)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()));
+    }
+    let structural = workload.model.structural.as_ref().ok_or_else(|| {
+        ResourcePlanningError::Invalid(
+            "mixed constraint planning requires explicit structural topology".into(),
+        )
+    })?;
+    let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let layout = mixed_dof_layout(&topology);
+    let nodes = topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.identity, index))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    ResolvedConstraintMatrix::from_plan(constraints, layout.total_dof_count(), |owner, dof| {
+        match owner {
+            CanonicalStructuralDofOwner::StructuralNode(identity) => nodes
+                .get(&identity)
+                .and_then(|node| layout.index(*node, StructuralDofKind::from_constraint(dof))),
+            CanonicalStructuralDofOwner::ReferencePoint(_) => None,
+        }
+    })
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
 }
 
 fn solve_policy(

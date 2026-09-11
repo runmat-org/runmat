@@ -6,7 +6,8 @@ use runmat_execution::{
     Digest,
 };
 use runmat_meshing_core::{
-    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId, StableDigest,
+    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, PersistentEntityId,
+    SolverMeshArtifact, StableDigest,
 };
 
 use crate::{
@@ -119,6 +120,7 @@ fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
 
 fn structural_fixture() -> (
     AnalysisModel,
+    SolverMeshArtifact,
     AnalysisProjection,
     CanonicalStructuralConstraintPlan,
 ) {
@@ -137,13 +139,62 @@ fn structural_fixture() -> (
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let constraints = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
-    (model, projection, constraints)
+    (model, mesh, projection, constraints)
+}
+
+fn mixed_structural_fixture() -> (
+    AnalysisModel,
+    SolverMeshArtifact,
+    AnalysisProjection,
+    CanonicalStructuralConstraintPlan,
+) {
+    let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
+        kind: runmat_meshing_core::PersistentEntityKind::Vertex,
+        source_topology_id: "beam_root".into(),
+        assembly_path: vec!["root".into()],
+    });
+    mesh.topology.nodes[0].provenance.sort();
+    for face in &mut mesh.topology.boundary_faces {
+        face.provenance.push(PersistentEntityId {
+            kind: runmat_meshing_core::PersistentEntityKind::Face,
+            source_topology_id: "root".into(),
+            assembly_path: vec!["root".into()],
+        });
+        face.provenance.sort();
+    }
+    mesh.topology.boundary_faces[1]
+        .provenance
+        .push(PersistentEntityId {
+            kind: runmat_meshing_core::PersistentEntityKind::Face,
+            source_topology_id: "solid_load".into(),
+            assembly_path: vec!["root".into()],
+        });
+    mesh.topology.boundary_faces[1].provenance.sort();
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+
+    let mut model = crate::fixtures::mixed_solid_beam_model(attached_coordinates);
+    model.geometry_revision = mesh.geometry.geometry_revision as u32;
+    model.connectors = vec![runmat_analysis_core::AnalysisConnector {
+        connector_id: "solid_to_beam_spring".into(),
+        primary: runmat_analysis_core::RegionTarget::authored("root"),
+        secondary: Some(runmat_analysis_core::RegionTarget::authored("span")),
+        kind: runmat_analysis_core::ConnectorKind::TranslationalSpring {
+            stiffness: runmat_analysis_core::Stiffness::new(2_000.0),
+        },
+    }];
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let constraints = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+    (model, mesh, projection, constraints)
 }
 
 #[test]
 fn structural_symbolic_plan_is_preassembly_and_material_independent() {
-    let (_, projection, constraints) = structural_fixture();
-    let operators = StructuralSymbolicOperators::derive(&projection, &constraints).unwrap();
+    let (model, mesh, projection, constraints) = structural_fixture();
+    let operators =
+        StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
     let patterns = operators.patterns();
     let facts = SparseResourceFacts::from_patterns(patterns).unwrap();
 
@@ -156,7 +207,7 @@ fn structural_symbolic_plan_is_preassembly_and_material_independent() {
     assert_eq!(operators.stiffness_upper_bound().rows(), 12);
     assert_eq!(
         operators.identity(),
-        StructuralSymbolicOperators::derive(&projection, &constraints)
+        StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh)
             .unwrap()
             .identity()
     );
@@ -164,7 +215,7 @@ fn structural_symbolic_plan_is_preassembly_and_material_independent() {
 
 #[test]
 fn structural_preflight_derives_numerical_facts_before_assembly() {
-    let (model, projection, constraints) = structural_fixture();
+    let (model, mesh, projection, constraints) = structural_fixture();
     let observations = resolve_observation_plan(
         &model.sequence.steps[0],
         &projection,
@@ -184,8 +235,9 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         initial_guess_transition: None,
     };
 
-    let plan = build_structural_resource_plan(&projection, &constraints, &observations, &workload)
-        .unwrap();
+    let plan =
+        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload)
+            .unwrap();
 
     assert_eq!(plan.input.topology_digest, projection.projection_digest);
     assert_eq!(plan.input.sparse.rows, Count(12));
@@ -201,7 +253,9 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         plan.input.constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
-    let operators = StructuralSymbolicOperators::derive(&projection, &constraints).unwrap();
+    let operators =
+        StructuralSymbolicOperators::derive(&projection, &constraints, &workload.model, &mesh)
+            .unwrap();
     let expected_admission =
         crate::algebra::CoercivitySymbolicPlan::derive(operators.stiffness_upper_bound()).unwrap();
     let SolveResourcePolicy::Iterative { admission, .. } = &plan.input.solve else {
@@ -219,6 +273,69 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert_eq!(
         admission.resident_bytes_upper_bound,
         ByteCount(expected_admission.resident_bytes_upper_bound())
+    );
+    plan.validate_identity().unwrap();
+}
+
+#[test]
+fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
+    let (model, mesh, projection, constraints) = mixed_structural_fixture();
+    let observations = resolve_observation_plan(
+        &model.sequence.steps[0],
+        &projection,
+        &[],
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let workload = crate::execution::StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model: model.clone(),
+        backend: crate::contracts::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    let plan =
+        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload)
+            .unwrap();
+
+    assert_eq!(plan.input.topology.nodes, Count(5));
+    assert_eq!(plan.input.topology.elements, Count(2));
+    assert_eq!(plan.input.sparse.rows, Count(21));
+    assert_eq!(
+        plan.input.topology_digest,
+        constraints.topology.structural_digest()
+    );
+    assert_eq!(
+        plan.identity,
+        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload,)
+            .unwrap()
+            .identity
+    );
+
+    let with_connector =
+        StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
+    let mut without_connector_model = model;
+    without_connector_model.connectors.clear();
+    let without_connector = StructuralSymbolicOperators::derive(
+        &projection,
+        &constraints,
+        &without_connector_model,
+        &mesh,
+    )
+    .unwrap();
+    assert!(
+        with_connector
+            .stiffness_upper_bound()
+            .column_indices()
+            .len()
+            > without_connector
+                .stiffness_upper_bound()
+                .column_indices()
+                .len()
     );
     plan.validate_identity().unwrap();
 }
