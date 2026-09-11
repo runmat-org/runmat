@@ -10,7 +10,7 @@ export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
   kind(value, 1, "runmat-builtin-migration-gate-result", "gate result");
-  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "storage_admission"], "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
   if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
@@ -33,6 +33,10 @@ export function parseGateResult(value, expected) {
   });
   if (new Set(checks.map((entry) => entry.id)).size !== checks.length) throw new Error("gate check ids must be unique");
   for (const id of identities) if (!checks.some((entry) => entry.id === `${gate}:${id}`)) throw new Error(`${gate}: typed producer evidence is missing the ${id} identity check`);
+  const artifacts = array(value.artifacts, "gate artifacts", { empty: true }).map(parseArtifact);
+  const artifactRoles = artifacts.map((entry) => entry.role);
+  if (new Set(artifactRoles).size !== artifactRoles.length) throw new Error(`${gate}: gate artifact roles must be unique`);
+  if (JSON.stringify(artifactRoles) !== JSON.stringify([...artifactRoles].sort(compareCodePoint))) throw new Error(`${gate}: gate artifacts must use canonical role ordering`);
   const derivedResult = value.producer_evidence.process.exit_code === 0 && checks.every((entry) => entry.result === "pass") ? "pass" : "fail";
   if (value.result !== derivedResult) throw new Error("gate result conflicts with captured process status or checks");
   parseStorageAdmission(value.storage_admission, value.result, expected?.storage_policy, producedAt);
@@ -40,9 +44,20 @@ export function parseGateResult(value, expected) {
     if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.inventory_digest !== expected.inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
-    if (expected.gate_plans) validateReviewedPlan(gate, producerEvidence, expected);
+    if (expected.gate_plans) validateReviewedPlan(gate, value.result, producerEvidence, artifacts, expected);
   }
-  return { ...value, identities: identities.sort(compareCodePoint), checks };
+  return { ...value, identities: identities.sort(compareCodePoint), checks, artifacts };
+}
+
+function parseArtifact(value) {
+  exact(value, ["role", "path", "byte_length", "content_digest"], "gate artifact");
+  nonempty(value.role, "gate artifact role");
+  const artifactPath = absolutePath(value.path, `${value.role} artifact path`);
+  integer(value.byte_length, `${value.role} artifact byte length`, 0);
+  digest(value.content_digest, `${value.role} artifact content digest`);
+  const bytes = fs.readFileSync(artifactPath);
+  if (bytes.length !== value.byte_length || contentDigest(bytes) !== value.content_digest) throw new Error(`${value.role}: artifact bytes differ from gate evidence`);
+  return { ...value, path: artifactPath };
 }
 
 function parseProducerEvidence(value, producer, sourceRevisionValue) {
@@ -68,12 +83,15 @@ function parseProducerEvidence(value, producer, sourceRevisionValue) {
   return value;
 }
 
-function validateReviewedPlan(gate, evidence, expected) {
+function validateReviewedPlan(gate, result, evidence, artifacts, expected) {
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
   const contract = gatePlanEvidence(plan, expected.compiled_build, expected.repository);
   if (evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
   if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
+  const actualRoles = artifacts.map((entry) => entry.role);
+  if (actualRoles.some((role) => !plan.expected_artifact_roles.includes(role))) throw new Error(`${gate}: producer emitted an unreviewed artifact role`);
+  if (result === "pass" && JSON.stringify(actualRoles) !== JSON.stringify(plan.expected_artifact_roles)) throw new Error(`${gate}: passing evidence does not cover the reviewed artifact roles`);
 }
 
 function parseStorageAdmission(value, gateResult, policy, producedAt) {
