@@ -8,6 +8,7 @@ import { auditMigration, parseBatch } from "../audit.mjs";
 import { parseControlManifest } from "../control.mjs";
 import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../control-draft.mjs";
 import { dispositionInputFromControl, validateDispositionInput } from "../dispositions.mjs";
+import { compileDispositionReview, parseDispositionReview } from "../disposition-review.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { runGateProducer } from "../gate-adapter.mjs";
 import { generatedProductChecks, parseGeneratedProductsProof } from "../generated-products.mjs";
@@ -23,6 +24,27 @@ import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceField
 import { cleanupRepositoryFixtures, compiledInventoryFixture, controlledFixture, gate, repositoryFixture, REVISION } from "./helpers.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
+
+function dispositionReviewFixture(inventory) {
+  return {
+    schema_version: 1,
+    kind: "runmat-builtin-disposition-review",
+    authority: "reviewer-authored-development-input",
+    baseline_inventory_digest: inventory.digest,
+    groups: [{
+      id: "math-basic-canonical",
+      disposition: "canonical",
+      identities: ["foo"],
+      alias_targets: {},
+      domain: "math",
+      family: "basic",
+      reason: null,
+      evidence: ["catalog and runtime owner review"],
+      review: { status: "reviewed", evidence: ["C00 disposition review"] },
+    }],
+    review: { status: "reviewed", evidence: ["C00 disposition review"] },
+  };
+}
 
 test("inventory v2 binds lexical observations to content-derived source and disposition digests", () => {
   const repository = repositoryFixture();
@@ -219,6 +241,81 @@ test("disposition v1 is closed and supports reviewed internal double-underscore 
   assert.doesNotThrow(() => validateDispositionInput(value));
   value.identities.__helper.extra = true;
   assert.throws(() => validateDispositionInput(value), /fields must be exactly/);
+});
+
+test("disposition review expands exact reviewed groups without inferred selectors", () => {
+  const fixture = controlledFixture();
+  const review = dispositionReviewFixture(fixture.inventory);
+  const output = compileDispositionReview(review, fixture.inventory);
+  assert.deepEqual(Object.keys(output.identities), ["foo"]);
+  assert.deepEqual(output.identities.foo, {
+    disposition: "canonical",
+    canonical: null,
+    domain: "math",
+    family: "basic",
+    reason: null,
+    review: {
+      status: "reviewed",
+      evidence: ["C00 disposition review", "catalog and runtime owner review"],
+    },
+  });
+  assert.doesNotThrow(() => validateDispositionInput(output));
+});
+
+test("disposition review rejects omissions, overlap, guesses, and stale baselines", () => {
+  const fixture = controlledFixture();
+  const omitted = dispositionReviewFixture(fixture.inventory);
+  omitted.groups[0].identities = [];
+  assert.throws(() => parseDispositionReview(omitted, fixture.inventory), /nonempty array/);
+
+  const duplicate = dispositionReviewFixture(fixture.inventory);
+  duplicate.groups.push({ ...structuredClone(duplicate.groups[0]), id: "math-basic-second" });
+  assert.throws(() => parseDispositionReview(duplicate, fixture.inventory), /assigned to both/);
+
+  const wildcard = dispositionReviewFixture(fixture.inventory);
+  wildcard.groups[0].identities = ["foo.*"];
+  assert.throws(() => parseDispositionReview(wildcard, fixture.inventory), /unknown inventory identity/);
+
+  const stale = dispositionReviewFixture(fixture.inventory);
+  stale.baseline_inventory_digest = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => parseDispositionReview(stale, fixture.inventory), /exact baseline inventory/);
+});
+
+test("reviewed target disposition may replace an existing catalog authority", () => {
+  const fixture = controlledFixture();
+  const review = dispositionReviewFixture(fixture.inventory);
+  review.groups[0].disposition = "internal";
+  review.groups[0].reason = "Reviewed target removes an accidentally public development binding";
+  const dispositions = compileDispositionReview(review, fixture.inventory);
+  const subject = buildInventory(fixture.repository, dispositions, {
+    revision: REVISION,
+    compiledInventory: fixture.compiledInventory,
+  });
+  assert.equal(subject.identities[0].disposition.kind, "internal");
+  assert.equal(subject.diagnostics.length, 0);
+});
+
+test("compile-dispositions CLI expands only a baseline-bound reviewed input", () => {
+  const fixture = controlledFixture();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-disposition-review-"));
+  const inventoryPath = path.join(directory, "inventory.json");
+  const reviewPath = path.join(directory, "review.json");
+  const outputPath = path.join(directory, "dispositions.json");
+  fs.writeFileSync(inventoryPath, JSON.stringify(fixture.inventory));
+  fs.writeFileSync(reviewPath, JSON.stringify(dispositionReviewFixture(fixture.inventory)));
+  const cli = path.resolve("scripts/development/builtin-migration-factory.mjs");
+  const result = spawnSync(process.execPath, [
+    cli, "compile-dispositions", "--review", reviewPath,
+    "--baseline-inventory", inventoryPath, "--output", outputPath,
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotThrow(() => validateDispositionInput(JSON.parse(fs.readFileSync(outputPath))));
+
+  const missingReview = spawnSync(process.execPath, [
+    cli, "compile-dispositions", "--baseline-inventory", inventoryPath,
+  ], { encoding: "utf8" });
+  assert.equal(missingReview.status, 2);
+  assert.match(missingReview.stderr, /requires --review/);
 });
 
 test("gate producer requests cannot inject commands, results, checks, or storage", () => {
