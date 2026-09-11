@@ -64,6 +64,50 @@ pub enum RecoveredFieldNumericRepresentation {
     PhaseRadians,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveredFieldEntityDomain {
+    StructuralNodes,
+    SolidElements,
+    BeamElements,
+    ShellElements,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveredFieldEntityCounts {
+    pub structural_nodes: usize,
+    pub solid_elements: usize,
+    pub beam_elements: usize,
+    pub shell_elements: usize,
+}
+
+impl RecoveredFieldEntityCounts {
+    pub const fn entity_count(self, domain: RecoveredFieldEntityDomain) -> usize {
+        match domain {
+            RecoveredFieldEntityDomain::StructuralNodes => self.structural_nodes,
+            RecoveredFieldEntityDomain::SolidElements => self.solid_elements,
+            RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
+            RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
+        }
+    }
+
+    pub(super) fn validate(self) -> Result<(), RecoveredFieldError> {
+        if self.structural_nodes == 0
+            || self
+                .solid_elements
+                .checked_add(self.beam_elements)
+                .and_then(|count| count.checked_add(self.shell_elements))
+                .is_none_or(|count| count == 0)
+        {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field topology requires structural nodes and at least one element".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "domain", content = "coordinate")]
 pub enum RecoveredFieldSample {
@@ -95,6 +139,7 @@ pub struct RecoveredFieldDefinition {
     field_id: String,
     quantity: ObservationQuantity,
     location: FieldLocation,
+    entity_domain: RecoveredFieldEntityDomain,
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
 }
@@ -106,6 +151,7 @@ struct RecoveredFieldDefinitionData {
     field_id: String,
     quantity: ObservationQuantity,
     location: FieldLocation,
+    entity_domain: RecoveredFieldEntityDomain,
     value_shape: ObservationValueShape,
     numeric_representation: RecoveredFieldNumericRepresentation,
 }
@@ -119,6 +165,7 @@ impl TryFrom<RecoveredFieldDefinitionData> for RecoveredFieldDefinition {
             field_id: data.field_id,
             quantity: data.quantity,
             location: data.location,
+            entity_domain: data.entity_domain,
             value_shape: data.value_shape,
             numeric_representation: data.numeric_representation,
         };
@@ -132,6 +179,7 @@ impl RecoveredFieldDefinition {
         field_id: impl Into<String>,
         quantity: ObservationQuantity,
         location: FieldLocation,
+        entity_domain: RecoveredFieldEntityDomain,
         value_shape: ObservationValueShape,
         numeric_representation: RecoveredFieldNumericRepresentation,
     ) -> Result<Self, RecoveredFieldError> {
@@ -140,6 +188,7 @@ impl RecoveredFieldDefinition {
             field_id: field_id.into(),
             quantity,
             location,
+            entity_domain,
             value_shape,
             numeric_representation,
         };
@@ -164,6 +213,10 @@ impl RecoveredFieldDefinition {
         self.location
     }
 
+    pub const fn entity_domain(&self) -> RecoveredFieldEntityDomain {
+        self.entity_domain
+    }
+
     pub fn value_shape(&self) -> &ObservationValueShape {
         &self.value_shape
     }
@@ -179,6 +232,7 @@ impl RecoveredFieldDefinition {
             &(
                 self.quantity,
                 self.location,
+                self.entity_domain,
                 &self.value_shape,
                 self.numeric_representation,
             ),
@@ -192,6 +246,24 @@ impl RecoveredFieldDefinition {
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
         if self.field_id.trim().is_empty() {
             return Err(RecoveredFieldError::EmptyIdentifier);
+        }
+        if !matches!(
+            (self.location, self.entity_domain),
+            (
+                FieldLocation::Node,
+                RecoveredFieldEntityDomain::StructuralNodes
+            ) | (
+                FieldLocation::Element,
+                RecoveredFieldEntityDomain::SolidElements
+            ) | (
+                FieldLocation::Element,
+                RecoveredFieldEntityDomain::BeamElements
+            ) | (
+                FieldLocation::Element,
+                RecoveredFieldEntityDomain::ShellElements
+            )
+        ) {
+            return Err(RecoveredFieldError::CatalogUnsupportedLocation);
         }
         if self.value_shape.component_count().is_none()
             || !self
@@ -347,8 +419,7 @@ pub struct RecoveredFieldArtifact {
     pub recovery_request: FieldRecoveryRequestIdentity,
     pub source_result: SolverResultIdentity,
     pub topology_digest: Digest,
-    pub node_count: usize,
-    pub element_count: usize,
+    pub entity_counts: RecoveredFieldEntityCounts,
     fields: Vec<RecoveredField>,
 }
 
@@ -372,22 +443,18 @@ pub struct RecoveredFieldArtifactManifest {
     pub recovery_request: FieldRecoveryRequestIdentity,
     pub source_result: SolverResultIdentity,
     pub topology_digest: Digest,
-    pub node_count: usize,
-    pub element_count: usize,
+    pub entity_counts: RecoveredFieldEntityCounts,
     pub fields: Vec<RecoveredFieldArtifactEntry>,
 }
 
 impl RecoveredFieldArtifactManifest {
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
-        if self.schema_version != 1
-            || self.node_count == 0
-            || self.element_count == 0
-            || self.fields.is_empty()
-        {
+        if self.schema_version != 1 || self.fields.is_empty() {
             return Err(RecoveredFieldError::InvalidArtifact(
                 "field manifest requires a supported schema, nonempty topology, and fields".into(),
             ));
         }
+        self.entity_counts.validate()?;
         let mut field_ids = std::collections::BTreeSet::new();
         let mut sample_keys = std::collections::BTreeSet::new();
         for entry in &self.fields {
@@ -534,8 +601,7 @@ struct RecoveredFieldArtifactWire {
     recovery_request: FieldRecoveryRequestIdentity,
     source_result: SolverResultIdentity,
     topology_digest: Digest,
-    node_count: usize,
-    element_count: usize,
+    entity_counts: RecoveredFieldEntityCounts,
     fields: Vec<RecoveredField>,
 }
 
@@ -549,8 +615,7 @@ impl TryFrom<RecoveredFieldArtifactWire> for RecoveredFieldArtifact {
             recovery_request: wire.recovery_request,
             source_result: wire.source_result,
             topology_digest: wire.topology_digest,
-            node_count: wire.node_count,
-            element_count: wire.element_count,
+            entity_counts: wire.entity_counts,
             fields: wire.fields,
         };
         artifact.validate()?;
@@ -563,8 +628,7 @@ impl RecoveredFieldArtifact {
         recovery_request: FieldRecoveryRequestIdentity,
         source_result: SolverResultIdentity,
         topology_digest: Digest,
-        node_count: usize,
-        element_count: usize,
+        entity_counts: RecoveredFieldEntityCounts,
         fields: Vec<RecoveredField>,
     ) -> Result<Self, RecoveredFieldError> {
         let mut artifact = Self {
@@ -573,8 +637,7 @@ impl RecoveredFieldArtifact {
             recovery_request,
             source_result,
             topology_digest,
-            node_count,
-            element_count,
+            entity_counts,
             fields,
         };
         artifact.identity = artifact.derive_identity()?;
@@ -601,8 +664,7 @@ impl RecoveredFieldArtifact {
             recovery_request: self.recovery_request,
             source_result: self.source_result,
             topology_digest: self.topology_digest,
-            node_count: self.node_count,
-            element_count: self.element_count,
+            entity_counts: self.entity_counts,
             fields: self
                 .fields
                 .iter()
@@ -637,8 +699,7 @@ impl RecoveredFieldArtifact {
             recovery_request: manifest.recovery_request,
             source_result: manifest.source_result,
             topology_digest: manifest.topology_digest,
-            node_count: manifest.node_count,
-            element_count: manifest.element_count,
+            entity_counts: manifest.entity_counts,
             fields,
         };
         artifact.validate()?;
@@ -646,11 +707,12 @@ impl RecoveredFieldArtifact {
     }
 
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
-        if self.schema_version != 1 || self.node_count == 0 || self.element_count == 0 {
+        if self.schema_version != 1 {
             return Err(RecoveredFieldError::InvalidArtifact(
                 "artifact requires a supported schema and nonempty topology".into(),
             ));
         }
+        self.entity_counts.validate()?;
         if self.fields.is_empty() {
             return Err(RecoveredFieldError::InvalidArtifact(
                 "artifact contains no recovered fields".into(),
@@ -659,11 +721,12 @@ impl RecoveredFieldArtifact {
         let mut sample_keys = std::collections::BTreeSet::new();
         for field in &self.fields {
             field.validate()?;
-            let expected_entities = match field.definition().location() {
-                FieldLocation::Node => self.node_count,
-                FieldLocation::Element => self.element_count,
-                _ => return Err(RecoveredFieldError::CatalogUnsupportedLocation),
-            };
+            let expected_entities = self
+                .entity_counts
+                .entity_count(field.definition().entity_domain());
+            if expected_entities == 0 {
+                return Err(RecoveredFieldError::ArtifactTopologyMismatch);
+            }
             let components = field
                 .definition()
                 .value_shape()
@@ -711,8 +774,7 @@ impl RecoveredFieldArtifact {
             recovery_request: self.recovery_request,
             source_result: self.source_result,
             topology_digest: self.topology_digest,
-            node_count: self.node_count,
-            element_count: self.element_count,
+            entity_counts: self.entity_counts,
             fields: self
                 .fields
                 .iter()
@@ -737,8 +799,7 @@ fn derive_artifact_identity(
             manifest.recovery_request,
             manifest.source_result,
             manifest.topology_digest,
-            manifest.node_count,
-            manifest.element_count,
+            manifest.entity_counts,
             &manifest.fields,
         ),
         FIELD_LIMITS,

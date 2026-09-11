@@ -51,15 +51,41 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         import_structural_linear_completion(driver.store(), solve_response, solve, limits).unwrap();
     let source_result = imported_solve.objects;
     let source_numerical_receipt = imported_solve.numerical_receipt_objects;
+    let source_invocation = solve
+        .inputs
+        .iter()
+        .find(|input| {
+            input.manifest.kind
+                == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::SolverInvocation
+        })
+        .unwrap()
+        .clone();
+    let mesh = solve
+        .inputs
+        .iter()
+        .find(|input| {
+            input.manifest.kind == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh
+        })
+        .cloned();
+    let resource_plan = solve
+        .inputs
+        .iter()
+        .find(|input| {
+            input.manifest.kind
+                == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ResourcePlan
+        })
+        .unwrap()
+        .clone();
     let workload =
-        StructuralLinearWorkload::from_canonical_bytes(&solve.inputs[0].payload()).unwrap();
+        StructuralLinearWorkload::from_canonical_bytes(&source_invocation.payload()).unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap();
     let step = workload.procedure_step().unwrap().clone();
 
     let fields = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
         source_host: solve.host.clone(),
+        source_invocation: source_invocation.clone(),
         source_result: source_result.clone(),
-        mesh: solve.inputs[1].clone(),
+        mesh: mesh.clone(),
         program_revision: program_revision.clone(),
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,
@@ -75,7 +101,8 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             source_host: fields.host.clone(),
             source_request: fields.request.clone(),
             source_fields: imported_fields,
-            mesh: solve.inputs[1].clone(),
+            source_invocation,
+            mesh,
             sequence,
             step: step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
@@ -111,7 +138,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
-        source_resource_plan: solve.inputs[3].clone(),
+        source_resource_plan: resource_plan,
         source_resource_usage: resource_usage.objects.clone(),
         source_observations: Some(imported_observations),
         program_revision,

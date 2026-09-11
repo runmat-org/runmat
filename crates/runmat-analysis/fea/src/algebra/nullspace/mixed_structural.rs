@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 use runmat_meshing_core::SolverMeshArtifact;
 
-use crate::physics::structural::topology::mixed::CanonicalMixedStructuralTopology;
+use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 
 use super::{
     canonical_frame::{self, CanonicalFrameTopology},
@@ -84,7 +84,7 @@ pub(super) fn prove(
             positions_m: &positions,
             node_identities: &identities,
             components,
-            topology_identity: topology.identity,
+            topology_identity: topology.identity.discretization_digest(),
             kind: NullspaceKind::MixedStructuralRigidBody3d,
         },
         layout,
@@ -99,7 +99,7 @@ pub(super) fn prove(
 fn mixed_components(
     mesh: &SolverMeshArtifact,
     structural: &StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
 ) -> Result<Vec<Vec<usize>>, NullspaceEvidenceError> {
     let node_by_id = mesh
         .topology

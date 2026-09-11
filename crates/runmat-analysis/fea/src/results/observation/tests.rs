@@ -21,6 +21,7 @@ use crate::{
     planning::resource::{Count, ObservationResourceFacts},
     results::field::{
         RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition,
+        RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
     topology::AnalysisProjection,
@@ -33,6 +34,7 @@ fn scalar_definition() -> RecoveredFieldDefinition {
         "temperature.recovered",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -414,6 +416,72 @@ fn invalid_and_unbounded_requests_fail_before_field_evaluation() {
     ));
 }
 
+#[test]
+fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let structural = model.structural.as_ref().unwrap();
+    let node_count = structural.nodes.len();
+    let beam_count = structural
+        .elements
+        .iter()
+        .filter(|element| {
+            matches!(
+                element.kind,
+                runmat_analysis_core::StructuralElementKind::Beam(_)
+            )
+        })
+        .count();
+    let shell_count = structural.elements.len() - beam_count;
+    let definition = RecoveredFieldDefinition::new(
+        "structural.displacement",
+        ObservationQuantity::Displacement,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
+        ObservationValueShape::Vector3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let mut request = spec("explicit-displacement", ObservationTarget::WholeModel);
+    request.quantity = ObservationQuantity::Displacement;
+    request.value_shape = ObservationValueShape::Vector3;
+    model.sequence.steps[0].observations = vec![ObservationRequest::Field(request)];
+    let step = &model.sequence.steps[0];
+    let plan = resolve_structural_observation_plan(
+        step,
+        &model,
+        None,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let values = (0..node_count * 3).map(|value| value as f64).collect();
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::Final,
+        runmat_analysis_core::AnalysisField::host_f64(
+            "structural.displacement",
+            vec![node_count, 3],
+            values,
+        ),
+    )
+    .unwrap();
+    let fields = RecoveredFieldCatalog::new_for_topology(
+        plan.topology_digest,
+        RecoveredFieldEntityCounts {
+            structural_nodes: node_count,
+            solid_elements: 0,
+            beam_elements: beam_count,
+            shell_elements: shell_count,
+        },
+        vec![field],
+    )
+    .unwrap();
+    let results = evaluate_structural_observations(&plan, &model, None, &fields).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].entities.len(), node_count);
+    assert_eq!(results[0].field.shape, vec![node_count, 3]);
+}
+
 fn solver_layers(
     model: &runmat_analysis_core::AnalysisModel,
 ) -> (
@@ -476,6 +544,7 @@ fn output_and_accuracy_changes_do_not_invalidate_solver_layers() {
         "displacement.recovered",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )

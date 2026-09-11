@@ -1,7 +1,7 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
-use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
+use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 use crate::results::field::{
     RecoveredFieldArtifactIdentity, RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
 };
@@ -26,7 +26,7 @@ pub struct ObservationEvaluationRequest {
     pub source_fields: RecoveredFieldArtifactIdentity,
     pub source_selection: RecoveredFieldSelectionIdentity,
     pub source_result: SolverResultIdentity,
-    pub mesh_digest: Digest,
+    pub topology: CanonicalStructuralTopologyIdentity,
     pub plan: ResolvedObservationPlan,
 }
 
@@ -40,7 +40,7 @@ struct ObservationEvaluationRequestWire {
     source_fields: RecoveredFieldArtifactIdentity,
     source_selection: RecoveredFieldSelectionIdentity,
     source_result: SolverResultIdentity,
-    mesh_digest: Digest,
+    topology: CanonicalStructuralTopologyIdentity,
     plan: ResolvedObservationPlan,
 }
 
@@ -56,7 +56,7 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
             source_fields: wire.source_fields,
             source_selection: wire.source_selection,
             source_result: wire.source_result,
-            mesh_digest: wire.mesh_digest,
+            topology: wire.topology,
             plan: wire.plan,
         };
         request.validate()?;
@@ -68,7 +68,7 @@ impl ObservationEvaluationRequest {
     pub fn new(
         producer: StepIdentity,
         source: &RecoveredFieldSelection,
-        mesh_digest: Digest,
+        topology: CanonicalStructuralTopologyIdentity,
         plan: ResolvedObservationPlan,
     ) -> AnalysisExecutionResult<Self> {
         source
@@ -91,7 +91,7 @@ impl ObservationEvaluationRequest {
                     source.source.identity,
                     source.identity,
                     source.source.source_result,
-                    mesh_digest,
+                    topology,
                     plan.identity,
                     plan.topology_digest,
                 ),
@@ -101,7 +101,7 @@ impl ObservationEvaluationRequest {
             source_fields: source.source.identity,
             source_selection: source.identity,
             source_result: source.source.source_result,
-            mesh_digest,
+            topology,
             plan,
         };
         request.validate()?;
@@ -129,12 +129,15 @@ impl ObservationEvaluationRequest {
                 self.source_fields,
                 self.source_selection,
                 self.source_result,
-                self.mesh_digest,
+                self.topology,
                 self.plan.identity,
                 self.plan.topology_digest,
             ),
         )?;
-        if self.identity != expected {
+        if !self.topology.has_valid_identity()
+            || self.plan.topology_digest != self.topology.discretization_digest()
+            || self.identity != expected
+        {
             return Err(AnalysisExecutionError::Identity(
                 "observation evaluation request identity does not converge",
             ));

@@ -6,6 +6,9 @@ use runmat_analysis_core::{
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 use super::{
+    constraint_projection::{
+        apply_direct_constraints, resolve_constraint_matrix, rotational_row_count,
+    },
     direct_constraints::DirectConstraintAssignments,
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     explicit_connectors::assemble_connectors_with_resolver,
@@ -22,16 +25,13 @@ use crate::{
         ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
         RealSparseMatrix,
     },
-    constraints::{
-        CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-        ResolvedConstraintMatrix,
-    },
+    constraints::CanonicalStructuralConstraintPlan,
     excitation::{RealizedExcitationKind, RealizedExcitations},
     physics::structural::{
         material::StructuralMaterialInventory,
         topology::{
-            mixed::CanonicalMixedStructuralTopology,
-            mixed_target::{
+            node_space::CanonicalStructuralNodeSpace,
+            target::{
                 resolve_mixed_structural_target, MixedStructuralTargetError,
                 MixedStructuralTargetOwnership,
             },
@@ -39,7 +39,7 @@ use crate::{
     },
 };
 
-pub(crate) fn mixed_dof_layout(topology: &CanonicalMixedStructuralTopology) -> StructuralDofLayout {
+pub(crate) fn mixed_dof_layout(topology: &CanonicalStructuralNodeSpace) -> StructuralDofLayout {
     StructuralDofLayout::from_node_sets(
         topology
             .nodes
@@ -64,7 +64,7 @@ pub(super) fn assemble_mixed_structural_system(
     let structural = model.structural.as_ref().ok_or({
         LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
     })?;
-    let topology = CanonicalMixedStructuralTopology::derive(mesh, structural).map_err(|error| {
+    let topology = CanonicalStructuralNodeSpace::derive(mesh, structural).map_err(|error| {
         LinearAssemblyError::Structural(StructuralAssemblyError::MixedTopology(error.to_string()))
     })?;
     let layout = mixed_dof_layout(&topology);
@@ -286,15 +286,14 @@ pub(super) fn assemble_mixed_structural_system(
         &explicit_excitations,
         &layout,
         &mut rhs,
-        topology.identity,
+        topology.identity.discretization_digest(),
         &canonical_node_coordinates_m,
         &topology.explicit_node_indices,
     )
     .map_err(LinearAssemblyError::Structural)?;
     let has_general_rows = constraint_plan.rows.iter().any(|row| row.terms.len() != 1);
-    let resolved_constraint_matrix =
-        resolve_mixed_constraint_matrix(constraint_plan, &topology, &layout)
-            .map_err(LinearAssemblyError::ConstraintAlgebra)?;
+    let resolved_constraint_matrix = resolve_constraint_matrix(constraint_plan, &topology, &layout)
+        .map_err(LinearAssemblyError::ConstraintAlgebra)?;
     let (
         constrained,
         constrained_dof_count,
@@ -316,12 +315,12 @@ pub(super) fn assemble_mixed_structural_system(
         (
             vec![false; dof_count],
             resolved_constraint_matrix.row_count(),
-            count_rotational_constraint_rows(constraint_plan),
+            rotational_row_count(constraint_plan),
             Some(resolved_constraint_matrix.clone()),
             reduction,
         )
     } else {
-        lower_mixed_direct_constraints(constraint_plan, &topology, &mut direct_constraints)
+        apply_direct_constraints(constraint_plan, &topology, &mut direct_constraints)
             .map_err(LinearAssemblyError::Structural)?;
         let constrained_dof_count = direct_constraints.constrained_dof_count();
         let rotational_constraint_count = direct_constraints.rotational_constraint_count();
@@ -456,7 +455,7 @@ fn resolve_target(
     selector: &str,
     mesh: &SolverMeshArtifact,
     structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
 ) -> Result<MixedStructuralTargetOwnership, StructuralAssemblyError> {
     resolve_mixed_structural_target(selector, mesh, structural, topology).map_err(|error| {
         match error {
@@ -481,76 +480,6 @@ fn resolve_target(
             }
         }
     })
-}
-
-fn lower_mixed_direct_constraints(
-    plan: &CanonicalStructuralConstraintPlan,
-    topology: &CanonicalMixedStructuralTopology,
-    assignments: &mut DirectConstraintAssignments<'_>,
-) -> Result<(), StructuralAssemblyError> {
-    let nodes = topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    for row in &plan.rows {
-        if row.reaction_recovery == crate::constraints::ReactionRecovery::RedundantEquation {
-            continue;
-        }
-        let [term] = row.terms.as_slice() else {
-            return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
-                constraint_id: row.constraint_id.clone(),
-                constraint_kind: "general_constraint_equation",
-            });
-        };
-        let CanonicalStructuralDofOwner::StructuralNode(identity) = term.owner else {
-            return Err(StructuralAssemblyError::ConstraintPlanNodeAbsent);
-        };
-        let node = nodes
-            .get(&identity)
-            .copied()
-            .ok_or(StructuralAssemblyError::ConstraintPlanNodeAbsent)?;
-        assignments.assign(
-            &row.constraint_id,
-            node,
-            StructuralDofKind::from_constraint(term.dof),
-            row.right_hand_side / term.coefficient,
-        )?;
-    }
-    Ok(())
-}
-
-fn resolve_mixed_constraint_matrix(
-    plan: &CanonicalStructuralConstraintPlan,
-    topology: &CanonicalMixedStructuralTopology,
-    layout: &StructuralDofLayout,
-) -> Result<ResolvedConstraintMatrix, crate::constraints::ConstraintAlgebraError> {
-    let nodes = topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    ResolvedConstraintMatrix::from_plan(plan, layout.total_dof_count(), |owner, dof| match owner {
-        CanonicalStructuralDofOwner::StructuralNode(identity) => nodes
-            .get(&identity)
-            .and_then(|node| layout.index(*node, StructuralDofKind::from_constraint(dof))),
-        CanonicalStructuralDofOwner::ReferencePoint(_) => None,
-    })
-}
-
-fn count_rotational_constraint_rows(plan: &CanonicalStructuralConstraintPlan) -> usize {
-    plan.rows
-        .iter()
-        .filter(|row| {
-            row.reaction_recovery != crate::constraints::ReactionRecovery::RedundantEquation
-                && row
-                    .terms
-                    .iter()
-                    .any(|term| matches!(term.dof, CanonicalStructuralDof::Rotation(_)))
-        })
-        .count()
 }
 
 fn merge_sources(
@@ -662,12 +591,14 @@ mod tests {
     use super::*;
     use crate::{
         assembly::dofs::StructuralDofKind,
-        physics::structural::topology::mixed::CanonicalMixedStructuralNode,
+        physics::structural::topology::{
+            node_space::CanonicalStructuralNode, CanonicalStructuralTopologyIdentity,
+        },
     };
 
     #[test]
     fn attached_and_unattached_explicit_nodes_share_only_authored_translations() {
-        let topology = CanonicalMixedStructuralTopology {
+        let topology = CanonicalStructuralNodeSpace {
             nodes: vec![
                 node(true, true, 0),
                 node(true, false, 1),
@@ -677,7 +608,9 @@ mod tests {
             ],
             solid_node_count: 4,
             explicit_node_indices: vec![0, 4],
-            identity: Digest::sha256(b"mixed-topology"),
+            identity: CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: Digest::sha256(b"mixed-topology"),
+            },
         };
 
         let layout = mixed_dof_layout(&topology);
@@ -700,8 +633,8 @@ mod tests {
         owns_solid_translation: bool,
         owns_explicit_rotation: bool,
         identity_byte: u8,
-    ) -> CanonicalMixedStructuralNode {
-        CanonicalMixedStructuralNode {
+    ) -> CanonicalStructuralNode {
+        CanonicalStructuralNode {
             identity: StableDigest::from_bytes([identity_byte; 32]),
             coordinates_m: [f64::from(identity_byte), 0.0, 0.0],
             owns_solid_translation,

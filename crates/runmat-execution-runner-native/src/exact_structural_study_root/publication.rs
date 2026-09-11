@@ -575,7 +575,7 @@ pub fn import_exact_structural_study_result(
             program_revision: expected.program_revision.clone(),
             artifact_access: expected.artifact_access.clone(),
             workloads: resolved_workloads.clone(),
-            mesh: mesh.artifact.clone(),
+            mesh: Some(mesh.artifact.clone()),
             chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: limits,
             required_capabilities: BTreeSet::new(),

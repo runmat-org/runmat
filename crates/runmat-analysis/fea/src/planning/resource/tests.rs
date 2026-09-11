@@ -13,7 +13,7 @@ use runmat_meshing_core::{
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     fixtures::{fixture_model, FixtureId},
-    results::observation::{resolve_observation_plan, ObservationLimits},
+    results::observation::{resolve_structural_observation_plan, ObservationLimits},
     topology::AnalysisProjection,
 };
 
@@ -216,9 +216,10 @@ fn structural_symbolic_plan_is_preassembly_and_material_independent() {
 #[test]
 fn structural_preflight_derives_numerical_facts_before_assembly() {
     let (model, mesh, projection, constraints) = structural_fixture();
-    let observations = resolve_observation_plan(
+    let observations = resolve_structural_observation_plan(
         &model.sequence.steps[0],
-        &projection,
+        &model,
+        Some(&mesh),
         &[],
         ObservationLimits::default(),
     )
@@ -235,11 +236,13 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         initial_guess_transition: None,
     };
 
-    let plan =
-        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload)
-            .unwrap();
+    let plan = build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload)
+        .unwrap();
 
-    assert_eq!(plan.input.topology_digest, projection.projection_digest);
+    assert_eq!(
+        plan.input.topology_digest,
+        constraints.topology.discretization_digest()
+    );
     assert_eq!(plan.input.sparse.rows, Count(12));
     assert_eq!(
         plan.input.sparse.operator_nonzeros,
@@ -280,9 +283,10 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
 #[test]
 fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
     let (model, mesh, projection, constraints) = mixed_structural_fixture();
-    let observations = resolve_observation_plan(
+    let observations = resolve_structural_observation_plan(
         &model.sequence.steps[0],
-        &projection,
+        &model,
+        Some(&mesh),
         &[],
         ObservationLimits::default(),
     )
@@ -298,20 +302,19 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let plan =
-        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload)
-            .unwrap();
+    let plan = build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload)
+        .unwrap();
 
     assert_eq!(plan.input.topology.nodes, Count(5));
     assert_eq!(plan.input.topology.elements, Count(2));
     assert_eq!(plan.input.sparse.rows, Count(21));
     assert_eq!(
         plan.input.topology_digest,
-        constraints.topology.structural_digest()
+        constraints.topology.discretization_digest()
     );
     assert_eq!(
         plan.identity,
-        build_structural_resource_plan(&mesh, &projection, &constraints, &observations, &workload,)
+        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload,)
             .unwrap()
             .identity
     );
@@ -338,6 +341,58 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
                 .len()
     );
     plan.validate_identity().unwrap();
+}
+
+#[test]
+fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let constraints = CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
+    let observations = resolve_structural_observation_plan(
+        &model.sequence.steps[0],
+        &model,
+        None,
+        &[],
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let workload = crate::execution::StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model: model.clone(),
+        backend: crate::contracts::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    let plan =
+        build_structural_resource_plan(None, &constraints, &observations, &workload).unwrap();
+    let structural = model.structural.as_ref().unwrap();
+
+    assert_eq!(
+        plan.input.topology_digest,
+        constraints.topology.discretization_digest()
+    );
+    assert_eq!(
+        plan.input.topology.nodes,
+        Count(structural.nodes.len() as u64)
+    );
+    assert_eq!(
+        plan.input.topology.elements,
+        Count(structural.elements.len() as u64)
+    );
+    assert_eq!(plan.input.topology.boundary_faces, Count(0));
+    assert_eq!(
+        plan.input.sparse.rows,
+        Count((structural.nodes.len() * 6) as u64)
+    );
+    assert_eq!(
+        plan.identity,
+        build_structural_resource_plan(None, &constraints, &observations, &workload)
+            .unwrap()
+            .identity
+    );
 }
 
 #[test]

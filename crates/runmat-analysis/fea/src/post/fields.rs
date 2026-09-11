@@ -28,7 +28,7 @@ use crate::{
     },
     post::{error::StructuralFieldRecoveryError, solid::recover_solid_fields},
     results::field::{
-        RecoveredField, RecoveredFieldDefinition, RecoveredFieldError,
+        RecoveredField, RecoveredFieldDefinition, RecoveredFieldEntityDomain, RecoveredFieldError,
         RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
     solve::linear::LinearSolveResult,
@@ -216,44 +216,52 @@ pub fn structural_observable_field_definitions(
             FEA_FIELD_STRUCTURAL_DISPLACEMENT,
             ObservationQuantity::Displacement,
             FieldLocation::Node,
+            RecoveredFieldEntityDomain::StructuralNodes,
             ObservationValueShape::Vector3,
         ),
         (
             FEA_FIELD_STRUCTURAL_STRAIN,
             ObservationQuantity::Strain,
             FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
             ObservationValueShape::SymmetricTensor3,
         ),
         (
             FEA_FIELD_STRUCTURAL_STRESS,
             ObservationQuantity::Stress,
             FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
             ObservationValueShape::SymmetricTensor3,
         ),
         (
             FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
             ObservationQuantity::StrainEnergy,
             FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
             ObservationValueShape::Scalar,
         ),
         (
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
             ObservationQuantity::ReactionForce,
             FieldLocation::Node,
+            RecoveredFieldEntityDomain::StructuralNodes,
             ObservationValueShape::Vector3,
         ),
     ];
     declarations
         .into_iter()
-        .map(|(field_id, quantity, location, value_shape)| {
-            RecoveredFieldDefinition::new(
-                field_id,
-                quantity,
-                location,
-                value_shape,
-                RecoveredFieldNumericRepresentation::Real,
-            )
-        })
+        .map(
+            |(field_id, quantity, location, entity_domain, value_shape)| {
+                RecoveredFieldDefinition::new(
+                    field_id,
+                    quantity,
+                    location,
+                    entity_domain,
+                    value_shape,
+                    RecoveredFieldNumericRepresentation::Real,
+                )
+            },
+        )
         .collect()
 }
 

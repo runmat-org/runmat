@@ -1,14 +1,13 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::FieldLocation;
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 
 use crate::topology::AnalysisProjection;
 
 use super::{
-    RecoveredField, RecoveredFieldArtifact, RecoveredFieldDefinitionIdentity, RecoveredFieldError,
-    RecoveredFieldSample,
+    RecoveredField, RecoveredFieldArtifact, RecoveredFieldDefinitionIdentity,
+    RecoveredFieldEntityCounts, RecoveredFieldError, RecoveredFieldSample,
 };
 
 const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
@@ -28,8 +27,13 @@ impl RecoveredFieldCatalog {
     ) -> Result<Self, RecoveredFieldError> {
         artifact.validate()?;
         if artifact.topology_digest != projection.projection_digest
-            || artifact.node_count != projection.nodes.len()
-            || artifact.element_count != projection.elements.len()
+            || artifact.entity_counts
+                != (RecoveredFieldEntityCounts {
+                    structural_nodes: projection.nodes.len(),
+                    solid_elements: projection.elements.len(),
+                    beam_elements: 0,
+                    shell_elements: 0,
+                })
         {
             return Err(RecoveredFieldError::ArtifactTopologyMismatch);
         }
@@ -40,6 +44,23 @@ impl RecoveredFieldCatalog {
         projection: &AnalysisProjection,
         fields: Vec<RecoveredField>,
     ) -> Result<Self, RecoveredFieldError> {
+        Self::new_for_topology(
+            projection.projection_digest,
+            RecoveredFieldEntityCounts {
+                structural_nodes: projection.nodes.len(),
+                solid_elements: projection.elements.len(),
+                beam_elements: 0,
+                shell_elements: 0,
+            },
+            fields,
+        )
+    }
+
+    pub fn new_for_topology(
+        topology_digest: Digest,
+        entity_counts: RecoveredFieldEntityCounts,
+        fields: Vec<RecoveredField>,
+    ) -> Result<Self, RecoveredFieldError> {
         let mut by_sample = BTreeMap::new();
         for (index, field) in fields.iter().enumerate() {
             let definition = field.definition();
@@ -47,11 +68,10 @@ impl RecoveredFieldCatalog {
             if by_sample.insert(sample_key, index).is_some() {
                 return Err(RecoveredFieldError::CatalogDuplicateSample);
             }
-            let entity_count = match definition.location() {
-                FieldLocation::Node => projection.nodes.len(),
-                FieldLocation::Element => projection.elements.len(),
-                _ => return Err(RecoveredFieldError::CatalogUnsupportedLocation),
-            };
+            let entity_count = entity_counts.entity_count(definition.entity_domain());
+            if entity_count == 0 {
+                return Err(RecoveredFieldError::ArtifactTopologyMismatch);
+            }
             let components = definition
                 .value_shape()
                 .component_count()
@@ -66,7 +86,7 @@ impl RecoveredFieldCatalog {
             }
         }
         Ok(Self {
-            topology_digest: projection.projection_digest,
+            topology_digest,
             fields,
             by_sample,
         })

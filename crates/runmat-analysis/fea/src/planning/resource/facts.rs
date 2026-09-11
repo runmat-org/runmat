@@ -1,4 +1,4 @@
-use crate::physics::structural::topology::mixed::CanonicalMixedStructuralTopology;
+use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 use crate::{
     algebra::SparsePattern, constraints::CanonicalStructuralConstraintPlan,
     results::observation::ResolvedObservationPlan, topology::AnalysisProjection,
@@ -49,7 +49,7 @@ impl TopologyResourceFacts {
     pub(crate) fn from_mixed_projection(
         projection: &AnalysisProjection,
         structural: &StructuralModel,
-        topology: &CanonicalMixedStructuralTopology,
+        topology: &CanonicalStructuralNodeSpace,
     ) -> Result<Self, ResourcePlanningError> {
         let solid_element_references = sum_lengths(
             projection
@@ -128,6 +128,59 @@ impl TopologyResourceFacts {
                 projection.boundary_faces.len(),
                 element_node_references,
                 boundary_node_references,
+                node_neighbor_references,
+            )?,
+        })
+    }
+
+    pub(crate) fn from_explicit(
+        structural: &StructuralModel,
+        topology: &CanonicalStructuralNodeSpace,
+    ) -> Result<Self, ResourcePlanningError> {
+        let element_node_references = sum_lengths(
+            structural
+                .elements
+                .iter()
+                .map(|element| match &element.kind {
+                    StructuralElementKind::Beam(beam) => beam.node_ids.len(),
+                    StructuralElementKind::Shell(shell) => shell.node_ids.len(),
+                }),
+            "explicit element-node references",
+        )?;
+        let node_neighbor_references =
+            structural
+                .elements
+                .iter()
+                .try_fold(0usize, |total, element| {
+                    let node_count = match &element.kind {
+                        StructuralElementKind::Beam(beam) => beam.node_ids.len(),
+                        StructuralElementKind::Shell(shell) => shell.node_ids.len(),
+                    };
+                    total
+                        .checked_add(node_count.saturating_mul(node_count.saturating_sub(1)))
+                        .ok_or(ResourcePlanningError::Overflow(
+                            "explicit node-neighbor references",
+                        ))
+                })?;
+        Ok(Self {
+            nodes: count(topology.nodes.len(), "explicit node count")?,
+            elements: count(structural.elements.len(), "explicit element count")?,
+            boundary_faces: Count(0),
+            element_node_references: count(
+                element_node_references,
+                "explicit element-node references",
+            )?,
+            boundary_node_references: Count(0),
+            node_neighbor_references: count(
+                node_neighbor_references,
+                "explicit node-neighbor references",
+            )?,
+            estimated_resident_bytes: estimate_topology_resident_bytes(
+                topology.nodes.len(),
+                structural.elements.len(),
+                0,
+                element_node_references,
+                0,
                 node_neighbor_references,
             )?,
         })

@@ -12,8 +12,8 @@ use super::{
         dof_component, nodal_vector_field, nodal_vector_field_for_count, owner_dof_index,
         translation_component, ConstraintNodeState,
     },
-    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology,
-    CanonicalStructuralDof, CanonicalStructuralDofOwner, ReactionRecovery,
+    CanonicalStructuralConstraintPlan, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralTopologyIdentity, ReactionRecovery,
 };
 use crate::{
     assembly::{dofs::StructuralDofKind, mixed_dof_layout},
@@ -21,7 +21,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
         FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_ROTATION,
     },
-    physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
+    physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -67,7 +67,7 @@ impl ConstraintViolation {
 pub struct CanonicalStructuralConstraintResult {
     pub schema_version: u16,
     pub constraint_plan_digest: Digest,
-    pub topology: CanonicalStructuralConstraintTopology,
+    pub topology: CanonicalStructuralTopologyIdentity,
     pub reference_points: Vec<ConstraintReferencePointResult>,
     pub groups: Vec<ConstraintGroupResult>,
     pub resultant_force_newtons: [f64; 3],
@@ -127,26 +127,47 @@ impl CanonicalStructuralConstraintResult {
     pub fn recover_for_model(
         plan: &CanonicalStructuralConstraintPlan,
         model: &AnalysisModel,
-        mesh: &SolverMeshArtifact,
+        mesh: Option<&SolverMeshArtifact>,
         fields: &[AnalysisField],
     ) -> Result<Self, ConstraintResultError> {
-        if matches!(
-            plan.topology,
-            CanonicalStructuralConstraintTopology::Solid { .. }
-        ) {
-            return Self::recover(plan, mesh, fields);
+        if let CanonicalStructuralTopologyIdentity::Solid { .. } = plan.topology {
+            return Self::recover(
+                plan,
+                mesh.ok_or_else(|| {
+                    ConstraintResultError::InvalidPlan(
+                        "solid constraint recovery requires its canonical mesh".into(),
+                    )
+                })?,
+                fields,
+            );
         }
         if !plan.reference_points.is_empty() {
             return Err(ConstraintResultError::GeneralizedStateRequired);
         }
         let structural = model.structural.as_ref().ok_or_else(|| {
             ConstraintResultError::InvalidPlan(
-                "mixed constraint recovery requires explicit structural topology".into(),
+                "structural constraint recovery requires explicit topology".into(),
             )
         })?;
-        let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
-            .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
-        if plan.topology.structural_digest() != topology.identity {
+        let topology = match plan.topology {
+            CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+                CanonicalStructuralNodeSpace::derive_explicit(structural)
+            }
+            CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+                CanonicalStructuralNodeSpace::derive(
+                    mesh.ok_or_else(|| {
+                        ConstraintResultError::InvalidPlan(
+                            "conformal mixed constraint recovery requires its canonical mesh"
+                                .into(),
+                        )
+                    })?,
+                    structural,
+                )
+            }
+            CanonicalStructuralTopologyIdentity::Solid { .. } => unreachable!(),
+        }
+        .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
+        if plan.topology != topology.identity {
             return Err(ConstraintResultError::TopologyMismatch);
         }
         let layout = mixed_dof_layout(&topology);
@@ -208,7 +229,7 @@ impl CanonicalStructuralConstraintResult {
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
         mesh.validate()
             .map_err(|error| ConstraintResultError::InvalidPlan(error.to_string()))?;
-        if plan.topology.mesh_digest() != mesh.canonical_digest {
+        if plan.topology.mesh_digest() != Some(mesh.canonical_digest) {
             return Err(ConstraintResultError::TopologyMismatch);
         }
         let expected_dofs = mesh.topology.nodes.len() * 3 + plan.reference_points.len() * 6;

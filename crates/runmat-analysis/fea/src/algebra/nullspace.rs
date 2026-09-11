@@ -140,9 +140,10 @@ impl NullspaceEliminationEvidence {
         structural: &runmat_analysis_core::StructuralModel,
         layout: &StructuralDofLayout,
         operator: &RealSparseMatrix,
+        constraints: &ResolvedConstraintMatrix,
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
-        structural_frame::prove(structural, layout, operator, constrained_dofs)
+        structural_frame::prove(structural, layout, operator, constraints, constrained_dofs)
     }
 
     pub fn prove_connector_anchored_structural_frame(
@@ -151,6 +152,7 @@ impl NullspaceEliminationEvidence {
         element_operator: &RealSparseMatrix,
         connector_operator: &RealSparseMatrix,
         combined_operator: &RealSparseMatrix,
+        constraints: &ResolvedConstraintMatrix,
         constrained_dofs: &[bool],
     ) -> Result<Self, NullspaceEvidenceError> {
         structural_frame::prove_with_connector_anchors(
@@ -159,6 +161,7 @@ impl NullspaceEliminationEvidence {
             element_operator,
             connector_operator,
             combined_operator,
+            constraints,
             constrained_dofs,
         )
     }
@@ -299,7 +302,8 @@ impl NullspaceEliminationEvidence {
 pub(crate) struct MixedStructuralNullspaceInput<'a> {
     pub mesh: &'a SolverMeshArtifact,
     pub structural: &'a runmat_analysis_core::StructuralModel,
-    pub topology: &'a crate::physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
+    pub topology:
+        &'a crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
     pub layout: &'a StructuralDofLayout,
     pub element_operator: &'a RealSparseMatrix,
     pub connector_operator: Option<&'a RealSparseMatrix>,

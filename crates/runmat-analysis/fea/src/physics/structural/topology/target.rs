@@ -4,7 +4,7 @@ use runmat_analysis_core::StructuralModel;
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
 
-use super::mixed::CanonicalMixedStructuralTopology;
+use super::{explicit_target_node_indices, node_space::CanonicalStructuralNodeSpace};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MixedStructuralTargetOwnership {
@@ -43,10 +43,13 @@ pub(crate) fn resolve_mixed_structural_target(
     selector: &str,
     mesh: &SolverMeshArtifact,
     structural: &StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
 ) -> Result<MixedStructuralTargetOwnership, MixedStructuralTargetError> {
     let solid = solid_nodes(mesh, selector)?;
-    let explicit = explicit_nodes(structural, topology, selector);
+    let explicit = explicit_target_node_indices(structural, selector)
+        .into_iter()
+        .map(|node| topology.explicit_node_indices[node])
+        .collect::<BTreeSet<_>>();
     match (solid.is_empty(), explicit.is_empty()) {
         (true, true) => Err(MixedStructuralTargetError::Unmapped {
             selector: selector.into(),
@@ -66,41 +69,6 @@ pub(crate) fn resolve_mixed_structural_target(
             explicit_node_count: explicit.len(),
         }),
     }
-}
-
-fn explicit_nodes(
-    structural: &StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
-    selector: &str,
-) -> BTreeSet<usize> {
-    structural
-        .nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| selector == format!("node:{}", node.node_id))
-        .map(|(node, _)| topology.explicit_node_indices[node])
-        .chain(
-            structural
-                .elements
-                .iter()
-                .filter(|element| element.region_id == selector)
-                .flat_map(|element| match &element.kind {
-                    runmat_analysis_core::StructuralElementKind::Beam(beam) => {
-                        beam.node_ids.as_slice()
-                    }
-                    runmat_analysis_core::StructuralElementKind::Shell(shell) => {
-                        shell.node_ids.as_slice()
-                    }
-                })
-                .filter_map(|node_id| {
-                    structural
-                        .nodes
-                        .iter()
-                        .position(|node| node.node_id == *node_id)
-                })
-                .map(|node| topology.explicit_node_indices[node]),
-        )
-        .collect()
 }
 
 fn solid_nodes(

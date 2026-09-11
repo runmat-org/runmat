@@ -1,0 +1,75 @@
+use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+
+use crate::physics::structural::topology::{
+    node_space::CanonicalStructuralNodeSpace, CanonicalStructuralTopologyIdentity,
+};
+
+use super::{RecoveredFieldEntityCounts, RecoveredFieldError};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StructuralRecoveredFieldTopology {
+    pub identity: CanonicalStructuralTopologyIdentity,
+    pub entity_counts: RecoveredFieldEntityCounts,
+}
+
+impl StructuralRecoveredFieldTopology {
+    pub fn derive(
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+    ) -> Result<Self, RecoveredFieldError> {
+        if let Some(mesh) = mesh {
+            mesh.validate_canonical()
+                .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
+        }
+        let structural = model.structural.as_ref();
+        let has_explicit = structural.is_some_and(|structural| !structural.elements.is_empty());
+        let (identity, structural_nodes) = match (mesh, structural.filter(|_| has_explicit)) {
+            (Some(mesh), Some(structural)) if !mesh.topology.volume_elements.is_empty() => {
+                let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
+                    .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
+                (topology.identity, topology.nodes.len())
+            }
+            (None, Some(structural)) => {
+                let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+                    .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
+                (topology.identity, topology.nodes.len())
+            }
+            (Some(mesh), _) => (
+                CanonicalStructuralTopologyIdentity::Solid {
+                    mesh_digest: mesh.canonical_digest,
+                },
+                mesh.topology.nodes.len(),
+            ),
+            (None, None) => {
+                return Err(RecoveredFieldError::InvalidArtifact(
+                    "structural field topology requires solid or explicit elements".into(),
+                ))
+            }
+        };
+        let (beam_elements, shell_elements) = structural
+            .map(|structural| {
+                structural
+                    .elements
+                    .iter()
+                    .fold((0, 0), |counts, element| match element.kind {
+                        StructuralElementKind::Beam(_) => (counts.0 + 1, counts.1),
+                        StructuralElementKind::Shell(_) => (counts.0, counts.1 + 1),
+                    })
+            })
+            .unwrap_or_default();
+        let entity_counts = RecoveredFieldEntityCounts {
+            structural_nodes,
+            solid_elements: mesh
+                .map(|mesh| mesh.topology.volume_elements.len())
+                .unwrap_or(0),
+            beam_elements,
+            shell_elements,
+        };
+        entity_counts.validate()?;
+        Ok(Self {
+            identity,
+            entity_counts,
+        })
+    }
+}

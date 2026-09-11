@@ -3,13 +3,15 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{ObservationId, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest,
-    ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
+    ObservationEvaluationRequest, SequenceIdentity, StepIdentity, StructuralLinearWorkload,
 };
-use runmat_analysis_fea::results::field::RecoveredFieldSelection;
+use runmat_analysis_fea::results::field::{
+    RecoveredFieldSelection, StructuralRecoveredFieldTopology,
+};
 use runmat_analysis_fea::results::observation::{
-    resolve_observation_plan, ObservationArtifactManifest, ObservationLimits, ObservationResult,
+    resolve_structural_observation_plan, ObservationArtifactManifest, ObservationLimits,
+    ObservationResult,
 };
-use runmat_analysis_fea::topology::AnalysisProjection;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -30,7 +32,8 @@ pub struct StructuralObservationPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: FieldRecoveryRequest,
     pub source_fields: ImportedRecoveredFields,
-    pub mesh: PreparedAnalysisObjects,
+    pub source_invocation: PreparedAnalysisObjects,
+    pub mesh: Option<PreparedAnalysisObjects>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
     pub limits: ObservationLimits,
@@ -63,29 +66,50 @@ pub fn prepare_structural_observation(
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
         || preparation.source_host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
         || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
-        || preparation.mesh.manifest.kind != AnalysisNumericalObjectKind::Mesh
+        || preparation.source_invocation.manifest.kind
+            != AnalysisNumericalObjectKind::SolverInvocation
+        || preparation
+            .mesh
+            .as_ref()
+            .is_some_and(|mesh| mesh.manifest.kind != AnalysisNumericalObjectKind::Mesh)
         || preparation.chunk_bytes == 0
     {
         return Err(AnalysisBridgeError::Invalid(
-            "observation evaluation requires completed recovered fields, their mesh, and bounded chunks"
-                .into(),
+            "observation evaluation requires completed recovered fields, their source invocation, optional canonical mesh, and bounded chunks".into(),
         ));
     }
     let request_input = unique_workload_input(
         &preparation.source_host,
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
     )?;
+    let invocation_input = unique_workload_input(
+        &preparation.source_host,
+        AnalysisNumericalObjectKind::SolverInvocation,
+    )?;
     let mesh_input =
-        unique_workload_input(&preparation.source_host, AnalysisNumericalObjectKind::Mesh)?;
+        optional_workload_input(&preparation.source_host, AnalysisNumericalObjectKind::Mesh)?;
     if request_input.logical_identity != preparation.source_request.identity().digest()
         || preparation.source_host.workload.step != preparation.source_request.producer
-        || mesh_input.logical_identity != preparation.mesh.manifest.logical_identity
-        || mesh_input.payload_digest != preparation.mesh.manifest.payload_digest
-        || preparation.source_request.mesh_digest != preparation.mesh.manifest.logical_identity
+        || invocation_input.logical_identity
+            != preparation.source_invocation.manifest.logical_identity
+        || invocation_input.payload_digest != preparation.source_invocation.manifest.payload_digest
+        || invocation_input.manifest_digest != preparation.source_invocation.root.digest
     {
         return Err(AnalysisBridgeError::Identity(
             "observation source differs from its field-recovery workload",
         ));
+    }
+    match (mesh_input, preparation.mesh.as_ref()) {
+        (Some(source), Some(mesh))
+            if source.logical_identity == mesh.manifest.logical_identity
+                && source.payload_digest == mesh.manifest.payload_digest
+                && source.manifest_digest == mesh.root.digest => {}
+        (None, None) => {}
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "observation mesh presence or identity differs from the field-recovery workload",
+            ))
+        }
     }
     let expected_step =
         StepIdentity::from_solver_contract(preparation.sequence, &preparation.step)?;
@@ -94,13 +118,22 @@ pub fn prepare_structural_observation(
             "observation procedure step differs from its producing step",
         ));
     }
-    let mesh_artifact = SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let projection = AnalysisProjection::derive(&mesh_artifact)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if projection.projection_digest != preparation.source_request.projection_digest {
+    let workload =
+        StructuralLinearWorkload::from_canonical_bytes(&preparation.source_invocation.payload())?;
+    let mesh_artifact = preparation
+        .mesh
+        .as_ref()
+        .map(|mesh| {
+            SolverMeshArtifact::canonical_decode(&mesh.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    let topology =
+        StructuralRecoveredFieldTopology::derive(&workload.model, mesh_artifact.as_ref())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if topology.identity != preparation.source_request.topology {
         return Err(AnalysisBridgeError::Identity(
-            "observation projection differs from its field-recovery request",
+            "observation topology differs from its field-recovery request",
         ));
     }
     let fields = &preparation.source_fields.manifest;
@@ -117,9 +150,10 @@ pub fn prepare_structural_observation(
         .iter()
         .map(|field| field.definition.clone())
         .collect::<Vec<_>>();
-    let plan = resolve_observation_plan(
+    let plan = resolve_structural_observation_plan(
         &preparation.step,
-        &projection,
+        &workload.model,
+        mesh_artifact.as_ref(),
         &definitions,
         preparation.limits,
     )
@@ -140,7 +174,7 @@ pub fn prepare_structural_observation(
     let request = ObservationEvaluationRequest::new(
         preparation.source_request.producer,
         &selection,
-        preparation.source_request.mesh_digest,
+        topology.identity,
         plan,
     )?;
     let selection_bytes = selection
@@ -196,8 +230,12 @@ pub fn prepare_structural_observation(
     let inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (selected_field_objects, ValueRefKind::DriverObject),
-        (preparation.mesh, ValueRefKind::DriverObject),
+        (preparation.source_invocation, ValueRefKind::DriverObject),
     ];
+    let mut inputs = inputs;
+    if let Some(mesh) = preparation.mesh {
+        inputs.push((mesh, ValueRefKind::DriverObject));
+    }
     let workload_inputs = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
@@ -352,6 +390,24 @@ fn unique_workload_input(
     let input = matches.next().ok_or_else(|| {
         AnalysisBridgeError::Invalid(format!("analysis workload is missing its {kind:?} input"))
     })?;
+    if matches.next().is_some() {
+        return Err(AnalysisBridgeError::Invalid(format!(
+            "analysis workload has multiple {kind:?} inputs"
+        )));
+    }
+    Ok(input)
+}
+
+fn optional_workload_input(
+    host: &AnalysisHostWorkload,
+    kind: AnalysisNumericalObjectKind,
+) -> AnalysisBridgeResult<Option<&AnalysisWorkloadInput>> {
+    let mut matches = host
+        .workload
+        .inputs
+        .iter()
+        .filter(|input| input.kind == kind);
+    let input = matches.next();
     if matches.next().is_some() {
         return Err(AnalysisBridgeError::Invalid(format!(
             "analysis workload has multiple {kind:?} inputs"

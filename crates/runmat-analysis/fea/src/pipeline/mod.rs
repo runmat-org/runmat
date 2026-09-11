@@ -12,12 +12,13 @@ mod admission;
 
 use runmat_analysis_core::{
     AnalysisModel, ExcitationAction, ExcitationTarget, StructuralConstraint,
-    StructuralConstraintKind, StructuralElementKind, StructuralModel,
+    StructuralConstraintKind,
 };
 
 use crate::{
     assembly::{dofs::StructuralDofKind, AssemblySummary},
     contracts::FeaRunError,
+    physics::structural::topology::explicit_target_node_indices,
 };
 
 const ROTATION_REQUIRES_ROTATIONAL_DOF_MESSAGE: &str =
@@ -47,7 +48,7 @@ pub(crate) fn validate_rotational_dof_targets(
             .kind
             .target()
             .expect("rotation constraint has a target");
-        let target_nodes = structural_target_nodes(structural, &target.region_id);
+        let target_nodes = explicit_target_node_indices(structural, &target.region_id);
         if target_nodes.is_empty()
             || target_nodes
                 .iter()
@@ -108,54 +109,4 @@ fn node_has_rotational_dofs(summary: &AssemblySummary, node_index: usize) -> boo
             .index(node_index, *kind)
             .is_some()
     })
-}
-
-fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
-    if let Some(node_id) = structural_node_selector(region_id) {
-        return structural_node_index(structural, node_id)
-            .into_iter()
-            .collect();
-    }
-    let mut nodes = Vec::new();
-    for element in &structural.elements {
-        if element.region_id != region_id {
-            continue;
-        }
-        match &element.kind {
-            StructuralElementKind::Beam(beam) => {
-                for node_id in beam.node_ids {
-                    if let Some(index) = structural_node_index(structural, node_id) {
-                        if !nodes.contains(&index) {
-                            nodes.push(index);
-                        }
-                    }
-                }
-            }
-            StructuralElementKind::Shell(shell) => {
-                for node_id in shell.node_ids {
-                    if let Some(index) = structural_node_index(structural, node_id) {
-                        if !nodes.contains(&index) {
-                            nodes.push(index);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    nodes
-}
-
-fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
-    structural
-        .nodes
-        .iter()
-        .position(|node| node.node_id == node_id)
-}
-
-fn structural_node_selector(region_id: &str) -> Option<u32> {
-    region_id
-        .strip_prefix("node:")
-        .unwrap_or(region_id)
-        .parse::<u32>()
-        .ok()
 }

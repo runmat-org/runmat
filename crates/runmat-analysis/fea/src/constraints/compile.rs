@@ -10,10 +10,9 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 use super::contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralConstraintTopology,
-    CanonicalStructuralDof, CanonicalStructuralDofOwner, CanonicalStructuralReferencePoint,
-    ConstraintCouplingEvidence, ConstraintCouplingKind, ConstraintEnforcement,
-    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
+    ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
     ConstraintPlanEvidence, ResolvedConstraintTarget,
 };
 use super::coupling::compile_reference_coupling;
@@ -29,6 +28,7 @@ use super::plan::{
 };
 use super::row;
 use super::target::{node_coordinates, resolve_solid_target};
+use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
@@ -88,12 +88,9 @@ pub(super) fn compile(
     let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
     let plan = CanonicalStructuralConstraintPlan {
         schema_version: 1,
-        topology: CanonicalStructuralConstraintTopology::Solid {
+        topology: CanonicalStructuralTopologyIdentity::Solid {
             mesh_digest: mesh.canonical_digest,
         },
-        geometry_source_digest: mesh.geometry.source_digest,
-        geometry_revision: mesh.geometry.geometry_revision,
-        persistent_mapping_version: mesh.geometry.persistent_mapping_version,
         authored_constraints_digest,
         enforcement,
         reference_points,

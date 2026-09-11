@@ -9,12 +9,16 @@ use runmat_meshing_core::{
 use serde::Serialize;
 use thiserror::Error;
 
+use super::{
+    explicit_node_identity, explicit_topology_digest, CanonicalStructuralTopologyIdentity,
+};
+
 const IDENTITY_PREFIX: &[u8] = b"runmat-fea-mixed-structural-topology/v1\0";
 const IDENTITY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct CanonicalMixedStructuralNode {
+pub(crate) struct CanonicalStructuralNode {
     pub identity: StableDigest,
     pub coordinates_m: [f64; 3],
     pub owns_solid_translation: bool,
@@ -22,15 +26,15 @@ pub(crate) struct CanonicalMixedStructuralNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct CanonicalMixedStructuralTopology {
-    pub nodes: Vec<CanonicalMixedStructuralNode>,
+pub(crate) struct CanonicalStructuralNodeSpace {
+    pub nodes: Vec<CanonicalStructuralNode>,
     pub solid_node_count: usize,
     pub explicit_node_indices: Vec<usize>,
-    pub identity: Digest,
+    pub identity: CanonicalStructuralTopologyIdentity,
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
-pub(crate) enum MixedStructuralTopologyError {
+pub(crate) enum StructuralNodeSpaceError {
     #[error("mixed structural topology requires a valid canonical solver mesh: {0}")]
     InvalidMesh(String),
     #[error("explicit node {node_id} has an empty CAD-vertex attachment")]
@@ -70,23 +74,61 @@ pub(crate) enum MixedStructuralTopologyError {
     Identity(String),
 }
 
-impl CanonicalMixedStructuralTopology {
+impl CanonicalStructuralNodeSpace {
+    pub fn derive_explicit(structural: &StructuralModel) -> Result<Self, StructuralNodeSpaceError> {
+        let structural_topology_digest = explicit_topology_digest(structural)
+            .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))?;
+        let nodes = structural
+            .nodes
+            .iter()
+            .map(|node| {
+                explicit_node_identity(structural_topology_digest, node.node_id, node.coordinates_m)
+                    .map(|identity| CanonicalStructuralNode {
+                        identity,
+                        coordinates_m: node.coordinates_m,
+                        owns_solid_translation: false,
+                        owns_explicit_rotation: true,
+                    })
+                    .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let unique_identities = nodes
+            .iter()
+            .map(|node| node.identity)
+            .collect::<BTreeSet<_>>();
+        if unique_identities.len() != nodes.len() {
+            return Err(StructuralNodeSpaceError::Identity(
+                "canonical explicit-node identities are not unique".into(),
+            ));
+        }
+        Ok(Self {
+            explicit_node_indices: (0..nodes.len()).collect(),
+            nodes,
+            solid_node_count: 0,
+            identity: CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest,
+            },
+        })
+    }
+
     pub fn derive(
         mesh: &SolverMeshArtifact,
         structural: &StructuralModel,
-    ) -> Result<Self, MixedStructuralTopologyError> {
+    ) -> Result<Self, StructuralNodeSpaceError> {
         mesh.validate_canonical()
-            .map_err(|error| MixedStructuralTopologyError::InvalidMesh(error.to_string()))?;
+            .map_err(|error| StructuralNodeSpaceError::InvalidMesh(error.to_string()))?;
         let tolerance_m = mesh
             .resolved_request
             .tolerance
             .equivalence_tolerance_m(model_scale(mesh))
-            .map_err(|error| MixedStructuralTopologyError::InvalidMesh(error.to_string()))?;
+            .map_err(|error| StructuralNodeSpaceError::InvalidMesh(error.to_string()))?;
+        let structural_topology_digest = explicit_topology_digest(structural)
+            .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))?;
         let mut nodes = mesh
             .topology
             .nodes
             .iter()
-            .map(|node| CanonicalMixedStructuralNode {
+            .map(|node| CanonicalStructuralNode {
                 identity: node.stable_identity,
                 coordinates_m: node.coordinates_m,
                 owns_solid_translation: true,
@@ -100,7 +142,7 @@ impl CanonicalMixedStructuralTopology {
             let canonical_index = if let Some(attachment) = &node.solid_attachment {
                 let selection = attachment.geometry_vertex_id.trim();
                 if selection.is_empty() {
-                    return Err(MixedStructuralTopologyError::EmptyAttachment {
+                    return Err(StructuralNodeSpaceError::EmptyAttachment {
                         node_id: node.node_id,
                     });
                 }
@@ -119,14 +161,14 @@ impl CanonicalMixedStructuralTopology {
                     .collect::<Vec<_>>();
                 let canonical_index = match matches.as_slice() {
                     [] => {
-                        return Err(MixedStructuralTopologyError::MissingAttachment {
+                        return Err(StructuralNodeSpaceError::MissingAttachment {
                             node_id: node.node_id,
                             geometry_vertex_id: attachment.geometry_vertex_id.clone(),
                         })
                     }
                     [index] => *index,
                     _ => {
-                        return Err(MixedStructuralTopologyError::AmbiguousAttachment {
+                        return Err(StructuralNodeSpaceError::AmbiguousAttachment {
                             node_id: node.node_id,
                             geometry_vertex_id: attachment.geometry_vertex_id.clone(),
                             matched_node_count: matches.len(),
@@ -134,7 +176,7 @@ impl CanonicalMixedStructuralTopology {
                     }
                 };
                 if let Some(first_node_id) = attached.insert(canonical_index, node.node_id) {
-                    return Err(MixedStructuralTopologyError::DuplicateAttachment {
+                    return Err(StructuralNodeSpaceError::DuplicateAttachment {
                         first_node_id,
                         second_node_id: node.node_id,
                     });
@@ -144,7 +186,7 @@ impl CanonicalMixedStructuralTopology {
                     mesh.topology.nodes[canonical_index].coordinates_m,
                 );
                 if !distance_m.is_finite() || distance_m > tolerance_m {
-                    return Err(MixedStructuralTopologyError::AttachmentCoordinateMismatch {
+                    return Err(StructuralNodeSpaceError::AttachmentCoordinateMismatch {
                         node_id: node.node_id,
                         geometry_vertex_id: attachment.geometry_vertex_id.clone(),
                         distance_m,
@@ -154,8 +196,13 @@ impl CanonicalMixedStructuralTopology {
                 nodes[canonical_index].owns_explicit_rotation = true;
                 canonical_index
             } else {
-                let identity = explicit_node_identity(node.node_id, node.coordinates_m)?;
-                nodes.push(CanonicalMixedStructuralNode {
+                let identity = explicit_node_identity(
+                    structural_topology_digest,
+                    node.node_id,
+                    node.coordinates_m,
+                )
+                .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))?;
+                nodes.push(CanonicalStructuralNode {
                     identity,
                     coordinates_m: node.coordinates_m,
                     owns_solid_translation: false,
@@ -170,13 +217,13 @@ impl CanonicalMixedStructuralTopology {
             .map(|node| node.identity)
             .collect::<BTreeSet<_>>();
         if unique_identities.len() != nodes.len() {
-            return Err(MixedStructuralTopologyError::Identity(
+            return Err(StructuralNodeSpaceError::Identity(
                 "canonical mixed-node identities are not unique".into(),
             ));
         }
-        let identity = identity(
+        let structural_topology_digest = identity(
             mesh.canonical_digest,
-            structural,
+            structural_topology_digest,
             &nodes,
             &explicit_node_indices,
         )?;
@@ -184,39 +231,33 @@ impl CanonicalMixedStructuralTopology {
             nodes,
             solid_node_count,
             explicit_node_indices,
-            identity,
+            identity: CanonicalStructuralTopologyIdentity::ConformalMixed {
+                mesh_digest: mesh.canonical_digest,
+                structural_topology_digest,
+            },
         })
     }
 }
 
 fn identity(
     mesh_digest: StableDigest,
-    structural: &StructuralModel,
-    nodes: &[CanonicalMixedStructuralNode],
+    structural_topology_digest: Digest,
+    nodes: &[CanonicalStructuralNode],
     explicit_node_indices: &[usize],
-) -> Result<Digest, MixedStructuralTopologyError> {
+) -> Result<Digest, StructuralNodeSpaceError> {
     encode_contract(
         IDENTITY_PREFIX,
         "mixed-structural-topology",
-        &(mesh_digest, structural, nodes, explicit_node_indices),
+        &(
+            mesh_digest,
+            structural_topology_digest,
+            nodes,
+            explicit_node_indices,
+        ),
         IDENTITY_LIMITS,
     )
     .map(Digest::sha256)
-    .map_err(|error| MixedStructuralTopologyError::Identity(error.to_string()))
-}
-
-fn explicit_node_identity(
-    node_id: u32,
-    coordinates_m: [f64; 3],
-) -> Result<StableDigest, MixedStructuralTopologyError> {
-    encode_contract(
-        IDENTITY_PREFIX,
-        "unattached-explicit-structural-node",
-        &(node_id, coordinates_m),
-        IDENTITY_LIMITS,
-    )
-    .map(|encoded| StableDigest::from_bytes(*Digest::sha256(encoded).bytes()))
-    .map_err(|error| MixedStructuralTopologyError::Identity(error.to_string()))
+    .map_err(|error| StructuralNodeSpaceError::Identity(error.to_string()))
 }
 
 fn model_scale(mesh: &SolverMeshArtifact) -> f64 {
@@ -254,6 +295,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_node_space_uses_the_authored_topology_without_a_mesh() {
+        let structural = crate::fixtures::fixture_model(
+            crate::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+        )
+        .structural
+        .expect("beam topology");
+        let topology = CanonicalStructuralNodeSpace::derive_explicit(&structural).unwrap();
+        assert_eq!(topology.solid_node_count, 0);
+        assert_eq!(topology.explicit_node_indices, vec![0, 1]);
+        assert!(topology
+            .nodes
+            .iter()
+            .all(|node| { !node.owns_solid_translation && node.owns_explicit_rotation }));
+        assert!(matches!(
+            topology.identity,
+            super::super::CanonicalStructuralTopologyIdentity::Explicit { .. }
+        ));
+    }
+
+    #[test]
     fn attached_explicit_node_upgrades_one_solid_node_without_duplicate_translation() {
         let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
         let vertex = PersistentEntityId {
@@ -272,7 +333,7 @@ mod tests {
             geometry_vertex_id: "beam-root".into(),
         });
 
-        let projected = CanonicalMixedStructuralTopology::derive(&mesh, &structural).unwrap();
+        let projected = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
         assert_eq!(projected.solid_node_count, 4);
         assert_eq!(projected.nodes.len(), 5);
         assert_eq!(projected.explicit_node_indices, vec![0, 4]);
@@ -294,8 +355,8 @@ mod tests {
             geometry_vertex_id: "beam-root".into(),
         });
         assert!(matches!(
-            CanonicalMixedStructuralTopology::derive(&mesh, &structural),
-            Err(MixedStructuralTopologyError::MissingAttachment { .. })
+            CanonicalStructuralNodeSpace::derive(&mesh, &structural),
+            Err(StructuralNodeSpaceError::MissingAttachment { .. })
         ));
 
         let vertex = PersistentEntityId {
@@ -307,8 +368,8 @@ mod tests {
         mesh.topology.nodes[1].provenance.push(vertex);
         reseal(&mut mesh);
         assert!(matches!(
-            CanonicalMixedStructuralTopology::derive(&mesh, &structural),
-            Err(MixedStructuralTopologyError::AmbiguousAttachment { .. })
+            CanonicalStructuralNodeSpace::derive(&mesh, &structural),
+            Err(StructuralNodeSpaceError::AmbiguousAttachment { .. })
         ));
 
         mesh.topology.nodes[1]
@@ -317,8 +378,8 @@ mod tests {
         reseal(&mut mesh);
         structural.nodes[0].coordinates_m[0] += 0.25;
         assert!(matches!(
-            CanonicalMixedStructuralTopology::derive(&mesh, &structural),
-            Err(MixedStructuralTopologyError::AttachmentCoordinateMismatch { .. })
+            CanonicalStructuralNodeSpace::derive(&mesh, &structural),
+            Err(StructuralNodeSpaceError::AttachmentCoordinateMismatch { .. })
         ));
     }
 
@@ -336,11 +397,11 @@ mod tests {
         )
         .structural
         .expect("beam topology");
-        let disconnected = CanonicalMixedStructuralTopology::derive(&mesh, &structural).unwrap();
+        let disconnected = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
         structural.nodes[0].solid_attachment = Some(ConformalSolidAttachment {
             geometry_vertex_id: "beam-root".into(),
         });
-        let attached = CanonicalMixedStructuralTopology::derive(&mesh, &structural).unwrap();
+        let attached = CanonicalStructuralNodeSpace::derive(&mesh, &structural).unwrap();
         assert_ne!(disconnected.identity, attached.identity);
     }
 

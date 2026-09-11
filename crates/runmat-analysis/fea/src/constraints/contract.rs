@@ -6,6 +6,8 @@ use runmat_meshing_core::{PersistentEntityId, StableDigest};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanonicalStructuralDof {
@@ -130,50 +132,6 @@ pub struct CanonicalStructuralDofAddress {
     pub dof: CanonicalStructuralDof,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum CanonicalStructuralConstraintTopology {
-    Solid {
-        mesh_digest: StableDigest,
-    },
-    ConformalMixed {
-        mesh_digest: StableDigest,
-        structural_topology_digest: Digest,
-    },
-}
-
-impl CanonicalStructuralConstraintTopology {
-    pub const fn mesh_digest(self) -> StableDigest {
-        match self {
-            Self::Solid { mesh_digest } | Self::ConformalMixed { mesh_digest, .. } => mesh_digest,
-        }
-    }
-
-    pub fn structural_digest(self) -> Digest {
-        match self {
-            Self::Solid { mesh_digest } => Digest::from_bytes(*mesh_digest.bytes()),
-            Self::ConformalMixed {
-                structural_topology_digest,
-                ..
-            } => structural_topology_digest,
-        }
-    }
-
-    pub fn has_valid_identity(self) -> bool {
-        self.mesh_digest() != StableDigest::ZERO
-            && match self {
-                Self::Solid { .. } => true,
-                Self::ConformalMixed {
-                    structural_topology_digest,
-                    ..
-                } => {
-                    structural_topology_digest.bytes() != &[0; 32]
-                        && structural_topology_digest != Digest::sha256([])
-                }
-            }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalStructuralReferencePoint {
@@ -214,10 +172,7 @@ pub struct ConstraintPlanEvidence {
 #[serde(deny_unknown_fields)]
 pub struct CanonicalStructuralConstraintPlan {
     pub schema_version: u16,
-    pub topology: CanonicalStructuralConstraintTopology,
-    pub geometry_source_digest: StableDigest,
-    pub geometry_revision: u64,
-    pub persistent_mapping_version: u32,
+    pub topology: CanonicalStructuralTopologyIdentity,
     pub authored_constraints_digest: Digest,
     pub enforcement: ConstraintEnforcement,
     pub reference_points: Vec<CanonicalStructuralReferencePoint>,

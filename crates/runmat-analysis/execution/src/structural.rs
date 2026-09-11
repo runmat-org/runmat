@@ -12,8 +12,9 @@ use runmat_analysis_fea::execution::{
 };
 use runmat_analysis_fea::planning::resource::{build_structural_resource_plan, FeaResourcePlan};
 use runmat_analysis_fea::post::fields::structural_observable_field_definitions;
-use runmat_analysis_fea::results::observation::{resolve_observation_plan, ObservationLimits};
-use runmat_analysis_fea::topology::AnalysisProjection;
+use runmat_analysis_fea::results::observation::{
+    resolve_structural_observation_plan, ObservationLimits,
+};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
@@ -39,7 +40,7 @@ pub struct StructuralLinearProgramPreparation {
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
     pub workload: StructuralLinearWorkload,
-    pub mesh: SolverMeshArtifact,
+    pub mesh: Option<SolverMeshArtifact>,
     pub initial_guess: Option<PreparedAnalysisObjects>,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -153,9 +154,10 @@ pub fn prepare_structural_sequence_step(
                     consumer,
                     authored: authored_transition,
                     source: &state,
-                    target_topology_digest: Digest::from_bytes(
-                        *preparation.mesh.canonical_digest.bytes(),
-                    ),
+                    target_topology_digest: structural_topology_digest(
+                        &preparation.workload,
+                        preparation.mesh.as_ref(),
+                    )?,
                 },
             )?);
         }
@@ -173,45 +175,49 @@ pub fn prepare_structural_linear_program(
     preparation: StructuralLinearProgramPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
     preparation.workload.validate()?;
-    preparation
-        .mesh
-        .validate()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if let Some(mesh) = &preparation.mesh {
+        mesh.validate()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    }
     if preparation.chunk_bytes == 0 {
         return Err(AnalysisBridgeError::Invalid(
             "structural analysis chunk size must be non-zero".into(),
         ));
     }
     let mesh_revision = u64::from(preparation.workload.model.geometry_revision);
-    if preparation.mesh.geometry.geometry_revision != mesh_revision {
+    if preparation
+        .mesh
+        .as_ref()
+        .is_some_and(|mesh| mesh.geometry.geometry_revision != mesh_revision)
+    {
         return Err(AnalysisBridgeError::Invalid(
             "structural workload and solver mesh geometry revisions differ".into(),
         ));
     }
 
-    let constraint_plan =
-        CanonicalStructuralConstraintPlan::compile(&preparation.workload.model, &preparation.mesh)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_plan = CanonicalStructuralConstraintPlan::compile_for_model(
+        &preparation.workload.model,
+        preparation.mesh.as_ref(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let constraint_plan_bytes = constraint_plan
         .canonical_bytes()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let constraint_plan_digest = constraint_plan
         .content_digest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let projection = AnalysisProjection::derive(&preparation.mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let field_definitions = structural_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let observation_plan = resolve_observation_plan(
+    let observation_plan = resolve_structural_observation_plan(
         preparation.workload.procedure_step()?,
-        &projection,
+        &preparation.workload.model,
+        preparation.mesh.as_ref(),
         &field_definitions,
         ObservationLimits::default(),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = build_structural_resource_plan(
-        &preparation.mesh,
-        &projection,
+        preparation.mesh.as_ref(),
         &constraint_plan,
         &observation_plan,
         &preparation.workload,
@@ -221,11 +227,7 @@ pub fn prepare_structural_linear_program(
         .canonical_bytes()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let solve_bytes = preparation.workload.canonical_bytes()?;
-    let mesh_bytes = preparation
-        .mesh
-        .canonical_encode()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mesh_digest = Digest::from_bytes(*preparation.mesh.canonical_digest.bytes());
+    let topology_digest = constraint_plan.topology.discretization_digest();
     match (
         preparation.workload.initial_guess_transition.as_ref(),
         preparation.initial_guess.as_ref(),
@@ -239,8 +241,8 @@ pub fn prepare_structural_linear_program(
                     &state.payload(),
                 )?;
             if decoded.identity != transition.source_state
-                || decoded.topology_digest != mesh_digest
-                || transition.target_topology_digest != mesh_digest
+                || decoded.topology_digest != topology_digest
+                || transition.target_topology_digest != topology_digest
             {
                 return Err(AnalysisBridgeError::Identity(
                     "initial-guess state differs from its transition or solver mesh",
@@ -258,7 +260,7 @@ pub fn prepare_structural_linear_program(
         &preparation.workload,
         preparation.authored_study_digest,
         preparation.frozen_project_digest,
-        mesh_digest,
+        topology_digest,
         constraint_plan_digest,
         resource_plan.identity.digest(),
     )?;
@@ -293,14 +295,6 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let mesh = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::Mesh,
-        mesh_digest,
-        &mesh_bytes,
-        preparation.chunk_bytes,
-        ObjectNamespace::InputValue,
-        preparation.inventory_limits,
-    )?;
     let constraint_plan = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ConstraintPlan,
         identities.constraint_plan.digest(),
@@ -317,12 +311,25 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let mut inputs = vec![
-        (invocation, ValueRefKind::DriverObject),
-        (mesh, ValueRefKind::DriverObject),
-        (constraint_plan, ValueRefKind::DriverObject),
-        (resource_plan_objects, ValueRefKind::DriverObject),
-    ];
+    let mut inputs = vec![(invocation, ValueRefKind::DriverObject)];
+    if let Some(mesh) = preparation.mesh {
+        let mesh_bytes = mesh
+            .canonical_encode()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        inputs.push((
+            prepare_analysis_objects(
+                AnalysisNumericalObjectKind::Mesh,
+                Digest::from_bytes(*mesh.canonical_digest.bytes()),
+                &mesh_bytes,
+                preparation.chunk_bytes,
+                ObjectNamespace::InputValue,
+                preparation.inventory_limits,
+            )?,
+            ValueRefKind::DriverObject,
+        ));
+    }
+    inputs.push((constraint_plan, ValueRefKind::DriverObject));
+    inputs.push((resource_plan_objects, ValueRefKind::DriverObject));
     if let Some(initial_guess) = preparation.initial_guess {
         inputs.push((initial_guess, ValueRefKind::ResultObject));
     }
@@ -469,11 +476,20 @@ struct StructuralIdentities {
     execution_plan: ExecutionPlanIdentity,
 }
 
+fn structural_topology_digest(
+    workload: &StructuralLinearWorkload,
+    mesh: Option<&SolverMeshArtifact>,
+) -> AnalysisBridgeResult<Digest> {
+    CanonicalStructuralConstraintPlan::compile_for_model(&workload.model, mesh)
+        .map(|plan| plan.topology.discretization_digest())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+}
+
 fn derive_identities(
     workload: &StructuralLinearWorkload,
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
-    mesh_digest: Digest,
+    topology_digest: Digest,
     constraint_plan_digest: Digest,
     resource_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
@@ -481,7 +497,7 @@ fn derive_identities(
     let study = StudyIdentity::from_authored_digest(authored_study_digest, frozen_project_digest)?;
     let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence)?;
     let step = StepIdentity::from_solver_contract(sequence, step_contract)?;
-    let constraints = ConstraintPlanIdentity::new(step, mesh_digest, constraint_plan_digest)?;
+    let constraints = ConstraintPlanIdentity::new(step, topology_digest, constraint_plan_digest)?;
     let excitations = workload
         .model
         .excitations
@@ -498,7 +514,10 @@ fn derive_identities(
                 step,
                 signal,
                 contract_digest("excitation-target", &excitation.excitation().target)?,
-                contract_digest("canonical-mesh-projection", &(mesh_digest, authored))?,
+                contract_digest(
+                    "canonical-structural-projection",
+                    &(topology_digest, authored),
+                )?,
             )
             .map_err(Into::into)
         })
@@ -515,10 +534,10 @@ fn derive_identities(
     )?;
     let discretization = DiscretizationIdentity::new(
         problem,
-        mesh_digest,
+        topology_digest,
         contract_digest(
             "formulation",
-            &(workload.formulation_requirement, mesh_digest),
+            &(workload.formulation_requirement, topology_digest),
         )?,
     )?;
     let operator = OperatorIdentity::new(

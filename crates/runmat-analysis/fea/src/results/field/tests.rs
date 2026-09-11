@@ -17,6 +17,7 @@ fn temperature_definition(label: &str) -> RecoveredFieldDefinition {
         label,
         ObservationQuantity::Temperature,
         FieldLocation::Node,
+        RecoveredFieldEntityDomain::StructuralNodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -40,8 +41,9 @@ fn recovery_request() -> crate::execution::FieldRecoveryRequestIdentity {
     crate::execution::FieldRecoveryRequest::new(
         step,
         source_result(),
-        Digest::sha256("mesh"),
-        Digest::sha256("projection"),
+        crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
+            structural_topology_digest: Digest::sha256("topology"),
+        },
     )
     .unwrap()
     .identity()
@@ -96,6 +98,7 @@ fn constructors_and_deserialization_reject_shape_identity_and_sample_substitutio
             "temperature.invalid",
             ObservationQuantity::Temperature,
             FieldLocation::Node,
+            RecoveredFieldEntityDomain::StructuralNodes,
             ObservationValueShape::Vector3,
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -131,8 +134,12 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
         recovery_request(),
         source_result(),
         projection.projection_digest,
-        projection.nodes.len(),
-        projection.elements.len(),
+        RecoveredFieldEntityCounts {
+            structural_nodes: projection.nodes.len(),
+            solid_elements: projection.elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+        },
         vec![field],
     )
     .unwrap();
@@ -165,8 +172,12 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
         recovery_request(),
         source_result(),
         projection.projection_digest,
-        projection.nodes.len(),
-        projection.elements.len(),
+        RecoveredFieldEntityCounts {
+            structural_nodes: projection.nodes.len(),
+            solid_elements: projection.elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+        },
         vec![final_field.clone(), time_field.clone()],
     )
     .unwrap();

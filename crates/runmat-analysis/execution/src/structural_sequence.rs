@@ -40,7 +40,7 @@ pub struct StructuralSequencePreparation {
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
     pub workloads: BTreeMap<ProcedureStepId, StructuralLinearWorkload>,
-    pub mesh: SolverMeshArtifact,
+    pub mesh: Option<SolverMeshArtifact>,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
@@ -220,10 +220,10 @@ impl StructuralSequenceCoordinator {
         let model = validated_structural_sequence_model(&preparation.workloads)?;
         let sequence = validate_model_sequence(&model)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        preparation
-            .mesh
-            .validate()
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if let Some(mesh) = &preparation.mesh {
+            mesh.validate()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        }
         if preparation.chunk_bytes == 0 {
             return Err(AnalysisBridgeError::Invalid(
                 "structural sequence chunk size must be non-zero".into(),
@@ -435,9 +435,11 @@ impl StructuralSequenceCoordinator {
                         source_host: task.prepared.host.clone(),
                         source_result: imported.objects.clone(),
                         declaration: declaration.clone(),
-                        topology_digest: Digest::from_bytes(
-                            *self.preparation.mesh.canonical_digest.bytes(),
-                        ),
+                        topology_digest: imported
+                            .result
+                            .constraint_result
+                            .topology
+                            .discretization_digest(),
                         program_revision: self.preparation.program_revision.clone(),
                         chunk_bytes: self.preparation.chunk_bytes,
                         inventory_limits: self.preparation.inventory_limits,

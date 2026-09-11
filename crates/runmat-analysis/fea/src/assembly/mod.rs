@@ -1,8 +1,8 @@
+mod constraint_projection;
 mod direct_constraints;
 pub mod dofs;
 pub mod elements;
 mod explicit_connectors;
-mod explicit_constraints;
 mod explicit_elements;
 mod explicit_loads;
 mod mixed_structural;
@@ -17,9 +17,11 @@ use std::{collections::BTreeMap, fmt};
 
 pub(crate) use mixed_structural::mixed_dof_layout;
 
+#[cfg(test)]
+use runmat_analysis_core::StructuralElementKind;
 use runmat_analysis_core::{
-    AnalysisModel, BoundaryTransferImplementation, SourceImplementation, StructuralElementKind,
-    StructuralFormulationRealization, StructuralModel, StructuralOperatorImplementation,
+    AnalysisModel, BoundaryTransferImplementation, SourceImplementation,
+    StructuralFormulationRealization, StructuralOperatorImplementation,
     StructuralRecoveryImplementation, StructuralTranslationDof,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
@@ -27,6 +29,9 @@ use serde::{Deserialize, Serialize};
 
 use self::elements::solid::SolidMaterial;
 use self::{
+    constraint_projection::{
+        apply_direct_constraints, resolve_constraint_matrix, rotational_row_count,
+    },
     direct_constraints::DirectConstraintAssignments,
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
     elements::{
@@ -34,7 +39,6 @@ use self::{
         shell::{ShellElementError, ShellElementGeometry, ShellMaterial, ShellSection},
     },
     explicit_connectors::assemble_explicit_connectors,
-    explicit_constraints::apply_explicit_constraints,
     explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
     explicit_loads::apply_explicit_structural_loads,
     solver_solid::{
@@ -44,11 +48,12 @@ use self::{
     solver_solid_boundary::apply_solver_mesh_structural_loads,
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
-        structural_boundary_implementations, structural_constraint_kind_name,
-        structural_source_implementations, validate_structural_inputs, StructuralProjectionBasis,
+        structural_boundary_implementations, structural_source_implementations,
+        validate_structural_inputs, StructuralProjectionBasis,
     },
 };
 use crate::physics::structural::material::StructuralMaterialInventory;
+use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
@@ -59,8 +64,8 @@ use crate::algebra::{
 };
 use crate::constraints::{
     AffineConstraintReduction, CanonicalStructuralConstraintPlan, CanonicalStructuralDof,
-    CanonicalStructuralDofOwner, ConstraintAlgebraError, ConstraintPlanError, ReactionRecovery,
-    ResolvedConstraintMatrix,
+    CanonicalStructuralDofOwner, ConstraintAlgebraError, ConstraintEnforcement,
+    ConstraintPlanError, ReactionRecovery, ResolvedConstraintMatrix,
 };
 use crate::excitation::{RealizedExcitationKind, RealizedExcitations};
 use crate::{FeaElectroThermalContext, FeaThermoMechanicalContext};
@@ -275,6 +280,7 @@ pub enum StructuralAssemblyError {
         region_id: String,
     },
     ExplicitTopologyIdentity(String),
+    InvalidConstraintPlan(String),
     InvalidSpatialProjectionEvidence {
         load_id: String,
         reason: String,
@@ -422,6 +428,10 @@ impl fmt::Display for StructuralAssemblyError {
             Self::ExplicitTopologyIdentity(message) => write!(
                 f,
                 "explicit structural topology identity could not be derived: {message}"
+            ),
+            Self::InvalidConstraintPlan(message) => write!(
+                f,
+                "explicit structural constraint plan is invalid: {message}"
             ),
             Self::InvalidSpatialProjectionEvidence { load_id, reason } => write!(
                 f,
@@ -766,7 +776,7 @@ pub(crate) fn assemble_structural_system(
 pub(crate) fn assemble_structural_system_with_constraint_plan(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
-    solver_mesh: SolverMeshArtifact,
+    solver_mesh: Option<SolverMeshArtifact>,
     requirement: StructuralFormulationRequirement,
     constraint_plan: &CanonicalStructuralConstraintPlan,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
@@ -776,7 +786,7 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
     assemble_linear_system_impl(
         model,
         excitations,
-        Some(solver_mesh),
+        solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
         Some(requirement),
@@ -807,14 +817,7 @@ fn assemble_linear_system_impl(
                 supplied_constraint_plan,
             );
         }
-        if supplied_constraint_plan.is_some() {
-            return Err(LinearAssemblyError::ConstraintPlan(
-                ConstraintPlanError::Invalid(
-                    "a solid constraint plan cannot be applied to explicit connectivity".into(),
-                ),
-            ));
-        }
-        return assemble_explicit_structural_system(model, excitations)
+        return assemble_explicit_structural_system(model, excitations, supplied_constraint_plan)
             .map_err(LinearAssemblyError::Structural);
     }
     if solver_mesh.is_none()
@@ -1528,6 +1531,7 @@ fn electro_thermal_fingerprint(
 fn assemble_explicit_structural_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
+    supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
 ) -> Result<AssemblySummary, StructuralAssemblyError> {
     let structural = model
         .structural
@@ -1562,6 +1566,20 @@ fn assemble_explicit_structural_system(
         &structural_dof_layout,
         &canonical_node_indices,
     )?;
+    let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(structural)
+        .map_err(|error| StructuralAssemblyError::ExplicitTopologyIdentity(error.to_string()))?;
+    let compiled_constraint_plan;
+    let constraint_plan = if let Some(plan) = supplied_constraint_plan {
+        plan.validate_against_explicit(model)
+            .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
+        plan
+    } else {
+        compiled_constraint_plan =
+            CanonicalStructuralConstraintPlan::compile_for_model(model, None).map_err(|error| {
+                StructuralAssemblyError::InvalidConstraintPlan(error.to_string())
+            })?;
+        &compiled_constraint_plan
+    };
     let mut rhs = vec![0.0_f64; dof_count];
     let mut connector_stiffness_assembler = RealSparseAssembler::square(
         dof_count,
@@ -1593,18 +1611,50 @@ fn assemble_explicit_structural_system(
     let structural_moment_projection = source_projection.moment_projection;
     let spatial_projection_evidence = source_projection.evidence;
 
-    let explicit_node_indices = (0..node_count).collect::<Vec<_>>();
     let mut direct_constraints = DirectConstraintAssignments::new(&structural_dof_layout);
-    apply_explicit_constraints(
-        model,
-        structural,
-        &explicit_node_indices,
-        &mut direct_constraints,
-        true,
-    )?;
-    let constrained_dof_count = direct_constraints.constrained_dof_count();
-    let rotational_constraint_count = direct_constraints.rotational_constraint_count();
-    let constrained = direct_constraints.apply(&mut rhs)?;
+    let resolved_constraint_matrix =
+        resolve_constraint_matrix(constraint_plan, &topology, &structural_dof_layout)
+            .map_err(|error| StructuralAssemblyError::InvalidConstraintPlan(error.to_string()))?;
+    let has_general_rows = constraint_plan.rows.iter().any(|row| row.terms.len() != 1);
+    let (
+        constrained,
+        constrained_dof_count,
+        rotational_constraint_count,
+        constraint_matrix,
+        affine_constraint_reduction,
+    ) = if has_general_rows {
+        let reduction = if constraint_plan.enforcement == ConstraintEnforcement::LagrangeMultiplier
+        {
+            None
+        } else {
+            Some(
+                resolved_constraint_matrix
+                    .affine_reduction()
+                    .map_err(|error| {
+                        StructuralAssemblyError::InvalidConstraintPlan(error.to_string())
+                    })?,
+            )
+        };
+        (
+            vec![false; dof_count],
+            resolved_constraint_matrix.row_count(),
+            rotational_row_count(constraint_plan),
+            Some(resolved_constraint_matrix.clone()),
+            reduction,
+        )
+    } else {
+        apply_direct_constraints(constraint_plan, &topology, &mut direct_constraints)?;
+        let constrained_dof_count = direct_constraints.constrained_dof_count();
+        let rotational_constraint_count = direct_constraints.rotational_constraint_count();
+        let constrained = direct_constraints.apply(&mut rhs)?;
+        (
+            constrained,
+            constrained_dof_count,
+            rotational_constraint_count,
+            None,
+            None,
+        )
+    };
     drop(direct_constraints);
 
     let stiffness = if connector_summary.stiffness_count == 0 {
@@ -1644,6 +1694,7 @@ fn assemble_explicit_structural_system(
             structural,
             &structural_dof_layout,
             operators.stiffness(),
+            &resolved_constraint_matrix,
             &constrained,
         )
     } else {
@@ -1653,6 +1704,7 @@ fn assemble_explicit_structural_system(
             &element_stiffness,
             &connector_stiffness,
             operators.stiffness(),
+            &resolved_constraint_matrix,
             &constrained,
         )
     } {
@@ -1698,13 +1750,14 @@ fn assemble_explicit_structural_system(
             excitations,
             StructuralProjectionBasis::ExplicitConnectivity,
         ),
-        structural_boundary_transfers: structural_boundary_implementations(
-            model,
-            StructuralProjectionBasis::ExplicitConnectivity,
-        ),
+        structural_boundary_transfers: if constraint_plan.groups.is_empty() {
+            vec![BoundaryTransferImplementation::NotApplicable]
+        } else {
+            vec![BoundaryTransferImplementation::ExplicitRegionConnectivity]
+        },
         constrained_dof_count,
-        constraint_matrix: None,
-        affine_constraint_reduction: None,
+        constraint_matrix,
+        affine_constraint_reduction,
         load_count: excitations.len(),
         structural_material,
         thermo_mechanical: None,
@@ -1754,56 +1807,6 @@ fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSumma
         lame_lambda_pa,
         shear_modulus_pa,
     }
-}
-
-fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<usize> {
-    structural
-        .nodes
-        .iter()
-        .position(|node| node.node_id == node_id)
-}
-
-fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
-    if let Some(node_id) = structural_node_selector(region_id) {
-        return structural_node_index(structural, node_id)
-            .into_iter()
-            .collect();
-    }
-    let mut nodes = Vec::new();
-    for element in &structural.elements {
-        if element.region_id != region_id {
-            continue;
-        }
-        match &element.kind {
-            StructuralElementKind::Beam(beam) => {
-                for node_id in beam.node_ids {
-                    if let Some(index) = structural_node_index(structural, node_id) {
-                        if !nodes.contains(&index) {
-                            nodes.push(index);
-                        }
-                    }
-                }
-            }
-            StructuralElementKind::Shell(shell) => {
-                for node_id in shell.node_ids {
-                    if let Some(index) = structural_node_index(structural, node_id) {
-                        if !nodes.contains(&index) {
-                            nodes.push(index);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    nodes
-}
-
-fn structural_node_selector(region_id: &str) -> Option<u32> {
-    region_id
-        .strip_prefix("node:")
-        .unwrap_or(region_id)
-        .parse::<u32>()
-        .ok()
 }
 
 fn add_rhs(
@@ -4182,11 +4185,21 @@ mod tests {
             }
         }
         let perturbed = perturbed.finish().unwrap();
+        let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_explicit(
+            model.structural.as_ref().unwrap(),
+        )
+        .unwrap();
+        let constraints =
+            CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
+        let constraints =
+            resolve_constraint_matrix(&constraints, &topology, &anchored.structural_dof_layout)
+                .unwrap();
         assert_eq!(
             NullspaceEliminationEvidence::prove_structural_frame(
                 model.structural.as_ref().unwrap(),
                 &anchored.structural_dof_layout,
                 &perturbed,
+                &constraints,
                 anchored.operator.constrained_dofs(),
             ),
             Err(crate::algebra::NullspaceEvidenceError::NullModeViolation)

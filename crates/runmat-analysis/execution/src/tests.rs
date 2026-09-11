@@ -619,6 +619,7 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
         "displacement.history",
         runmat_analysis_core::ObservationQuantity::Displacement,
         runmat_analysis_core::FieldLocation::Node,
+        runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::StructuralNodes,
         runmat_analysis_core::ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1123,7 +1124,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         program_revision: revision(),
         artifact_access: access(),
         workload: solve.clone(),
-        mesh: mesh.clone(),
+        mesh: Some(mesh.clone()),
         initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1362,8 +1363,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let field_prepared = prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
         source_host: prepared.host.clone(),
+        source_invocation: prepared.inputs[0].clone(),
         source_result: completed.outputs[0].clone(),
-        mesh: prepared.inputs[1].clone(),
+        mesh: Some(prepared.inputs[1].clone()),
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1384,9 +1386,13 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let recovered_artifact = runmat_analysis_fea::results::field::RecoveredFieldArtifact::new(
         field_prepared.request.identity(),
         field_prepared.request.source_result,
-        projection.projection_digest,
-        projection.nodes.len(),
-        projection.elements.len(),
+        field_prepared.request.topology.discretization_digest(),
+        runmat_analysis_fea::results::field::RecoveredFieldEntityCounts {
+            structural_nodes: projection.nodes.len(),
+            solid_elements: projection.elements.len(),
+            beam_elements: 0,
+            shell_elements: 0,
+        },
         recovered_fields,
     )
     .unwrap();
@@ -1421,7 +1427,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             source_host: field_prepared.host.clone(),
             source_request: field_prepared.request.clone(),
             source_fields: imported_fields,
-            mesh: prepared.inputs[1].clone(),
+            source_invocation: prepared.inputs[0].clone(),
+            mesh: Some(prepared.inputs[1].clone()),
             sequence,
             step: producer_step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
@@ -1476,17 +1483,20 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .all(|chunk| !selected_chunk_digests.contains(&chunk.digest)));
     }
     let recovered_catalog =
-        runmat_analysis_fea::results::field::RecoveredFieldCatalog::from_artifact(
-            &projection,
-            recovered_artifact.clone(),
+        runmat_analysis_fea::results::field::RecoveredFieldCatalog::new_for_topology(
+            recovered_artifact.topology_digest,
+            recovered_artifact.entity_counts,
+            recovered_artifact.fields().to_vec(),
         )
         .unwrap();
-    let observation_results = runmat_analysis_fea::results::observation::evaluate_observations(
-        &observation_prepared.request.plan,
-        &projection,
-        &recovered_catalog,
-    )
-    .unwrap();
+    let observation_results =
+        runmat_analysis_fea::results::observation::evaluate_structural_observations(
+            &observation_prepared.request.plan,
+            &solve.model,
+            Some(&mesh),
+            &recovered_catalog,
+        )
+        .unwrap();
     let observation_artifact = runmat_analysis_fea::results::observation::ObservationArtifact::new(
         runmat_analysis_fea::results::observation::ObservationArtifactInput {
             evaluation_request: observation_prepared.request.identity(),
@@ -1755,8 +1765,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     assert!(
         prepare_structural_field_recovery(StructuralFieldRecoveryPreparation {
             source_host: prepared.host.clone(),
+            source_invocation: prepared.inputs[0].clone(),
             source_result: substituted_result,
-            mesh: prepared.inputs[1].clone(),
+            mesh: Some(prepared.inputs[1].clone()),
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -1807,7 +1818,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         program_revision: revision(),
         artifact_access: access(),
         workload: branch_workload,
-        mesh: mesh.clone(),
+        mesh: Some(mesh.clone()),
         initial_guess: Some(state_completed.outputs[0].clone()),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1855,7 +1866,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             program_revision: revision(),
             artifact_access: access(),
             workload: substituted_workload,
-            mesh: mesh.clone(),
+            mesh: Some(mesh.clone()),
             initial_guess: Some(substituted_state),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -1892,7 +1903,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             encryption_context: digest("another-encryption-context"),
         },
         workload: solve.clone(),
-        mesh: mesh.clone(),
+        mesh: Some(mesh.clone()),
         initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1921,7 +1932,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         program_revision: revision(),
         artifact_access: access(),
         workload: backend_variant,
-        mesh: mesh.clone(),
+        mesh: Some(mesh.clone()),
         initial_guess: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2153,7 +2164,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             program_revision: revision(),
             artifact_access: access(),
             workloads: incomplete_workloads,
-            mesh: mesh.clone(),
+            mesh: Some(mesh.clone()),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
@@ -2173,7 +2184,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             program_revision: revision(),
             artifact_access: access(),
             workloads: substituted_workloads,
-            mesh: mesh.clone(),
+            mesh: Some(mesh.clone()),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
@@ -2186,7 +2197,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         program_revision: revision(),
         artifact_access: access(),
         workloads: workloads.clone(),
-        mesh: mesh.clone(),
+        mesh: Some(mesh.clone()),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -2391,7 +2402,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             program_revision: revision(),
             artifact_access: access(),
             workloads: workloads.clone(),
-            mesh: mesh.clone(),
+            mesh: Some(mesh.clone()),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
@@ -2411,7 +2422,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             program_revision: revision(),
             artifact_access: access(),
             workloads,
-            mesh,
+            mesh: Some(mesh),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),

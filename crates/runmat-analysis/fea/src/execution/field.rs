@@ -1,6 +1,7 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
-use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
+
+use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequestIdentity,
@@ -18,8 +19,7 @@ pub struct FieldRecoveryRequest {
     identity: FieldRecoveryRequestIdentity,
     pub producer: StepIdentity,
     pub source_result: SolverResultIdentity,
-    pub mesh_digest: Digest,
-    pub projection_digest: Digest,
+    pub topology: CanonicalStructuralTopologyIdentity,
 }
 
 #[derive(Deserialize)]
@@ -29,8 +29,7 @@ struct FieldRecoveryRequestWire {
     identity: FieldRecoveryRequestIdentity,
     producer: StepIdentity,
     source_result: SolverResultIdentity,
-    mesh_digest: Digest,
-    projection_digest: Digest,
+    topology: CanonicalStructuralTopologyIdentity,
 }
 
 impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
@@ -42,8 +41,7 @@ impl TryFrom<FieldRecoveryRequestWire> for FieldRecoveryRequest {
             identity: wire.identity,
             producer: wire.producer,
             source_result: wire.source_result,
-            mesh_digest: wire.mesh_digest,
-            projection_digest: wire.projection_digest,
+            topology: wire.topology,
         };
         request.validate()?;
         Ok(request)
@@ -54,19 +52,17 @@ impl FieldRecoveryRequest {
     pub fn new(
         producer: StepIdentity,
         source_result: SolverResultIdentity,
-        mesh_digest: Digest,
-        projection_digest: Digest,
+        topology: CanonicalStructuralTopologyIdentity,
     ) -> AnalysisExecutionResult<Self> {
         let request = Self {
             schema_version: 1,
             identity: FieldRecoveryRequestIdentity::derive(
                 "field-recovery-request",
-                &(producer, source_result, mesh_digest, projection_digest),
+                &(producer, source_result, topology),
             )?,
             producer,
             source_result,
-            mesh_digest,
-            projection_digest,
+            topology,
         };
         request.validate()?;
         Ok(request)
@@ -79,14 +75,12 @@ impl FieldRecoveryRequest {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let expected = FieldRecoveryRequestIdentity::derive(
             "field-recovery-request",
-            &(
-                self.producer,
-                self.source_result,
-                self.mesh_digest,
-                self.projection_digest,
-            ),
+            &(self.producer, self.source_result, self.topology),
         )?;
-        if self.schema_version != 1 || self.identity != expected {
+        if self.schema_version != 1
+            || !self.topology.has_valid_identity()
+            || self.identity != expected
+        {
             return Err(AnalysisExecutionError::Identity(
                 "field recovery request identity does not converge",
             ));

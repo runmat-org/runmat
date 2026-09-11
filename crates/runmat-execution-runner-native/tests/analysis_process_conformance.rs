@@ -16,7 +16,7 @@ use runmat_analysis_execution::{
     StructuralSequencePreparation,
 };
 use runmat_analysis_fea::constraints::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology, ConstraintEnforcement,
+    CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity, ConstraintEnforcement,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -99,6 +99,9 @@ async fn parent() {
     let (mixed_host, mixed_program, _mixed_inputs, mixed_resource_plan) =
         mixed_fixture(revision(), "analysis-process-conformance");
     let mixed_request = mixed_program.request.clone();
+    let (explicit_host, explicit_program, explicit_inputs, explicit_resource_plan) =
+        explicit_fixture(revision(), "analysis-process-conformance");
+    let explicit_request = explicit_program.request.clone();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.executable = std::env::current_exe().unwrap();
     config.worker_arguments = vec!["--child".into()];
@@ -110,6 +113,7 @@ async fn parent() {
     program.write_to(&mut store).unwrap();
     second_program.write_to(&mut store).unwrap();
     mixed_program.write_to(&mut store).unwrap();
+    explicit_program.write_to(&mut store).unwrap();
     let submissions = vec![
         (
             request.clone(),
@@ -144,14 +148,27 @@ async fn parent() {
                 mixed_resource_plan.request.clone(),
             ),
         ),
+        (
+            explicit_request.clone(),
+            analysis_submission(
+                session.scope_id(),
+                session.pool_id(),
+                &explicit_host,
+                &explicit_request,
+                Some(&explicit_resource_plan),
+                explicit_resource_plan.request.clone(),
+            ),
+        ),
     ];
     let mut tasks = session.submit_graph(submissions).unwrap();
+    let explicit_task = tasks.pop().unwrap();
     let mixed_task = tasks.pop().unwrap();
     let second_task = tasks.pop().unwrap();
     let task = tasks.pop().unwrap();
     let process_result = wait_for_native_task(task).await;
     let second_result = wait_for_native_task(second_task).await;
     let mixed_result = wait_for_native_task(mixed_task).await;
+    let explicit_result = wait_for_native_task(explicit_task).await;
     let process_payload = import_result(&store, success_response(&process_result), &host);
     assert_eq!(
         import_result(&store, success_response(&second_result), &second_host),
@@ -183,7 +200,7 @@ async fn parent() {
         StructuralLinearWorkloadResult::from_canonical_bytes(&mixed_payload).unwrap();
     assert!(matches!(
         mixed_decoded.constraint_result.topology,
-        CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+        CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
     ));
     let mut mixed_inline_store = store.clone();
     let mixed_inline = execute_analysis_program_request(
@@ -196,6 +213,25 @@ async fn parent() {
         import_result(&mixed_inline_store, mixed_inline, &mixed_host),
         mixed_payload
     );
+    let explicit_payload =
+        import_result(&store, success_response(&explicit_result), &explicit_host);
+    let explicit_decoded =
+        StructuralLinearWorkloadResult::from_canonical_bytes(&explicit_payload).unwrap();
+    assert!(matches!(
+        explicit_decoded.constraint_result.topology,
+        CanonicalStructuralTopologyIdentity::Explicit { .. }
+    ));
+    let mut explicit_inline_store = store.clone();
+    let explicit_inline = execute_analysis_program_request(
+        &explicit_request,
+        &mut explicit_inline_store,
+        &NativeAnalysisKernel,
+        NativeAnalysisHostLimits::default(),
+    );
+    assert_eq!(
+        import_result(&explicit_inline_store, explicit_inline, &explicit_host),
+        explicit_payload
+    );
 
     let prepared_solve = PreparedStructuralLinearProgram {
         host: host.clone(),
@@ -204,6 +240,13 @@ async fn parent() {
         resource_plan,
     };
     let solve_resource_usage = resource_usage(&store, &prepared_solve, &process_result);
+    let prepared_explicit = PreparedStructuralLinearProgram {
+        host: explicit_host.clone(),
+        program: explicit_program,
+        inputs: explicit_inputs,
+        resource_plan: explicit_resource_plan,
+    };
+    let explicit_resource_usage = resource_usage(&store, &prepared_explicit, &explicit_result);
     let mut publication_driver = publication_chain::ProcessDriver {
         session: &session,
         store: &mut store,
@@ -219,6 +262,18 @@ async fn parent() {
     assert_eq!(
         published.source_result,
         decoded_result_identity(&host, &process_payload)
+    );
+    let explicit_published = publication_chain::execute_publication_chain(
+        &mut publication_driver,
+        &prepared_explicit,
+        success_response(&explicit_result),
+        &explicit_resource_usage,
+        revision(),
+    )
+    .await;
+    assert_eq!(
+        explicit_published.source_result,
+        decoded_result_identity(&explicit_host, &explicit_payload)
     );
 
     let mut sequence_config = NativeExecutionConfig::for_current_executable().unwrap();
@@ -276,12 +331,22 @@ async fn parent() {
     interrupt.store(false, Ordering::Relaxed);
     drop(interrupt_guard);
 
-    remote_conformance(process_payload, mixed_payload.clone(), published.clone()).await;
+    remote_conformance(
+        process_payload,
+        mixed_payload.clone(),
+        explicit_payload.clone(),
+        published.clone(),
+        explicit_published.clone(),
+    )
+    .await;
     durable_conformance(
         inline_payload,
         mixed_payload,
+        explicit_payload,
         published,
+        explicit_published,
         solve_resource_usage,
+        explicit_resource_usage,
     )
     .await;
     signal::run().await;
@@ -363,8 +428,11 @@ async fn run_durable_driver() {
 async fn durable_conformance(
     expected_payload: Vec<u8>,
     expected_mixed_payload: Vec<u8>,
+    expected_explicit_payload: Vec<u8>,
     expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+    expected_explicit_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     resource_usage: PreparedStructuralResourceUsage,
+    explicit_resource_usage: PreparedStructuralResourceUsage,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = publication_chain::DurableDriver::open(
@@ -408,12 +476,37 @@ async fn durable_conformance(
         import_result(driver.store(), mixed_success, &mixed_host),
         expected_mixed_payload
     );
+
+    let (explicit_host, explicit_program, explicit_inputs, explicit_resource_plan) =
+        explicit_fixture(revision(), "durable-analysis");
+    let explicit = PreparedStructuralLinearProgram {
+        host: explicit_host,
+        program: explicit_program,
+        inputs: explicit_inputs,
+        resource_plan: explicit_resource_plan,
+    };
+    let explicit_success = driver.execute(&explicit.host, &explicit.program).await;
+    assert_eq!(
+        import_result(driver.store(), explicit_success.clone(), &explicit.host,),
+        expected_explicit_payload
+    );
+    let publication = publication_chain::execute_publication_chain(
+        &mut driver,
+        &explicit,
+        explicit_success,
+        &explicit_resource_usage,
+        revision(),
+    )
+    .await;
+    assert_eq!(publication, expected_explicit_publication);
 }
 
 async fn remote_conformance(
     expected_payload: Vec<u8>,
     expected_mixed_payload: Vec<u8>,
+    expected_explicit_payload: Vec<u8>,
     expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
+    expected_explicit_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 ) {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
@@ -446,6 +539,9 @@ async fn remote_conformance(
     let (mixed_host, mixed_program, _mixed_inputs, mixed_resource_plan) =
         mixed_fixture(revision.clone(), "remote-analysis");
     let mixed_request = mixed_program.request.clone();
+    let (explicit_host, explicit_program, explicit_inputs, explicit_resource_plan) =
+        explicit_fixture(revision.clone(), "remote-analysis");
+    let explicit_request = explicit_program.request.clone();
     let bundle = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
         .with_compiled_package_closure()
@@ -576,6 +672,10 @@ async fn remote_conformance(
             pool.register_execution_object(object.reference.clone(), object.bytes.clone())
                 .unwrap();
         }
+        for object in &explicit_program.objects {
+            pool.register_execution_object(object.reference.clone(), object.bytes.clone())
+                .unwrap();
+        }
         let mut completions = pool
             .submit_graph(vec![
                 (
@@ -611,8 +711,20 @@ async fn remote_conformance(
                         mixed_resource_plan.request.clone(),
                     ),
                 ),
+                (
+                    explicit_request.clone(),
+                    analysis_submission(
+                        scope_id,
+                        pool_id,
+                        &explicit_host,
+                        &explicit_request,
+                        Some(&explicit_resource_plan),
+                        explicit_resource_plan.request.clone(),
+                    ),
+                ),
             ])
             .unwrap();
+        let explicit_completion = completions.pop().unwrap();
         let mixed_completion = completions.pop().unwrap();
         let second_completion = completions.pop().unwrap();
         let completion = completions.pop().unwrap();
@@ -629,12 +741,18 @@ async fn remote_conformance(
             .await
             .expect("remote mixed analysis completion timeout")
             .unwrap();
+        let explicit_success =
+            tokio::time::timeout(Duration::from_secs(15), explicit_completion.wait())
+                .await
+                .expect("remote explicit analysis completion timeout")
+                .unwrap();
         let mut result_store = publication_chain::MemoryStore::default();
         for reference in success
             .result_objects
             .iter()
             .chain(&second_success.result_objects)
             .chain(&mixed_success.result_objects)
+            .chain(&explicit_success.result_objects)
         {
             result_store.0.insert(
                 reference.logical_digest,
@@ -658,6 +776,14 @@ async fn remote_conformance(
             import_result(&result_store, success_response(&mixed_success), &mixed_host,),
             expected_mixed_payload
         );
+        assert_eq!(
+            import_result(
+                &result_store,
+                success_response(&explicit_success),
+                &explicit_host,
+            ),
+            expected_explicit_payload
+        );
         let solve = PreparedStructuralLinearProgram {
             host: host.clone(),
             program: program.clone(),
@@ -665,6 +791,13 @@ async fn remote_conformance(
             resource_plan,
         };
         let solve_resource_usage = resource_usage(&result_store, &solve, &success);
+        let explicit = PreparedStructuralLinearProgram {
+            host: explicit_host.clone(),
+            program: explicit_program.clone(),
+            inputs: explicit_inputs,
+            resource_plan: explicit_resource_plan,
+        };
+        let explicit_resource_usage = resource_usage(&result_store, &explicit, &explicit_success);
         let mut publication_driver = publication_chain::RemoteDriver {
             pool: Arc::clone(&pool),
             store: result_store,
@@ -680,6 +813,15 @@ async fn remote_conformance(
         )
         .await;
         assert_eq!(publication, expected_publication);
+        let publication = publication_chain::execute_publication_chain(
+            &mut publication_driver,
+            &explicit,
+            success_response(&explicit_success),
+            &explicit_resource_usage,
+            revision.clone(),
+        )
+        .await;
+        assert_eq!(publication, expected_explicit_publication);
         let sequence = execute_structural_sequence_remotely(
             Arc::clone(&pool),
             sequence_preparation(revision.clone(), "remote-analysis"),
@@ -770,13 +912,63 @@ fn fixture_for_study(
         program_revision: revision,
         artifact_access: access,
         workload: solve,
-        mesh,
+        mesh: Some(mesh),
         initial_guess: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
     })
     .unwrap();
+    (
+        prepared.host,
+        prepared.program,
+        prepared.inputs,
+        prepared.resource_plan,
+    )
+}
+
+fn explicit_fixture(
+    revision: ProgramRevision,
+    authorization_scope: &str,
+) -> (
+    AnalysisHostWorkload,
+    PreparedAnalysisProgram,
+    Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
+    runmat_analysis_fea::planning::resource::FeaResourcePlan,
+) {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.sequence.steps[0].observations = vec![structural_displacement_observation()];
+    let solve = StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("explicit-authored-study"),
+        frozen_project_digest: None,
+        program_revision: revision,
+        artifact_access: ArtifactAccess {
+            authorization_scope: authorization_scope.into(),
+            encryption_context: digest("explicit-encryption"),
+        },
+        workload: solve,
+        mesh: None,
+        initial_guess: None,
+        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert!(prepared
+        .inputs
+        .iter()
+        .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
     (
         prepared.host,
         prepared.program,
@@ -877,7 +1069,7 @@ fn mixed_fixture(
             encryption_context: digest("mixed-encryption"),
         },
         workload: solve,
-        mesh,
+        mesh: Some(mesh),
         initial_guess: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -1029,7 +1221,7 @@ fn sequence_preparation(
             encryption_context: digest("process-sequence-encryption"),
         },
         workloads,
-        mesh,
+        mesh: Some(mesh),
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

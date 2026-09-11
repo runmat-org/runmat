@@ -115,11 +115,7 @@ fn run_linear_static_with_constraint_plan(
         Some(plan) => assemble_structural_system_with_constraint_plan(
             model,
             &excitations,
-            options.solver_mesh.clone().ok_or_else(|| {
-                FeaRunError::InvalidModel(
-                    "a prepared constraint plan requires its canonical solver mesh".into(),
-                )
-            })?,
+            options.solver_mesh.clone(),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
             plan,
         ),

@@ -137,7 +137,7 @@ async fn execute_one(
             program_revision: revision,
             artifact_access: artifact_access(study_digest),
             workloads,
-            mesh: prepared.solver_mesh().clone(),
+            mesh: Some(prepared.solver_mesh().clone()),
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),

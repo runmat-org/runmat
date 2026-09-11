@@ -19,6 +19,7 @@ use super::row::{
     compare_rows, residual_quantity, row_identity, term_key, validate_row_classification,
 };
 use super::target::validate_resolved_target;
+use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
 const PLAN_DOMAIN: &str = "structural-constraint-plan";
@@ -26,35 +27,44 @@ const SOURCE_DOMAIN: &str = "structural-constraint-source";
 const PLAN_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 impl CanonicalStructuralConstraintPlan {
+    pub fn compile_for_model(
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+    ) -> Result<Self, ConstraintPlanError> {
+        let has_explicit_elements = model
+            .structural
+            .as_ref()
+            .is_some_and(|structural| !structural.elements.is_empty());
+        match (mesh, has_explicit_elements) {
+            (Some(mesh), true) if !mesh.topology.volume_elements.is_empty() => {
+                super::mixed::compile(model, mesh)
+            }
+            (Some(mesh), _) => super::compile::compile(model, mesh),
+            (None, true) => super::mixed::compile_explicit(model),
+            (None, false) => Err(ConstraintPlanError::Invalid(
+                "structural constraint compilation requires a solid mesh or explicit connectivity"
+                    .into(),
+            )),
+        }
+    }
+
     pub fn compile(
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, ConstraintPlanError> {
-        if model
-            .structural
-            .as_ref()
-            .is_some_and(|structural| !structural.elements.is_empty())
-            && !mesh.topology.volume_elements.is_empty()
-        {
-            super::mixed::compile(model, mesh)
-        } else {
-            super::compile::compile(model, mesh)
-        }
+        Self::compile_for_model(model, Some(mesh))
     }
 
     pub fn validate(&self) -> Result<(), ConstraintPlanError> {
         if self.schema_version != 1
             || !self.topology.has_valid_identity()
-            || self.geometry_source_digest == StableDigest::ZERO
-            || self.geometry_revision == 0
-            || self.persistent_mapping_version == 0
             || self.evidence.authored_constraint_count != self.groups.len()
             || self.evidence.active_row_count + self.evidence.redundant_row_count != self.rows.len()
             || self.evidence.rank != self.evidence.active_row_count
             || self.evidence.conflicting_row_count != 0
         {
             return Err(ConstraintPlanError::Invalid(
-                "schema, topology, geometry, or evidence is inconsistent".into(),
+                "schema, topology, or evidence is inconsistent".into(),
             ));
         }
         if !self
@@ -108,15 +118,19 @@ impl CanonicalStructuralConstraintPlan {
                 .filter(|row| row.constraint_id == group.constraint_id)
                 .collect::<Vec<_>>();
             let implementation_is_valid = match self.topology {
-                CanonicalStructuralConstraintTopology::Solid { .. } => {
+                CanonicalStructuralTopologyIdentity::Solid { .. } => {
                     group.implementation
                         == runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
                 }
-                CanonicalStructuralConstraintTopology::ConformalMixed { .. } => matches!(
+                CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => matches!(
                     group.implementation,
                     runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
                         | runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity
                 ),
+                CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+                    group.implementation
+                        == runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity
+                }
             };
             if group.constraint_id.is_empty()
                 || !implementation_is_valid
@@ -251,11 +265,7 @@ impl CanonicalStructuralConstraintPlan {
         mesh: &SolverMeshArtifact,
     ) -> Result<(), ConstraintPlanError> {
         self.validate()?;
-        if self.topology.mesh_digest() != mesh.canonical_digest
-            || self.geometry_source_digest != mesh.geometry.source_digest
-            || self.geometry_revision != mesh.geometry.geometry_revision
-            || self.persistent_mapping_version != mesh.geometry.persistent_mapping_version
-        {
+        if self.topology.mesh_digest() != Some(mesh.canonical_digest) {
             return Err(ConstraintPlanError::TopologyMismatch);
         }
         let authored = structural_constraints(model);
@@ -266,6 +276,43 @@ impl CanonicalStructuralConstraintPlan {
         if *self != expected {
             return Err(ConstraintPlanError::Invalid(
                 "constraint plan differs from canonical compilation".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_against_explicit(
+        &self,
+        model: &AnalysisModel,
+    ) -> Result<(), ConstraintPlanError> {
+        self.validate()?;
+        let expected_topology = model
+            .structural
+            .as_ref()
+            .ok_or_else(|| {
+                ConstraintPlanError::Invalid(
+                    "explicit constraint validation requires structural topology".into(),
+                )
+            })
+            .and_then(|structural| {
+                crate::physics::structural::topology::explicit_topology_digest(structural)
+                    .map_err(|error| ConstraintPlanError::Invalid(error.to_string()))
+            })?;
+        if self.topology
+            != (CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: expected_topology,
+            })
+        {
+            return Err(ConstraintPlanError::TopologyMismatch);
+        }
+        let authored = structural_constraints(model);
+        if self.authored_constraints_digest != authored_constraints_digest(&authored)? {
+            return Err(ConstraintPlanError::AuthoredConstraintsMismatch);
+        }
+        let expected = Self::compile_for_model(model, None)?;
+        if *self != expected {
+            return Err(ConstraintPlanError::Invalid(
+                "constraint plan differs from canonical explicit compilation".into(),
             ));
         }
         Ok(())

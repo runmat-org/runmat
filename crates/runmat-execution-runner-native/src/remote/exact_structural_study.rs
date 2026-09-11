@@ -158,7 +158,7 @@ pub(super) async fn execute_with_completed_meshing(
             program_revision: request.recipe.program_revision.clone(),
             artifact_access: decoded.artifact_access.clone(),
             workloads,
-            mesh: completed.result.artifact.clone(),
+            mesh: Some(completed.result.artifact.clone()),
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: Default::default(),

@@ -4,15 +4,14 @@ use super::{
     add_moment_projection_rhs, add_rhs,
     dofs::{StructuralDofKind, StructuralDofLayout},
     moment_projection::target_centroid,
-    structural_node_selector, structural_target_nodes, MomentProjectionSummary,
-    StructuralAssemblyError,
+    structural_target_nodes, MomentProjectionSummary, StructuralAssemblyError,
 };
 use crate::{
     excitation::{
         RealizedExcitationKind, RealizedExcitations, SpatialIntegrationRule,
         SpatialProjectionAccumulator, SpatialProjectionEvidence,
     },
-    physics::structural::topology::explicit_topology_digest,
+    physics::structural::topology::{explicit_node_selector, explicit_topology_digest},
 };
 
 pub(super) struct ExplicitLoadProjection {
@@ -213,7 +212,7 @@ pub(super) fn apply_projected_explicit_structural_loads(
 }
 
 fn explicit_target_entity_count(structural: &StructuralModel, region_id: &str) -> usize {
-    if structural_node_selector(region_id).is_some() {
+    if explicit_node_selector(region_id).is_some() {
         return 1;
     }
     structural

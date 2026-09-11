@@ -2,11 +2,11 @@ use crate::{
     algebra::CoercivitySymbolicPlan,
     assembly::{dofs::StructuralDofKind, mixed_dof_layout},
     constraints::{
-        CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology,
-        CanonicalStructuralDofOwner, ResolvedConstraintMatrix,
+        CanonicalStructuralConstraintPlan, CanonicalStructuralDofOwner,
+        CanonicalStructuralTopologyIdentity, ResolvedConstraintMatrix,
     },
     execution::StructuralLinearWorkload,
-    physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
+    physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
     results::observation::ResolvedObservationPlan,
     solve::preconditioner::SpdPreconditionerKind,
     topology::AnalysisProjection,
@@ -34,8 +34,7 @@ const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 8;
 /// This function does no assembly and accepts no caller-supplied topology, sparse, constraint, or
 /// observation counts. It is therefore safe to run before allocations and expensive kernels.
 pub fn build_structural_resource_plan(
-    mesh: &SolverMeshArtifact,
-    projection: &AnalysisProjection,
+    mesh: Option<&SolverMeshArtifact>,
     constraints: &CanonicalStructuralConstraintPlan,
     observations: &ResolvedObservationPlan,
     workload: &StructuralLinearWorkload,
@@ -43,13 +42,35 @@ pub fn build_structural_resource_plan(
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    if observations.topology_digest != projection.projection_digest {
+    let topology_digest = constraints.topology.discretization_digest();
+    if observations.topology_digest != topology_digest {
         return Err(ResourcePlanningError::Invalid(
-            "observation plan and analysis projection name different topology".into(),
+            "observation plan and structural constraints name different topology".into(),
         ));
     }
-    let symbolic =
-        StructuralSymbolicOperators::derive(projection, constraints, &workload.model, mesh)?;
+    let projection = mesh
+        .map(AnalysisProjection::derive)
+        .transpose()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let symbolic = match constraints.topology {
+        CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+            StructuralSymbolicOperators::derive_explicit(constraints, &workload.model)?
+        }
+        CanonicalStructuralTopologyIdentity::Solid { .. }
+        | CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+            let mesh = mesh.ok_or_else(|| {
+                ResourcePlanningError::Invalid(
+                    "solid structural resource planning requires a solver mesh".into(),
+                )
+            })?;
+            let projection = projection.as_ref().ok_or_else(|| {
+                ResourcePlanningError::Invalid(
+                    "solid structural resource planning requires an analysis projection".into(),
+                )
+            })?;
+            StructuralSymbolicOperators::derive(projection, constraints, &workload.model, mesh)?
+        }
+    };
     let sparse = SparseResourceFacts::from_patterns(symbolic.patterns())?;
     let contribution_nonzeros =
         u64::try_from(symbolic.stiffness_upper_bound().column_indices().len())
@@ -82,7 +103,7 @@ pub fn build_structural_resource_plan(
     )?;
     let mixed_topology = if matches!(
         constraints.topology,
-        CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+        CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
     ) {
         let structural = workload.model.structural.as_ref().ok_or_else(|| {
             ResourcePlanningError::Invalid(
@@ -91,8 +112,15 @@ pub fn build_structural_resource_plan(
         })?;
         Some((
             structural,
-            CanonicalMixedStructuralTopology::derive(mesh, structural)
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            CanonicalStructuralNodeSpace::derive(
+                mesh.ok_or_else(|| {
+                    ResourcePlanningError::Invalid(
+                        "mixed resource planning requires a solver mesh".into(),
+                    )
+                })?,
+                structural,
+            )
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         ))
     } else {
         None
@@ -100,14 +128,27 @@ pub fn build_structural_resource_plan(
     let recovery_node_count = mixed_topology
         .as_ref()
         .map(|(_, topology)| topology.nodes.len())
-        .unwrap_or(projection.nodes.len());
-    let recovery_element_count = projection
-        .elements
-        .len()
-        .checked_add(
-            mixed_topology
+        .or_else(|| {
+            workload
+                .model
+                .structural
                 .as_ref()
-                .map(|(structural, _)| structural.elements.len())
+                .filter(|structural| !structural.elements.is_empty())
+                .map(|structural| structural.nodes.len())
+        })
+        .or_else(|| projection.as_ref().map(|projection| projection.nodes.len()))
+        .unwrap_or(0);
+    let solid_element_count = projection
+        .as_ref()
+        .map(|projection| projection.elements.len())
+        .unwrap_or(0);
+    let recovery_element_count = solid_element_count
+        .checked_add(
+            workload
+                .model
+                .structural
+                .as_ref()
+                .map(|structural| structural.elements.len())
                 .unwrap_or(0),
         )
         .ok_or(ResourcePlanningError::Overflow(
@@ -136,14 +177,27 @@ pub fn build_structural_resource_plan(
         .procedure_step()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let topology_facts = if let Some((structural, topology)) = mixed_topology.as_ref() {
+        let projection = projection.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid("mixed resource planning lost its projection".into())
+        })?;
         TopologyResourceFacts::from_mixed_projection(projection, structural, topology)?
+    } else if matches!(
+        constraints.topology,
+        CanonicalStructuralTopologyIdentity::Explicit { .. }
+    ) {
+        let structural = workload.model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "explicit resource planning requires structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        TopologyResourceFacts::from_explicit(structural, &topology)?
     } else {
-        TopologyResourceFacts::from_projection(projection)?
+        TopologyResourceFacts::from_projection(projection.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid("solid resource planning lost its projection".into())
+        })?)?
     };
-    let topology_digest = mixed_topology
-        .as_ref()
-        .map(|(_, topology)| topology.identity)
-        .unwrap_or(projection.projection_digest);
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         topology_digest,
@@ -193,14 +247,19 @@ pub fn build_structural_resource_plan(
 }
 
 fn resolve_constraint_matrix(
-    mesh: &SolverMeshArtifact,
+    mesh: Option<&SolverMeshArtifact>,
     constraints: &CanonicalStructuralConstraintPlan,
     workload: &StructuralLinearWorkload,
 ) -> Result<ResolvedConstraintMatrix, ResourcePlanningError> {
-    if !matches!(
+    if matches!(
         constraints.topology,
-        CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+        CanonicalStructuralTopologyIdentity::Solid { .. }
     ) {
+        let mesh = mesh.ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "solid constraint planning requires a solver mesh".into(),
+            )
+        })?;
         let node_identities = mesh
             .topology
             .nodes
@@ -215,8 +274,23 @@ fn resolve_constraint_matrix(
             "mixed constraint planning requires explicit structural topology".into(),
         )
     })?;
-    let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let topology = match constraints.topology {
+        CanonicalStructuralTopologyIdentity::Explicit { .. } => {
+            CanonicalStructuralNodeSpace::derive_explicit(structural)
+        }
+        CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => {
+            CanonicalStructuralNodeSpace::derive(
+                mesh.ok_or_else(|| {
+                    ResourcePlanningError::Invalid(
+                        "mixed constraint planning requires a solver mesh".into(),
+                    )
+                })?,
+                structural,
+            )
+        }
+        CanonicalStructuralTopologyIdentity::Solid { .. } => unreachable!(),
+    }
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let layout = mixed_dof_layout(&topology);
     let nodes = topology
         .nodes

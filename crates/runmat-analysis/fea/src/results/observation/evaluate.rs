@@ -1,8 +1,9 @@
 use runmat_analysis_core::{
-    AnalysisField, FieldLocation, ObservationId, ObservationValueShape, SamplingPolicy,
-    SpatialReduction,
+    AnalysisField, AnalysisModel, FieldLocation, ObservationId, ObservationValueShape,
+    SamplingPolicy, SpatialReduction,
 };
 use runmat_execution::Digest;
+use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     results::field::{
@@ -17,24 +18,44 @@ use super::contract::{
     ResolvedObservationPlan, ResolvedObservationTarget,
 };
 use super::history::{sample_matches_domain, sample_matches_policy};
+use super::topology::StructuralObservationTopology;
 
 pub fn evaluate_observations(
     plan: &ResolvedObservationPlan,
     projection: &AnalysisProjection,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
+    let topology = StructuralObservationTopology::from_projection(projection);
+    evaluate_observations_for_topology(plan, &topology, fields)
+}
+
+pub fn evaluate_structural_observations(
+    plan: &ResolvedObservationPlan,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    fields: &RecoveredFieldCatalog,
+) -> Result<Vec<ObservationResult>, ObservationError> {
+    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    evaluate_observations_for_topology(plan, &topology, fields)
+}
+
+fn evaluate_observations_for_topology(
+    plan: &ResolvedObservationPlan,
+    topology: &StructuralObservationTopology,
+    fields: &RecoveredFieldCatalog,
+) -> Result<Vec<ObservationResult>, ObservationError> {
     plan.validate_identity()?;
-    if plan.topology_digest != projection.projection_digest {
+    if plan.topology_digest != topology.digest() {
         return Err(ObservationError::Identity(
             "observation plan names a different topology projection",
         ));
     }
-    if fields.topology_digest() != projection.projection_digest {
+    if fields.topology_digest() != topology.digest() {
         return Err(ObservationError::Identity(
             "recovered field catalog names a different topology projection",
         ));
     }
-    validate_plan_targets(plan, projection)?;
+    validate_plan_targets(plan, topology)?;
     if plan
         .observations
         .iter()
@@ -50,7 +71,7 @@ pub fn evaluate_observations(
             evaluate_sample(
                 plan,
                 observation,
-                projection,
+                topology,
                 fields,
                 RecoveredFieldSample::Final,
             )
@@ -65,15 +86,36 @@ pub fn evaluate_observation_sample(
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
+    let topology = StructuralObservationTopology::from_projection(projection);
+    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample)
+}
+
+pub fn evaluate_structural_observation_sample(
+    plan: &ResolvedObservationPlan,
+    observation_id: &ObservationId,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    fields: &RecoveredFieldCatalog,
+    sample: RecoveredFieldSample,
+) -> Result<ObservationResult, ObservationError> {
+    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample)
+}
+
+fn evaluate_observation_sample_for_topology(
+    plan: &ResolvedObservationPlan,
+    observation_id: &ObservationId,
+    topology: &StructuralObservationTopology,
+    fields: &RecoveredFieldCatalog,
+    sample: RecoveredFieldSample,
+) -> Result<ObservationResult, ObservationError> {
     plan.validate_identity()?;
-    if plan.topology_digest != projection.projection_digest
-        || fields.topology_digest() != projection.projection_digest
-    {
+    if plan.topology_digest != topology.digest() || fields.topology_digest() != topology.digest() {
         return Err(ObservationError::Identity(
             "sampled observation inputs name different topology projections",
         ));
     }
-    validate_plan_targets(plan, projection)?;
+    validate_plan_targets(plan, topology)?;
     let observation = plan
         .observations
         .iter()
@@ -98,13 +140,13 @@ pub fn evaluate_observation_sample(
             "sample coordinate differs from the resolved independent domain".into(),
         ));
     }
-    evaluate_sample(plan, observation, projection, fields, sample)
+    evaluate_sample(plan, observation, topology, fields, sample)
 }
 
 fn evaluate_sample(
     plan: &ResolvedObservationPlan,
     observation: &ResolvedObservation,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
@@ -116,6 +158,7 @@ fn evaluate_sample(
         })?;
     if source.definition().quantity() != observation.spec.quantity
         || source.definition().location() != observation.spec.source_location
+        || source.definition().entity_domain() != observation.source_entity_domain
         || source.definition().value_shape() != &observation.spec.value_shape
     {
         return Err(ObservationError::Field {
@@ -130,12 +173,12 @@ fn evaluate_sample(
             "this serial evaluator requires a matching real recovered-field sample",
         ));
     }
-    evaluate_one(plan, observation, source.storage(), projection)
+    evaluate_one(plan, observation, source.storage(), topology)
 }
 
 fn validate_plan_targets(
     plan: &ResolvedObservationPlan,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
 ) -> Result<(), ObservationError> {
     for observation in &plan.observations {
         match &observation.target {
@@ -144,10 +187,10 @@ fn validate_plan_targets(
                 identities,
             } => {
                 if !indices.iter().zip(identities).all(|(index, identity)| {
-                    projection
+                    topology
                         .nodes
                         .get(*index)
-                        .is_some_and(|node| node.stable_identity == *identity)
+                        .is_some_and(|node| node.identity == *identity)
                 }) {
                     return Err(ObservationError::Identity(
                         "resolved node target differs from the topology projection",
@@ -155,14 +198,15 @@ fn validate_plan_targets(
                 }
             }
             ResolvedObservationTarget::Elements {
+                domain,
                 indices,
                 identities,
             } => {
+                let elements = topology.elements(*domain)?;
                 if !indices.iter().zip(identities).all(|(index, identity)| {
-                    projection
-                        .elements
+                    elements
                         .get(*index)
-                        .is_some_and(|element| element.stable_identity == *identity)
+                        .is_some_and(|element| element.identity == *identity)
                 }) {
                     return Err(ObservationError::Identity(
                         "resolved element target differs from the topology projection",
@@ -170,6 +214,13 @@ fn validate_plan_targets(
                 }
             }
             ResolvedObservationTarget::Volume { element_indices } => {
+                let projection =
+                    topology
+                        .solid_projection
+                        .as_ref()
+                        .ok_or(ObservationError::Unsupported(
+                            "volume observations require admitted solid topology",
+                        ))?;
                 if element_indices
                     .iter()
                     .any(|index| projection.elements.get(*index).is_none())
@@ -180,6 +231,13 @@ fn validate_plan_targets(
                 }
             }
             ResolvedObservationTarget::Boundary { face_indices } => {
+                let projection =
+                    topology
+                        .solid_projection
+                        .as_ref()
+                        .ok_or(ObservationError::Unsupported(
+                            "boundary observations require admitted solid topology",
+                        ))?;
                 if face_indices
                     .iter()
                     .any(|index| projection.boundary_faces.get(*index).is_none())
@@ -198,7 +256,7 @@ fn evaluate_one(
     plan: &ResolvedObservationPlan,
     observation: &ResolvedObservation,
     field: &AnalysisField,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
 ) -> Result<ObservationResult, ObservationError> {
     let source_components = shape_component_count(&observation.spec.value_shape)?;
     let source_values = field.as_host_f64().ok_or(ObservationError::Unsupported(
@@ -224,6 +282,7 @@ fn evaluate_one(
         ResolvedObservationTarget::Elements {
             indices,
             identities,
+            ..
         } => (
             select_values(
                 source_values,
@@ -243,7 +302,12 @@ fn evaluate_one(
                 source_values,
                 source_components,
                 element_indices,
-                projection,
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "volume observations require admitted solid topology",
+                    ))?,
             )?,
             Vec::new(),
         ),
@@ -253,7 +317,12 @@ fn evaluate_one(
                 source_values,
                 source_components,
                 face_indices,
-                projection,
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "boundary observations require admitted solid topology",
+                    ))?,
             )?,
             Vec::new(),
         ),
@@ -272,7 +341,7 @@ fn evaluate_one(
         schema_version: 1,
         logical_identity: ObservationResultIdentity(Digest::sha256([])),
         plan_identity: plan.identity,
-        topology_digest: projection.projection_digest,
+        topology_digest: topology.digest(),
         observation_id: observation.spec.observation_id.clone(),
         quantity: observation.spec.quantity,
         location: observation.spec.output_location,

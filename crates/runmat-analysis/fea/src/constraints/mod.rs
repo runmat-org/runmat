@@ -23,14 +23,15 @@ mod row;
 mod target;
 mod vector;
 
+pub use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 pub use contract::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralConstraintTopology,
-    CanonicalStructuralDof, CanonicalStructuralDofAddress, CanonicalStructuralDofOwner,
-    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
-    ConstraintCouplingWeight, ConstraintEnforcement, ConstraintGroupEvidence,
-    ConstraintPairingEvidence, ConstraintPairingWeight, ConstraintPlanError,
-    ConstraintPlanEvidence, ConstraintResidualQuantity, ReactionRecovery, ResolvedConstraintTarget,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofAddress,
+    CanonicalStructuralDofOwner, CanonicalStructuralReferencePoint, ConstraintCouplingEvidence,
+    ConstraintCouplingKind, ConstraintCouplingWeight, ConstraintEnforcement,
+    ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPairingWeight,
+    ConstraintPlanError, ConstraintPlanEvidence, ConstraintResidualQuantity, ReactionRecovery,
+    ResolvedConstraintTarget,
 };
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintReferencePointResult,

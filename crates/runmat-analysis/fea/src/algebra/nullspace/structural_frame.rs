@@ -1,22 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use runmat_analysis_core::{StructuralElementKind, StructuralModel};
-use runmat_meshing_core::StableDigest;
-
 use crate::assembly::dofs::StructuralDofLayout;
+use crate::constraints::ResolvedConstraintMatrix;
+use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
+use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 
 use super::{
-    digest, validate_operator, MatrixDefiniteness, NullspaceEliminationEvidence,
-    NullspaceEvidenceError, NullspaceKind, OperatorRole, RealSparseMatrix,
+    validate_operator, MatrixDefiniteness, NullspaceEliminationEvidence, NullspaceEvidenceError,
+    NullspaceKind, OperatorRole, RealSparseMatrix,
 };
-
-const TOPOLOGY_DOMAIN: &str = "fea-explicit-structural-frame-topology";
-const NODE_DOMAIN: &str = "fea-explicit-structural-frame-node";
 
 pub(super) fn prove(
     structural: &StructuralModel,
     layout: &StructuralDofLayout,
     operator: &RealSparseMatrix,
+    constraints: &ResolvedConstraintMatrix,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     prove_impl(
@@ -25,6 +23,7 @@ pub(super) fn prove(
         operator,
         None,
         operator,
+        constraints,
         constrained_dofs,
     )
 }
@@ -35,6 +34,7 @@ pub(super) fn prove_with_connector_anchors(
     element_operator: &RealSparseMatrix,
     connector_operator: &RealSparseMatrix,
     combined_operator: &RealSparseMatrix,
+    constraints: &ResolvedConstraintMatrix,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     prove_impl(
@@ -43,6 +43,7 @@ pub(super) fn prove_with_connector_anchors(
         element_operator,
         Some(connector_operator),
         combined_operator,
+        constraints,
         constrained_dofs,
     )
 }
@@ -53,6 +54,7 @@ fn prove_impl(
     element_operator: &RealSparseMatrix,
     connector_operator: Option<&RealSparseMatrix>,
     combined_operator: &RealSparseMatrix,
+    constraints: &ResolvedConstraintMatrix,
     constrained_dofs: &[bool],
 ) -> Result<NullspaceEliminationEvidence, NullspaceEvidenceError> {
     if structural.nodes.is_empty()
@@ -66,6 +68,7 @@ fn prove_impl(
                 || operator.columns() != combined_operator.columns()
         })
         || constrained_dofs.len() != combined_operator.rows()
+        || constraints.full_dof_count != combined_operator.rows()
         || layout.reference_point_count() != 0
         || structural.elements.iter().any(|element| {
             !matches!(
@@ -113,27 +116,31 @@ fn prove_impl(
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
     let components = structural_frame_components(structural, &node_by_id)?;
-    let positions = structural
+    let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+        .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
+    let positions = topology
         .nodes
         .iter()
         .map(|node| node.coordinates_m)
         .collect::<Vec<_>>();
-    let identities = (0..structural.nodes.len())
-        .map(|node| explicit_node_identity(structural, node))
-        .collect::<Result<Vec<_>, _>>()?;
+    let identities = topology
+        .nodes
+        .iter()
+        .map(|node| node.identity)
+        .collect::<Vec<_>>();
     super::canonical_frame::prove(
         super::canonical_frame::CanonicalFrameTopology {
             positions_m: &positions,
             node_identities: &identities,
             components,
-            topology_identity: digest(TOPOLOGY_DOMAIN, &(&structural.nodes, &structural.elements))?,
+            topology_identity: topology.identity.discretization_digest(),
             kind: NullspaceKind::StructuralFrameRigidBody3d,
         },
         layout,
         element_operator,
         connector_operator,
         combined_operator,
-        None,
+        Some(constraints),
         constrained_dofs,
     )
 }
@@ -186,16 +193,4 @@ fn structural_frame_components(
         components.push(component);
     }
     Ok(components)
-}
-
-fn explicit_node_identity(
-    structural: &StructuralModel,
-    node: usize,
-) -> Result<StableDigest, NullspaceEvidenceError> {
-    let node = structural
-        .nodes
-        .get(node)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let identity = digest(NODE_DOMAIN, &(node.node_id, node.coordinates_m))?;
-    Ok(StableDigest::from_bytes(*identity.bytes()))
 }

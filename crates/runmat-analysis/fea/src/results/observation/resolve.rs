@@ -1,14 +1,19 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    ComplexRepresentation, CompressionPolicy, EntityDimension, ExcitationTarget, ExpectedTopology,
-    FieldLocation, ObservationComponent, ObservationCostEstimate, ObservationRequest,
-    ObservationSpec, ObservationTarget, ProcedureStep, RecoveryPolicy, RetentionPolicy,
-    SamplingPolicy, SeriesReduction, SignalPrecision, SpatialReduction, TargetCardinality,
+    AnalysisModel, ComplexRepresentation, CompressionPolicy, EntityDimension, ExcitationTarget,
+    ExpectedTopology, FieldLocation, ObservationComponent, ObservationCostEstimate,
+    ObservationRequest, ObservationSpec, ObservationTarget, ProcedureStep, RecoveryPolicy,
+    RetentionPolicy, SamplingPolicy, SeriesReduction, SignalPrecision, SpatialReduction,
+    TargetCardinality,
 };
 use runmat_execution::Digest;
+use runmat_meshing_core::SolverMeshArtifact;
 
-use crate::{results::field::RecoveredFieldDefinition, topology::AnalysisProjection};
+use crate::{
+    results::field::{RecoveredFieldDefinition, RecoveredFieldEntityDomain},
+    topology::AnalysisProjection,
+};
 
 use super::contract::{
     checked_bytes, shape_component_count, ObservationError, ObservationLimits,
@@ -16,10 +21,32 @@ use super::contract::{
     ResolvedObservationPlan, ResolvedObservationPlanIdentity, ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
+use super::topology::StructuralObservationTopology;
 
 pub fn resolve_observation_plan(
     step: &ProcedureStep,
     projection: &AnalysisProjection,
+    fields: &[RecoveredFieldDefinition],
+    limits: ObservationLimits,
+) -> Result<ResolvedObservationPlan, ObservationError> {
+    let topology = StructuralObservationTopology::from_projection(projection);
+    resolve_observation_plan_for_topology(step, &topology, fields, limits)
+}
+
+pub fn resolve_structural_observation_plan(
+    step: &ProcedureStep,
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    fields: &[RecoveredFieldDefinition],
+    limits: ObservationLimits,
+) -> Result<ResolvedObservationPlan, ObservationError> {
+    let topology = StructuralObservationTopology::derive(model, mesh)?;
+    resolve_observation_plan_for_topology(step, &topology, fields, limits)
+}
+
+fn resolve_observation_plan_for_topology(
+    step: &ProcedureStep,
+    topology: &StructuralObservationTopology,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservationPlan, ObservationError> {
@@ -30,12 +57,12 @@ pub fn resolve_observation_plan(
     let observations = step
         .observations
         .iter()
-        .map(|request| resolve_request(step, request, projection, fields, limits))
+        .map(|request| resolve_request(step, request, topology, fields, limits))
         .collect::<Result<Vec<_>, _>>()?;
     let mut plan = ResolvedObservationPlan {
         schema_version: 1,
         identity: ResolvedObservationPlanIdentity(Digest::sha256([])),
-        topology_digest: projection.projection_digest,
+        topology_digest: topology.digest(),
         step_id: step.step_id.clone(),
         independent_domain: step.independent_domain.clone(),
         observations,
@@ -69,7 +96,7 @@ fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), Obs
 fn resolve_request(
     step: &ProcedureStep,
     request: &ObservationRequest,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
     fields: &[RecoveredFieldDefinition],
     limits: ObservationLimits,
 ) -> Result<ResolvedObservation, ObservationError> {
@@ -93,7 +120,7 @@ fn resolve_request(
     }
     validate_supported_spec(request, spec)?;
     let source_field = bind_field(spec, fields)?;
-    let target = resolve_target(request, spec, projection)?;
+    let target = resolve_target(request, spec, source_field.entity_domain(), topology)?;
     let (component, result_component_count) = resolve_component(spec, &source_field)?;
     let selected = target.selected_entity_count();
     if selected == 0 {
@@ -132,7 +159,7 @@ fn resolve_request(
         .map_err(|_| ObservationError::Limit("observation retained sample count"))?;
     let result_component_count_u64 = u64::try_from(result_component_count)
         .map_err(|_| ObservationError::Limit("observation result component count"))?;
-    let work_entities = integration_work(&target, projection)?;
+    let work_entities = integration_work(&target, topology)?;
     let operation_count = u64::try_from(work_entities)
         .ok()
         .and_then(|value| value.checked_mul(result_component_count_u64))
@@ -171,6 +198,7 @@ fn resolve_request(
     Ok(ResolvedObservation {
         spec: spec.clone(),
         source_field_definition_identity: source_field.identity(),
+        source_entity_domain: source_field.entity_domain(),
         target,
         component,
         result_component_count,
@@ -312,21 +340,22 @@ fn bind_field(
 fn resolve_target(
     request: &ObservationRequest,
     spec: &ObservationSpec,
-    projection: &AnalysisProjection,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     match request {
-        ObservationRequest::Probe(_) => resolve_probe(spec, projection),
-        ObservationRequest::Reduction(_) => resolve_reduction_target(spec, projection),
-        ObservationRequest::Field(_) => resolve_field_target(spec, projection),
+        ObservationRequest::Probe(_) => resolve_probe(spec, field_domain, topology),
+        ObservationRequest::Reduction(_) => resolve_reduction_target(spec, field_domain, topology),
+        ObservationRequest::Field(_) => resolve_field_target(spec, field_domain, topology),
         ObservationRequest::History(_) if spec.reduction.is_some() => {
-            resolve_reduction_target(spec, projection)
+            resolve_reduction_target(spec, field_domain, topology)
         }
         ObservationRequest::History(_)
             if matches!(spec.target, ObservationTarget::Point { .. }) =>
         {
-            resolve_probe(spec, projection)
+            resolve_probe(spec, field_domain, topology)
         }
-        ObservationRequest::History(_) => resolve_field_target(spec, projection),
+        ObservationRequest::History(_) => resolve_field_target(spec, field_domain, topology),
         _ => Err(ObservationError::Unsupported(
             "unsupported observation request",
         )),
@@ -335,7 +364,8 @@ fn resolve_target(
 
 fn resolve_probe(
     spec: &ObservationSpec,
-    projection: &AnalysisProjection,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     let ObservationTarget::Point { position } = spec.target else {
         return Err(target_error(
@@ -345,7 +375,7 @@ fn resolve_probe(
     };
     match spec.source_location {
         FieldLocation::Node => {
-            let matches = projection
+            let matches = topology
                 .nodes
                 .iter()
                 .enumerate()
@@ -354,7 +384,7 @@ fn resolve_probe(
             match matches.as_slice() {
                 [(index, node)] => Ok(ResolvedObservationTarget::Nodes {
                     indices: vec![*index],
-                    identities: vec![node.stable_identity],
+                    identities: vec![node.identity],
                 }),
                 [] => Err(target_error(
                     spec,
@@ -367,16 +397,17 @@ fn resolve_probe(
             }
         }
         FieldLocation::Element => {
-            let matches = projection
-                .elements
+            let elements = topology.elements(field_domain)?;
+            let matches = elements
                 .iter()
                 .enumerate()
                 .filter(|(_, element)| element.centroid_m == position.meters)
                 .collect::<Vec<_>>();
             match matches.as_slice() {
                 [(index, element)] => Ok(ResolvedObservationTarget::Elements {
+                    domain: field_domain,
                     indices: vec![*index],
-                    identities: vec![element.stable_identity],
+                    identities: vec![element.identity],
                 }),
                 [] => Err(target_error(
                     spec,
@@ -396,14 +427,16 @@ fn resolve_probe(
 
 fn resolve_field_target(
     spec: &ObservationSpec,
-    projection: &AnalysisProjection,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     match &spec.target {
         ObservationTarget::WholeModel
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => match spec.source_location {
-            FieldLocation::Node => nodes_target((0..projection.nodes.len()).collect(), projection),
+            FieldLocation::Node => nodes_target((0..topology.nodes.len()).collect(), topology),
             FieldLocation::Element => {
-                elements_target((0..projection.elements.len()).collect(), projection)
+                let elements = topology.elements(field_domain)?;
+                elements_target((0..elements.len()).collect(), field_domain, topology)
             }
             _ => Err(ObservationError::Unsupported("unsupported field location")),
         },
@@ -415,13 +448,14 @@ fn resolve_field_target(
             ) {
                 (EntityDimension::Point, ExpectedTopology::MeshNode, FieldLocation::Node) => {
                     let id = parse_node_selector(&region.region_id, spec)?;
-                    let index = projection
-                        .node_index(id)
-                        .ok_or_else(|| target_error(spec, "mesh-node selector does not resolve"))?;
+                    let index = topology.node_index(id)?.ok_or_else(|| {
+                        target_error(spec, "structural-node selector does not resolve")
+                    })?;
                     enforce_cardinality(region.cardinality, 1, spec)?;
-                    nodes_target(vec![index], projection)
+                    nodes_target(vec![index], topology)
                 }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace, FieldLocation::Node) => {
+                    let projection = solid_projection(topology, spec)?;
                     let faces = matching_faces(&region.region_id, projection);
                     enforce_cardinality(region.cardinality, faces.len(), spec)?;
                     let indices = faces
@@ -435,19 +469,24 @@ fn resolve_field_target(
                         .collect::<BTreeSet<_>>()
                         .into_iter()
                         .collect();
-                    nodes_target(indices, projection)
+                    nodes_target(indices, topology)
                 }
                 (
                     EntityDimension::Volume,
                     ExpectedTopology::MeshElement,
                     FieldLocation::Element,
                 ) => {
-                    let indices = matching_elements(&region.region_id, projection);
+                    let indices = matching_elements(&region.region_id, field_domain, topology)?;
                     enforce_cardinality(region.cardinality, indices.len(), spec)?;
-                    elements_target(indices, projection)
+                    elements_target(indices, field_domain, topology)
                 }
                 (EntityDimension::Volume, ExpectedTopology::MeshElement, FieldLocation::Node) => {
-                    let elements = matching_elements(&region.region_id, projection);
+                    let projection = solid_projection(topology, spec)?;
+                    let elements = matching_elements(
+                        &region.region_id,
+                        RecoveredFieldEntityDomain::SolidElements,
+                        topology,
+                    )?;
                     enforce_cardinality(region.cardinality, elements.len(), spec)?;
                     let indices = elements
                         .into_iter()
@@ -455,7 +494,7 @@ fn resolve_field_target(
                         .collect::<BTreeSet<_>>()
                         .into_iter()
                         .collect();
-                    nodes_target(indices, projection)
+                    nodes_target(indices, topology)
                 }
                 _ => Err(target_error(
                     spec,
@@ -472,8 +511,18 @@ fn resolve_field_target(
 
 fn resolve_reduction_target(
     spec: &ObservationSpec,
-    projection: &AnalysisProjection,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    let projection = solid_projection(topology, spec)?;
+    if !matches!(
+        field_domain,
+        RecoveredFieldEntityDomain::StructuralNodes | RecoveredFieldEntityDomain::SolidElements
+    ) {
+        return Err(ObservationError::Unsupported(
+            "beam and shell reductions require formulation-owned integration rules",
+        ));
+    }
     match &spec.target {
         ObservationTarget::WholeModel
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
@@ -484,7 +533,11 @@ fn resolve_reduction_target(
         ObservationTarget::Spatial(ExcitationTarget::Region(region)) => {
             match (region.entity_dimension, region.expected_topology) {
                 (EntityDimension::Volume, ExpectedTopology::MeshElement) => {
-                    let element_indices = matching_elements(&region.region_id, projection);
+                    let element_indices = matching_elements(
+                        &region.region_id,
+                        RecoveredFieldEntityDomain::SolidElements,
+                        topology,
+                    )?;
                     enforce_cardinality(region.cardinality, element_indices.len(), spec)?;
                     Ok(ResolvedObservationTarget::Volume { element_indices })
                 }
@@ -510,12 +563,17 @@ fn resolve_reduction_target(
 
 fn nodes_target(
     indices: Vec<usize>,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
-    let identities = indices
-        .iter()
-        .map(|index| projection.nodes[*index].stable_identity)
-        .collect();
+    let identities =
+        indices
+            .iter()
+            .map(|index| {
+                topology.nodes.get(*index).map(|node| node.identity).ok_or(
+                    ObservationError::Identity("resolved node target exceeds structural topology"),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
     Ok(ResolvedObservationTarget::Nodes {
         indices,
         identities,
@@ -524,30 +582,66 @@ fn nodes_target(
 
 fn elements_target(
     indices: Vec<usize>,
-    projection: &AnalysisProjection,
+    domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    let elements = topology.elements(domain)?;
     let identities = indices
         .iter()
-        .map(|index| projection.elements[*index].stable_identity)
-        .collect();
+        .map(|index| {
+            elements
+                .get(*index)
+                .map(|element| element.identity)
+                .ok_or(ObservationError::Identity(
+                    "resolved element target exceeds structural topology",
+                ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(ResolvedObservationTarget::Elements {
+        domain,
         indices,
         identities,
     })
 }
 
-fn matching_elements(selector: &str, projection: &AnalysisProjection) -> Vec<usize> {
-    projection
-        .elements
+fn matching_elements(
+    selector: &str,
+    domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
+) -> Result<Vec<usize>, ObservationError> {
+    if domain == RecoveredFieldEntityDomain::SolidElements {
+        if let Some(projection) = &topology.solid_projection {
+            return Ok(projection
+                .elements
+                .iter()
+                .enumerate()
+                .filter_map(|(index, element)| {
+                    element
+                        .region_id
+                        .matches_analysis_selection(selector)
+                        .then_some(index)
+                })
+                .collect());
+        }
+    }
+    Ok(topology
+        .elements(domain)?
         .iter()
         .enumerate()
-        .filter_map(|(index, element)| {
-            element
-                .region_id
-                .matches_analysis_selection(selector)
-                .then_some(index)
-        })
-        .collect()
+        .filter_map(|(index, element)| (element.region_id == selector).then_some(index))
+        .collect())
+}
+
+fn solid_projection<'a>(
+    topology: &'a StructuralObservationTopology,
+    spec: &ObservationSpec,
+) -> Result<&'a AnalysisProjection, ObservationError> {
+    topology.solid_projection.as_ref().ok_or_else(|| {
+        target_error(
+            spec,
+            "volume and boundary observations require admitted solid topology",
+        )
+    })
 }
 
 fn matching_faces(selector: &str, projection: &AnalysisProjection) -> Vec<usize> {
@@ -618,12 +712,19 @@ fn resolve_component(
 
 fn integration_work(
     target: &ResolvedObservationTarget,
-    projection: &AnalysisProjection,
+    topology: &StructuralObservationTopology,
 ) -> Result<usize, ObservationError> {
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }
         | ResolvedObservationTarget::Elements { indices, .. } => Ok(indices.len()),
         ResolvedObservationTarget::Volume { element_indices } => {
+            let projection =
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "volume reduction work requires admitted solid topology",
+                    ))?;
             element_indices.iter().try_fold(0usize, |work, index| {
                 projection
                     .elements
@@ -635,6 +736,13 @@ fn integration_work(
             })
         }
         ResolvedObservationTarget::Boundary { face_indices } => {
+            let projection =
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "boundary reduction work requires admitted solid topology",
+                    ))?;
             face_indices.iter().try_fold(0usize, |work, index| {
                 projection
                     .boundary_faces

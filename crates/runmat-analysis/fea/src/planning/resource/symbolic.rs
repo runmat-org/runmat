@@ -8,9 +8,9 @@ use runmat_meshing_core::SolverMeshArtifact;
 use crate::{
     algebra::SparsePattern,
     assembly::{dofs::StructuralDofKind, mixed_dof_layout},
-    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintTopology},
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity},
     physics::structural::topology::{
-        mixed::CanonicalMixedStructuralTopology, mixed_target::resolve_mixed_structural_target,
+        node_space::CanonicalStructuralNodeSpace, target::resolve_mixed_structural_target,
     },
     topology::AnalysisProjection,
 };
@@ -46,14 +46,14 @@ impl StructuralSymbolicOperators {
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, ResourcePlanningError> {
-        if constraints.topology.mesh_digest() != projection.mesh_digest {
+        if constraints.topology.mesh_digest() != Some(projection.mesh_digest) {
             return Err(ResourcePlanningError::Invalid(
                 "constraint plan and analysis projection name different topology".into(),
             ));
         }
         if matches!(
             constraints.topology,
-            CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+            CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
         ) {
             return Self::derive_mixed(projection, constraints, model, mesh);
         }
@@ -123,6 +123,105 @@ impl StructuralSymbolicOperators {
         })
     }
 
+    pub fn derive_explicit(
+        constraints: &CanonicalStructuralConstraintPlan,
+        model: &AnalysisModel,
+    ) -> Result<Self, ResourcePlanningError> {
+        let structural = model.structural.as_ref().ok_or_else(|| {
+            ResourcePlanningError::Invalid(
+                "explicit symbolic planning requires structural topology".into(),
+            )
+        })?;
+        let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        if constraints.topology != topology.identity {
+            return Err(ResourcePlanningError::Invalid(
+                "constraint plan and explicit structural topology differ".into(),
+            ));
+        }
+        if !constraints.reference_points.is_empty() {
+            return Err(ResourcePlanningError::Invalid(
+                "explicit reference-point symbolic planning is not complete".into(),
+            ));
+        }
+        let layout = mixed_dof_layout(&topology);
+        let total_dofs = layout.total_dof_count();
+        let mut rows = (0..total_dofs)
+            .map(|_| BTreeSet::<usize>::new())
+            .collect::<Vec<_>>();
+        for element in &structural.elements {
+            let explicit_nodes = match &element.kind {
+                StructuralElementKind::Beam(beam) => beam.node_ids.as_slice(),
+                StructuralElementKind::Shell(shell) => shell.node_ids.as_slice(),
+            };
+            let mut element_dofs = Vec::new();
+            for node_id in explicit_nodes {
+                let explicit = structural
+                    .nodes
+                    .iter()
+                    .position(|node| node.node_id == *node_id)
+                    .ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "element `{}` references absent node {}",
+                            element.element_id, node_id
+                        ))
+                    })?;
+                let canonical = topology.explicit_node_indices[explicit];
+                element_dofs.extend(
+                    StructuralDofKind::ORDER
+                        .into_iter()
+                        .filter_map(|dof| layout.index(canonical, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &element_dofs);
+        }
+        for connector in &model.connectors {
+            let mut connector_nodes =
+                crate::physics::structural::topology::explicit_target_node_indices(
+                    structural,
+                    &connector.primary.region_id,
+                );
+            if let Some(secondary) = &connector.secondary {
+                connector_nodes.extend(
+                    crate::physics::structural::topology::explicit_target_node_indices(
+                        structural,
+                        &secondary.region_id,
+                    ),
+                );
+            }
+            connector_nodes.sort_unstable();
+            connector_nodes.dedup();
+            if connector_nodes.is_empty() {
+                return Err(ResourcePlanningError::Invalid(format!(
+                    "connector `{}` resolves to no explicit structural nodes",
+                    connector.connector_id
+                )));
+            }
+            let mut connector_dofs = Vec::new();
+            for node in connector_nodes {
+                connector_dofs.extend(
+                    [
+                        StructuralDofKind::Ux,
+                        StructuralDofKind::Uy,
+                        StructuralDofKind::Uz,
+                    ]
+                    .into_iter()
+                    .filter_map(|dof| layout.index(node, dof)),
+                );
+            }
+            add_dense_element_pattern(&mut rows, &connector_dofs);
+        }
+        for (row, columns) in rows.iter_mut().enumerate() {
+            columns.insert(row);
+        }
+        let stiffness_upper_bound = pattern_from_rows(rows, total_dofs)?;
+        Self::from_patterns(
+            stiffness_upper_bound.clone(),
+            stiffness_upper_bound.clone(),
+            stiffness_upper_bound,
+        )
+    }
+
     fn derive_mixed(
         projection: &AnalysisProjection,
         constraints: &CanonicalStructuralConstraintPlan,
@@ -134,9 +233,9 @@ impl StructuralSymbolicOperators {
                 "mixed symbolic planning requires explicit structural topology".into(),
             )
         })?;
-        let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
+        let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        if constraints.topology.structural_digest() != topology.identity {
+        if constraints.topology != topology.identity {
             return Err(ResourcePlanningError::Invalid(
                 "constraint plan and mixed structural topology differ".into(),
             ));

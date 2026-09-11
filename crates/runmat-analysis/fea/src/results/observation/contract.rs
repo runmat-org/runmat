@@ -13,7 +13,9 @@ use crate::execution::{
     FieldRecoveryRequestIdentity, ObservationEvaluationRequestIdentity, SolverResultIdentity,
     StepIdentity,
 };
-use crate::results::field::{RecoveredFieldArtifactIdentity, RecoveredFieldDefinitionIdentity};
+use crate::results::field::{
+    RecoveredFieldArtifactIdentity, RecoveredFieldDefinitionIdentity, RecoveredFieldEntityDomain,
+};
 
 pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
 pub(super) const OBSERVATION_LIMITS: CanonicalLimits =
@@ -90,6 +92,7 @@ pub enum ResolvedObservationTarget {
         identities: Vec<StableDigest>,
     },
     Elements {
+        domain: RecoveredFieldEntityDomain,
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
     },
@@ -116,6 +119,7 @@ impl ResolvedObservationTarget {
 pub struct ResolvedObservation {
     pub spec: ObservationSpec,
     pub source_field_definition_identity: RecoveredFieldDefinitionIdentity,
+    pub source_entity_domain: RecoveredFieldEntityDomain,
     pub target: ResolvedObservationTarget,
     pub component: ResolvedComponentProjection,
     pub result_component_count: usize,
@@ -806,6 +810,7 @@ fn validate_resolved_observation(
             identities,
         } => {
             if observation.spec.source_location != FieldLocation::Node
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.reduction.is_some()
                 || indices.len() != identities.len()
                 || indices.is_empty()
@@ -818,10 +823,13 @@ fn validate_resolved_observation(
             }
         }
         ResolvedObservationTarget::Elements {
+            domain,
             indices,
             identities,
         } => {
             if observation.spec.source_location != FieldLocation::Element
+                || observation.source_entity_domain != *domain
+                || *domain == RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.reduction.is_some()
                 || indices.len() != identities.len()
                 || indices.is_empty()
@@ -836,6 +844,11 @@ fn validate_resolved_observation(
         }
         ResolvedObservationTarget::Volume { element_indices } => {
             if observation.spec.reduction.is_none()
+                || !matches!(
+                    observation.source_entity_domain,
+                    RecoveredFieldEntityDomain::StructuralNodes
+                        | RecoveredFieldEntityDomain::SolidElements
+                )
                 || element_indices.is_empty()
                 || !strictly_increasing(element_indices)
             {
@@ -846,6 +859,7 @@ fn validate_resolved_observation(
         }
         ResolvedObservationTarget::Boundary { face_indices } => {
             if observation.spec.source_location != FieldLocation::Node
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
                 || !strictly_increasing(face_indices)

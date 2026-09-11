@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, SolverResultIdentity,
+    StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 use runmat_analysis_fea::results::field::{
     RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
+    StructuralRecoveredFieldTopology,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -23,8 +25,9 @@ use crate::{
 
 pub struct StructuralFieldRecoveryPreparation {
     pub source_host: AnalysisHostWorkload,
+    pub source_invocation: PreparedAnalysisObjects,
     pub source_result: PreparedAnalysisObjects,
-    pub mesh: PreparedAnalysisObjects,
+    pub mesh: Option<PreparedAnalysisObjects>,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -50,12 +53,34 @@ pub fn prepare_structural_field_recovery(
     preparation.source_host.validate()?;
     if preparation.source_host.workload.kind != AnalysisWorkKind::Solve
         || preparation.source_result.manifest.kind != AnalysisNumericalObjectKind::SolverResult
-        || preparation.mesh.manifest.kind != AnalysisNumericalObjectKind::Mesh
+        || preparation.source_invocation.manifest.kind
+            != AnalysisNumericalObjectKind::SolverInvocation
+        || preparation
+            .mesh
+            .as_ref()
+            .is_some_and(|mesh| mesh.manifest.kind != AnalysisNumericalObjectKind::Mesh)
         || preparation.chunk_bytes == 0
     {
         return Err(AnalysisBridgeError::Invalid(
-            "field recovery requires one completed solve, its canonical mesh, and bounded chunks"
+            "field recovery requires one completed solve, its invocation, optional canonical mesh, and bounded chunks"
                 .into(),
+        ));
+    }
+    let source_invocation = preparation
+        .source_host
+        .workload
+        .inputs
+        .iter()
+        .find(|input| input.kind == AnalysisNumericalObjectKind::SolverInvocation)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("source solve has no invocation input".into())
+        })?;
+    if source_invocation.logical_identity != preparation.source_invocation.manifest.logical_identity
+        || source_invocation.payload_digest != preparation.source_invocation.manifest.payload_digest
+        || source_invocation.manifest_digest != preparation.source_invocation.root.digest
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "field recovery invocation differs from the source solve invocation",
         ));
     }
     let source_mesh = preparation
@@ -63,15 +88,18 @@ pub fn prepare_structural_field_recovery(
         .workload
         .inputs
         .iter()
-        .find(|input| input.kind == AnalysisNumericalObjectKind::Mesh)
-        .ok_or_else(|| AnalysisBridgeError::Invalid("source solve has no mesh input".into()))?;
-    if source_mesh.logical_identity != preparation.mesh.manifest.logical_identity
-        || source_mesh.payload_digest != preparation.mesh.manifest.payload_digest
-        || source_mesh.manifest_digest != preparation.mesh.root.digest
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "field recovery mesh differs from the source solve mesh",
-        ));
+        .find(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+    match (source_mesh, preparation.mesh.as_ref()) {
+        (Some(source), Some(mesh))
+            if source.logical_identity == mesh.manifest.logical_identity
+                && source.payload_digest == mesh.manifest.payload_digest
+                && source.manifest_digest == mesh.root.digest => {}
+        (None, None) => {}
+        _ => {
+            return Err(AnalysisBridgeError::Identity(
+                "field recovery mesh presence or identity differs from the source solve",
+            ))
+        }
     }
     let source_result = SolverResultIdentity::new(
         preparation.source_host.workload.identity,
@@ -82,15 +110,30 @@ pub fn prepare_structural_field_recovery(
             "field recovery solver result differs from its source workload",
         ));
     }
-    let mesh_artifact = SolverMeshArtifact::canonical_decode(&preparation.mesh.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh_artifact)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let workload =
+        StructuralLinearWorkload::from_canonical_bytes(&preparation.source_invocation.payload())?;
+    let result =
+        StructuralLinearWorkloadResult::from_canonical_bytes(&preparation.source_result.payload())?;
+    let mesh_artifact = preparation
+        .mesh
+        .as_ref()
+        .map(|mesh| {
+            SolverMeshArtifact::canonical_decode(&mesh.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    let topology =
+        StructuralRecoveredFieldTopology::derive(&workload.model, mesh_artifact.as_ref())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if result.constraint_result.topology != topology.identity {
+        return Err(AnalysisBridgeError::Identity(
+            "field recovery topology differs from the completed solve",
+        ));
+    }
     let request = FieldRecoveryRequest::new(
         preparation.source_host.workload.step,
         source_result,
-        preparation.mesh.manifest.logical_identity,
-        projection.projection_digest,
+        topology.identity,
     )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
@@ -103,9 +146,13 @@ pub fn prepare_structural_field_recovery(
     )?;
     let inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
+        (preparation.source_invocation, ValueRefKind::DriverObject),
         (preparation.source_result, ValueRefKind::ResultObject),
-        (preparation.mesh, ValueRefKind::DriverObject),
     ];
+    let mut inputs = inputs;
+    if let Some(mesh) = preparation.mesh {
+        inputs.push((mesh, ValueRefKind::DriverObject));
+    }
     let workload_inputs = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
@@ -183,7 +230,7 @@ pub fn import_structural_recovered_fields(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if manifest.identity.digest() != output.logical_identity
         || manifest.source_result != prepared.request.source_result
-        || manifest.topology_digest != prepared.request.projection_digest
+        || manifest.topology_digest != prepared.request.topology.discretization_digest()
         || manifest.recovery_request != prepared.request.identity()
     {
         return Err(AnalysisBridgeError::Identity(

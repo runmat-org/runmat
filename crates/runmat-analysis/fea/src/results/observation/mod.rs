@@ -9,6 +9,7 @@ mod evaluate;
 mod history;
 mod publish;
 mod resolve;
+mod topology;
 
 pub use contract::{
     ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
@@ -17,14 +18,17 @@ pub use contract::{
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
     ResolvedObservationPlanIdentity, ResolvedObservationTarget,
 };
-pub use evaluate::{evaluate_observation_sample, evaluate_observations};
+pub use evaluate::{
+    evaluate_observation_sample, evaluate_observations, evaluate_structural_observation_sample,
+    evaluate_structural_observations,
+};
 pub use history::{
     BoundedObservationHistory, ObservationHistory, ObservationHistoryEntry,
     ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
     ObservationHistorySampleIdentity,
 };
 pub use publish::publish_observation;
-pub use resolve::resolve_observation_plan;
+pub use resolve::{resolve_observation_plan, resolve_structural_observation_plan};
 
 #[cfg(test)]
 mod tests;

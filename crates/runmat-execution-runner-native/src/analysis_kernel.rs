@@ -26,13 +26,13 @@ use runmat_analysis_fea::results::accuracy::{
 };
 use runmat_analysis_fea::results::field::{
     RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldSelection,
+    StructuralRecoveredFieldTopology,
 };
 use runmat_analysis_fea::results::observation::{
-    evaluate_observations, resolve_observation_plan, ObservationArtifact, ObservationArtifactInput,
+    evaluate_structural_observations, ObservationArtifact, ObservationArtifactInput,
     ObservationArtifactManifest, ObservationLimits,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
-use runmat_analysis_fea::topology::AnalysisProjection;
 use runmat_analysis_fea::{
     run_linear_static_with_prepared_constraint_plan, LinearStaticSolveOptions,
 };
@@ -246,13 +246,14 @@ fn execute_observation_evaluation(
         AnalysisNumericalObjectKind::ObservationEvaluationRequest,
     )?;
     let fields = unique_input(&invocation, AnalysisNumericalObjectKind::FieldSelection)?;
-    let mesh = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
-    if invocation.inputs.len() != 3
+    let solver_invocation =
+        unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
+    let mesh = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    if invocation.inputs.len() != 3 + usize::from(mesh.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Observation]
     {
         return Err(AnalysisBridgeError::Invalid(
-            "observation evaluation requires one request, field artifact, mesh, and observation output"
-                .into(),
+            "observation evaluation requires one request, field selection, source invocation, optional mesh, and observation output".into(),
         ));
     }
     let request_manifest_identity = request.manifest.logical_identity;
@@ -277,26 +278,35 @@ fn execute_observation_evaluation(
         || request.source_fields != selection.source.identity
         || request.field_recovery_request != selection.source.recovery_request
         || request.source_result != selection.source.source_result
-        || request.mesh_digest != mesh.manifest.logical_identity
         || request.plan.topology_digest != selection.source.topology_digest
     {
         return Err(AnalysisBridgeError::Identity(
             "observation inputs differ from the admitted evaluation request",
         ));
     }
-    let mesh = SolverMeshArtifact::canonical_decode(&mesh.payload())
+    let workload = StructuralLinearWorkload::from_canonical_bytes(&solver_invocation.payload())?;
+    let mesh = mesh
+        .map(|mesh| {
+            SolverMeshArtifact::canonical_decode(&mesh.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()) != request.mesh_digest {
+    if request.topology != topology.identity {
         return Err(AnalysisBridgeError::Identity(
-            "observation mesh content differs from its admitted identity",
+            "observation topology differs from its admitted identity",
         ));
     }
-    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let catalog = RecoveredFieldCatalog::new(&projection, selected_fields)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let results = evaluate_observations(&request.plan, &projection, &catalog)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        topology.identity.discretization_digest(),
+        topology.entity_counts,
+        selected_fields,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let results =
+        evaluate_structural_observations(&request.plan, &workload.model, mesh.as_ref(), &catalog)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let artifact = ObservationArtifact::new(ObservationArtifactInput {
         evaluation_request: request.identity(),
         producer: request.producer,
@@ -340,13 +350,15 @@ fn execute_field_recovery(
         &invocation,
         AnalysisNumericalObjectKind::FieldRecoveryRequest,
     )?;
+    let solver_invocation =
+        unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let solver_result = unique_input(&invocation, AnalysisNumericalObjectKind::SolverResult)?;
-    let mesh = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
-    if invocation.inputs.len() != 3
+    let mesh = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    if invocation.inputs.len() != 3 + usize::from(mesh.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
     {
         return Err(AnalysisBridgeError::Invalid(
-            "field recovery requires one request, solver result, mesh, and field output".into(),
+            "field recovery requires one request, source invocation, solver result, optional mesh, and field output".into(),
         ));
     }
     let request_manifest_identity = request.manifest.logical_identity;
@@ -354,36 +366,39 @@ fn execute_field_recovery(
     if request.identity().digest() != request_manifest_identity
         || request.producer != invocation.host.workload.step
         || request.source_result.digest() != solver_result.manifest.logical_identity
-        || request.mesh_digest != mesh.manifest.logical_identity
     {
         return Err(AnalysisBridgeError::Identity(
             "field recovery inputs differ from the admitted source request",
         ));
     }
-    let mesh = SolverMeshArtifact::canonical_decode(&mesh.payload())
+    let workload = StructuralLinearWorkload::from_canonical_bytes(&solver_invocation.payload())?;
+    let mesh = mesh
+        .map(|mesh| {
+            SolverMeshArtifact::canonical_decode(&mesh.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()) != request.mesh_digest {
+    if topology.identity != request.topology {
         return Err(AnalysisBridgeError::Identity(
-            "field recovery mesh content differs from its topology identity",
-        ));
-    }
-    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if projection.projection_digest != request.projection_digest {
-        return Err(AnalysisBridgeError::Identity(
-            "field recovery projection differs from its admitted identity",
+            "field recovery topology differs from its admitted identity",
         ));
     }
     let mut solver_result =
         StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+    if solver_result.constraint_result.topology != topology.identity {
+        return Err(AnalysisBridgeError::Identity(
+            "field recovery topology differs from the completed solve",
+        ));
+    }
     let fields = take_structural_observable_fields(&mut solver_result.run.fields)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let artifact = RecoveredFieldArtifact::new(
         request.identity(),
         request.source_result,
-        request.projection_digest,
-        mesh.topology.nodes.len(),
-        mesh.topology.volume_elements.len(),
+        topology.identity.discretization_digest(),
+        topology.entity_counts,
         fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -417,15 +432,13 @@ fn execute_structural_linear(
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let solve_invocation =
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
-    let mesh = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
+    let mesh_input = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let constraint_plan = unique_input(&invocation, AnalysisNumericalObjectKind::ConstraintPlan)?;
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let solve = StructuralLinearWorkload::from_canonical_bytes(&solve_invocation.payload())?;
-    let expected_inputs = if solve.initial_guess_transition.is_some() {
-        5
-    } else {
-        4
-    };
+    let expected_inputs = 3
+        + usize::from(mesh_input.is_some())
+        + usize::from(solve.initial_guess_transition.is_some());
     if invocation.inputs.len() != expected_inputs
         || invocation.host.workload.outputs
             != vec![
@@ -438,6 +451,31 @@ fn execute_structural_linear(
                 .into(),
         ));
     }
+    let solver_model = solve.solver_model()?;
+    let mesh = mesh_input
+        .map(|input| {
+            SolverMeshArtifact::canonical_decode(&input.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    if let (Some(input), Some(mesh)) = (mesh_input, mesh.as_ref()) {
+        if runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
+            != input.manifest.logical_identity
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "structural mesh content differs from its input identity",
+            ));
+        }
+    }
+    let constraint_plan =
+        CanonicalStructuralConstraintPlan::from_canonical_bytes(&constraint_plan.payload())
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    match mesh.as_ref() {
+        Some(mesh) => constraint_plan.validate_against(&solver_model, mesh),
+        None => constraint_plan.validate_against_explicit(&solver_model),
+    }
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let topology_digest = constraint_plan.topology.discretization_digest();
     let initial_displacement = solve
         .initial_guess_transition
         .as_ref()
@@ -457,8 +495,8 @@ fn execute_structural_linear(
             if state.identity != transition.source_state
                 || state.state_id != transition.state_id
                 || state.kind != runmat_analysis_core::StateKind::StructuralPrimary
-                || state.topology_digest != mesh.manifest.logical_identity
-                || transition.target_topology_digest != mesh.manifest.logical_identity
+                || state.topology_digest != topology_digest
+                || transition.target_topology_digest != topology_digest
             {
                 return Err(AnalysisBridgeError::Identity(
                     "initial-guess state differs from its transition or solver topology",
@@ -482,15 +520,6 @@ fn execute_structural_linear(
             })
         })
         .transpose()?;
-    let solver_model = solve.solver_model()?;
-    let mesh = SolverMeshArtifact::canonical_decode(&mesh.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let constraint_plan =
-        CanonicalStructuralConstraintPlan::from_canonical_bytes(&constraint_plan.payload())
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    constraint_plan
-        .validate_against(&solver_model, &mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan_input.manifest.logical_identity != resource_plan.identity.digest() {
@@ -498,19 +527,19 @@ fn execute_structural_linear(
             "resource-plan manifest differs from its canonical identity",
         ));
     }
-    let projection = AnalysisProjection::derive(&mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let field_definitions = structural_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let observations = resolve_observation_plan(
-        solve.procedure_step()?,
-        &projection,
-        &field_definitions,
-        ObservationLimits::default(),
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let observations =
+        runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
+            solve.procedure_step()?,
+            &solve.model,
+            mesh.as_ref(),
+            &field_definitions,
+            ObservationLimits::default(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let expected_resource_plan =
-        build_structural_resource_plan(&mesh, &projection, &constraint_plan, &observations, &solve)
+        build_structural_resource_plan(mesh.as_ref(), &constraint_plan, &observations, &solve)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {
         return Err(AnalysisBridgeError::Identity(
@@ -519,7 +548,7 @@ fn execute_structural_linear(
     }
     let expected_constraint_identity = ConstraintPlanIdentity::new(
         invocation.host.workload.step,
-        runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        topology_digest,
         constraint_plan
             .content_digest()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
@@ -537,7 +566,7 @@ fn execute_structural_linear(
             preconditioner_kind: solve.preconditioner,
             algebra_backend_kind: solve.algebra_backend,
             solver_mesh_artifact_path: None,
-            solver_mesh: Some(mesh.clone()),
+            solver_mesh: mesh.clone(),
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
             initial_displacement,
         },
@@ -547,7 +576,7 @@ fn execute_structural_linear(
     let constraint_result = CanonicalStructuralConstraintResult::recover_for_model(
         &constraint_plan,
         &solver_model,
-        &mesh,
+        mesh.as_ref(),
         &run.fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -661,7 +690,7 @@ mod tests {
         prepare_structural_sequence_step, AnalysisCapabilityRequirement, AnalysisHostWorkload,
         AnalysisWorkloadInput, AnalysisWorkloadRequest, StructuralLinearProgramPreparation,
     };
-    use runmat_analysis_fea::constraints::CanonicalStructuralConstraintTopology;
+    use runmat_analysis_fea::constraints::CanonicalStructuralTopologyIdentity;
     use runmat_analysis_fea::execution::SolverResultIdentity;
     use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
     use runmat_analysis_fea::planning::resource::{
@@ -726,6 +755,47 @@ mod tests {
             4096,
             ObjectNamespace::ResultValue,
             ObjectInventoryLimits::default(),
+        )
+        .unwrap()
+    }
+
+    fn test_host_for_inputs(
+        source: &AnalysisHostWorkload,
+        kind: AnalysisWorkKind,
+        inputs: &[runmat_analysis_execution::PreparedAnalysisObjects],
+        outputs: Vec<AnalysisNumericalObjectKind>,
+        result_input: Option<usize>,
+    ) -> AnalysisHostWorkload {
+        let workload_inputs = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| AnalysisWorkloadInput {
+                kind: input.manifest.kind,
+                logical_identity: input.manifest.logical_identity,
+                payload_digest: input.manifest.payload_digest,
+                manifest_digest: input.root.digest,
+                manifest_encoded_length: input.root.encoded_length,
+                reference_kind: if result_input == Some(index) {
+                    ValueRefKind::ResultObject
+                } else {
+                    ValueRefKind::DriverObject
+                },
+            })
+            .collect();
+        AnalysisHostWorkload::new(
+            AnalysisWorkloadRequest::new(
+                source.workload.study,
+                source.workload.step,
+                source.workload.execution_plan,
+                kind,
+                workload_inputs,
+                outputs,
+                BTreeSet::from([AnalysisCapabilityRequirement::Host {
+                    abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
+                }]),
+            )
+            .unwrap(),
+            source.artifact_access.clone(),
         )
         .unwrap()
     }
@@ -811,7 +881,7 @@ mod tests {
                 encryption_context: digest("encryption"),
             },
             workload: solve.clone(),
-            mesh,
+            mesh: Some(mesh),
             initial_guess: None,
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -870,17 +940,9 @@ mod tests {
             .source_result,
             field_source_result
         );
-        let field_recovery_request = FieldRecoveryRequest::new(
-            step,
-            field_source_result,
-            inputs[1].manifest.logical_identity,
-            runmat_analysis_fea::topology::AnalysisProjection::derive(
-                &SolverMeshArtifact::canonical_decode(&inputs[1].payload()).unwrap(),
-            )
-            .unwrap()
-            .projection_digest,
-        )
-        .unwrap();
+        let field_recovery_request =
+            FieldRecoveryRequest::new(step, field_source_result, executed_constraint_plan.topology)
+                .unwrap();
         let field_recovery_request = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::FieldRecoveryRequest,
             field_recovery_request.identity().digest(),
@@ -892,6 +954,7 @@ mod tests {
         .unwrap();
         let field_inputs = vec![
             field_recovery_request,
+            inputs[0].clone(),
             solver_result.clone(),
             inputs[1].clone(),
         ];
@@ -904,7 +967,7 @@ mod tests {
                 payload_digest: input.manifest.payload_digest,
                 manifest_digest: input.root.digest,
                 manifest_encoded_length: input.root.encoded_length,
-                reference_kind: if index == 1 {
+                reference_kind: if index == 2 {
                     ValueRefKind::ResultObject
                 } else {
                     ValueRefKind::DriverObject
@@ -941,22 +1004,20 @@ mod tests {
             field.storage().field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
         }));
 
-        let observation_projection = runmat_analysis_fea::topology::AnalysisProjection::derive(
-            &SolverMeshArtifact::canonical_decode(&field_inputs[2].payload()).unwrap(),
-        )
-        .unwrap();
         let definitions = recovered
             .fields()
             .iter()
             .map(|field| field.definition().clone())
             .collect::<Vec<_>>();
-        let observation_plan = runmat_analysis_fea::results::observation::resolve_observation_plan(
-            &solve.model.sequence.steps[0],
-            &observation_projection,
-            &definitions,
-            runmat_analysis_fea::results::observation::ObservationLimits::default(),
-        )
-        .unwrap();
+        let observation_plan =
+            runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
+                &solve.model.sequence.steps[0],
+                &solve.model,
+                Some(&SolverMeshArtifact::canonical_decode(&field_inputs[3].payload()).unwrap()),
+                &definitions,
+                runmat_analysis_fea::results::observation::ObservationLimits::default(),
+            )
+            .unwrap();
         let field_selection = RecoveredFieldSelection::new(
             recovered.manifest().unwrap(),
             recovered
@@ -969,7 +1030,7 @@ mod tests {
         let observation_request = ObservationEvaluationRequest::new(
             step,
             &field_selection,
-            field_inputs[2].manifest.logical_identity,
+            executed_constraint_plan.topology,
             observation_plan,
         )
         .unwrap();
@@ -1000,7 +1061,8 @@ mod tests {
         let observation_inputs = vec![
             observation_request,
             recovered_fields,
-            field_inputs[2].clone(),
+            field_inputs[1].clone(),
+            field_inputs[3].clone(),
         ];
         let observation_workload_inputs = observation_inputs
             .iter()
@@ -1371,7 +1433,7 @@ mod tests {
             program_revision: revision(),
             artifact_access: host.artifact_access.clone(),
             workload: warm_solve,
-            mesh: SolverMeshArtifact::canonical_decode(&inputs[1].payload()).unwrap(),
+            mesh: Some(SolverMeshArtifact::canonical_decode(&inputs[1].payload()).unwrap()),
             initial_guess: Some(warm_state),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -1410,6 +1472,232 @@ mod tests {
                 inputs: &substituted,
             })
             .is_err());
+    }
+
+    #[test]
+    fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        model.sequence.steps[0].observations = vec![structural_displacement_observation()];
+        let solve = StructuralLinearWorkload {
+            schema_version: 1,
+            step_id: model.sequence.steps[0].step_id.clone(),
+            model,
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
+            preconditioner: SpdPreconditionerKind::Jacobi,
+            algebra_backend: LinearAlgebraBackendKind::CpuReference,
+            require_solver_mesh_for_solid: true,
+            initial_guess_transition: None,
+        };
+        let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+            authored_study_digest: digest("explicit-study"),
+            frozen_project_digest: None,
+            program_revision: revision(),
+            artifact_access: ArtifactAccess {
+                authorization_scope: "study:explicit".into(),
+                encryption_context: digest("explicit-encryption"),
+            },
+            workload: solve.clone(),
+            mesh: None,
+            initial_guess: None,
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+        })
+        .unwrap();
+        assert_eq!(prepared.inputs.len(), 3);
+        assert!(prepared
+            .inputs
+            .iter()
+            .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
+
+        let outputs = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::Solve,
+                host: &prepared.host,
+                inputs: &prepared.inputs,
+            })
+            .unwrap();
+        let result =
+            StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
+        assert!(matches!(
+            result.constraint_result.topology,
+            CanonicalStructuralTopologyIdentity::Explicit { .. }
+        ));
+        assert!(result.run.fields.iter().any(|field| {
+            field.field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
+                && field.as_host_f64().is_some_and(|values| {
+                    !values.is_empty() && values.iter().all(|value| value.is_finite())
+                })
+        }));
+
+        let solver_result = prepare_kernel_output(&outputs[0]);
+        let source_result = SolverResultIdentity::new(
+            prepared.host.workload.identity,
+            solver_result.manifest.payload_digest,
+        )
+        .unwrap();
+        let recovery_request = FieldRecoveryRequest::new(
+            prepared.host.workload.step,
+            source_result,
+            result.constraint_result.topology,
+        )
+        .unwrap();
+        let recovery_request = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::FieldRecoveryRequest,
+            recovery_request.identity().digest(),
+            &recovery_request.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let recovery_inputs = vec![recovery_request, prepared.inputs[0].clone(), solver_result];
+        assert!(recovery_inputs
+            .iter()
+            .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
+        let recovery_host = test_host_for_inputs(
+            &prepared.host,
+            AnalysisWorkKind::RecoverField,
+            &recovery_inputs,
+            vec![AnalysisNumericalObjectKind::Field],
+            Some(2),
+        );
+        let recovered_outputs = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::RecoverField,
+                host: &recovery_host,
+                inputs: &recovery_inputs,
+            })
+            .unwrap();
+        let recovered_objects = prepare_kernel_output(&recovered_outputs[0]);
+        let recovered = decode_recovered_field_artifact(&recovered_objects).unwrap();
+        assert_eq!(
+            recovered.topology_digest,
+            result.constraint_result.topology.discretization_digest()
+        );
+        assert_eq!(recovered.entity_counts.solid_elements, 0);
+        assert!(recovered.entity_counts.beam_elements > 0);
+
+        let mut substituted_workload = solve.clone();
+        substituted_workload.model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+        substituted_workload.step_id = substituted_workload.model.sequence.steps[0].step_id.clone();
+        let substituted_invocation = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::SolverInvocation,
+            digest("substituted-explicit-invocation"),
+            &substituted_workload.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let mut substituted_recovery_inputs = recovery_inputs.clone();
+        substituted_recovery_inputs[1] = substituted_invocation.clone();
+        assert!(NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::RecoverField,
+                host: &recovery_host,
+                inputs: &substituted_recovery_inputs,
+            })
+            .is_err());
+
+        let definitions = recovered
+            .fields()
+            .iter()
+            .map(|field| field.definition().clone())
+            .collect::<Vec<_>>();
+        let observation_plan =
+            runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
+                &solve.model.sequence.steps[0],
+                &solve.model,
+                None,
+                &definitions,
+                ObservationLimits::default(),
+            )
+            .unwrap();
+        let selection = RecoveredFieldSelection::new(
+            recovered.manifest().unwrap(),
+            recovered
+                .fields()
+                .iter()
+                .map(RecoveredField::identity)
+                .collect(),
+        )
+        .unwrap();
+        let observation_request = ObservationEvaluationRequest::new(
+            prepared.host.workload.step,
+            &selection,
+            result.constraint_result.topology,
+            observation_plan,
+        )
+        .unwrap();
+        let observation_request = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ObservationEvaluationRequest,
+            observation_request.identity().digest(),
+            &observation_request.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let mut selection_partitions = vec![AnalysisKernelOutputPartition {
+            logical_identity: selection.identity.digest(),
+            payload: selection.canonical_bytes().unwrap(),
+        }];
+        selection_partitions.extend(recovered.fields().iter().map(|field| {
+            AnalysisKernelOutputPartition {
+                logical_identity: field.identity().digest(),
+                payload: field.canonical_bytes().unwrap(),
+            }
+        }));
+        let selection_objects = prepare_kernel_output(&AnalysisKernelOutput::partitioned(
+            AnalysisNumericalObjectKind::FieldSelection,
+            selection.identity.digest(),
+            selection_partitions,
+        ));
+        let observation_inputs = vec![
+            observation_request,
+            selection_objects,
+            prepared.inputs[0].clone(),
+        ];
+        assert!(observation_inputs
+            .iter()
+            .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
+        let observation_host = test_host_for_inputs(
+            &prepared.host,
+            AnalysisWorkKind::EvaluateObservation,
+            &observation_inputs,
+            vec![AnalysisNumericalObjectKind::Observation],
+            Some(1),
+        );
+        let observation_outputs = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::EvaluateObservation,
+                host: &observation_host,
+                inputs: &observation_inputs,
+            })
+            .unwrap();
+        let mut substituted_observation_inputs = observation_inputs.clone();
+        substituted_observation_inputs[2] = substituted_invocation;
+        assert!(NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::EvaluateObservation,
+                host: &observation_host,
+                inputs: &substituted_observation_inputs,
+            })
+            .is_err());
+        let observation_objects = prepare_kernel_output(&observation_outputs[0]);
+        let observation_manifest = ObservationArtifactManifest::from_canonical_bytes(
+            &observation_objects
+                .partition_payload(observation_objects.manifest.logical_identity)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(observation_manifest.results.len(), 1);
+        assert_eq!(
+            observation_manifest.topology_digest,
+            result.constraint_result.topology.discretization_digest()
+        );
     }
 
     #[test]
@@ -1530,7 +1818,7 @@ mod tests {
                 encryption_context: digest("mixed-encryption"),
             },
             workload: solve,
-            mesh,
+            mesh: Some(mesh),
             initial_guess: None,
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -1576,7 +1864,7 @@ mod tests {
             runmat_analysis_fea::constraints::ConstraintViolation::RotationRadians(_)
         )));
         let mut substituted = result.constraint_result.clone();
-        let CanonicalStructuralConstraintTopology::ConformalMixed {
+        let CanonicalStructuralTopologyIdentity::ConformalMixed {
             structural_topology_digest,
             ..
         } = &mut substituted.topology

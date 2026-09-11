@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PrescribedStructuralDofs, StructuralConstraint,
     StructuralConstraintKind, StructuralRotationDof, TargetCardinality,
@@ -5,16 +7,17 @@ use runmat_analysis_core::{
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::physics::structural::topology::{
-    mixed::CanonicalMixedStructuralTopology,
-    mixed_target::{resolve_mixed_structural_target, MixedStructuralTargetOwnership},
+    explicit_target_node_indices,
+    node_space::CanonicalStructuralNodeSpace,
+    target::{resolve_mixed_structural_target, MixedStructuralTargetOwnership},
 };
 
 use super::{
     contract::{
         CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-        CanonicalStructuralConstraintTerm, CanonicalStructuralConstraintTopology,
-        CanonicalStructuralDof, CanonicalStructuralDofOwner, ConstraintGroupEvidence,
-        ConstraintPlanError, ConstraintPlanEvidence, ResolvedConstraintTarget,
+        CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+        ConstraintGroupEvidence, ConstraintPlanError, ConstraintPlanEvidence,
+        ResolvedConstraintTarget,
     },
     enforcement,
     frame::{require_global, translation_basis, translation_direction},
@@ -32,7 +35,7 @@ pub(super) fn compile(
             "mixed constraint compilation requires explicit topology".into(),
         )
     })?;
-    let topology = CanonicalMixedStructuralTopology::derive(mesh, structural)
+    let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
         .map_err(|error| ConstraintPlanError::Invalid(error.to_string()))?;
     let authored = structural_constraints(model);
     let mut solid_model = model.clone();
@@ -59,7 +62,7 @@ pub(super) fn compile(
     let mut enforcement_mode = plan.enforcement;
     for constraint in generic {
         let (mut targets, rows) =
-            compile_mixed_constraint(model, mesh, structural, &topology, constraint)?;
+            compile_node_constraint(model, Some(mesh), structural, &topology, constraint)?;
         targets.sort_by_key(|target| target.selection_digest);
         targets.dedup_by_key(|target| target.selection_digest);
         enforcement_mode = enforcement::combine(
@@ -83,10 +86,7 @@ pub(super) fn compile(
         .sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
     plan.rows.sort_by(row::compare_rows);
     let (active_row_count, redundant_row_count) = row::classify(&mut plan.rows)?;
-    plan.topology = CanonicalStructuralConstraintTopology::ConformalMixed {
-        mesh_digest: mesh.canonical_digest,
-        structural_topology_digest: topology.identity,
-    };
+    plan.topology = topology.identity;
     plan.authored_constraints_digest = authored_constraints_digest(&authored)?;
     plan.enforcement = enforcement_mode;
     plan.evidence = ConstraintPlanEvidence {
@@ -100,11 +100,78 @@ pub(super) fn compile(
     Ok(plan)
 }
 
+pub(super) fn compile_explicit(
+    model: &AnalysisModel,
+) -> Result<CanonicalStructuralConstraintPlan, ConstraintPlanError> {
+    let structural = model.structural.as_ref().ok_or_else(|| {
+        ConstraintPlanError::Invalid(
+            "explicit constraint compilation requires structural topology".into(),
+        )
+    })?;
+    let topology = CanonicalStructuralNodeSpace::derive_explicit(structural)
+        .map_err(|error| ConstraintPlanError::Invalid(error.to_string()))?;
+    let authored = structural_constraints(model);
+    let mut constraint_ids = BTreeSet::new();
+    for constraint in &authored {
+        if !constraint_ids.insert(constraint.constraint_id.as_str()) {
+            return Err(ConstraintPlanError::DuplicateConstraintId {
+                constraint_id: constraint.constraint_id.clone(),
+            });
+        }
+    }
+    let mut groups = Vec::with_capacity(authored.len());
+    let mut rows = Vec::new();
+    let mut enforcement_mode = super::contract::ConstraintEnforcement::DirectElimination;
+    for constraint in &authored {
+        let (mut targets, compiled_rows) =
+            compile_node_constraint(model, None, structural, &topology, constraint)?;
+        targets.sort_by_key(|target| target.selection_digest);
+        targets.dedup_by_key(|target| target.selection_digest);
+        enforcement_mode = enforcement::combine(
+            enforcement_mode,
+            enforcement::select(&constraint.kind, &compiled_rows),
+        );
+        groups.push(ConstraintGroupEvidence {
+            constraint_id: constraint.constraint_id.clone(),
+            source_digest: source_digest(constraint)?,
+            implementation:
+                runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity,
+            targets,
+            reference_point_identities: Vec::new(),
+            coupling: None,
+            pairings: Vec::new(),
+            row_count: compiled_rows.len(),
+        });
+        rows.extend(compiled_rows);
+    }
+    groups.sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
+    rows.sort_by(row::compare_rows);
+    let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
+    let plan = CanonicalStructuralConstraintPlan {
+        schema_version: 1,
+        topology: topology.identity,
+        authored_constraints_digest: authored_constraints_digest(&authored)?,
+        enforcement: enforcement_mode,
+        reference_points: Vec::new(),
+        evidence: ConstraintPlanEvidence {
+            authored_constraint_count: groups.len(),
+            active_row_count,
+            redundant_row_count,
+            conflicting_row_count: 0,
+            rank: active_row_count,
+        },
+        groups,
+        rows,
+    };
+    plan.validate()?;
+    Ok(plan)
+}
+
 fn requires_mixed_compilation(
     constraint: &StructuralConstraint,
     mesh: &SolverMeshArtifact,
     structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
 ) -> Result<bool, ConstraintPlanError> {
     let mut mixed = false;
     visit_targets(&constraint.kind, |target| {
@@ -122,11 +189,11 @@ fn requires_mixed_compilation(
     Ok(mixed)
 }
 
-fn compile_mixed_constraint(
+fn compile_node_constraint(
     model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
+    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
 ) -> Result<
     (
@@ -215,9 +282,9 @@ fn compile_mixed_constraint(
 
 fn compile_prescribed(
     model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
+    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
     values: &PrescribedStructuralDofs,
 ) -> Result<
@@ -293,25 +360,42 @@ fn finite_value(value: f64, constraint: &StructuralConstraint) -> Result<f64, Co
 }
 
 fn resolve_target(
-    mesh: &SolverMeshArtifact,
+    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
     target: &runmat_analysis_core::RegionTarget,
 ) -> Result<(ResolvedConstraintTarget, Vec<usize>), ConstraintPlanError> {
-    let ownership = resolve_mixed_structural_target(&target.region_id, mesh, structural, topology)
-        .map_err(|error| {
-            ConstraintPlanError::Invalid(format!(
-                "constraint `{}` target resolution failed: {error}",
-                constraint.constraint_id
-            ))
-        })?;
+    let ownership = if let Some(mesh) = mesh {
+        resolve_mixed_structural_target(&target.region_id, mesh, structural, topology).map_err(
+            |error| {
+                ConstraintPlanError::Invalid(format!(
+                    "constraint `{}` target resolution failed: {error}",
+                    constraint.constraint_id
+                ))
+            },
+        )?
+    } else {
+        let canonical_nodes = explicit_target_node_indices(structural, &target.region_id)
+            .into_iter()
+            .map(|node| topology.explicit_node_indices[node])
+            .collect::<Vec<_>>();
+        if canonical_nodes.is_empty() {
+            return Err(ConstraintPlanError::EmptyTarget {
+                constraint_id: constraint.constraint_id.clone(),
+                region_id: target.region_id.clone(),
+            });
+        }
+        MixedStructuralTargetOwnership::Explicit { canonical_nodes }
+    };
     let nodes = ownership.canonical_nodes().to_vec();
     let resolved = match ownership {
         MixedStructuralTargetOwnership::Solid { .. }
-        | MixedStructuralTargetOwnership::Shared { .. } => {
-            resolve_solid_target(mesh, target, &constraint.constraint_id)?
-        }
+        | MixedStructuralTargetOwnership::Shared { .. } => resolve_solid_target(
+            mesh.expect("solid target ownership requires a solver mesh"),
+            target,
+            &constraint.constraint_id,
+        )?,
         MixedStructuralTargetOwnership::Explicit { .. } => {
             let mut identities = nodes
                 .iter()
@@ -345,7 +429,7 @@ fn resolve_target(
 }
 
 fn available_dofs(
-    topology: &CanonicalMixedStructuralTopology,
+    topology: &CanonicalStructuralNodeSpace,
     node: usize,
 ) -> Vec<CanonicalStructuralDof> {
     let mut dofs = CanonicalStructuralDof::TRANSLATIONS.to_vec();
@@ -399,7 +483,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::constraints::ConstraintEnforcement;
+    use crate::constraints::{CanonicalStructuralTopologyIdentity, ConstraintEnforcement};
 
     #[test]
     fn mixed_plan_round_trips_with_structural_rotation_rows() {
@@ -407,7 +491,7 @@ mod tests {
         let plan = CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
         assert!(matches!(
             plan.topology,
-            CanonicalStructuralConstraintTopology::ConformalMixed { .. }
+            CanonicalStructuralTopologyIdentity::ConformalMixed { .. }
         ));
         assert!(plan.rows.iter().any(|row| {
             row.constraint_id == "beam_root_rotation"
@@ -422,6 +506,26 @@ mod tests {
         .unwrap();
         assert_eq!(decoded, plan);
         decoded.validate_against(&model, &mesh).unwrap();
+    }
+
+    #[test]
+    fn explicit_plan_round_trips_without_a_solver_mesh() {
+        let model = crate::fixtures::fixture_model(
+            crate::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+        );
+        let plan = CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
+        assert!(matches!(
+            plan.topology,
+            CanonicalStructuralTopologyIdentity::Explicit { .. }
+        ));
+        assert_eq!(plan.evidence.authored_constraint_count, 1);
+        assert_eq!(plan.evidence.active_row_count, 6);
+        plan.validate_against_explicit(&model).unwrap();
+        let decoded = CanonicalStructuralConstraintPlan::from_canonical_bytes(
+            &plan.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, plan);
     }
 
     #[test]
