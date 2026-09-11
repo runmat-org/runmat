@@ -219,7 +219,7 @@ impl ObservationPartitionPlan {
             topology_digest: plan.topology_digest,
             observation_id: observation_id.clone(),
             partitions,
-            resource_cost: partitioned_resource_cost(observation, partition_count)?,
+            resource_cost: partitioned_resource_cost(observation, partition_count, policy)?,
         };
         partition_plan.identity = partition_plan.derive_identity()?;
         partition_plan.validate_structure()?;
@@ -353,6 +353,7 @@ impl ObservationPartitionPlan {
 fn partitioned_resource_cost(
     observation: &super::ResolvedObservation,
     partition_count: usize,
+    policy: ObservationExecutionPolicy,
 ) -> Result<ObservationCostEstimate, ObservationError> {
     let partitions = u64::try_from(partition_count)
         .map_err(|_| ObservationError::Limit("observation partition count"))?;
@@ -374,7 +375,12 @@ fn partitioned_resource_cost(
         .ok_or(ObservationError::Limit(
             "observation partition transfer bytes",
         ))?;
-    let collective_count = if observation.spec.reduction.is_some() {
+    let spatial_collectives = if observation
+        .spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.spatial != runmat_analysis_core::SpatialReduction::None)
+    {
         extra_partitions
             .checked_mul(produced_samples)
             .ok_or(ObservationError::Limit(
@@ -383,6 +389,24 @@ fn partitioned_resource_cost(
     } else {
         0
     };
+    let series_collectives = if observation
+        .spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.series != runmat_analysis_core::SeriesReduction::None)
+    {
+        produced_samples
+            .min(u64::from(policy.maximum_partitions_per_observation().get()))
+            .saturating_sub(1)
+    } else {
+        0
+    };
+    let collective_count =
+        spatial_collectives
+            .checked_add(series_collectives)
+            .ok_or(ObservationError::Limit(
+                "observation partition collective count",
+            ))?;
     Ok(ObservationCostEstimate {
         operation_count: observation.resolved_cost.operation_count,
         peak_resident_bytes: observation.resolved_cost.peak_resident_bytes,

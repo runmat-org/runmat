@@ -347,10 +347,30 @@ pub enum SeriesReduction {
     Minimum,
     Maximum,
     AbsoluteMaximum,
-    RootMeanSquare,
-    Mean,
-    Variance,
+    RootMeanSquare { weighting: SeriesWeighting },
+    Mean { weighting: SeriesWeighting },
+    Variance { weighting: SeriesWeighting },
     Envelope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeriesWeighting {
+    UniformSamples,
+    TrapezoidalIndependentDomain,
+}
+
+impl SeriesReduction {
+    pub const fn weighting(self) -> Option<SeriesWeighting> {
+        match self {
+            Self::RootMeanSquare { weighting }
+            | Self::Mean { weighting }
+            | Self::Variance { weighting } => Some(weighting),
+            Self::None | Self::Minimum | Self::Maximum | Self::AbsoluteMaximum | Self::Envelope => {
+                None
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

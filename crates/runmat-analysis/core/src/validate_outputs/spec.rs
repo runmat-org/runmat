@@ -25,7 +25,7 @@ pub(super) fn validate_spec(
     validate_target_location(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
-    super::sampling::validate_reduction(request, spec)?;
+    super::sampling::validate_reduction(step, request, spec)?;
     super::sampling::validate_storage(request, spec)
 }
 

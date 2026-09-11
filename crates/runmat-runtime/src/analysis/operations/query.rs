@@ -1,9 +1,21 @@
 use super::super::*;
+use runmat_analysis_fea::results::observation::SeriesReductionPayload;
 
 macro_rules! visit_analysis_result_fields {
     ($run_result:expr, $as_ref:ident, [$($borrow:tt)*], $visit:expr) => {{
         for field in $($borrow)* $run_result.run.fields {
             $visit(field);
+        }
+        for reduction in $($borrow)* $run_result.run.series_reductions {
+            match $($borrow)* reduction.payload {
+                SeriesReductionPayload::Values { field, .. } => $visit(field),
+                SeriesReductionPayload::Envelope {
+                    minimum, maximum, ..
+                } => {
+                    $visit(minimum);
+                    $visit(maximum);
+                }
+            }
         }
         if let Some(modal) = $run_result.modal_results.$as_ref() {
             for field in $($borrow)* modal.mode_shapes {

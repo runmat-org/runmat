@@ -2029,11 +2029,23 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut step = ProcedureStep::structural_transient("transient_history");
     let requested_times = vec![0.0, 0.25, 0.7, 1.0];
-    step.observations = vec![nodal_history_observation(
+    let mut history_request = nodal_history_observation(
         "displacement_history",
         runmat_analysis_core::ObservationQuantity::Displacement,
         runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
-    )];
+    );
+    let runmat_analysis_core::ObservationRequest::History(spec) = &mut history_request else {
+        unreachable!()
+    };
+    spec.component = runmat_analysis_core::ObservationComponent::Y;
+    spec.reduction = Some(runmat_analysis_core::ReductionPolicy {
+        spatial: runmat_analysis_core::SpatialReduction::None,
+        series: runmat_analysis_core::SeriesReduction::RootMeanSquare {
+            weighting: runmat_analysis_core::SeriesWeighting::TrapezoidalIndependentDomain,
+        },
+        extrema_ties: runmat_analysis_core::ExtremaTiePolicy::FirstCanonical,
+    });
+    step.observations = vec![history_request];
     model.sequence.steps = vec![step];
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
 
@@ -2056,6 +2068,30 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
         .all(|time| result.time_points_s.contains(time)));
     assert_eq!(result.run.observation_histories.len(), 1);
     let history = &result.run.observation_histories[0];
+    assert_eq!(result.run.series_reductions.len(), 1);
+    let series = &result.run.series_reductions[0];
+    assert_eq!(series.source_history, history.manifest().identity);
+    assert_eq!(
+        series.operation,
+        runmat_analysis_core::SeriesReduction::RootMeanSquare {
+            weighting: runmat_analysis_core::SeriesWeighting::TrapezoidalIndependentDomain,
+        }
+    );
+    series
+        .validate()
+        .expect("pipeline series reduction should be self-consistent");
+    let crate::results::observation::SeriesReductionPayload::Values {
+        field: reduced_field,
+        ..
+    } = &series.payload
+    else {
+        panic!("RMS history reduction must produce one field")
+    };
+    assert_eq!(
+        result.run.field(&reduced_field.field_id),
+        Some(reduced_field)
+    );
+    assert!(result.run.field_ids().contains(&reduced_field.field_id));
     assert_eq!(history.manifest().observed_sample_count, 4);
     assert_eq!(
         history
@@ -2079,9 +2115,15 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
             .iter()
             .position(|candidate| *candidate == time_s)
             .expect("history coordinate must identify an accepted snapshot");
+        let expected_y = result.displacement_snapshots[snapshot_index]
+            .as_host_f64()
+            .expect("displacement history source should be host-backed")
+            .chunks_exact(3)
+            .map(|components| components[1])
+            .collect::<Vec<_>>();
         assert_eq!(
             sample.result.field.as_host_f64(),
-            result.displacement_snapshots[snapshot_index].as_host_f64()
+            Some(expected_y.as_slice())
         );
     }
     let encoded = history

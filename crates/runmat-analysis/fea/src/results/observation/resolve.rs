@@ -132,6 +132,10 @@ fn resolve_request(
             SpatialReduction::Minimum | SpatialReduction::Maximum
         )
     });
+    let has_spatial_reduction = spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.spatial != SpatialReduction::None);
     if spatial_extrema && result_component_count != 1 {
         return Err(ObservationError::Invalid(
             "spatial extrema require a scalar quantity or scalar component projection".into(),
@@ -161,10 +165,8 @@ fn resolve_request(
                 .checked_mul(result_storage_component_count)
                 .ok_or(ObservationError::Limit("observation extrema value count"))?
         }
-        ObservationRequest::Reduction(_)
-        | ObservationRequest::History(ObservationSpec {
-            reduction: Some(_), ..
-        }) => result_storage_component_count,
+        ObservationRequest::Reduction(_) => result_storage_component_count,
+        ObservationRequest::History(_) if has_spatial_reduction => result_storage_component_count,
         _ => selected
             .checked_mul(result_storage_component_count)
             .ok_or(ObservationError::Limit("observation value count"))?,
@@ -183,6 +185,16 @@ fn resolve_request(
             maximum_retained_samples: 1,
         },
     };
+    if spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.series != SeriesReduction::None)
+        && sample_bounds.maximum_retained_samples < sample_bounds.maximum_produced_samples
+    {
+        return Err(ObservationError::Invalid(
+            "series reduction requires retention of every produced history sample".into(),
+        ));
+    }
     let retained_sample_count = u64::try_from(sample_bounds.maximum_retained_samples)
         .map_err(|_| ObservationError::Limit("observation retained sample count"))?;
     let result_component_count_u64 = u64::try_from(result_storage_component_count)
@@ -200,6 +212,18 @@ fn resolve_request(
     let retained_value_bytes = value_bytes
         .checked_mul(retained_sample_count)
         .ok_or(ObservationError::Limit("observation retained value bytes"))?;
+    let series_output_bytes = match spec.reduction.as_ref().map(|reduction| reduction.series) {
+        Some(SeriesReduction::Envelope) => value_bytes
+            .checked_mul(2)
+            .ok_or(ObservationError::Limit("series envelope bytes"))?,
+        Some(series) if series != SeriesReduction::None => value_bytes,
+        _ => 0,
+    };
+    let series_evidence_bytes = if series_output_bytes == 0 {
+        0
+    } else {
+        retained_value_bytes
+    };
     let source_work_bytes = checked_bytes(
         work_entities
             .checked_mul(
@@ -216,11 +240,15 @@ fn resolve_request(
                 .and_then(|overhead| overhead.checked_mul(retained_sample_count))
                 .ok_or(ObservationError::Limit("observation storage overhead"))?,
         )
+        .and_then(|value| value.checked_add(series_output_bytes))
+        .and_then(|value| value.checked_add(series_evidence_bytes))
         .ok_or(ObservationError::Limit("observation storage overhead"))?;
     let resolved_cost = ObservationCostEstimate {
         operation_count,
         peak_resident_bytes: source_work_bytes
             .checked_add(retained_value_bytes)
+            .and_then(|value| value.checked_add(series_output_bytes))
+            .and_then(|value| value.checked_add(series_evidence_bytes))
             .ok_or(ObservationError::Limit("observation working set"))?,
         stored_bytes,
         transfer_bytes: stored_bytes,
@@ -305,9 +333,11 @@ fn validate_supported_spec(
         _ => {}
     }
     if let Some(reduction) = &spec.reduction {
-        if reduction.series != SeriesReduction::None {
-            return Err(ObservationError::Unsupported(
-                "series reductions require a sampled state series",
+        if reduction.series != SeriesReduction::None
+            && !matches!(request, ObservationRequest::History(_))
+        {
+            return Err(ObservationError::Invalid(
+                "series reductions require a history request".into(),
             ));
         }
         if !matches!(
@@ -332,15 +362,23 @@ fn validate_supported_spec(
             "probe requests cannot apply reductions".into(),
         )),
         ObservationRequest::Reduction(_)
-        | ObservationRequest::History(ObservationSpec {
-            reduction: Some(_), ..
-        }) if spec
-            .reduction
-            .as_ref()
-            .is_none_or(|reduction| reduction.spatial == SpatialReduction::None) =>
+            if spec
+                .reduction
+                .as_ref()
+                .is_none_or(|reduction| reduction.spatial == SpatialReduction::None) =>
         {
             Err(ObservationError::Invalid(
                 "reduction requests require a spatial reduction".into(),
+            ))
+        }
+        ObservationRequest::History(ObservationSpec {
+            reduction: Some(_), ..
+        }) if spec.reduction.as_ref().is_none_or(|reduction| {
+            reduction.spatial == SpatialReduction::None && reduction.series == SeriesReduction::None
+        }) =>
+        {
+            Err(ObservationError::Invalid(
+                "history reduction requests require a spatial or series reduction".into(),
             ))
         }
         _ => Ok(()),
@@ -412,7 +450,12 @@ fn resolve_target(
         ObservationRequest::Probe(_) => resolve_probe(spec, field_domain, topology),
         ObservationRequest::Reduction(_) => resolve_reduction_target(spec, field_domain, topology),
         ObservationRequest::Field(_) => resolve_field_target(spec, field_domain, topology),
-        ObservationRequest::History(_) if spec.reduction.is_some() => {
+        ObservationRequest::History(_)
+            if spec
+                .reduction
+                .as_ref()
+                .is_some_and(|reduction| reduction.spatial != SpatialReduction::None) =>
+        {
             resolve_reduction_target(spec, field_domain, topology)
         }
         ObservationRequest::History(_)
@@ -929,6 +972,13 @@ fn integration_work(
 }
 
 fn operation_multiplier(request: &ObservationRequest, spec: &ObservationSpec) -> u64 {
+    if spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.series != SeriesReduction::None)
+    {
+        return 16;
+    }
     match request {
         ObservationRequest::Reduction(_)
         | ObservationRequest::History(ObservationSpec {

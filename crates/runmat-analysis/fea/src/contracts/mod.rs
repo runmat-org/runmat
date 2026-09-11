@@ -392,21 +392,41 @@ pub struct FeaRunResult {
     #[serde(default)]
     pub observations: Vec<crate::results::observation::ObservationResult>,
     pub observation_histories: Vec<crate::results::observation::ObservationHistory>,
+    pub series_reductions: Vec<crate::results::observation::SeriesReductionResult>,
     pub fields: Vec<AnalysisField>,
 }
 
 impl FeaRunResult {
     pub fn field(&self, field_id: &str) -> Option<&AnalysisField> {
-        self.fields.iter().find(|field| field.field_id == field_id)
+        self.fields
+            .iter()
+            .find(|field| field.field_id == field_id)
+            .or_else(|| {
+                self.series_reductions
+                    .iter()
+                    .find_map(|reduction| reduction.payload.field(field_id))
+            })
     }
 
     pub fn fields_are_empty(&self) -> bool {
-        self.fields.is_empty() || self.fields.iter().all(AnalysisField::is_empty)
+        self.fields.iter().all(AnalysisField::is_empty)
+            && self
+                .series_reductions
+                .iter()
+                .flat_map(|reduction| reduction.payload.fields())
+                .flatten()
+                .all(AnalysisField::is_empty)
     }
 
     pub fn field_ids(&self) -> Vec<String> {
         self.fields
             .iter()
+            .chain(
+                self.series_reductions
+                    .iter()
+                    .flat_map(|reduction| reduction.payload.fields())
+                    .flatten(),
+            )
             .map(|field| field.field_id.clone())
             .collect()
     }

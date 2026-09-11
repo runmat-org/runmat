@@ -883,6 +883,11 @@ fn validate_resolved_observation(
                 SpatialReduction::Minimum | SpatialReduction::Maximum
             )
         });
+    let has_spatial_reduction = observation
+        .spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| reduction.spatial != SpatialReduction::None);
     let expected_result_components = match observation.component {
         ResolvedComponentProjection::All => source_components,
         ResolvedComponentProjection::Cartesian { axis } if axis < source_components => 1,
@@ -905,7 +910,7 @@ fn validate_resolved_observation(
         } => {
             if observation.spec.source_location != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
-                || (observation.spec.reduction.is_some() && !spatial_extrema)
+                || (has_spatial_reduction && !spatial_extrema)
                 || indices.len() != identities.len()
                 || indices.is_empty()
                 || !strictly_increasing(indices)
@@ -924,7 +929,7 @@ fn validate_resolved_observation(
             if observation.spec.source_location != FieldLocation::Element
                 || observation.source_entity_domain != *domain
                 || *domain == RecoveredFieldEntityDomain::StructuralNodes
-                || (observation.spec.reduction.is_some() && !spatial_extrema)
+                || (has_spatial_reduction && !spatial_extrema)
                 || indices.len() != identities.len()
                 || indices.is_empty()
                 || !strictly_increasing(indices)
@@ -957,7 +962,7 @@ fn validate_resolved_observation(
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.recovery
                     != runmat_analysis_core::RecoveryPolicy::ShapeFunctionInterpolation
-                || (observation.spec.reduction.is_some() && !spatial_extrema)
+                || (has_spatial_reduction && !spatial_extrema)
                 || samples.is_empty()
                 || !valid_ordinals
                 || !valid_samples

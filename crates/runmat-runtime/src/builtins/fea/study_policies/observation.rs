@@ -3,7 +3,7 @@ use std::sync::Once;
 use runmat_analysis_core::{
     ComplexRepresentation, DiagnosticKind, ExtremaTiePolicy, FieldLocation, ObservationComponent,
     ObservationPurpose, ObservationQuantity, PartialAccessPolicy, RecoveryPolicy, SeriesReduction,
-    SignConvention, SpatialReduction,
+    SeriesWeighting, SignConvention, SpatialReduction,
 };
 
 use super::super::*;
@@ -19,16 +19,30 @@ pub(super) const SIGN_CLASS: &str = "fea.SignConvention";
 pub(super) const COMPLEX_CLASS: &str = "fea.ComplexRepresentation";
 pub(super) const SPATIAL_REDUCTION_CLASS: &str = "fea.SpatialReduction";
 pub(super) const SERIES_REDUCTION_CLASS: &str = "fea.SeriesReduction";
+pub(super) const SERIES_WEIGHTING_CLASS: &str = "fea.SeriesWeighting";
 pub(super) const EXTREMA_TIE_CLASS: &str = "fea.ExtremaTiePolicy";
 pub(super) const PARTIAL_ACCESS_CLASS: &str = "fea.PartialAccessPolicy";
 pub(super) const PURPOSE_CLASS: &str = "fea.ObservationPurpose";
 pub(super) const DIAGNOSTIC_KIND_CLASS: &str = "fea.DiagnosticKind";
 
 const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
+const fn required(
+    name: &'static str,
+    ty: BuiltinParamType,
+    description: &'static str,
+) -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name,
+        ty,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description,
+    }
+}
 const CHOICE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
-    notes: "Closed FEA observation-policy choices have no numeric inputs.",
+    notes: "Typed FEA observation-policy constructors have no integer inputs.",
 };
 
 macro_rules! choice {
@@ -739,33 +753,91 @@ choices!(
         SeriesReduction::AbsoluteMaximum
     ),
     (
-        series_rms,
-        SERIES_RMS_DESCRIPTOR,
-        SERIES_RMS_SIGNATURES,
-        "fea.SeriesReduction.rootMeanSquare",
-        SeriesReduction::RootMeanSquare
-    ),
-    (
-        series_mean,
-        SERIES_MEAN_DESCRIPTOR,
-        SERIES_MEAN_SIGNATURES,
-        "fea.SeriesReduction.mean",
-        SeriesReduction::Mean
-    ),
-    (
-        series_variance,
-        SERIES_VARIANCE_DESCRIPTOR,
-        SERIES_VARIANCE_SIGNATURES,
-        "fea.SeriesReduction.variance",
-        SeriesReduction::Variance
-    ),
-    (
         series_envelope,
         SERIES_ENVELOPE_DESCRIPTOR,
         SERIES_ENVELOPE_SIGNATURES,
         "fea.SeriesReduction.envelope",
         SeriesReduction::Envelope
     )
+);
+choices!(
+    SERIES_WEIGHTING_CLASS,
+    (
+        series_weighting_uniform,
+        SERIES_WEIGHTING_UNIFORM_DESCRIPTOR,
+        SERIES_WEIGHTING_UNIFORM_SIGNATURES,
+        "fea.SeriesWeighting.uniformSamples",
+        SeriesWeighting::UniformSamples
+    ),
+    (
+        series_weighting_trapezoidal,
+        SERIES_WEIGHTING_TRAPEZOIDAL_DESCRIPTOR,
+        SERIES_WEIGHTING_TRAPEZOIDAL_SIGNATURES,
+        "fea.SeriesWeighting.trapezoidalIndependentDomain",
+        SeriesWeighting::TrapezoidalIndependentDomain
+    )
+);
+
+const SERIES_STATISTIC_INPUTS: [BuiltinParamDescriptor; 1] = [required(
+    "weighting",
+    BuiltinParamType::Any,
+    "Typed weighting over the independent-domain samples.",
+)];
+
+macro_rules! series_statistic {
+    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $variant:ident) => {
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: concat!("value = ", $builtin, "(weighting)"),
+            inputs: &SERIES_STATISTIC_INPUTS,
+            outputs: &OUT_ANY,
+        }];
+        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &ERRORS,
+        };
+        #[runtime_builtin(
+                            name = $builtin,
+                            category = "fea",
+                            summary = "Select a typed, explicitly weighted series statistic.",
+                            keywords = "fea,observation,series,reduction,weighting,typed",
+                            descriptor($descriptor),
+                            integer_audit(CHOICE_INTEGER_AUDIT),
+                            builtin_path = "crate::builtins::fea::study_policies::observation"
+                        )]
+        pub async fn $function(weighting: Value) -> BuiltinResult<Value> {
+            to_typed_value(
+                $builtin,
+                SERIES_REDUCTION_CLASS,
+                SeriesReduction::$variant {
+                    weighting: series_weighting($builtin, &weighting)?,
+                },
+            )
+        }
+    };
+}
+
+series_statistic!(
+    series_rms,
+    SERIES_RMS_DESCRIPTOR,
+    SERIES_RMS_SIGNATURES,
+    "fea.SeriesReduction.rootMeanSquare",
+    RootMeanSquare
+);
+series_statistic!(
+    series_mean,
+    SERIES_MEAN_DESCRIPTOR,
+    SERIES_MEAN_SIGNATURES,
+    "fea.SeriesReduction.mean",
+    Mean
+);
+series_statistic!(
+    series_variance,
+    SERIES_VARIANCE_DESCRIPTOR,
+    SERIES_VARIANCE_SIGNATURES,
+    "fea.SeriesReduction.variance",
+    Variance
 );
 choices!(
     EXTREMA_TIE_CLASS,
@@ -921,6 +993,12 @@ pub(crate) fn series_reduction(
 ) -> BuiltinResult<SeriesReduction> {
     from_typed_value(builtin, SERIES_REDUCTION_CLASS, value)
 }
+pub(crate) fn series_weighting(
+    builtin: &'static str,
+    value: &Value,
+) -> BuiltinResult<SeriesWeighting> {
+    from_typed_value(builtin, SERIES_WEIGHTING_CLASS, value)
+}
 pub(crate) fn extrema_ties(
     builtin: &'static str,
     value: &Value,
@@ -993,6 +1071,12 @@ pub(super) fn ensure_classes_registered() {
             "runmat.fea.series-reduction",
             VALUE_FIELD,
             &SERIES_METHODS,
+        );
+        register_immutable_class(
+            SERIES_WEIGHTING_CLASS,
+            "runmat.fea.series-weighting",
+            VALUE_FIELD,
+            &SERIES_WEIGHTING_METHODS,
         );
         register_immutable_class(
             EXTREMA_TIE_CLASS,
@@ -1212,6 +1296,13 @@ const SERIES_METHODS: [(&str, &str); 8] = [
     ("variance", "fea.SeriesReduction.variance"),
     ("envelope", "fea.SeriesReduction.envelope"),
 ];
+const SERIES_WEIGHTING_METHODS: [(&str, &str); 2] = [
+    ("uniformSamples", "fea.SeriesWeighting.uniformSamples"),
+    (
+        "trapezoidalIndependentDomain",
+        "fea.SeriesWeighting.trapezoidalIndependentDomain",
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -1225,6 +1316,24 @@ mod tests {
         assert_eq!(
             field_location("test", &value).unwrap(),
             FieldLocation::Point
+        );
+    }
+
+    #[test]
+    fn series_statistics_preserve_explicit_typed_weighting() {
+        let uniform = block_on(series_weighting_uniform()).unwrap();
+        let trapezoidal = block_on(series_weighting_trapezoidal()).unwrap();
+        assert_eq!(
+            series_reduction("test", &block_on(series_mean(uniform)).unwrap()).unwrap(),
+            SeriesReduction::Mean {
+                weighting: SeriesWeighting::UniformSamples,
+            }
+        );
+        assert_eq!(
+            series_reduction("test", &block_on(series_rms(trapezoidal)).unwrap()).unwrap(),
+            SeriesReduction::RootMeanSquare {
+                weighting: SeriesWeighting::TrapezoidalIndependentDomain,
+            }
         );
     }
 }

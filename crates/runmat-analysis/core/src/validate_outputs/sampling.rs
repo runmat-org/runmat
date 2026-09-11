@@ -199,6 +199,7 @@ fn interval_within_domain(domain: &IndependentDomain, start: f64, end: f64) -> b
 }
 
 pub(super) fn validate_reduction(
+    step: &ProcedureStep,
     request: &ObservationRequest,
     spec: &ObservationSpec,
 ) -> Result<(), AnalysisValidationError> {
@@ -206,6 +207,24 @@ pub(super) fn validate_reduction(
         !matches!(value.spatial, SpatialReduction::None)
             || !matches!(value.series, SeriesReduction::None)
     });
+    if spec
+        .reduction
+        .as_ref()
+        .and_then(|value| value.series.weighting())
+        == Some(crate::SeriesWeighting::TrapezoidalIndependentDomain)
+        && !matches!(
+            step.independent_domain,
+            IndependentDomain::TimeSeconds { .. }
+                | IndependentDomain::LoadFactor { .. }
+                | IndependentDomain::FrequencyHertz(_)
+                | IndependentDomain::StudyParameter { .. }
+        )
+    {
+        return observation_error(
+            request,
+            "trapezoidal series weighting requires a continuous independent domain",
+        );
+    }
     match request {
         ObservationRequest::Reduction(_) if !has_reduction => observation_error(
             request,
@@ -213,6 +232,16 @@ pub(super) fn validate_reduction(
         ),
         ObservationRequest::Field(_) if spec.reduction.is_some() => {
             observation_error(request, "field requests cannot apply reductions")
+        }
+        ObservationRequest::Field(_)
+        | ObservationRequest::Probe(_)
+        | ObservationRequest::Reduction(_)
+            if spec
+                .reduction
+                .as_ref()
+                .is_some_and(|value| value.series != SeriesReduction::None) =>
+        {
+            observation_error(request, "series reductions require a history request")
         }
         _ => Ok(()),
     }

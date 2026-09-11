@@ -12,9 +12,10 @@ use crate::{
         },
         observation::{
             evaluate_observation_sample, evaluate_structural_observation_sample,
-            exact_scheduled_coordinates, resolve_observation_plan,
+            exact_scheduled_coordinates, reduce_observation_history, resolve_observation_plan,
             resolve_structural_observation_plan, sample_matches_policy, BoundedObservationHistory,
-            ObservationError, ObservationHistory, ObservationLimits, StructuralObservationTopology,
+            ObservationError, ObservationExecutionPolicy, ObservationHistory, ObservationLimits,
+            SeriesReductionResult, StructuralObservationTopology,
         },
     },
     topology::AnalysisProjection,
@@ -181,18 +182,27 @@ pub(crate) enum HistoryTopology<'a> {
     },
 }
 
+#[derive(Default)]
+pub(crate) struct EvaluatedObservationHistories {
+    pub histories: Vec<ObservationHistory>,
+    pub series_reductions: Vec<SeriesReductionResult>,
+}
+
 pub(crate) fn evaluate_field_histories(
     step: &ProcedureStep,
     topology: HistoryTopology<'_>,
     coordinates: &[RecoveredFieldSample],
     series: &[HistoryFieldSeries<'_>],
-) -> Result<Vec<ObservationHistory>, ObservationError> {
+) -> Result<EvaluatedObservationHistories, ObservationError> {
     let mut history_step = step.clone();
     history_step
         .observations
         .retain(|request| matches!(request, ObservationRequest::History(_)));
     if history_step.observations.is_empty() {
-        return Ok(Vec::new());
+        return Ok(EvaluatedObservationHistories {
+            histories: Vec::new(),
+            series_reductions: Vec::new(),
+        });
     }
     if coordinates.is_empty()
         || series.is_empty()
@@ -305,8 +315,29 @@ pub(crate) fn evaluate_field_histories(
         }
     }
 
-    histories
+    let histories = histories
         .into_iter()
         .map(|(_, history)| history.finish())
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    let series_reductions = histories
+        .iter()
+        .filter(|history| {
+            plan.observations
+                .iter()
+                .find(|observation| {
+                    observation.spec.observation_id == history.manifest().observation_id
+                })
+                .and_then(|observation| observation.spec.reduction.as_ref())
+                .is_some_and(|reduction| {
+                    reduction.series != runmat_analysis_core::SeriesReduction::None
+                })
+        })
+        .map(|history| {
+            reduce_observation_history(&plan, history, ObservationExecutionPolicy::scalable())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(EvaluatedObservationHistories {
+        histories,
+        series_reductions,
+    })
 }

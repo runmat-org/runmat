@@ -106,6 +106,7 @@ pub fn solve_reduced_finite_volume(
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
         observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
         diagnostics: {
             run_diagnostics.extend([
             FeaDiagnostic {

@@ -127,8 +127,8 @@ pub use study::output::{
     ObservationId, ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
     ObservationStoragePolicy, ObservationTarget, ObservationThreshold, ObservationValueShape,
     PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
-    SeriesObservationEvent, SeriesReduction, SignConvention, SolverObservationEvent,
-    SpatialReduction,
+    SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
+    SolverObservationEvent, SpatialReduction,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,

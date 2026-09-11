@@ -52907,7 +52907,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -52957,7 +52957,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -53007,7 +53007,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -53057,7 +53057,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -53107,7 +53107,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -54756,7 +54756,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -54806,7 +54806,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -54856,7 +54856,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -54906,7 +54906,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -54956,7 +54956,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -55006,7 +55006,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -55056,7 +55056,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -59845,7 +59845,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -59895,7 +59895,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -59945,7 +59945,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -59995,7 +59995,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60045,7 +60045,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60095,7 +60095,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60145,7 +60145,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60195,7 +60195,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60245,7 +60245,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60295,7 +60295,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60345,7 +60345,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60395,7 +60395,57 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.FieldLocation.point",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.FieldLocation.point()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -60445,7 +60495,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -65902,6 +65952,121 @@
       ]
     },
     {
+      "name": "fea.MechanicalDamping.rayleigh",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "damping = fea.MechanicalDamping.rayleigh(massCoefficient, stiffnessCoefficient)",
+          "inputs": [
+            {
+              "name": "massCoefficient",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.RayleighMassCoefficient multiplying the mass matrix."
+            },
+            {
+              "name": "stiffnessCoefficient",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed fea.RayleighStiffnessCoefficient multiplying the stiffness matrix."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.MechanicalDamping.undamped",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "damping = fea.MechanicalDamping.undamped()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
       "name": "fea.ModalCombination.absoluteSum",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -68125,7 +68290,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68175,7 +68340,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68225,7 +68390,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68275,7 +68440,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68325,7 +68490,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68375,7 +68540,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68425,7 +68590,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68475,7 +68640,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68525,7 +68690,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68575,7 +68740,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68625,7 +68790,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68675,7 +68840,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68725,7 +68890,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -68775,7 +68940,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69186,7 +69351,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69236,7 +69401,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69286,7 +69451,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69336,7 +69501,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69386,7 +69551,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69436,7 +69601,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69486,7 +69651,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69536,7 +69701,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69586,7 +69751,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69636,7 +69801,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69686,7 +69851,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69736,7 +69901,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69786,7 +69951,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69836,7 +70001,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69886,7 +70051,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69936,7 +70101,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -69986,7 +70151,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70036,7 +70201,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70086,7 +70251,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70136,7 +70301,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70186,7 +70351,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70236,7 +70401,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70286,7 +70451,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70336,7 +70501,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70386,7 +70551,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70436,7 +70601,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70486,7 +70651,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70536,7 +70701,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70586,7 +70751,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70636,7 +70801,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70686,7 +70851,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70736,7 +70901,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70786,7 +70951,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70836,7 +71001,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70886,7 +71051,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70936,7 +71101,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -70986,7 +71151,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71036,7 +71201,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71086,7 +71251,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71136,7 +71301,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71186,7 +71351,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71854,7 +72019,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -71904,7 +72069,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -72934,6 +73099,172 @@
       }
     },
     {
+      "name": "fea.RayleighMassCoefficient.perSecond",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "coefficient = fea.RayleighMassCoefficient.perSecond(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
+      "name": "fea.RayleighStiffnessCoefficient.seconds",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "coefficient = fea.RayleighStiffnessCoefficient.seconds(value)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite real scalar in the unit named by the constructor."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable dimensioned FEA value in canonical SI storage."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "dimensioned scalar value",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "ScalarOnly",
+          "notes": "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution."
+        }
+      ]
+    },
+    {
       "name": "fea.RecoveryPolicy.areaWeightedAverage",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -72980,7 +73311,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -73030,7 +73361,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -73080,7 +73411,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -73130,7 +73461,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -73180,7 +73511,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -73230,7 +73561,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -75794,6 +76125,89 @@
       ]
     },
     {
+      "name": "fea.SamplingPolicy.studyParameterValues",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "policy = fea.SamplingPolicy.studyParameterValues(values)",
+          "inputs": [
+            {
+              "name": "values",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite sampling coordinates."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "typed observation policy",
+          "inputs": [
+            {
+              "name": "sampling, storage, or cost value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Counts and byte estimates remain exact; physical coordinates and tolerances cross once into binary64."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "NotApplicable",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "Multiple",
+          "notes": "Observation authoring constructs immutable host values."
+        }
+      ]
+    },
+    {
       "name": "fea.SamplingPolicy.timeIntervalSeconds",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -76371,7 +76785,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76421,7 +76835,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76471,7 +76885,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76480,8 +76894,16 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "value = fea.SeriesReduction.mean()",
-          "inputs": [],
+          "label": "value = fea.SeriesReduction.mean(weighting)",
+          "inputs": [
+            {
+              "name": "weighting",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed weighting over the independent-domain samples."
+            }
+          ],
           "outputs": [
             {
               "name": "result",
@@ -76521,7 +76943,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76571,7 +76993,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76621,7 +77043,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76630,8 +77052,16 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "value = fea.SeriesReduction.rootMeanSquare()",
-          "inputs": [],
+          "label": "value = fea.SeriesReduction.rootMeanSquare(weighting)",
+          "inputs": [
+            {
+              "name": "weighting",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed weighting over the independent-domain samples."
+            }
+          ],
           "outputs": [
             {
               "name": "result",
@@ -76671,7 +77101,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76680,7 +77110,65 @@
       "completion_policy": "Public",
       "signatures": [
         {
-          "label": "value = fea.SeriesReduction.variance()",
+          "label": "value = fea.SeriesReduction.variance(weighting)",
+          "inputs": [
+            {
+              "name": "weighting",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed weighting over the independent-domain samples."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.SeriesWeighting.trapezoidalIndependentDomain",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.SeriesWeighting.trapezoidalIndependentDomain()",
           "inputs": [],
           "outputs": [
             {
@@ -76721,7 +77209,57 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.SeriesWeighting.uniformSamples",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.SeriesWeighting.uniformSamples()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.LOAD_FAILED",
+          "identifier": "RunMat:fea:LoadFailed",
+          "when": "A .fea document cannot be read, parsed, or resolved.",
+          "message": "fea: failed to load FEA document"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76771,7 +77309,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76821,7 +77359,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76871,7 +77409,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76921,7 +77459,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -76971,7 +77509,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78657,7 +79195,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78707,7 +79245,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78757,7 +79295,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78807,7 +79345,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78857,7 +79395,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78907,7 +79445,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -78957,7 +79495,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -79007,7 +79545,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {
@@ -79057,7 +79595,7 @@
       ],
       "integer_audit": {
         "kind": "NotApplicable",
-        "notes": "Closed FEA observation-policy choices have no numeric inputs."
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
       }
     },
     {

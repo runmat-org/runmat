@@ -197,6 +197,7 @@ pub(super) fn run(
         spatial_projection_evidence: outcome.source_evidence,
         observations: Vec::new(),
         observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
         fields: Vec::new(),
     };
     if thermal_step.observations.iter().any(|request| {
@@ -210,7 +211,7 @@ pub(super) fn run(
             .copied()
             .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
             .collect::<Vec<_>>();
-        run.observation_histories = evaluate_field_histories(
+        let evaluated_histories = evaluate_field_histories(
             thermal_step,
             HistoryTopology::Solid(&initial_assembly.projection),
             &coordinates,
@@ -249,6 +250,8 @@ pub(super) fn run(
             ],
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        run.observation_histories = evaluated_histories.histories;
+        run.series_reductions = evaluated_histories.series_reductions;
     }
 
     emit_phase(

@@ -5,7 +5,8 @@ use runmat_analysis_core::{
     ObservationQuantity, ObservationRequest, ObservationSpec, ObservationStoragePolicy,
     ObservationTarget, ObservationValueShape, PartialAccessPolicy, Position, ProcedureStep,
     RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent,
-    SeriesReduction, SignConvention, SignalPrecision, SolverObservationEvent, SpatialReduction,
+    SeriesReduction, SeriesWeighting, SignConvention, SignalPrecision, SolverObservationEvent,
+    SpatialReduction,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -149,6 +150,67 @@ fn complex_pressure_history_spec(
 
 fn projection(order: ElementOrder) -> AnalysisProjection {
     AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(order)).unwrap()
+}
+
+fn completed_scalar_series(
+    operation: SeriesReduction,
+    ties: ExtremaTiePolicy,
+    retention: RetentionPolicy,
+    times: &[f64],
+    values: &[f64],
+) -> Result<(ResolvedObservationPlan, ObservationHistory), ObservationError> {
+    assert_eq!(times.len(), values.len());
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut request = spec(
+        "series",
+        ObservationTarget::Point {
+            position: Position::new(projection.nodes[0].coordinates_m),
+        },
+    );
+    request.sampling = SamplingPolicy::TimeSeconds(times.to_vec());
+    request.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::None,
+        series: operation,
+        extrema_ties: ties,
+    });
+    request.storage.retention = retention;
+    request.cost = ObservationCostEstimate {
+        operation_count: 1_000_000,
+        peak_resident_bytes: 10_000_000,
+        stored_bytes: 10_000_000,
+        transfer_bytes: 10_000_000,
+        collective_count: 0,
+    };
+    let mut step = ProcedureStep::thermal_transient("series-step");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: times[0],
+        end: *times.last().unwrap(),
+    };
+    step.observations = vec![ObservationRequest::History(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )?;
+    let observation_id = ObservationId("series".into());
+    let mut builder = BoundedObservationHistory::new(&plan, &observation_id)?;
+    for (&time, &value) in times.iter().zip(values) {
+        let sample = RecoveredFieldSample::TimeSeconds(time);
+        let fields = catalog_at_sample(
+            &projection,
+            &definition,
+            sample,
+            vec![4],
+            vec![value, 0.0, 0.0, 0.0],
+        );
+        let result =
+            evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample)?;
+        builder.push(sample, result)?;
+    }
+    Ok((plan, builder.finish()?))
 }
 
 #[test]
@@ -460,6 +522,191 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
     let mut invalid_manifest = serde_json::to_value(history.manifest()).unwrap();
     invalid_manifest["maximum_retained_samples"] = serde_json::json!(3);
     assert!(serde_json::from_value::<ObservationHistoryManifest>(invalid_manifest).is_err());
+}
+
+#[test]
+fn series_statistics_make_nonuniform_weighting_explicit() {
+    let times = [0.0, 1.0, 3.0];
+    let values = [0.0, 2.0, 2.0];
+    let (uniform_plan, uniform_history) = completed_scalar_series(
+        SeriesReduction::Mean {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::Canonical,
+        &times,
+        &values,
+    )
+    .unwrap();
+    let uniform = reduce_observation_history(
+        &uniform_plan,
+        &uniform_history,
+        ObservationExecutionPolicy::serial(),
+    )
+    .unwrap();
+    let SeriesReductionPayload::Values { field, extrema } = &uniform.payload else {
+        panic!("mean must produce one value field")
+    };
+    assert!(extrema.is_empty());
+    assert!((field.as_host_f64().unwrap()[0] - 4.0 / 3.0).abs() < 1.0e-14);
+    let serial_resources =
+        ObservationResourceFacts::from_plan(&uniform_plan, ObservationExecutionPolicy::serial())
+            .unwrap();
+    let scalable_resources =
+        ObservationResourceFacts::from_plan(&uniform_plan, ObservationExecutionPolicy::scalable())
+            .unwrap();
+    assert_eq!(serial_resources.collective_count, Count(0));
+    assert_eq!(scalable_resources.collective_count, Count(2));
+
+    let (trapezoidal_plan, trapezoidal_history) = completed_scalar_series(
+        SeriesReduction::Mean {
+            weighting: SeriesWeighting::TrapezoidalIndependentDomain,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::Canonical,
+        &times,
+        &values,
+    )
+    .unwrap();
+    let serial = reduce_observation_history(
+        &trapezoidal_plan,
+        &trapezoidal_history,
+        ObservationExecutionPolicy::serial(),
+    )
+    .unwrap();
+    let split = reduce_observation_history(
+        &trapezoidal_plan,
+        &trapezoidal_history,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(serial.identity, split.identity);
+    assert_ne!(serial.evidence, split.evidence);
+    let SeriesReductionPayload::Values { field, .. } = serial.payload else {
+        panic!("mean must produce one value field")
+    };
+    assert!((field.as_host_f64().unwrap()[0] - 5.0 / 3.0).abs() < 1.0e-14);
+    assert_eq!(
+        SeriesReductionResult::from_canonical_bytes(&split.canonical_bytes().unwrap()).unwrap(),
+        split
+    );
+}
+
+#[test]
+fn series_extrema_and_envelope_retain_samples_entities_and_exact_ties() {
+    let (plan, history) = completed_scalar_series(
+        SeriesReduction::Envelope,
+        ExtremaTiePolicy::AllLocations,
+        RetentionPolicy::Canonical,
+        &[0.0, 1.0, 2.0],
+        &[1.0, 3.0, 3.0],
+    )
+    .unwrap();
+    let result = reduce_observation_history(
+        &plan,
+        &history,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(2).unwrap()),
+    )
+    .unwrap();
+    let SeriesReductionPayload::Envelope {
+        minimum,
+        maximum,
+        minima,
+        maxima,
+    } = &result.payload
+    else {
+        panic!("envelope must produce minimum and maximum fields")
+    };
+    assert_eq!(minimum.as_host_f64().unwrap(), &[1.0]);
+    assert_eq!(maximum.as_host_f64().unwrap(), &[3.0]);
+    assert_eq!(minima.len(), 1);
+    assert_eq!(maxima.len(), 2);
+    assert!(minima[0].entity.is_some());
+    assert_eq!(
+        maxima[0].source.coordinate,
+        RecoveredFieldSample::TimeSeconds(1.0)
+    );
+    assert_eq!(
+        maxima[1].source.coordinate,
+        RecoveredFieldSample::TimeSeconds(2.0)
+    );
+    result.validate_for(&plan, &history).unwrap();
+
+    let mut substituted = result.clone();
+    substituted.evidence.contributions[0].values[0] += 1.0;
+    assert!(substituted.validate_for(&plan, &history).is_err());
+}
+
+#[test]
+fn every_scalar_series_operation_has_defined_numerical_semantics() {
+    let cases = [
+        (SeriesReduction::Minimum, -2.0, 1usize),
+        (SeriesReduction::Maximum, 2.0, 1usize),
+        (SeriesReduction::AbsoluteMaximum, 2.0, 2usize),
+        (
+            SeriesReduction::RootMeanSquare {
+                weighting: SeriesWeighting::UniformSamples,
+            },
+            (8.0_f64 / 3.0).sqrt(),
+            0usize,
+        ),
+        (
+            SeriesReduction::Variance {
+                weighting: SeriesWeighting::UniformSamples,
+            },
+            8.0 / 3.0,
+            0usize,
+        ),
+    ];
+    for (operation, expected, expected_extrema) in cases {
+        let (plan, history) = completed_scalar_series(
+            operation,
+            ExtremaTiePolicy::AllLocations,
+            RetentionPolicy::Canonical,
+            &[0.0, 1.0, 2.0],
+            &[-2.0, 0.0, 2.0],
+        )
+        .unwrap();
+        let result =
+            reduce_observation_history(&plan, &history, ObservationExecutionPolicy::scalable())
+                .unwrap();
+        let SeriesReductionPayload::Values { field, extrema } = result.payload else {
+            panic!("non-envelope reduction must produce one value field")
+        };
+        assert!((field.as_host_f64().unwrap()[0] - expected).abs() < 1.0e-14);
+        assert_eq!(extrema.len(), expected_extrema);
+    }
+
+    let (plan, history) = completed_scalar_series(
+        SeriesReduction::Variance {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::Canonical,
+        &[0.0, 1.0, 2.0],
+        &[1.0e12 - 1.0, 1.0e12, 1.0e12 + 1.0],
+    )
+    .unwrap();
+    let stable =
+        reduce_observation_history(&plan, &history, ObservationExecutionPolicy::serial()).unwrap();
+    let SeriesReductionPayload::Values { field, .. } = stable.payload else {
+        panic!("variance must produce one value field")
+    };
+    assert!((field.as_host_f64().unwrap()[0] - 2.0 / 3.0).abs() < 1.0e-14);
+}
+
+#[test]
+fn series_reduction_rejects_incomplete_retention() {
+    assert!(completed_scalar_series(
+        SeriesReduction::RootMeanSquare {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::LatestSamples { count: 2 },
+        &[0.0, 1.0, 2.0],
+        &[1.0, 2.0, 3.0],
+    )
+    .is_err());
 }
 
 #[test]

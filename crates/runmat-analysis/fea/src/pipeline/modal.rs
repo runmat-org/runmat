@@ -201,6 +201,7 @@ pub fn run_modal_with_options(
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
         observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
         fields: run_fields,
     };
 
@@ -227,7 +228,7 @@ pub fn run_modal_with_options(
             )
         })
         .collect::<Vec<_>>();
-    let observation_histories = if execution_step.observations.iter().any(|request| {
+    let evaluated_histories = if execution_step.observations.iter().any(|request| {
         matches!(
             request,
             runmat_analysis_core::ObservationRequest::History(_)
@@ -270,9 +271,10 @@ pub fn run_modal_with_options(
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?
     } else {
-        Vec::new()
+        Default::default()
     };
-    run.observation_histories = observation_histories;
+    run.observation_histories = evaluated_histories.histories;
+    run.series_reductions = evaluated_histories.series_reductions;
 
     emit_phase(
         "fea.run_modal",

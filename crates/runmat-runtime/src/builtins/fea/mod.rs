@@ -4316,6 +4316,7 @@ execution:
                 spatial_projection_evidence: Vec::new(),
                 observations: Vec::new(),
                 observation_histories: Vec::new(),
+                series_reductions: Vec::new(),
                 fields: vec![AnalysisField::host_f64(
                     "structural.von_mises",
                     vec![1],
@@ -4404,6 +4405,7 @@ execution:
                 spatial_projection_evidence: Vec::new(),
                 observations: Vec::new(),
                 observation_histories: Vec::new(),
+                series_reductions: Vec::new(),
                 fields: Vec::new(),
             },
             render_topology: None,

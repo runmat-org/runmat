@@ -164,6 +164,7 @@ pub fn solve_reduced_harmonic(
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
         observation_histories: Vec::new(),
+        series_reductions: Vec::new(),
         diagnostics: diagnostics(DiagnosticInputs {
             topology,
             source_real: &source_real,
