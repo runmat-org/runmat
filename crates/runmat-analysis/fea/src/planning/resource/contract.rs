@@ -4,7 +4,10 @@ use runmat_analysis_core::AccuracyResourceCeiling;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::{
     identity::{AttemptId, WorkerId},
-    resource::{AcceleratorRequest, Capability, ResourceRequest, ResourceUsage},
+    resource::{
+        AcceleratorRequest, Capability, ResourceAccounting, ResourceAccountingSummary,
+        ResourceRequest, ResourceUsage,
+    },
     Digest,
 };
 use serde::{Deserialize, Serialize};
@@ -420,6 +423,18 @@ pub struct AnalysisResourceUsage {
     pub artifact_bytes: ByteCount,
 }
 
+impl From<ResourceAccountingSummary> for AnalysisResourceUsage {
+    fn from(summary: ResourceAccountingSummary) -> Self {
+        Self {
+            scheduler: summary.usage,
+            peak_cpu_millicores: summary.peak_cpu_millicores,
+            peak_memory_bytes: ByteCount(summary.peak_memory_bytes),
+            peak_scratch_bytes: ByteCount(summary.peak_scratch_bytes),
+            artifact_bytes: ByteCount(summary.artifact_bytes),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceOverrun {
@@ -481,6 +496,14 @@ impl ResourceUsageEvidenceIdentity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceUsageAttempt {
+    pub attempt_id: AttemptId,
+    pub worker_id: WorkerId,
+    pub resources: ResourceAccounting,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ResourceUsageEvidenceWire")]
 pub struct ResourceUsageEvidence {
     pub schema_version: u16,
@@ -488,9 +511,8 @@ pub struct ResourceUsageEvidence {
     pub plan: FeaResourcePlanIdentity,
     pub workload_digest: Digest,
     pub result_digest: Digest,
-    pub attempt_id: AttemptId,
-    pub worker_id: WorkerId,
-    pub allocation: ResourceRequest,
+    pub budget: ResourceRequest,
+    pub attempts: Vec<ResourceUsageAttempt>,
     pub actual: AnalysisResourceUsage,
     pub overruns: Vec<ResourceOverrun>,
 }
@@ -503,9 +525,8 @@ struct ResourceUsageEvidenceWire {
     plan: FeaResourcePlanIdentity,
     workload_digest: Digest,
     result_digest: Digest,
-    attempt_id: AttemptId,
-    worker_id: WorkerId,
-    allocation: ResourceRequest,
+    budget: ResourceRequest,
+    attempts: Vec<ResourceUsageAttempt>,
     actual: AnalysisResourceUsage,
     overruns: Vec<ResourceOverrun>,
 }
@@ -514,17 +535,18 @@ impl TryFrom<ResourceUsageEvidenceWire> for ResourceUsageEvidence {
     type Error = ResourcePlanningError;
 
     fn try_from(wire: ResourceUsageEvidenceWire) -> Result<Self, Self::Error> {
+        let actual = wire.actual;
         let expected = Self::build(
             wire.plan,
             wire.workload_digest,
             wire.result_digest,
-            wire.attempt_id,
-            wire.worker_id,
-            wire.allocation.clone(),
-            wire.actual.clone(),
+            wire.budget,
+            wire.attempts,
+            actual.scheduler.wall_millis,
         )?;
         if wire.schema_version != expected.schema_version
             || wire.identity != expected.identity
+            || actual != expected.actual
             || wire.overruns != expected.overruns
         {
             return Err(ResourcePlanningError::Identity);
@@ -538,25 +560,49 @@ impl ResourceUsageEvidence {
         plan: FeaResourcePlanIdentity,
         workload_digest: Digest,
         result_digest: Digest,
-        attempt_id: AttemptId,
-        worker_id: WorkerId,
-        allocation: ResourceRequest,
-        actual: AnalysisResourceUsage,
+        budget: ResourceRequest,
+        mut attempts: Vec<ResourceUsageAttempt>,
+        graph_wall_millis: u64,
     ) -> Result<Self, ResourcePlanningError> {
-        if workload_digest == Digest::sha256([])
-            || result_digest == Digest::sha256([])
-            || actual.peak_cpu_millicores != allocation.cpu_millicores
-            || actual.peak_memory_bytes.0 != allocation.memory_bytes
-            || actual.peak_scratch_bytes.0 != allocation.scratch_bytes
-        {
+        if workload_digest == Digest::sha256([]) || result_digest == Digest::sha256([]) {
             return Err(ResourcePlanningError::Invalid(
-                "resource usage must bind nonempty sources and its reserved allocation".into(),
+                "resource usage must bind nonempty sources".into(),
             ));
         }
-        allocation
+        attempts.sort_by_key(|attempt| attempt.attempt_id);
+        if attempts.is_empty()
+            || attempts
+                .windows(2)
+                .any(|pair| pair[0].attempt_id == pair[1].attempt_id)
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "resource usage requires distinct measured attempts".into(),
+            ));
+        }
+        for attempt in &attempts {
+            attempt
+                .resources
+                .validate()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        }
+        budget
             .validate()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let overruns = super::admission::reconcile_resource_request(&allocation, &actual)?;
+        if attempts.iter().any(|attempt| {
+            !super::admission::allocation_fits_budget(&attempt.resources.allocation, &budget)
+        }) {
+            return Err(ResourcePlanningError::Invalid(
+                "resource usage attempt allocation exceeds its budget".into(),
+            ));
+        }
+        let intervals = attempts
+            .iter()
+            .map(|attempt| attempt.resources.clone())
+            .collect::<Vec<_>>();
+        let summary = ResourceAccountingSummary::aggregate(&intervals, graph_wall_millis)
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let actual = AnalysisResourceUsage::from(summary);
+        let overruns = super::admission::reconcile_resource_request(&budget, &actual)?;
         let identity = ResourceUsageEvidenceIdentity(Digest::sha256(encode_contract(
             RESOURCE_USAGE_PREFIX,
             "resource-usage-identity",
@@ -564,9 +610,8 @@ impl ResourceUsageEvidence {
                 plan,
                 workload_digest,
                 result_digest,
-                attempt_id,
-                worker_id,
-                &allocation,
+                &budget,
+                &attempts,
                 &actual,
                 &overruns,
             ),
@@ -578,9 +623,8 @@ impl ResourceUsageEvidence {
             plan,
             workload_digest,
             result_digest,
-            attempt_id,
-            worker_id,
-            allocation,
+            budget,
+            attempts,
             actual,
             overruns,
         })
@@ -595,10 +639,9 @@ impl ResourceUsageEvidence {
             self.plan,
             self.workload_digest,
             self.result_digest,
-            self.attempt_id,
-            self.worker_id,
-            self.allocation.clone(),
-            self.actual.clone(),
+            self.budget.clone(),
+            self.attempts.clone(),
+            self.actual.scheduler.wall_millis,
         )?;
         if self != &expected {
             return Err(ResourcePlanningError::Identity);

@@ -61,7 +61,13 @@ fn scheduler_rejects_missing_or_substituted_attempt_resource_accounting() {
             unreachable!()
         };
         if substitute {
-            result.resources.as_mut().unwrap().allocation.memory_bytes += 1;
+            result
+                .resources
+                .as_mut()
+                .unwrap()
+                .resources
+                .allocation
+                .memory_bytes += 1;
         } else {
             result.resources = None;
         }

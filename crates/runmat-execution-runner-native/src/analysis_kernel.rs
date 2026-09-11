@@ -886,9 +886,7 @@ mod tests {
     use runmat_analysis_fea::constraints::CanonicalStructuralTopologyIdentity;
     use runmat_analysis_fea::execution::SolverResultIdentity;
     use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
-    use runmat_analysis_fea::planning::resource::{
-        record_resource_usage, AnalysisResourceUsage, ByteCount,
-    };
+    use runmat_analysis_fea::planning::resource::{record_resource_usage, ResourceUsageAttempt};
     use runmat_analysis_fea::results::accuracy::{AccuracyStatus, PublicationDecision};
     use runmat_analysis_fea::results::field::{
         RecoveredField, RecoveredFieldCatalog, RecoveredFieldSelection,
@@ -896,7 +894,7 @@ mod tests {
     use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
     use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
     use runmat_analysis_fea::ComputeBackend;
-    use runmat_execution::resource::ResourceUsage;
+    use runmat_execution::resource::ResourceAccounting;
     use runmat_execution::value::ValueRefKind;
     use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -1597,21 +1595,13 @@ mod tests {
             &prepared.resource_plan,
             host.workload.identity.digest(),
             field_source_result.digest(),
-            runmat_execution::identity::AttemptId::derive(&[b"kernel-attempt"]),
-            runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
-            allocation.clone(),
-            AnalysisResourceUsage {
-                scheduler: ResourceUsage {
-                    cpu_core_millis: 1,
-                    memory_byte_millis: u128::from(allocation.memory_bytes),
-                    wall_millis: 1,
-                    ..ResourceUsage::default()
-                },
-                peak_cpu_millicores: allocation.cpu_millicores,
-                peak_memory_bytes: ByteCount(allocation.memory_bytes),
-                peak_scratch_bytes: ByteCount(allocation.scratch_bytes),
-                artifact_bytes: ByteCount(0),
-            },
+            vec![ResourceUsageAttempt {
+                attempt_id: runmat_execution::identity::AttemptId::derive(&[b"kernel-attempt"]),
+                worker_id: runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+                resources: ResourceAccounting::for_reserved_interval(allocation, 1, 0, 0, 0)
+                    .unwrap(),
+            }],
+            1,
         )
         .unwrap();
         let resource_usage = runmat_analysis_execution::prepare_analysis_objects(

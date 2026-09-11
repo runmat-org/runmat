@@ -1,11 +1,13 @@
 use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_analysis_fea::planning::resource::{
-    record_resource_usage, AnalysisResourceUsage, ByteCount, ResourceUsageEvidence,
+    record_resource_usage, ResourceUsageAttempt, ResourceUsageEvidence,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
-use runmat_execution_runner::AttemptSuccess;
+use runmat_execution_runner::{
+    AttemptResourceAccounting, AttemptResourceAggregate, AttemptSuccess,
+};
 
 use crate::{
     prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
@@ -35,28 +37,73 @@ pub fn prepare_structural_resource_usage(
             "structural result has no scheduler-bound resource accounting".into(),
         )
     })?;
-    if accounting.artifact_bytes != result.result_object_bytes {
+    if accounting.resources.artifact_bytes != result.result_object_bytes {
         return Err(AnalysisBridgeError::Identity(
             "resource accounting artifact bytes differ from the imported structural result",
         ));
     }
-    let actual = AnalysisResourceUsage {
-        scheduler: accounting.usage.clone(),
-        peak_cpu_millicores: accounting.allocation.cpu_millicores,
-        peak_memory_bytes: ByteCount(accounting.allocation.memory_bytes),
-        peak_scratch_bytes: ByteCount(accounting.allocation.scratch_bytes),
-        artifact_bytes: ByteCount(accounting.artifact_bytes),
-    };
     let evidence = record_resource_usage(
         &prepared.resource_plan,
         prepared.host.workload.identity.digest(),
         result.identity.digest(),
-        accounting.attempt_id,
-        accounting.worker_id,
-        accounting.allocation.clone(),
-        actual,
+        vec![usage_attempt(accounting)],
+        accounting.resources.usage.wall_millis,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    prepare_usage_objects(prepared, evidence, chunk_bytes, limits)
+}
+
+/// Extends solve accounting with a measured downstream execution graph while retaining one
+/// canonical FEA evidence object. Generic execution owns interval measurement and aggregation;
+/// this bridge only binds those records to the scientific workload and result identities.
+pub fn extend_structural_resource_usage(
+    prepared: &PreparedStructuralLinearProgram,
+    result: &ImportedStructuralLinearResult,
+    baseline: &PreparedStructuralResourceUsage,
+    additional: &AttemptResourceAggregate,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+    validate_structural_resource_usage(prepared, result, baseline, &prepared.host.artifact_access)?;
+    additional.validate().map_err(|error| {
+        AnalysisBridgeError::Invalid(format!("invalid execution-graph accounting: {error}"))
+    })?;
+    let mut attempts = baseline.evidence.attempts.clone();
+    attempts.extend(additional.attempts.iter().map(usage_attempt));
+    let graph_wall_millis = baseline
+        .evidence
+        .actual
+        .scheduler
+        .wall_millis
+        .checked_add(additional.summary.usage.wall_millis)
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("resource graph wall time overflowed".into())
+        })?;
+    let evidence = record_resource_usage(
+        &prepared.resource_plan,
+        prepared.host.workload.identity.digest(),
+        result.identity.digest(),
+        attempts,
+        graph_wall_millis,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    prepare_usage_objects(prepared, evidence, chunk_bytes, limits)
+}
+
+fn usage_attempt(accounting: &AttemptResourceAccounting) -> ResourceUsageAttempt {
+    ResourceUsageAttempt {
+        attempt_id: accounting.attempt_id,
+        worker_id: accounting.worker_id,
+        resources: accounting.resources.clone(),
+    }
+}
+
+fn prepare_usage_objects(
+    prepared: &PreparedStructuralLinearProgram,
+    evidence: ResourceUsageEvidence,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourceUsage,
         evidence.identity().digest(),

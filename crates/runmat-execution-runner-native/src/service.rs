@@ -187,6 +187,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             function: call.function,
             arguments,
             requested_outputs,
+            resources: options.resources,
             idempotency_key: options.idempotency_key,
             retention_millis: options.retention_millis,
         })

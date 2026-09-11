@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::{AcceleratorRequest, ResourceInventory, ResourceRequest};
 use runmat_execution::Digest;
 
@@ -8,7 +7,8 @@ use super::{
     build_resource_plan,
     contract::{
         AnalysisResourceUsage, FeaResourcePlan, FeaResourcePlanningInput, PartitioningPolicy,
-        ResourceAdmission, ResourceOverrun, ResourcePlanningError, ResourceUsageEvidence,
+        ResourceAdmission, ResourceOverrun, ResourcePlanningError, ResourceUsageAttempt,
+        ResourceUsageEvidence,
     },
 };
 
@@ -16,23 +16,23 @@ pub fn record_resource_usage(
     plan: &FeaResourcePlan,
     workload_digest: Digest,
     result_digest: Digest,
-    attempt_id: AttemptId,
-    worker_id: WorkerId,
-    allocation: ResourceRequest,
-    actual: AnalysisResourceUsage,
+    attempts: Vec<ResourceUsageAttempt>,
+    graph_wall_millis: u64,
 ) -> Result<ResourceUsageEvidence, ResourcePlanningError> {
     plan.validate_identity()?;
-    if !allocation_matches_plan(&allocation, &plan.request) {
+    if attempts
+        .iter()
+        .any(|attempt| !allocation_fits_budget(&attempt.resources.allocation, &plan.request))
+    {
         return Err(ResourcePlanningError::Identity);
     }
     ResourceUsageEvidence::build(
         plan.identity,
         workload_digest,
         result_digest,
-        attempt_id,
-        worker_id,
-        allocation,
-        actual,
+        plan.request.clone(),
+        attempts,
+        graph_wall_millis,
     )
 }
 
@@ -42,12 +42,39 @@ pub fn validate_resource_usage_evidence(
 ) -> Result<(), ResourcePlanningError> {
     plan.validate_identity()?;
     if evidence.plan != plan.identity
-        || !allocation_matches_plan(&evidence.allocation, &plan.request)
+        || evidence.budget != plan.request
+        || evidence
+            .attempts
+            .iter()
+            .any(|attempt| !allocation_fits_budget(&attempt.resources.allocation, &plan.request))
         || evidence.overruns != reconcile_resource_usage(plan, &evidence.actual)?
     {
         return Err(ResourcePlanningError::Identity);
     }
     Ok(())
+}
+
+pub(crate) fn allocation_fits_budget(
+    allocation: &ResourceRequest,
+    budget: &ResourceRequest,
+) -> bool {
+    allocation.cpu_millicores <= budget.cpu_millicores
+        && allocation.memory_bytes <= budget.memory_bytes
+        && allocation.scratch_bytes <= budget.scratch_bytes
+        && allocation.max_wall_millis <= budget.max_wall_millis
+        && allocation.max_artifact_bytes <= budget.max_artifact_bytes
+        && allocation.max_egress_bytes <= budget.max_egress_bytes
+        && allocation.max_relay_bytes <= budget.max_relay_bytes
+        && budget
+            .required_capabilities
+            .is_subset(&allocation.required_capabilities)
+        && allocation.accelerators.iter().all(|requested| {
+            budget.accelerators.iter().any(|available| {
+                available.class == requested.class
+                    && requested.count <= available.count
+                    && requested.memory_bytes_each <= available.memory_bytes_each
+            })
+        })
 }
 
 pub fn allocation_matches_plan(allocation: &ResourceRequest, planned: &ResourceRequest) -> bool {

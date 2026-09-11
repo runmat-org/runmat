@@ -326,7 +326,7 @@ impl LocalSupervisor {
                 stdout_offset,
                 stderr_offset,
             } => SupervisorResponse::Attachment {
-                attachment: self.attach(job_id, stdout_offset, stderr_offset).await?,
+                attachment: Box::new(self.attach(job_id, stdout_offset, stderr_offset).await?),
             },
             SupervisorCommand::Cancel { job_id } => SupervisorResponse::Cancelled {
                 record: self.cancel(job_id).await?,

@@ -78,8 +78,8 @@ pub use observation_partition::{
     PreparedStructuralObservationReduction, StructuralObservationReductionPreparation,
 };
 pub use resource_usage::{
-    prepare_structural_resource_usage, validate_structural_resource_usage,
-    PreparedStructuralResourceUsage,
+    extend_structural_resource_usage, prepare_structural_resource_usage,
+    validate_structural_resource_usage, PreparedStructuralResourceUsage,
 };
 pub use response::{
     import_analysis_output_set, AnalysisHostResponse, AnalysisOutputRoot, AnalysisOutputSet,

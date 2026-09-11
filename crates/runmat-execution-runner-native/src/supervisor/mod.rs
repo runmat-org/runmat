@@ -15,8 +15,8 @@ pub use driver::{
     prepare_batch_driver,
 };
 pub use model::{
-    BatchDriverInvocation, BatchSubmission, JobAttachment, LocalJobRecord, LocalJobState,
-    ProgramBatchSubmission, MIN_RETENTION_MILLIS,
+    BatchDriverInvocation, BatchSubmission, DurableProgramAttempt, JobAttachment, LocalJobRecord,
+    LocalJobState, ProgramBatchExecution, ProgramBatchSubmission, MIN_RETENTION_MILLIS,
 };
 pub use service::{run_local_supervisor, LocalSupervisor, LocalSupervisorConfig};
 pub use store::SupervisorPaths;

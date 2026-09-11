@@ -2,6 +2,7 @@ use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::{Digest, JobHandle, JobId, OutputContract, RunId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,8 +11,8 @@ use super::filesystem::{
     atomic_json, atomic_write, io_error, read_json, secure_directory, unix_millis,
 };
 use super::model::{
-    BatchDriverInvocation, BatchSubmission, DriverCompletion, DriverMarker, JobAttachment,
-    LocalJobRecord, LocalJobState, ProgramBatchSubmission,
+    BatchDriverInvocation, BatchSubmission, DriverCompletion, DriverMarker, DurableProgramAttempt,
+    JobAttachment, LocalJobRecord, LocalJobState, ProgramBatchSubmission,
 };
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -312,15 +313,17 @@ impl JobStore {
         let job_dir = self.job_dir(job_id);
         let (stdout, next_stdout_offset) = read_chunk(&job_dir.join("stdout.log"), stdout_offset)?;
         let (stderr, next_stderr_offset) = read_chunk(&job_dir.join("stderr.log"), stderr_offset)?;
+        let completion = self.completion(job_id)?;
         Ok(JobAttachment {
             record: self.record(job_id)?,
             stdout,
             stderr,
             next_stdout_offset,
             next_stderr_offset,
-            response: self
-                .completion(job_id)?
-                .and_then(|completion| completion.response),
+            response: completion
+                .as_ref()
+                .and_then(|completion| completion.response.clone()),
+            resources: completion.and_then(|completion| completion.resources),
         })
     }
 
@@ -473,6 +476,16 @@ pub(super) fn load_driver_invocation(
             }
             Ok(BatchDriverInvocation::Program {
                 job_directory: job_dir.to_path_buf(),
+                attempt: DurableProgramAttempt {
+                    attempt_id: AttemptId::derive(&[
+                        request.handle.id.bytes(),
+                        &request.handle.generation.to_be_bytes(),
+                    ]),
+                    worker_id: WorkerId::derive(&[
+                        request.handle.id.bytes(),
+                        b"durable-local-driver",
+                    ]),
+                },
                 submission,
             })
         }

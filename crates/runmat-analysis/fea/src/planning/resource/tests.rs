@@ -761,26 +761,46 @@ fn reconciliation_checks_accelerator_device_time() {
 fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
     let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
     let allocation = plan.request.clone();
-    let actual = AnalysisResourceUsage {
-        scheduler: ResourceUsage {
-            cpu_core_millis: 1,
-            memory_byte_millis: u128::from(allocation.memory_bytes),
-            wall_millis: 1,
-            ..ResourceUsage::default()
-        },
-        peak_cpu_millicores: allocation.cpu_millicores,
-        peak_memory_bytes: ByteCount(allocation.memory_bytes),
-        peak_scratch_bytes: ByteCount(allocation.scratch_bytes),
-        artifact_bytes: ByteCount(0),
+    let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"attempt"]);
+    let worker_id = runmat_execution::identity::WorkerId::derive(&[b"worker"]);
+    let attempt = ResourceUsageAttempt {
+        attempt_id,
+        worker_id,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            allocation.clone(),
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
+    let mut partition_allocation = allocation.clone();
+    partition_allocation.cpu_millicores = (partition_allocation.cpu_millicores / 2).max(1);
+    partition_allocation.memory_bytes = (partition_allocation.memory_bytes / 2).max(1);
+    partition_allocation.scratch_bytes /= 2;
+    partition_allocation.max_wall_millis = (partition_allocation.max_wall_millis / 2).max(1);
+    partition_allocation.max_artifact_bytes /= 2;
+    partition_allocation.max_egress_bytes /= 2;
+    partition_allocation.max_relay_bytes /= 2;
+    let partition_attempt = ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"partition-attempt"]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"partition-worker"]),
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            partition_allocation,
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
     };
     let evidence = record_resource_usage(
         &plan,
         Digest::sha256("workload"),
         Digest::sha256("result"),
-        runmat_execution::identity::AttemptId::derive(&[b"attempt"]),
-        runmat_execution::identity::WorkerId::derive(&[b"worker"]),
-        allocation.clone(),
-        actual,
+        vec![partition_attempt, attempt],
+        2,
     )
     .unwrap();
     assert!(evidence.overruns.is_empty());
@@ -788,18 +808,37 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
         ResourceUsageEvidence::from_canonical_bytes(&evidence.canonical_bytes().unwrap()).unwrap(),
         evidence
     );
+    assert_eq!(evidence.attempts.len(), 2);
+    assert!(evidence
+        .attempts
+        .windows(2)
+        .all(|pair| pair[0].attempt_id < pair[1].attempt_id));
+
+    let mut tampered = serde_json::to_value(&evidence).unwrap();
+    tampered["actual"]["scheduler"]["cpu_core_millis"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ResourceUsageEvidence>(tampered).is_err());
 
     let mut substituted = allocation;
     substituted.memory_bytes += 1;
+    let substituted_attempt = ResourceUsageAttempt {
+        attempt_id,
+        worker_id,
+        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            substituted,
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
     assert!(matches!(
         record_resource_usage(
             &plan,
             Digest::sha256("workload"),
             Digest::sha256("result"),
-            runmat_execution::identity::AttemptId::derive(&[b"attempt"]),
-            runmat_execution::identity::WorkerId::derive(&[b"worker"]),
-            substituted,
-            evidence.actual.clone(),
+            vec![substituted_attempt],
+            1,
         ),
         Err(ResourcePlanningError::Identity)
     ));

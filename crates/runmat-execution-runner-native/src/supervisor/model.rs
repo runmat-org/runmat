@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
+use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
+use runmat_execution_runner::AttemptResourceAccounting;
 use serde::{Deserialize, Serialize};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -87,6 +90,7 @@ pub struct ProgramBatchSubmission {
     pub function: usize,
     pub arguments: Vec<ValuePayload>,
     pub requested_outputs: u16,
+    pub resources: ResourceRequest,
     pub idempotency_key: Option<String>,
     pub retention_millis: u64,
 }
@@ -94,6 +98,7 @@ pub struct ProgramBatchSubmission {
 impl ProgramBatchSubmission {
     pub fn from_request(
         request: ProgramExecutionRequest,
+        resources: ResourceRequest,
         idempotency_key: Option<String>,
         retention_millis: u64,
     ) -> Self {
@@ -103,6 +108,7 @@ impl ProgramBatchSubmission {
             function: request.function,
             arguments: request.arguments,
             requested_outputs: request.requested_outputs,
+            resources,
             idempotency_key,
             retention_millis,
         }
@@ -122,6 +128,9 @@ impl ProgramBatchSubmission {
     pub fn validate(&self) -> NativeExecutionResult<()> {
         self.program_request()
             .validate_for_portable_host()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        self.resources
+            .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         if self.arguments.len() > MAX_BATCH_ARGUMENTS
             || self
@@ -226,6 +235,7 @@ pub struct DriverCompletion {
     pub exit_code: Option<i32>,
     pub message: Option<String>,
     pub response: Option<ProgramExecutionResponse>,
+    pub resources: Option<AttemptResourceAccounting>,
 }
 
 impl DriverCompletion {
@@ -237,12 +247,20 @@ impl DriverCompletion {
                     | ProgramExecutionResponse::ExternalizedSuccess { .. }
             )
         });
-        if self.schema_version != 2
+        let resources_are_valid = self
+            .resources
+            .as_ref()
+            .map(AttemptResourceAccounting::validate)
+            .transpose()
+            .is_ok();
+        if self.schema_version != 3
             || self
                 .message
                 .as_ref()
                 .is_some_and(|value| value.len() > 16 * 1024)
             || response_succeeded.is_some_and(|succeeded| succeeded != self.success)
+            || self.response.is_some() != self.resources.is_some()
+            || !resources_are_valid
         {
             return Err(NativeExecutionError::Protocol(
                 "durable driver completion is malformed".into(),
@@ -268,6 +286,19 @@ pub struct JobAttachment {
     pub next_stdout_offset: u64,
     pub next_stderr_offset: u64,
     pub response: Option<ProgramExecutionResponse>,
+    pub resources: Option<AttemptResourceAccounting>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgramBatchExecution {
+    pub response: ProgramExecutionResponse,
+    pub resources: AttemptResourceAccounting,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DurableProgramAttempt {
+    pub attempt_id: AttemptId,
+    pub worker_id: WorkerId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,6 +311,7 @@ pub enum BatchDriverInvocation {
     },
     Program {
         job_directory: PathBuf,
+        attempt: DurableProgramAttempt,
         submission: Box<ProgramBatchSubmission>,
     },
 }

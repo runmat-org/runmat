@@ -1,6 +1,10 @@
 use std::path::Path;
+use std::time::Instant;
 
-use super::model::{BatchDriverInvocation, DriverCompletion, ProgramBatchSubmission};
+use super::model::{
+    BatchDriverInvocation, DriverCompletion, DurableProgramAttempt, ProgramBatchExecution,
+    ProgramBatchSubmission,
+};
 use super::store::{load_driver_invocation, write_completion, write_driver_marker};
 use crate::protocol::WorkerResponse;
 use crate::{NativeExecutionError, NativeExecutionResult};
@@ -27,19 +31,24 @@ pub fn complete_batch_driver(
     write_completion(
         job_directory,
         &DriverCompletion {
-            schema_version: 2,
+            schema_version: 3,
             success,
             exit_code,
             message,
             response: None,
+            resources: None,
         },
     )
 }
 
 pub fn complete_batch_driver_with_response(
     job_directory: &Path,
-    response: WorkerResponse,
+    execution: ProgramBatchExecution,
 ) -> NativeExecutionResult<()> {
+    let ProgramBatchExecution {
+        response,
+        resources,
+    } = execution;
     let (success, exit_code, message) = match &response {
         WorkerResponse::Success { .. } | WorkerResponse::ExternalizedSuccess { .. } => {
             (true, Some(0), None)
@@ -49,16 +58,48 @@ pub fn complete_batch_driver_with_response(
     write_completion(
         job_directory,
         &DriverCompletion {
-            schema_version: 2,
+            schema_version: 3,
             success,
             exit_code,
             message,
             response: Some(response),
+            resources: Some(resources),
         },
     )
 }
 
-pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> WorkerResponse {
+pub async fn execute_program_batch(
+    attempt: DurableProgramAttempt,
+    submission: ProgramBatchSubmission,
+) -> NativeExecutionResult<ProgramBatchExecution> {
+    submission.validate()?;
+    let started = Instant::now();
+    let allocation = submission.resources.clone();
+    let response = execute_program_response(&submission).await;
+    let artifact_bytes = response_artifact_bytes(&response)?;
+    let wall_millis = u64::try_from(started.elapsed().as_millis()).map_err(|_| {
+        NativeExecutionError::Protocol("durable program wall-clock accounting overflowed".into())
+    })?;
+    let resources = runmat_execution_runner::AttemptResourceAccounting::new(
+        attempt.attempt_id,
+        attempt.worker_id,
+        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            allocation,
+            wall_millis,
+            artifact_bytes,
+            0,
+            0,
+        )
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?,
+    )
+    .map_err(NativeExecutionError::Protocol)?;
+    Ok(ProgramBatchExecution {
+        response,
+        resources,
+    })
+}
+
+async fn execute_program_response(submission: &ProgramBatchSubmission) -> WorkerResponse {
     let request = submission.program_request();
     if request.artifact.form != runmat_execution_artifact::ExecutableForm::MeshingWorkload {
         return crate::worker::execute(request).await;
@@ -86,4 +127,18 @@ pub async fn execute_program_batch(submission: ProgramBatchSubmission) -> Worker
         &mut runmat_meshing_execution::NoopMeshingProgress,
         limits,
     )
+}
+
+fn response_artifact_bytes(response: &WorkerResponse) -> NativeExecutionResult<u64> {
+    let references = match response {
+        WorkerResponse::ExternalizedSuccess { result_objects, .. } => result_objects.as_slice(),
+        WorkerResponse::Success { .. } | WorkerResponse::Failure { .. } => &[],
+    };
+    references.iter().try_fold(0_u64, |total, reference| {
+        total.checked_add(reference.encoded_length).ok_or_else(|| {
+            NativeExecutionError::Protocol(
+                "durable program result artifact accounting overflowed".into(),
+            )
+        })
+    })
 }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution::{
     CancellationReason, ExecutionScopeId, FutureHandle, FutureId, JobHandle, OutputContract,
     TaskHandle, TaskId,
@@ -29,6 +30,7 @@ pub struct DeferredCall {
 pub struct DurableJobOptions {
     pub idempotency_key: Option<String>,
     pub retention_millis: u64,
+    pub resources: ResourceRequest,
 }
 
 #[derive(Clone, Debug, PartialEq)]

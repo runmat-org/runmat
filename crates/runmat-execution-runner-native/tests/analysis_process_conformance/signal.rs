@@ -30,6 +30,8 @@ use runmat_execution_runner_native::{
 use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 
+use super::analysis_resources;
+
 pub(super) async fn run() {
     let fixture = SignalFixture::new().await;
     let expected = canonical_tabulated_signal_content_digest(&fixture.explicit).unwrap();
@@ -245,6 +247,7 @@ impl SignalFixture {
                 .submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
                         chunk.request.clone(),
+                        analysis_resources(),
                         Some(format!("signal-placement-{index}")),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
@@ -257,6 +260,12 @@ impl SignalFixture {
                     supervisor.reconcile().await.unwrap();
                     let attachment = supervisor.attach(record.handle.id, 0, 0).await.unwrap();
                     if attachment.record.state.is_terminal() {
+                        let resources = attachment
+                            .resources
+                            .as_ref()
+                            .expect("durable signal must retain generic resource accounting");
+                        resources.validate().unwrap();
+                        assert_eq!(resources.resources.allocation, analysis_resources());
                         break attachment.response.unwrap_or_else(|| {
                             panic!("durable signal failed: {:?}", attachment.record.message)
                         });

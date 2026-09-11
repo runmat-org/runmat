@@ -1,5 +1,6 @@
 use super::*;
 
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution_runner_native::supervisor::{
     complete_batch_driver_with_response, execute_program_batch, prepare_batch_driver,
     BatchDriverInvocation, LocalJobState, LocalSupervisor, LocalSupervisorConfig,
@@ -16,6 +17,20 @@ pub(super) struct CurveFixture {
     pub(super) input: PreparedExactGeometryInput,
     pub(super) expected_partition_outputs: Vec<ValuePayload>,
     pub(super) expected_join_outputs: Vec<ValuePayload>,
+}
+
+fn durable_meshing_resources() -> ResourceRequest {
+    ResourceRequest {
+        cpu_millicores: 1_000,
+        memory_bytes: 1024 * 1024 * 1024,
+        scratch_bytes: 1024 * 1024 * 1024,
+        max_wall_millis: 60_000,
+        max_artifact_bytes: limits().inventory.max_total_bytes,
+        max_egress_bytes: 0,
+        max_relay_bytes: 0,
+        accelerators: Vec::new(),
+        required_capabilities: Default::default(),
+    }
 }
 
 pub(super) async fn native_conformance() {
@@ -89,6 +104,7 @@ pub(super) async fn durable_conformance() {
     let partition = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.partition_request.clone(),
+            durable_meshing_resources(),
             Some("curve-partition".into()),
             MIN_RETENTION_MILLIS,
         ))
@@ -124,6 +140,7 @@ pub(super) async fn durable_conformance() {
     let join = supervisor
         .submit_program(ProgramBatchSubmission::from_request(
             fixture.join_request.clone(),
+            durable_meshing_resources(),
             Some("curve-join".into()),
             MIN_RETENTION_MILLIS,
         ))
@@ -156,13 +173,14 @@ pub(super) async fn run_durable_driver() {
     let invocation = prepare_batch_driver().unwrap();
     let BatchDriverInvocation::Program {
         job_directory,
+        attempt,
         submission,
     } = invocation
     else {
         panic!("meshing conformance durable driver received a script")
     };
-    let response = execute_program_batch(*submission).await;
-    complete_batch_driver_with_response(&job_directory, response).unwrap();
+    let execution = execute_program_batch(attempt, *submission).await.unwrap();
+    complete_batch_driver_with_response(&job_directory, execution).unwrap();
 }
 
 async fn wait_for_durable(
@@ -174,6 +192,12 @@ async fn wait_for_durable(
             let attachment = supervisor.attach(job_id, 0, 0).await.unwrap();
             if attachment.record.state.is_terminal() {
                 assert_eq!(attachment.record.state, LocalJobState::Succeeded);
+                let resources = attachment
+                    .resources
+                    .as_ref()
+                    .expect("durable meshing must retain generic resource accounting");
+                resources.validate().unwrap();
+                assert_eq!(resources.resources.allocation, durable_meshing_resources());
                 break attachment;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;

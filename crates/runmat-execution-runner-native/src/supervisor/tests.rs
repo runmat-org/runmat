@@ -1,10 +1,13 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::time::Duration;
 
+use runmat_execution::identity::{AttemptId, WorkerId};
+use runmat_execution::resource::{ResourceAccounting, ResourceRequest};
 use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionResponse,
 };
+use runmat_execution_runner::AttemptResourceAccounting;
 
 use super::auth::{constant_time_eq, read_token};
 use super::model::{
@@ -30,7 +33,7 @@ else
   sleep 0.2
 fi
 tmp="$job/completion.helper.tmp"
-printf '{"schema_version":2,"success":true,"exit_code":0,"message":null,"response":null}' > "$tmp"
+printf '{"schema_version":3,"success":true,"exit_code":0,"message":null,"response":null,"resources":null}' > "$tmp"
 mv "$tmp" "$job/completion.json"
 "#,
     )
@@ -207,6 +210,7 @@ fn exact_program_submission_round_trips_through_durable_storage() {
         function: 7,
         arguments: Vec::new(),
         requested_outputs: 1,
+        resources: program_resources(),
         idempotency_key: Some("program-key".into()),
         retention_millis: MIN_RETENTION_MILLIS,
     };
@@ -227,20 +231,57 @@ fn exact_program_submission_round_trips_through_durable_storage() {
     assert_eq!(duplicate.handle, record.handle);
 
     let mut completion = DriverCompletion {
-        schema_version: 2,
+        schema_version: 3,
         success: false,
         exit_code: None,
         message: Some("typed worker failure".into()),
         response: Some(ProgramExecutionResponse::Failure {
             message: "typed worker failure".into(),
         }),
+        resources: Some(
+            AttemptResourceAccounting::new(
+                AttemptId::derive(&[b"durable-attempt"]),
+                WorkerId::derive(&[b"durable-worker"]),
+                ResourceAccounting::for_reserved_interval(program_resources(), 10, 0, 0, 0)
+                    .unwrap(),
+            )
+            .unwrap(),
+        ),
     };
     write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
     assert_eq!(
         store.completion(record.handle.id).unwrap(),
         Some(completion.clone())
     );
+    let mut missing_resources = completion.clone();
+    missing_resources.resources = None;
+    write_completion(&store.job_dir(record.handle.id), &missing_resources).unwrap();
+    assert!(store.completion(record.handle.id).is_err());
+    let mut substituted_resources = completion.clone();
+    substituted_resources
+        .resources
+        .as_mut()
+        .unwrap()
+        .resources
+        .usage
+        .cpu_core_millis += 1;
+    write_completion(&store.job_dir(record.handle.id), &substituted_resources).unwrap();
+    assert!(store.completion(record.handle.id).is_err());
     completion.success = true;
     write_completion(&store.job_dir(record.handle.id), &completion).unwrap();
     assert!(store.completion(record.handle.id).is_err());
+}
+
+fn program_resources() -> ResourceRequest {
+    ResourceRequest {
+        cpu_millicores: 1_000,
+        memory_bytes: 1024 * 1024,
+        scratch_bytes: 1024 * 1024,
+        max_wall_millis: 60_000,
+        max_artifact_bytes: 1024 * 1024,
+        max_egress_bytes: 0,
+        max_relay_bytes: 0,
+        accelerators: Vec::new(),
+        required_capabilities: Default::default(),
+    }
 }

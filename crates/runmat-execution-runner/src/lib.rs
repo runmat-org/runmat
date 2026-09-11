@@ -15,6 +15,6 @@ pub use driver::{Driver, DriverAction, DriverCommand, DriverConfig, DriverEvent,
 pub use error::{RunnerError, RunnerResult};
 pub use pool::{PoolSpec, WorkerSpec};
 pub use task::{
-    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptResourceAccounting, AttemptSuccess,
-    TaskSubmission,
+    AttemptFailureKind, AttemptReport, AttemptRequest, AttemptResourceAccounting,
+    AttemptResourceAggregate, AttemptSuccess, TaskSubmission,
 };

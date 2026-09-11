@@ -402,22 +402,25 @@ async fn run_durable_driver() {
     let invocation = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap();
     let job_directory = invocation.job_directory().to_path_buf();
     let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program {
+        attempt,
         submission,
         ..
     } = invocation
     else {
         panic!("analysis conformance driver received a script job")
     };
-    let response =
-        runmat_execution_runner_native::supervisor::execute_program_batch(*submission).await;
+    let execution =
+        runmat_execution_runner_native::supervisor::execute_program_batch(attempt, *submission)
+            .await
+            .unwrap();
     let succeeded = matches!(
-        response,
+        &execution.response,
         ProgramExecutionResponse::Success { .. }
             | ProgramExecutionResponse::ExternalizedSuccess { .. }
     );
     runmat_execution_runner_native::supervisor::complete_batch_driver_with_response(
         &job_directory,
-        response,
+        execution,
     )
     .unwrap();
     if !succeeded {
@@ -459,13 +462,13 @@ async fn durable_conformance(
         .execute(&solve_host, &solve_program, Some(&solve.resource_plan))
         .await;
     assert_eq!(
-        import_result(driver.store(), solve_success.clone(), &solve.host,),
+        import_result(driver.store(), solve_success.response.clone(), &solve.host,),
         expected_payload
     );
     let publication = publication_chain::execute_publication_chain(
         &mut driver,
         &solve,
-        solve_success,
+        solve_success.response,
         &resource_usage,
         revision(),
     )
@@ -478,7 +481,7 @@ async fn durable_conformance(
         .execute(&mixed_host, &mixed_program, Some(&mixed_resource_plan))
         .await;
     assert_eq!(
-        import_result(driver.store(), mixed_success, &mixed_host),
+        import_result(driver.store(), mixed_success.response, &mixed_host),
         expected_mixed_payload
     );
 
@@ -498,13 +501,17 @@ async fn durable_conformance(
         )
         .await;
     assert_eq!(
-        import_result(driver.store(), explicit_success.clone(), &explicit.host,),
+        import_result(
+            driver.store(),
+            explicit_success.response.clone(),
+            &explicit.host,
+        ),
         expected_explicit_payload
     );
     let publication = publication_chain::execute_publication_chain(
         &mut driver,
         &explicit,
-        explicit_success,
+        explicit_success.response,
         &explicit_resource_usage,
         revision(),
     )

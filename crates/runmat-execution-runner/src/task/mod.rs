@@ -6,7 +6,7 @@ mod retry;
 
 pub use attempt::{
     AttemptFailureKind, AttemptRecord, AttemptReport, AttemptRequest, AttemptResourceAccounting,
-    AttemptSuccess,
+    AttemptResourceAggregate, AttemptSuccess,
 };
 pub use graph::TaskGraph;
 pub use lifecycle::{TaskRecord, TaskSubmission};

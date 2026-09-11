@@ -2,19 +2,19 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use runmat_analysis_execution::{
-    import_observation_partition_contribution, import_published_result, import_reduced_observation,
-    import_structural_accuracy, import_structural_linear_completion,
-    import_structural_observation_assembly, import_structural_recovered_fields,
-    prepare_result_publication, prepare_structural_accuracy, prepare_structural_field_recovery,
-    prepare_structural_observation_assembly, prepare_structural_observation_fanout,
-    prepare_structural_observation_reduction, AnalysisHostWorkload, PreparedAnalysisProgram,
-    PreparedStructuralLinearProgram, PreparedStructuralResourceUsage, ResultPublicationPreparation,
-    StructuralAccuracyPreparation, StructuralFieldRecoveryPreparation,
-    StructuralObservationAssemblyPreparation, StructuralObservationPreparation,
-    StructuralObservationReductionPreparation,
+    extend_structural_resource_usage, import_observation_partition_contribution,
+    import_published_result, import_reduced_observation, import_structural_accuracy,
+    import_structural_linear_completion, import_structural_observation_assembly,
+    import_structural_recovered_fields, prepare_result_publication, prepare_structural_accuracy,
+    prepare_structural_field_recovery, prepare_structural_observation_assembly,
+    prepare_structural_observation_fanout, prepare_structural_observation_reduction,
+    AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
+    PreparedStructuralResourceUsage, ResultPublicationPreparation, StructuralAccuracyPreparation,
+    StructuralFieldRecoveryPreparation, StructuralObservationAssemblyPreparation,
+    StructuralObservationPreparation, StructuralObservationReductionPreparation,
 };
 use runmat_analysis_fea::execution::{
     SequenceIdentity, StructuralLinearWorkload, DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -24,7 +24,9 @@ use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ProgramExecutionResponse;
-use runmat_execution_runner::AttemptSuccess;
+use runmat_execution_runner::{
+    AttemptResourceAccounting, AttemptResourceAggregate, AttemptSuccess,
+};
 use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeProgramSession, RemotePoolDriver,
 };
@@ -41,13 +43,13 @@ pub(super) trait PublicationChainDriver {
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>>;
 
     fn execute_batch<'a>(
         &'a mut self,
         workloads: Vec<(&'a AnalysisHostWorkload, &'a PreparedAnalysisProgram)>,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = Vec<ProgramExecutionResponse>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Vec<MeteredProgramResponse>> + 'a>> {
         Box::pin(async move {
             let mut responses = Vec::with_capacity(workloads.len());
             for (host, program) in workloads {
@@ -68,8 +70,8 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let limits = ObjectInventoryLimits::default();
     let imported_solve =
         import_structural_linear_completion(driver.store(), solve_response, solve, limits).unwrap();
-    let source_result = imported_solve.objects;
-    let source_numerical_receipt = imported_solve.numerical_receipt_objects;
+    let source_result = imported_solve.objects.clone();
+    let source_numerical_receipt = imported_solve.numerical_receipt_objects.clone();
     let source_invocation = solve
         .inputs
         .iter()
@@ -112,9 +114,14 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     })
     .unwrap();
     let field_response = driver.execute(&fields.host, &fields.program, None).await;
-    let imported_fields =
-        import_structural_recovered_fields(driver.store(), field_response, &fields, limits)
-            .unwrap();
+    let imported_fields = import_structural_recovered_fields(
+        driver.store(),
+        field_response.response,
+        &fields,
+        limits,
+    )
+    .unwrap();
+    let observation_graph_started = Instant::now();
     let fanout = prepare_structural_observation_fanout(
         driver.store(),
         StructuralObservationPreparation {
@@ -144,11 +151,17 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             Some(&fanout.resource_plan),
         )
         .await;
+    let mut observation_attempts = Vec::new();
     let mut contribution_groups = BTreeMap::new();
     for (partition, response) in fanout.partitions.iter().zip(responses) {
-        let imported =
-            import_observation_partition_contribution(driver.store(), response, partition, limits)
-                .unwrap();
+        observation_attempts.push(response.resources);
+        let imported = import_observation_partition_contribution(
+            driver.store(),
+            response.response,
+            partition,
+            limits,
+        )
+        .unwrap();
         contribution_groups
             .entry(partition.partition_plan.identity)
             .or_insert_with(|| (partition.partition_plan.clone(), Vec::new()))
@@ -177,8 +190,10 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
                 Some(&reduction.resource_plan),
             )
             .await;
+        observation_attempts.push(response.resources);
         reduced.push(
-            import_reduced_observation(driver.store(), response, &reduction, limits).unwrap(),
+            import_reduced_observation(driver.store(), response.response, &reduction, limits)
+                .unwrap(),
         );
     }
     let observations =
@@ -200,13 +215,36 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             Some(&observations.resource_plan),
         )
         .await;
+    observation_attempts.push(observation_response.resources);
     let imported_observations = import_structural_observation_assembly(
         driver.store(),
-        observation_response,
+        observation_response.response,
         &observations,
         limits,
     )
     .unwrap();
+    let observation_resources = AttemptResourceAggregate::new(
+        observation_attempts,
+        u64::try_from(observation_graph_started.elapsed().as_millis())
+            .unwrap_or(u64::MAX)
+            .max(1),
+    )
+    .unwrap();
+    let expected_attempt_count =
+        resource_usage.evidence.attempts.len() + observation_resources.attempts.len();
+    let resource_usage = extend_structural_resource_usage(
+        solve,
+        &imported_solve,
+        resource_usage,
+        &observation_resources,
+        DEFAULT_ANALYSIS_CHUNK_BYTES,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        resource_usage.evidence.attempts.len(),
+        expected_attempt_count
+    );
 
     let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
         solve_host: solve.host.clone(),
@@ -223,14 +261,19 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let accuracy_response = driver
         .execute(&accuracy.host, &accuracy.program, None)
         .await;
-    let imported_accuracy =
-        import_structural_accuracy(driver.store(), accuracy_response, &accuracy, limits).unwrap();
+    let imported_accuracy = import_structural_accuracy(
+        driver.store(),
+        accuracy_response.response,
+        &accuracy,
+        limits,
+    )
+    .unwrap();
 
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
         source_resource_plan: resource_plan_objects,
-        source_resource_usage: resource_usage.objects.clone(),
+        source_resource_usage: resource_usage.objects,
         source_observations: Some(imported_observations),
         program_revision,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -240,15 +283,40 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let publication_response = driver
         .execute(&publication.host, &publication.program, None)
         .await;
-    import_published_result(driver.store(), publication_response, &publication, limits)
-        .unwrap()
-        .result
+    import_published_result(
+        driver.store(),
+        publication_response.response,
+        &publication,
+        limits,
+    )
+    .unwrap()
+    .result
+}
+
+#[derive(Clone)]
+pub(super) struct MeteredProgramResponse {
+    pub response: ProgramExecutionResponse,
+    pub resources: AttemptResourceAccounting,
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
     ProgramExecutionResponse::ExternalizedSuccess {
         outputs: success.outputs.clone(),
         result_objects: success.result_objects.clone(),
+    }
+}
+
+pub(super) fn metered_response(success: AttemptSuccess) -> MeteredProgramResponse {
+    success.validate_accounting().unwrap();
+    let resources = success
+        .resources
+        .as_deref()
+        .expect("analysis task must retain resource accounting")
+        .clone();
+    let response = success_response(&success);
+    MeteredProgramResponse {
+        response,
+        resources,
     }
 }
 
@@ -269,7 +337,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
             program.write_to(self.store).unwrap();
             let task = self
@@ -290,7 +358,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                 .unwrap()
                 .pop()
                 .unwrap();
-            success_response(&wait_for_native_task(task).await)
+            metered_response(wait_for_native_task(task).await)
         })
     }
 
@@ -298,7 +366,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
         &'a mut self,
         workloads: Vec<(&'a AnalysisHostWorkload, &'a PreparedAnalysisProgram)>,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = Vec<ProgramExecutionResponse>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Vec<MeteredProgramResponse>> + 'a>> {
         Box::pin(async move {
             for (_, program) in &workloads {
                 program.write_to(self.store).unwrap();
@@ -328,7 +396,7 @@ impl PublicationChainDriver for ProcessDriver<'_> {
                 .unwrap();
             let mut responses = Vec::with_capacity(tasks.len());
             for task in tasks {
-                responses.push(success_response(&wait_for_native_task(task).await));
+                responses.push(metered_response(wait_for_native_task(task).await));
             }
             responses
         })
@@ -368,8 +436,8 @@ impl PublicationChainDriver for DurableDriver {
         &'a mut self,
         _host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
-        _resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
+        resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
+    ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
             program.write_to(&mut self.store).unwrap();
             self.submission_sequence += 1;
@@ -380,6 +448,9 @@ impl PublicationChainDriver for DurableDriver {
                 .submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
                         program.request.clone(),
+                        resource_plan
+                            .map(|plan| plan.request.clone())
+                            .unwrap_or_else(analysis_resources),
                         Some(idempotency_key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
@@ -396,12 +467,24 @@ impl PublicationChainDriver for DurableDriver {
                         .await
                         .unwrap();
                     if attachment.record.state.is_terminal() {
-                        break attachment.response.unwrap_or_else(|| {
+                        let resources = attachment.resources.as_ref().expect(
+                            "durable analysis task must retain generic resource accounting",
+                        );
+                        resources.validate().unwrap();
+                        let expected = resource_plan
+                            .map(|plan| plan.request.clone())
+                            .unwrap_or_else(analysis_resources);
+                        assert_eq!(resources.resources.allocation, expected);
+                        let response = attachment.response.unwrap_or_else(|| {
                             panic!(
                                 "durable analysis failed without response: {:?}",
                                 attachment.record.message
                             )
                         });
+                        break MeteredProgramResponse {
+                            response,
+                            resources: resources.clone(),
+                        };
                     }
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
@@ -449,7 +532,7 @@ impl PublicationChainDriver for RemoteDriver {
         host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = ProgramExecutionResponse> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
             for object in &program.objects {
                 self.pool
@@ -492,7 +575,7 @@ impl PublicationChainDriver for RemoteDriver {
                         .to_vec(),
                 );
             }
-            success_response(&success)
+            metered_response(success)
         })
     }
 
@@ -500,7 +583,7 @@ impl PublicationChainDriver for RemoteDriver {
         &'a mut self,
         workloads: Vec<(&'a AnalysisHostWorkload, &'a PreparedAnalysisProgram)>,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
-    ) -> Pin<Box<dyn Future<Output = Vec<ProgramExecutionResponse>> + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Vec<MeteredProgramResponse>> + 'a>> {
         Box::pin(async move {
             for (_, program) in &workloads {
                 for object in &program.objects {
@@ -552,7 +635,7 @@ impl PublicationChainDriver for RemoteDriver {
                             .to_vec(),
                     );
                 }
-                responses.push(success_response(&success));
+                responses.push(metered_response(success));
             }
             responses
         })
