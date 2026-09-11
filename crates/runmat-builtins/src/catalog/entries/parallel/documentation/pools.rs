@@ -48,6 +48,8 @@ const PARPOOL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("workers = 2"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(workers == 2);\ndelete(pool);",
         },
@@ -59,6 +61,8 @@ const PARPOOL_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("first and second identify the same pool generation"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(first.ID == second.ID);\nassert(second.NumWorkers == 2);\ndelete(first);",
@@ -82,8 +86,8 @@ const GCP_SECTIONS: &[BuiltinDocumentationSection] = &[
     ] },
 ];
 const GCP_EXAMPLES: &[BuiltinExample] = &[
-    BuiltinExample { id: "nocreate-empty", title: "Inspect without creating a pool", program: "pool = gcp(\"nocreate\")", display_output: Some("pool = [] when the session has no active pool"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, verification: BuiltinExampleVerification::Assertions { source: "assert(isempty(pool));" } },
-    BuiltinExample { id: "inspect-current", title: "Read the current pool generation", program: "created = parpool(2);\ncurrent = gcp(\"nocreate\")", display_output: Some("current identifies created"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, verification: BuiltinExampleVerification::Assertions { source: "assert(current.ID == created.ID);\nassert(current.NumWorkers == 2);\ndelete(created);" } },
+    BuiltinExample { id: "nocreate-empty", title: "Inspect without creating a pool", program: "pool = gcp(\"nocreate\")", display_output: Some("pool = [] when the session has no active pool"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isempty(pool));" } },
+    BuiltinExample { id: "inspect-current", title: "Read the current pool generation", program: "created = parpool(2);\ncurrent = gcp(\"nocreate\")", display_output: Some("current identifies created"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Native, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(current.ID == created.ID);\nassert(current.NumWorkers == 2);\ndelete(created);" } },
 ];
 const GCP_FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq {

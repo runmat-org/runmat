@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = 3+4i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(z == 3 + 4i);",
         },
@@ -49,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = [1+4i 2+5i 3+6i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(z, [1+4i 2+5i 3+6i]));",
         },
@@ -60,6 +64,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = [1-1i 2-1i 3-1i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(z, [1-1i 2-1i 3-1i]));",
         },
@@ -71,6 +77,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = 12+0i\n\ntf = 0"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(z == 12);\nassert(~tf);",
         },
@@ -82,6 +90,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = 1+2i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(z == 1 + 2i);",
         },
@@ -94,6 +104,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = [1+4i 2+5i 3+6i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(G, 'gpuArray'));\nassert(isequal(z, [1+4i 2+5i 3+6i]));",
         },

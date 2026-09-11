@@ -18,6 +18,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("row = true and column = false"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(row);\nassert(~column);",
         },
@@ -29,6 +31,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(tf);",
         },
@@ -40,6 +44,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("row = true and not_row = false"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(row);\nassert(~not_row);",
         },
@@ -51,6 +57,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tf = true"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(tf);\nassert(~isgpuarray(tf));",
         },

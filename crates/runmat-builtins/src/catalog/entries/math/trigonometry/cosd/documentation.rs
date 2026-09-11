@@ -37,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.5"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 0.5);",
         },
@@ -48,6 +50,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [0 0]));",
         },
@@ -59,6 +63,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [1 0.8660 0.7071 0.5 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [1 sqrt(3)/2 sqrt(0.5) 0.5 0];\nassert(max(abs(y - expected)) < 1e-12);",
         },
@@ -70,6 +76,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y contains cosd(65) and cosd(90)"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"double\"));\nassert(y(2) == 0);\nassert(abs(y(1) - cosd(65)) < 1e-12);",
         },
@@ -81,6 +89,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostY = [1 0.5 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"gpuArray\"));\nassert(isequal(hostY, [1 0.5 0]));",
         },

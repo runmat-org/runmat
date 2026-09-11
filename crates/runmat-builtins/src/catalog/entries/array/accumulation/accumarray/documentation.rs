@@ -15,6 +15,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [30; 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(B, [30; 5]));",
         },
@@ -26,6 +28,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [4 6; 5 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(B, [4 6; 5 0]));",
         },
@@ -37,6 +41,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [2; 0; 9]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(B, [2; 0; 9]));",
         },
@@ -48,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = int16([3; 9; 0])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(B, \"int16\"));\nassert(isequal(B, int16([3; 9; 0])));",
         },
@@ -59,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("A sparse 4-by-1 result with two stored values"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(issparse(B));\nassert(isequal(full(B), [2; 0; 4; 0]));",
         },

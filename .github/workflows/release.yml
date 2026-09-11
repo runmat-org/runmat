@@ -300,6 +300,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Setup Node.js for product evidence
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install native dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -494,31 +499,6 @@ jobs:
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
           if ($LASTEXITCODE -ne 0) { throw "embedded-runtime release build failed with exit code $LASTEXITCODE" }
 
-      - name: Verify packaged CLI contains the native compile runtime (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          smoke_dir="$(mktemp -d)"
-          trap 'rm -rf "$smoke_dir"' EXIT
-          printf 'x = 2 + 3;\ndisp(x);\n' > "$smoke_dir/smoke.m"
-          target/${{ matrix.platform.target }}/release/runmat compile "$smoke_dir/smoke.m" -o "$smoke_dir/smoke"
-          "$smoke_dir/smoke" | grep -Fx '5'
-
-      - name: Verify packaged CLI contains the native compile runtime (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $smokeDir = Join-Path $env:RUNNER_TEMP 'runmat-aot-smoke'
-          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-          Set-Content -LiteralPath (Join-Path $smokeDir 'smoke.m') -Value "x = 2 + 3;`ndisp(x);"
-          & "target/${{ matrix.platform.target }}/release/runmat.exe" compile (Join-Path $smokeDir 'smoke.m') -o (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "embedded compile runtime verification failed with exit code $LASTEXITCODE" }
-          $output = & (Join-Path $smokeDir 'smoke.exe')
-          if ($LASTEXITCODE -ne 0) { throw "compiled smoke program failed with exit code $LASTEXITCODE" }
-          if (($output | Out-String).Trim() -ne '5') { throw "compiled smoke program returned unexpected output: $output" }
-
       - name: Import signing cert and codesign (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -579,48 +559,126 @@ jobs:
           xcrun stapler staple "$BIN" || true
           rm -f "$ZIP_NAME" notary_key.p8
 
+      - name: Stage and probe signed release product (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="artifacts/release-product/${{ matrix.platform.release_for }}"
+          source_revision="$(git rev-parse HEAD)"
+          node scripts/runtime/stage-builtin-example-product.mjs \
+            --binary "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}" \
+            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}"
+          node scripts/runtime/verify-builtin-examples.mjs artifacts \
+            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
+            --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
+          node scripts/runtime/verify-builtin-examples.mjs probe \
+            --kind native-embedded-aot-compile-and-execute-v1 \
+            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+
+      - name: Stage and probe signed release product (Windows)
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = "artifacts/release-product/${{ matrix.platform.release_for }}"
+          $sourceRevision = (& git rev-parse HEAD).Trim()
+          $arguments = @(
+            "scripts/runtime/stage-builtin-example-product.mjs",
+            "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
+            "--destination", "$root/product",
+            "--executable-name", "${{ matrix.platform.bin }}"
+          )
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
+          if (Test-Path $vcpkgBin) { $arguments += @("--dependency-dir", $vcpkgBin) }
+          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
+          $zmqLib = Join-Path $env:ZMQ_PATH "lib"
+          if (Test-Path $zmqBin) { $arguments += @("--dependency-dir", $zmqBin) }
+          elseif (Test-Path $zmqLib) { $arguments += @("--dependency-dir", $zmqLib) }
+          & node @arguments
+          if ($LASTEXITCODE -ne 0) { throw "native product staging failed with exit code $LASTEXITCODE" }
+          & node scripts/runtime/verify-builtin-examples.mjs artifacts `
+            --product native-cli --profile embedded-aot --source-revision $sourceRevision `
+            --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
+            --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
+          if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
+          & node scripts/runtime/verify-builtin-examples.mjs probe `
+            --kind native-embedded-aot-compile-and-execute-v1 `
+            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
+            --output "$root/${{ matrix.platform.release_for }}.product-probe.json"
+          if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
+
+      - name: Verify examples against exact staged native product
+        if: runner.os != 'Windows' || matrix.platform.target != 'aarch64-pc-windows-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="artifacts/release-product/${{ matrix.platform.release_for }}"
+          mkdir -p "$root/verification/results"
+          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/verification/inventory.json"
+          node scripts/runtime/verify-builtin-examples.mjs plan \
+            --inventory "$root/verification/inventory.json" --product native-cli \
+            --topology scripts/runtime/builtin-example-topology.c00.json \
+            --output "$root/verification/plan.json"
+          set +e
+          node scripts/runtime/run-builtin-example-product.mjs \
+            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
+            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            --output-dir "$root/verification/results"
+          execution_status=$?
+          set -e
+          set +e
+          node scripts/runtime/verify-builtin-examples.mjs reconcile \
+            --inventory "$root/verification/inventory.json" --plan "$root/verification/plan.json" \
+            --results-dir "$root/verification/results" \
+            --artifact-manifest "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            --product-probe "$root/${{ matrix.platform.release_for }}.product-probe.json" \
+            --report-dir "$root/verification/report" \
+            --output "$root/${{ matrix.platform.release_for }}.example-reconciliation.json"
+          reconciliation_status=$?
+          set -e
+          tar -czf "runmat-${VERSION}-${{ matrix.platform.release_for }}-builtin-example-evidence.tar.gz" \
+            -C "$root" \
+            "${{ matrix.platform.release_for }}.artifact-manifest.json" \
+            "${{ matrix.platform.release_for }}.product-probe.json" \
+            "${{ matrix.platform.release_for }}.example-reconciliation.json" \
+            verification
+          test "$execution_status" -eq 0
+          test "$reconciliation_status" -eq 0
+
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $target = "${{ matrix.platform.target }}"
-          $outDir = Join-Path "target" (Join-Path $target "release")
+          $outDir = "artifacts/release-product/${{ matrix.platform.release_for }}/product"
           $artifactName = "runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
 
           Push-Location $outDir
-          # Copy required runtime DLLs into output dir
-          $triplet = $env:VCPKG_DEFAULT_TRIPLET
-          $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $triplet + "\bin")
-          if (Test-Path $vcpkgBin) { Copy-Item -Path (Join-Path $vcpkgBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
-
-          $zmqBin = Join-Path $env:ZMQ_PATH "bin"
-          if (Test-Path $zmqBin) { Copy-Item -Path (Join-Path $zmqBin "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
-          else {
-            $zmqLib = Join-Path $env:ZMQ_PATH "lib"
-            if (Test-Path $zmqLib) { Copy-Item -Path (Join-Path $zmqLib "*.dll") -Destination . -Force -ErrorAction SilentlyContinue }
-          }
-
-          # Create zip with binary and DLLs
-          7z a (Join-Path "..\..\.." ("$artifactName.zip")) ${{ matrix.platform.bin }} *.dll
+          7z a (Join-Path "..\..\..\.." ("$artifactName.zip")) ${{ matrix.platform.bin }} *.dll
           Pop-Location
 
       - name: Package as archive (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cd target/${{ matrix.platform.target }}/release
+          cd artifacts/release-product/${{ matrix.platform.release_for }}/product
           ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
-          tar czvf ../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
+          tar czvf ../../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
           cd -
 
       - name: Publish release artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}
+          name: runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}-${{ github.run_attempt }}
           path: |
             runmat-*.tar.gz
             runmat-*.zip
+            artifacts/release-product/${{ matrix.platform.release_for }}/*.json
+          if-no-files-found: error
 
   create-release:
     if: github.event_name == 'push'

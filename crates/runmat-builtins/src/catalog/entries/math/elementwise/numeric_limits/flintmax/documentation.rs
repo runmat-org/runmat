@@ -23,6 +23,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = 9007199254740992"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"double\"));\nassert(limit == 2^53);\nassert(limit + 1 == limit);\nassert(limit - 1 ~= limit);" },
     },
     BuiltinExample {
@@ -32,6 +34,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = single(16777216)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"single\"));\nassert(limit == single(2^24));\nassert(limit + single(1) == limit);" },
     },
     BuiltinExample {
@@ -41,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = single(16777216)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"single\"));\nassert(limit == single(16777216));\nassert(isequal(size(limit), [1 1]));" },
     },
 ];

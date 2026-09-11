@@ -57,6 +57,8 @@ const INDEX_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("rank contains 1 and 2 in worker order"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(rank{1} == 1);\nassert(rank{2} == 2);\ndelete(pool);",
         },
@@ -68,6 +70,8 @@ const INDEX_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("rank = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(rank == 1);",
         },
@@ -81,6 +85,8 @@ const SIZE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("each worker reports count = 2"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(count{1} == 2);\nassert(count{2} == 2);\ndelete(pool);",
         },
@@ -92,6 +98,8 @@ const SIZE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("count = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(count == 1);",
         },
@@ -104,6 +112,8 @@ const LABINDEX_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("rank contains 1 and 2 in worker order"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(rank{1} == 1);\nassert(rank{2} == 2);\ndelete(pool);",
     },
@@ -115,6 +125,8 @@ const NUMLABS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("each worker reports count = 2"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(count{1} == 2);\nassert(count{2} == 2);\ndelete(pool);",
     },

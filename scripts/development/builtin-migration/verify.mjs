@@ -1,83 +1,65 @@
-import { sorted } from "./constants.mjs";
-import { reconcileExampleEvidence } from "./verify-examples.mjs";
-import { parseVerificationManifest, validateFactoryAudit } from "./verify-schema.mjs";
+import { evidenceDigest } from "./evidence.mjs";
+import { parseGateResult } from "./gate-result.mjs";
+import { parseVerificationManifest, validateAudit } from "./verify-schema.mjs";
 
-export function verifyBatch(manifestValue, loadedFactory, loadedReports) {
+export function verifyBatch(manifestValue, loadedAudit, loadedGates) {
   const manifest = parseVerificationManifest(manifestValue);
-  const globalFailures = [];
-  let factory = null;
-  let examples = null;
-  try {
-    factory = reconcileFactory(manifest, loadedFactory);
-  } catch (error) {
-    globalFailures.push(failure("factory-evidence-invalid", error));
+  const failures = [];
+  const audit = reconcileReference(manifest.audit, loadedAudit, "audit", failures);
+  if (audit) {
+    try { validateAudit(audit, { ...manifest.batch, audit_artifact_id: manifest.audit.artifact_id }); }
+    catch (error) { failures.push(issue("audit-invalid", error.message)); }
   }
-  try {
-    examples = reconcileExampleEvidence(manifest, loadedReports);
-  } catch (error) {
-    globalFailures.push(failure("example-evidence-invalid", error));
+  const expected = {
+    source_revision: manifest.batch.source_revision, source_digest: manifest.batch.source_digest,
+    inventory_digest: manifest.batch.inventory_digest, control_manifest_digest: manifest.batch.control_manifest_digest,
+    bundle_id: manifest.batch.bundle_id,
+  };
+  const gates = new Map();
+  for (const reference of manifest.gate_results) {
+    const loaded = loadedGates.find((entry) => entry.reference.artifact_id === reference.artifact_id);
+    const raw = reconcileReference(reference, loaded, "gate", failures);
+    if (!raw) continue;
+    try {
+      const parsed = parseGateResult(raw, expected);
+      if (parsed.artifact_id !== reference.artifact_id) throw new Error("gate artifact id differs from reference");
+      if (parsed.result !== "pass") throw new Error(`${parsed.gate}: result is ${parsed.result}`);
+      if (JSON.stringify(parsed.identities) !== JSON.stringify(manifest.batch.identities)) throw new Error(`${parsed.gate}: identities differ from batch`);
+      if (gates.has(parsed.gate)) throw new Error(`duplicate evidence for gate ${parsed.gate}`);
+      gates.set(parsed.gate, parsed);
+    } catch (error) { failures.push(issue("gate-invalid", error.message)); }
   }
-  const identities = manifest.batch.identities.map((identity) => {
-    const failures = [];
-    const factoryResult = factory?.value.identities.find((entry) => entry.identity === identity);
-    const exampleResult = examples?.identities.find((entry) => entry.identity === identity);
-    if (!factoryResult) failures.push({ code: "factory-identity-missing" });
-    else if (factoryResult.result !== "pass") failures.push({ code: "factory-audit-failed", audit_failures: factoryResult.failures });
-    if (!exampleResult) failures.push({ code: "example-evidence-unavailable" });
-    else failures.push(...exampleResult.failures);
-    return {
-      identity,
-      result: failures.length ? "fail" : "pass",
-      factory_result: factoryResult?.result ?? "missing",
-      required_lanes: exampleResult?.required_lanes ?? [],
-      observed_lanes: exampleResult?.observed_lanes ?? [],
-      example_keys: exampleResult?.example_keys ?? [],
-      failures,
-    };
+  if (audit) {
+    const auditedArtifacts = [...audit.evidence.gate_artifacts].sort();
+    const verifiedArtifacts = [...gates.values()].map((entry) => entry.artifact_id).sort();
+    if (JSON.stringify(auditedArtifacts) !== JSON.stringify(verifiedArtifacts)) failures.push(issue("audit-gate-set-mismatch", "verification gates differ from the gate set accepted by audit"));
+  }
+  const identities = manifest.expectations.map((expectation) => {
+    const missing = expectation.required_gates.filter((gate) => !gates.has(gate));
+    return { identity: expectation.identity, required_gates: expectation.required_gates, observed_gates: expectation.required_gates.filter((gate) => gates.has(gate)), result: missing.length ? "fail" : "pass", failures: missing.map((gate) => issue("required-gate-missing", gate)) };
   });
-  if (factory && factory.value.result !== "pass") globalFailures.push({ code: "factory-audit-not-passing" });
-  if (factory && factory.value.global_diagnostics?.length) globalFailures.push({ code: "factory-global-errors", count: factory.value.global_diagnostics.length });
-  const result = !globalFailures.length && identities.every((entry) => entry.result === "pass") ? "pass" : "fail";
+  const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 1,
-    kind: "runmat-builtin-migration-verification-result",
-    authority: "development-verification-evidence-only",
-    metadata: {
-      batch: { artifact: manifest.batch.artifact, source: manifest.batch.source },
-      inventories: { factory: manifest.batch.factory_inventory_digest, examples: manifest.batch.example_inventory_digest },
-      artifacts: {
-        factory: manifest.factory_audit.artifact,
-        example_combined: manifest.batch.combined_example_artifact,
-        example_inputs: examples?.inputArtifacts ?? manifest.example_reports.map((entry) => entry.artifact),
-        example_constituents: examples?.constituentArtifacts ?? [],
-      },
-    },
-    summary: {
-      identities: identities.length,
-      passed: identities.filter((entry) => entry.result === "pass").length,
-      failed: identities.filter((entry) => entry.result === "fail").length,
-      global_failures: globalFailures.length,
-    },
-    result,
-    global_failures: globalFailures,
-    identities,
+    schema_version: 2, kind: "runmat-builtin-migration-verification-result", authority: "development-verification-evidence-only",
+    artifact_id: manifest.batch.artifact_id, source_revision: manifest.batch.source_revision, source_digest: manifest.batch.source_digest,
+    inventory_digest: manifest.batch.inventory_digest, control_manifest_digest: manifest.batch.control_manifest_digest,
+    bundle_id: manifest.batch.bundle_id, identities: manifest.batch.identities,
+    inputs: { audit: manifest.audit, gates: manifest.gate_results },
+    summary: { identities: identities.length, passed, failed: identities.length - passed, global_failures: failures.length },
+    result: passed === identities.length && !failures.length ? "pass" : "fail", global_failures: failures, identity_results: identities,
   };
 }
 
-function reconcileFactory(manifest, loaded) {
-  if (!loaded || loaded.reference.path !== manifest.factory_audit.path
-      || loaded.reference.artifact !== manifest.factory_audit.artifact) {
-    throw new Error("Factory evidence reference changed during loading");
+function reconcileReference(reference, loaded, label, failures) {
+  if (!loaded || loaded.reference.path !== reference.path || loaded.reference.artifact_id !== reference.artifact_id || loaded.reference.digest !== reference.digest) {
+    failures.push(issue(`${label}-reference-invalid`, "loaded reference differs from reviewed manifest"));
+    return null;
   }
-  const audit = validateFactoryAudit(loaded.value);
-  if (audit.artifact !== manifest.factory_audit.artifact) throw new Error("Factory audit artifact mismatch");
-  if (audit.source !== manifest.batch.source) throw new Error("Stale factory audit source");
-  if (audit.inventory_digest !== manifest.batch.factory_inventory_digest) throw new Error("Stale factory inventory");
-  const requested = sorted(audit.value.requested_identities.map((entry) => entry.toLowerCase()));
-  if (JSON.stringify(requested) !== JSON.stringify(manifest.batch.identities)) throw new Error("Factory audit identities do not match batch");
-  return audit;
+  if (evidenceDigest(loaded.value) !== reference.digest) {
+    failures.push(issue(`${label}-digest-mismatch`, reference.artifact_id));
+    return null;
+  }
+  return loaded.value;
 }
 
-function failure(code, error) {
-  return { code, detail: error instanceof Error ? error.message : String(error) };
-}
+function issue(code, detail) { return { code, detail }; }

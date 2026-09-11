@@ -6,6 +6,7 @@ use super::{documentation, CELL2STRUCT_DESCRIPTOR, CELL2STRUCT_INTEGER_CAPABILIT
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const CELL2STRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "cell2struct",
     },

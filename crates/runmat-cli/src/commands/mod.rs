@@ -9,6 +9,7 @@ pub mod fea;
 pub mod gc;
 pub mod job;
 pub mod mex;
+pub mod native_interface;
 pub mod package;
 pub mod repl;
 pub mod script;

@@ -94,6 +94,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = uint8(240)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(c, 'uint8')); assert(c == uint8(240));",
         },
@@ -105,6 +107,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("c = 240"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(c, 'double')); assert(c == 240);",
         },
@@ -155,6 +159,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const BITCMP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "bitcmp" },
     category: "math/bitwise",
     documentation: DOCUMENTATION,

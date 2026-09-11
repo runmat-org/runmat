@@ -8,6 +8,7 @@ use crate::*;
 pub use contract::*;
 
 pub const MPOWER_CATALOG_ENTRY: BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "mpower",
     documentation::DOCUMENTATION,
     &MPOWER_DESCRIPTOR,

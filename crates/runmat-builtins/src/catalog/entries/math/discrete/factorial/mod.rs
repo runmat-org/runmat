@@ -159,6 +159,7 @@ const DISTRIBUTED_NUMERIC_CLASSES: [NumericClass; 8] = [
     NumericClass::UInt32,
 ];
 pub const FACTORIAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "factorial" },
     category: "math/discrete",
     documentation: FACTORIAL_DOCUMENTATION,

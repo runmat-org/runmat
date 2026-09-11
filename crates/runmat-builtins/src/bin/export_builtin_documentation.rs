@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const EXPORT_SCHEMA_VERSION: u32 = 1;
+const EXPORT_SCHEMA_VERSION: u32 = 2;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut output = None;
@@ -164,6 +164,25 @@ fn annotate_legacy_document(key: &str, document: &mut Value) -> Result<(), Strin
         .ok_or_else(|| format!("legacy documentation for {key} is not an object"))?;
     object.insert("key".into(), Value::String(key.into()));
     object.insert("authority".into(), Value::String("legacy_sidecar".into()));
+    if let Some(examples) = object.get_mut("examples").and_then(Value::as_array_mut) {
+        for example in examples {
+            let Some(example) = example.as_object_mut() else {
+                continue;
+            };
+            example
+                .entry("fixture")
+                .or_insert_with(|| Value::String("None".into()));
+            example.entry("requirements").or_insert_with(|| {
+                json!({
+                    "host": "Any",
+                    "engine": "Default",
+                    "compiler": [],
+                    "runtime": [],
+                    "toolchain": []
+                })
+            });
+        }
+    }
     Ok(())
 }
 
@@ -237,6 +256,8 @@ fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
                 "output": example.display_output,
                 "compatibility": example.compatibility,
                 "harness": example.harness,
+                "fixture": example.fixture,
+                "requirements": example.requirements,
                 "verification": example.verification,
             })
         })
@@ -356,6 +377,18 @@ mod tests {
             Some(expected_documents),
             "the transition must preserve the complete current documentation inventory"
         );
+        assert_eq!(first["schema_version"], EXPORT_SCHEMA_VERSION);
+        for document in first["builtins"]
+            .as_array()
+            .expect("documentation export rows")
+            .iter()
+            .filter(|document| document["authority"] == "catalog")
+        {
+            for example in document["examples"].as_array().expect("catalog examples") {
+                assert!(example.get("fixture").is_some());
+                assert!(example.get("requirements").is_some());
+            }
+        }
         let has_missing = first["inventory"]["missing_catalog_documentation"]
             .as_array()
             .is_some_and(|missing| !missing.is_empty());

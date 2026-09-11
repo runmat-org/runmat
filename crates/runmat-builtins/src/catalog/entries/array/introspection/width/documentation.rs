@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 5"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(n == 5);\nassert(isa(n, 'double'));" },
     },
     BuiltinExample {
@@ -41,6 +43,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 2"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(n == 2);\nassert(size(samples, 2) == 2);" },
     },
     BuiltinExample {
@@ -50,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 7"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(n == 7);" },
     },
     BuiltinExample {
@@ -59,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("n = 256"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(n == 256);\nassert(~isgpuarray(n));" },
     },
 ];

@@ -62,6 +62,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 3"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 3) < 1e-12);",
         },
@@ -73,6 +75,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("value = -Inf"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isinf(value) && value < 0);",
         },
@@ -84,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0.0000 + 3.1416i 0.6931 + 3.1416i 1.3863 + 3.1416i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [pi*1i log(2)+pi*1i log(4)+pi*1i];\nassert(max(abs(result - expected)) < 1e-12);",
         },
@@ -95,6 +101,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w = [0.8047 + 1.1071i 1.1920 + 1.8780i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(exp(w) - z)) < 1e-12);",
         },
@@ -106,6 +114,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0.0000 0.6931; 1.3863 2.0794]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 log(2); log(4) log(8)];\nassert(max(abs(result(:) - expected(:))) < 1e-12);",
         },
@@ -117,6 +127,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("values = [4.1744 4.1897 4.2047]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = log([65 66 67]);\nassert(max(abs(values - expected)) < 1e-12);",
         },

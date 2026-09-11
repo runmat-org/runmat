@@ -33,6 +33,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 1.1752"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 1.175201193643801) < 1e-12);",
         },
@@ -44,6 +46,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-1.1752 -0.5211 0 0.5211 1.1752]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [-1.175201193643801 -0.521095305493747 0 0.521095305493747 1.175201193643801];\nassert(max(abs(y - expected)) < 1e-12);",
         },
@@ -55,6 +59,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [0 1.1752; 3.6269 10.0179]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 1.175201193643801; 3.626860407847019 10.017874927409903];\nassert(isequal(size(B), [2 2]));\nassert(max(abs(B - expected), [], \"all\") < 1e-12);",
         },
@@ -66,6 +72,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0.2526 0.5211; 0.8223 1.1752]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0.252612316808168 0.521095305493747; 0.822316731935830 1.175201193643801];\nassert(max(abs(result - expected), [], \"all\") < 1e-12);",
         },
@@ -77,6 +85,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w = -0.4891 + 1.4031i"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = -0.489056259041294 + 1.403119250622041i;\nassert(abs(w - expected) < 1e-12);",
         },
@@ -88,6 +98,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y is a 0-by-3 double matrix"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(Y), [0 3]));\nassert(isempty(Y));",
         },

@@ -33,6 +33,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-2 0 0 1 4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [-2 0 0 1 4]));",
         },
@@ -44,6 +46,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [2 5; -3 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(B, [2 5; -3 5]));",
         },
@@ -55,6 +59,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("up = [-1 2; 0 3; 1 4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(up), [3 2])); assert(isequal(up, [-1 2; 0 3; 1 4]));",
         },
@@ -66,6 +72,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [2 + 3i, 0 - 3i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [2 + 3i, 0 - 3i]));",
         },
@@ -77,6 +85,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y retains class uint64 and every input bit"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'uint64')); assert(isequal(y, x));",
         },
@@ -88,6 +98,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [2 0; 3 4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [2 0; 3 4]));",
         },

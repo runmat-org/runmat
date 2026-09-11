@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 // @ts-check
 
+// Interactive pre-review helper retained for individual migrations. Its v1
+// report is not C00 completion evidence. The migration factory's reviewed
+// documentation_cutover gate owns the closed, content-addressed leaf and
+// destination reconciliation used by audit and verification.
+
 import { execFileSync, spawnSync } from "child_process";
 import { existsSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";

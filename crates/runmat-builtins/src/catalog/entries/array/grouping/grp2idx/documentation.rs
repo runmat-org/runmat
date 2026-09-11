@@ -31,6 +31,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("g = [1; 2; 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(g, [1; 2; 1]));\nassert(isequal(gN, {'b'; 'a'}));\nassert(isequal(gL, {'b'; 'a'}));" },
     },
     BuiltinExample {
@@ -40,6 +42,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("g = [2; 1; 2], gL = uint64([2; 9])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(g, [2; 1; 2]));\nassert(isa(gL, \"uint64\"));\nassert(isequal(gL, uint64([2; 9])));" },
     },
     BuiltinExample {
@@ -49,6 +53,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("g = [2; NaN; 1; 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequaln(g, [2; NaN; 1; 2]));\nassert(isequal(gL, [1; 3]));" },
     },
 ];

@@ -13,6 +13,7 @@ use super::{documentation, RMFIELD_DESCRIPTOR, RMFIELD_EXTENSIONS, RMFIELD_INTEG
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const RMFIELD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "rmfield" },
     category: "structs/core",
     documentation: documentation::DOCUMENTATION,

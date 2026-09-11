@@ -38,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 0 -1 0 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(Y, [1 0 -1 0 1]));",
         },
@@ -49,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("exactValue = 0; approximateValue is close to zero"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(exactValue == 0);\nassert(approximateValue ~= 0);",
         },
@@ -60,6 +64,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [1 -1]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(Y, \"double\"));\nassert(isequal(Y, [1 -1]));",
         },
@@ -71,6 +77,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y is a complex single scalar"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(Y, \"single\"));\nassert(real(Y) == 0);\nassert(abs(double(imag(Y)) + sinh(pi)) < 1e-5);",
         },
@@ -82,6 +90,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostY = [1 0 -1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(Y, \"gpuArray\"));\nassert(isequal(hostY, [1 0 -1]));",
         },

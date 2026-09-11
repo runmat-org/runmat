@@ -33,6 +33,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-3 -1 0 0 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(y, [-3 -1 0 0 3]));" },
     },
     BuiltinExample {
@@ -42,6 +44,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [1 4; -4 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(B, [1 4; -4 5]));" },
     },
     BuiltinExample {
@@ -51,6 +55,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("floored = [-2 1; -1 2; 0 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(floored), [3 2])); assert(isequal(floored, [-2 1; -1 2; 0 3]));" },
     },
     BuiltinExample {
@@ -60,6 +66,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [1 + 2i, -1 - 4i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(result, [1 + 2i, -1 - 4i]));" },
     },
     BuiltinExample {
@@ -69,6 +77,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y retains class uint64 and every input bit"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(y, 'uint64')); assert(isequal(y, x));" },
     },
     BuiltinExample {
@@ -78,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("H = [1 -1 0; -2 2 -4]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(H, [1 -1 0; -2 2 -4]));" },
     },
 ];

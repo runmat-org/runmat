@@ -12,6 +12,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("root is a nonempty character row"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(ischar(root)); assert(size(root, 1) == 1); assert(~isempty(root));",
         },
@@ -23,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(ischar(resource)); assert(endsWith(resource, 'toolbox'));",
         },

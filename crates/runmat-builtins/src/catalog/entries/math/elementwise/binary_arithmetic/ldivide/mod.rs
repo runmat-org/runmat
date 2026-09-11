@@ -13,6 +13,7 @@ pub use contract::*;
 const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const LDIVIDE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ldivide" },
     category: "math/elementwise",
     documentation: documentation::DOCUMENTATION,

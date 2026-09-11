@@ -28,6 +28,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("L = [45 765; 90 180]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(L, [45 765; 90 180]));",
         },
@@ -39,6 +41,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("L = uint16([255 64897 5115])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(L, 'uint16')); assert(isequal(L, uint16([255 64897 5115])));",
         },
@@ -50,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("L = int32([30 30])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(L, 'int32')); assert(isequal(L, int32([30 30])));",
         },
@@ -61,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("L = single([24 12])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(L, 'single')); assert(isequal(L, single([24 12])));",
         },

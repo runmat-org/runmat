@@ -17,6 +17,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const LS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "ls" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

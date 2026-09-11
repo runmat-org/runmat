@@ -250,12 +250,83 @@ jobs:
           npm version "${next_version}" --no-git-tag-version --allow-same-version
           echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
 
+      - name: Build publishable bindings once
+        working-directory: bindings/ts
+        run: npm run build
+
+      - name: Bind browser runtime entrypoints to exact publish bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_revision="$(git rev-parse HEAD)"
+          node scripts/runtime/verify-builtin-examples.mjs artifacts \
+            --product browser-wasm --profile web --source-revision "$source_revision" \
+            --file wasm-js=bindings/ts/dist/pkg-web/runmat_wasm_web.js \
+            --file wasm-binary=bindings/ts/dist/pkg-web/runmat_wasm_web_bg.wasm \
+            --output bindings/ts/browser-product.artifacts.json
+
+      - name: Verify examples against exact browser publish bytes
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.setup_chrome.outputs.chrome-path }}
+          RUNMAT_CHROMEDRIVER_BIN: ${{ steps.setup_chrome.outputs.chromedriver-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=bindings/ts/builtin-example-verification
+          mkdir -p "$root/results"
+          node scripts/runtime/verify-builtin-examples.mjs inventory --output "$root/inventory.json"
+          node scripts/runtime/verify-builtin-examples.mjs plan \
+            --inventory "$root/inventory.json" --product browser-wasm \
+            --topology scripts/runtime/builtin-example-topology.c00.json --output "$root/plan.json"
+          set +e
+          node scripts/runtime/run-builtin-example-product.mjs \
+            --inventory "$root/inventory.json" --plan "$root/plan.json" \
+            --artifact-manifest bindings/ts/browser-product.artifacts.json \
+            --output-dir "$root/results"
+          execution_status=$?
+          set -e
+          node scripts/runtime/verify-builtin-examples.mjs reconcile \
+            --inventory "$root/inventory.json" --plan "$root/plan.json" \
+            --results-dir "$root/results" \
+            --artifact-manifest bindings/ts/browser-product.artifacts.json \
+            --report-dir "$root/report" --output "$root/reconciliation.json"
+          test "$execution_status" -eq 0
+
+      - name: Retain browser product verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-bindings-product-evidence-${{ github.run_attempt }}
+          path: |
+            bindings/ts/browser-product.artifacts.json
+            bindings/ts/builtin-example-verification/plan.json
+            bindings/ts/builtin-example-verification/reconciliation.json
+            bindings/ts/builtin-example-verification/report
+            bindings/ts/builtin-example-verification/results/*.shard-result.json
+          if-no-files-found: error
+
+      - name: Pack the already-built package without lifecycle rebuilds
+        id: package_archive
+        working-directory: bindings/ts
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_json="$(npm pack --ignore-scripts --json)"
+          archive="$(PACKAGE_ARCHIVE_JSON="$archive_json" node -e 'const value=JSON.parse(process.env.PACKAGE_ARCHIVE_JSON); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
+          test -f "$archive"
+          packed_root="${RUNNER_TEMP}/runmat-bindings-package"
+          mkdir -p "$packed_root"
+          tar -xzf "$archive" -C "$packed_root"
+          cmp dist/pkg-web/runmat_wasm_web.js "$packed_root/package/dist/pkg-web/runmat_wasm_web.js"
+          cmp dist/pkg-web/runmat_wasm_web_bg.wasm "$packed_root/package/dist/pkg-web/runmat_wasm_web_bg.wasm"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
       - name: Publish bindings package to npm
         if: github.event_name == 'push' || inputs.publish
         working-directory: bindings/ts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --tag ${{ steps.publish_settings.outputs.dist_tag }}
+        run: npm publish "${{ steps.package_archive.outputs.archive }}" --ignore-scripts --access public --tag ${{ steps.publish_settings.outputs.dist_tag }}
 
       - name: Promote production release to latest
         if: (github.event_name == 'push' || inputs.publish) && steps.publish_settings.outputs.channel == 'prod'

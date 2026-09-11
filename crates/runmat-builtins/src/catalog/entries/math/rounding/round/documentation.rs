@@ -39,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-4 -2 -1 0 1 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [-4 -2 -1 0 1 2]));",
         },
@@ -50,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [21.46 20.00 22.50]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(y - [21.46 20 22.5])) < 1e-12);",
         },
@@ -61,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [1200 5700 91000]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [1200 5700 91000]));",
         },
@@ -72,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0.00123 12.3 98800]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(y - [0.00123 12.3 98800])) < 1e-10);",
         },
@@ -83,6 +91,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [1 - 4i, -3 + 1i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [1 - 4i, -3 + 1i]));",
         },
@@ -94,6 +104,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y retains class uint64 and every input bit"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, 'uint64')); assert(isequal(y, x));",
         },
@@ -105,6 +117,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [1200 5700]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [1200 5700]));",
         },
@@ -116,6 +130,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [-3 -1 1 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(result, [-3 -1 1 3]));",
         },

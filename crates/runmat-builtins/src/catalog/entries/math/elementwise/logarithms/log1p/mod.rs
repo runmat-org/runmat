@@ -113,6 +113,7 @@ const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
 pub const LOG1P_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "log1p" },
     category: "math/elementwise",
     documentation: LOG1P_DOCUMENTATION,

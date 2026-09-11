@@ -67,6 +67,7 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
 macro_rules! context_entry {
     ($constant:ident, $name:literal, $rule:expr, $documentation:expr, $descriptor:ident) => {
         pub const $constant: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "parallel",
             documentation: $documentation,

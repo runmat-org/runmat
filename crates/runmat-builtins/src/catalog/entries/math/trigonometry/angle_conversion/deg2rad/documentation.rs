@@ -30,6 +30,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r = 1.5708"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(r - pi/2) < 1e-12);",
         },
@@ -41,6 +43,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r = [0 0.5236 0.7854 1.0472 1.5708]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(r), size(d)));\nassert(max(abs(r - d*pi/180)) < 1e-12);",
         },
@@ -52,6 +56,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r is a single array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isa(r, \"single\"));\nassert(max(abs(double(r) - [0 pi/2 pi])) < 1e-6);",
@@ -64,6 +70,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r = [0 1.5708 3.1416]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(r, \"double\"));\nassert(max(abs(r - [0 pi/2 pi])) < 1e-12);",
         },

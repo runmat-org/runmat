@@ -19,8 +19,9 @@ test("harnesses select only their executable lanes", () => {
     assert.equal(usesNativeLane("Wgpu"), false);
     assert.equal(usesBrowserLane("NativeFilesystem"), false);
     assert.equal(usesNativeLane("NativeFilesystem"), true);
+    assert.equal(usesNativeLane("NativeLoopbackNetwork"), true);
     assert.equal(usesBrowserLane("InteractiveHost"), false);
-    assert.equal(usesNativeLane("InteractiveHost"), false);
+    assert.equal(usesNativeLane("InteractiveHost"), true);
 });
 
 test("portable success requires both lanes", () => {
@@ -47,7 +48,7 @@ test("portable expected errors must agree by stable identifier", () => {
 });
 
 test("an unsupported harness produces an explicit failing result", () => {
-    const testCase = { id: 3, harness: "InteractiveHost", verification: "Succeeds" };
+    const testCase = { id: 3, harness: "Unimplemented", verification: "Succeeds" };
     assert.match(mergeLaneResults([testCase], [], [], [testCase])[0].errorText, /no verifier adapter/);
 });
 
@@ -56,14 +57,16 @@ test("native results use the structured run artifact contract", () => {
         parseNativeArtifactManifest(JSON.stringify({
             schema_version: "runmat.artifacts.v1",
             success: false,
+            used_jit: false,
             error_identifier: "RunMat:test:Expected"
         })),
-        { success: false, errorIdentifier: "RunMat:test:Expected" }
+        { success: false, errorIdentifier: "RunMat:test:Expected", usedJit: false }
     );
     assert.throws(
         () => parseNativeArtifactManifest(JSON.stringify({
             schema_version: "runmat.artifacts.v0",
             success: true,
+            used_jit: false,
             error_identifier: null
         })),
         /unsupported or missing/
@@ -72,6 +75,7 @@ test("native results use the structured run artifact contract", () => {
         () => parseNativeArtifactManifest(JSON.stringify({
             schema_version: "runmat.artifacts.v1",
             success: "yes",
+            used_jit: false,
             error_identifier: null
         })),
         /success must be a boolean/

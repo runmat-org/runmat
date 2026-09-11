@@ -83,6 +83,7 @@ pub const REALSQRT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1]
 const REALSQRT_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 pub const REALSQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
     unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+        provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "realsqrt" },
         documentation: REALSQRT_DOCUMENTATION,
         descriptor: &REALSQRT_DESCRIPTOR,

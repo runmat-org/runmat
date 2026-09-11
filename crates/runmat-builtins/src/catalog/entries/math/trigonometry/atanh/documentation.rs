@@ -35,6 +35,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.5493"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 0.549306144334055) < 1e-12);",
         },
@@ -46,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-1.4722 -0.4847 0 0.4847 1.4722]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [-1.472219489583220 -0.484700278594052 0 0.484700278594052 1.472219489583220];\nassert(max(abs(y - expected)) < 1e-12);",
         },
@@ -57,6 +61,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("The values at 1 and -1 are positive and negative infinity"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isinf(B(1, 2)) && B(1, 2) > 0);\nassert(isinf(B(1, 3)) && B(1, 3) < 0);\nfinite_mask = [true false false; true true true];\nassert(max(abs(tanh(B(finite_mask)) - A(finite_mask))) < 1e-12);",
         },
@@ -68,6 +74,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0.5493 + 1.5708i, -0.3466 + 1.5708i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0.549306144334055 + 1.570796326794897i, -0.346573590279973 + 1.570796326794897i];\nassert(max(abs(result - expected)) < 1e-12);",
         },
@@ -79,6 +87,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("W contains the principal complex inverse hyperbolic tangents"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(W), [1 2]));\nassert(max(abs(tanh(W) - Z)) < 1e-12);",
         },
@@ -90,6 +100,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [-1.0986 -0.4236 0.4236 1.0986]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [-1.098612288668110 -0.423648930193602 0.423648930193602 1.098612288668110];\nassert(max(abs(result - expected)) < 1e-12);",
         },

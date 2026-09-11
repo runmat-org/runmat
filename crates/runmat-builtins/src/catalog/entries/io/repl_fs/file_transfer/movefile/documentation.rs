@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is double 1, the source is absent, and the target exists"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(status, 'double') && status == 1); assert(sourceAfter == 0 && targetAfter ~= 0);" },
     },
     BuiltinExample {
@@ -35,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("the source name is retained inside the destination directory"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(status == 1); assert(moved ~= 0);" },
     },
     BuiltinExample {
@@ -44,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is 1 and both diagnostic character rows are empty"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(status == 1); assert(ischar(msg) && isempty(msg)); assert(ischar(msgID) && isempty(msgID));" },
     },
     BuiltinExample {
@@ -53,6 +59,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("both matching files are moved"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(status == 1); assert(first ~= 0 && second ~= 0);" },
     },
     BuiltinExample {
@@ -62,6 +70,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is 0 and the diagnostic rows identify the failure"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(status == 0); assert(ischar(msg) && ~isempty(msg)); assert(ischar(msgID) && ~isempty(msgID));" },
     },
     BuiltinExample {
@@ -71,6 +81,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("status is 1 and the file remains at the same path"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(status == 1); assert(stillPresent ~= 0);" },
     },
 ];

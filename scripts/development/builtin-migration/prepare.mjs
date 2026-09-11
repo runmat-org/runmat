@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import { compareCodePoint, rustLeaf, sorted } from "./constants.mjs";
+import { rustLeaf, sorted } from "./constants.mjs";
+import { evidenceDigest } from "./evidence.mjs";
+import { buildSourceFieldDisposition, sourceFieldBaselineDigest } from "./source-fields.mjs";
+import { array, digest, exact, identity, integer, kind, nonempty, repositoryPath, sourceRevision, stableId } from "./schema.mjs";
 
-export function prepareIdentity(repository, inventory, identity, outputRoot) {
+export function prepareIdentity(repository, inventory, control, lease, identity, outputRoot) {
   const key = identity.toLowerCase();
   const row = inventory.identities.find((entry) => entry.identity === key);
   if (!row) throw new Error(`${identity}: identity is not present in the inventory`);
+  const controlled = control.identities.get(key);
+  if (!controlled) throw new Error(`${identity}: identity is not present in the reviewed control manifest`);
+  if (lease.bundle.id !== controlled.bundle_id) throw new Error(`${identity}: lease does not own the identity bundle`);
   const canonicalRepository = fs.realpathSync(repository);
   const absoluteOutput = path.resolve(outputRoot);
   const canonicalOutput = canonicalPotentialPath(absoluteOutput);
@@ -20,24 +26,65 @@ export function prepareIdentity(repository, inventory, identity, outputRoot) {
   assertWithinOutput(canonicalOutput, workspace);
   assertSafeTargets(canonicalRepository, workspace, prepareTargets(workspace, row));
   const documents = copyLegacyDocuments(repository, workspace, row);
-  const checklist = sourceFieldChecklist(repository, row);
+  const checklist = buildSourceFieldDisposition(repository, row);
   writeJson(path.join(workspace, "source-field-disposition.json"), checklist);
   writeJson(path.join(workspace, "inventory-evidence.json"), row);
   writeText(path.join(workspace, "catalog", "mod.rs.template"), catalogTemplate(row));
   writeText(path.join(workspace, "catalog", "documentation.rs.template"), documentationTemplate(row, documents));
   writeText(path.join(workspace, "runtime", `${rustLeaf(key)}.rs.template`), runtimeTemplate(row));
   const report = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-prepare-result",
     authority: "review-workspace-only",
     identity: key,
+    bundle_id: controlled.bundle_id,
+    control_manifest_digest: control.digest,
+    source: inventory.source,
+    inventory_digest: inventory.digest,
+    lease_id: lease.value.lease_id,
     workspace,
     copied_legacy_documents: documents,
-    checklist_entries: checklist.fields.length,
+    checklist_digest: evidenceDigest(checklist),
+    checklist_baseline_digest: sourceFieldBaselineDigest(checklist),
+    checklist_entries: checklist.sources.reduce((sum, source) => sum + source.leaves.length, 0),
     source_changes: false,
   };
   writeJson(path.join(workspace, "prepare-result.json"), report);
   return report;
+}
+
+export function parsePrepareResult(value, expected) {
+  kind(value, 2, "runmat-builtin-migration-prepare-result", "prepare result");
+  exact(value, ["schema_version", "kind", "authority", "identity", "bundle_id", "control_manifest_digest", "source", "inventory_digest", "lease_id", "workspace", "copied_legacy_documents", "checklist_digest", "checklist_baseline_digest", "checklist_entries", "source_changes"], "prepare result");
+  if (value.authority !== "review-workspace-only" || value.source_changes !== false) throw new Error("prepare result must remain review-only and source-neutral");
+  identity(value.identity, "prepare identity");
+  stableId(value.bundle_id, "prepare bundle id");
+  digest(value.control_manifest_digest, "prepare control digest");
+  exact(value.source, ["revision", "dirty", "roots", "files", "digest"], "prepare source snapshot");
+  sourceRevision(value.source.revision, "prepare source revision");
+  digest(value.source.digest, "prepare source digest");
+  array(value.source.roots, "prepare source roots").forEach((entry) => repositoryPath(entry, "prepare source root"));
+  array(value.source.files, "prepare source files").forEach((entry) => {
+    exact(entry, ["path", "mode", "content_digest"], "prepare source file");
+    repositoryPath(entry.path, "prepare source file path");
+    integer(entry.mode, "prepare source file mode");
+    digest(entry.content_digest, "prepare source file digest");
+  });
+  digest(value.inventory_digest, "prepare inventory digest");
+  digest(value.checklist_digest, "prepare checklist digest");
+  digest(value.checklist_baseline_digest, "prepare checklist baseline digest");
+  nonempty(value.lease_id, "prepare lease id");
+  nonempty(value.workspace, "prepare workspace");
+  array(value.copied_legacy_documents, "copied legacy documents", { empty: true }).forEach((entry) => {
+    exact(entry, ["source", "target"], "copied legacy document");
+    repositoryPath(entry.source, "copied legacy source");
+    repositoryPath(entry.target, "copied legacy target");
+  });
+  integer(value.checklist_entries, "prepare checklist entries");
+  if (expected && ((expected.identity !== undefined && value.identity !== expected.identity) || value.bundle_id !== expected.bundle_id || value.control_manifest_digest !== expected.control_manifest_digest || value.lease_id !== expected.lease_id)) {
+    throw new Error("prepare result does not match audit scope");
+  }
+  return value;
 }
 
 function prepareTargets(workspace, row) {
@@ -67,17 +114,6 @@ function copyLegacyDocuments(repository, workspace, row) {
     copied.push({ source: sourcePath, target: path.relative(workspace, target).split(path.sep).join("/") });
   }
   return copied;
-}
-
-function sourceFieldChecklist(repository, row) {
-  const fields = [];
-  for (const sourcePath of sorted([...row.ownership.sidecars, ...row.ownership.runtime_documentation_shadows])) {
-    const document = JSON.parse(fs.readFileSync(path.join(repository, sourcePath), "utf8"));
-    for (const [field, value] of Object.entries(document).sort(([a], [b]) => compareCodePoint(a, b))) {
-      fields.push({ source: sourcePath, field, status: "review-required", destination: null, value });
-    }
-  }
-  return { schema_version: 1, kind: "runmat-builtin-source-field-disposition", identity: row.identity, fields };
 }
 
 function catalogTemplate(row) {

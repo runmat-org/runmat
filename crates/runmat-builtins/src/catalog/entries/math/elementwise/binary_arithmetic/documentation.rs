@@ -113,6 +113,8 @@ const fn example(
         display_output: Some(display_output),
         compatibility,
         harness,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: assertions },
     }
 }

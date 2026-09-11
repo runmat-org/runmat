@@ -201,6 +201,7 @@ const EFFECTS: [EffectKind; 3] = [
     EffectKind::MayThrow,
 ];
 pub const WBLRND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "wblrnd" },
     category: "stats/random",
     documentation: WBLRND_DOCUMENTATION,

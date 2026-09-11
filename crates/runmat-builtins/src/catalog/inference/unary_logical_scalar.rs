@@ -85,6 +85,7 @@ mod tests {
             availability: BuiltinBindingAvailability::Required,
         }];
         BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity { name: "unary-test" },
             category: "test",
             documentation: BuiltinDocumentation {

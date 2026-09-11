@@ -28,6 +28,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = [6 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(G, [6 3]));",
         },
@@ -39,6 +41,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = int16([6 7])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(G, 'int16')); assert(isequal(G, int16([6 7])));",
         },
@@ -50,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("A*U + B*V = G"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(G == 6); assert(A.*U + B.*V == G);",
         },
@@ -61,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = 42"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(G == 42);",
         },

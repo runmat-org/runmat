@@ -1,0 +1,17 @@
+{
+  "schema": "runmat.builtin-examples.topology.v1",
+  "products": {
+    "browser-wasm": { "artifactProfile": "web" },
+    "native-cli": { "artifactProfile": "embedded-aot" }
+  },
+  "lanes": {
+    "browser-host": { "shards": 8, "requiredCapabilities": ["headless-chrome"] },
+    "browser-graphics": { "shards": 4, "requiredCapabilities": ["headless-chrome"] },
+    "browser-wgpu": { "shards": 4, "requiredCapabilities": ["headless-chrome", "webgpu"] },
+    "native-host": { "shards": 8 },
+    "native-filesystem": { "shards": 4 },
+    "native-loopback-network": { "shards": 2 },
+    "native-foreign-runtime": { "shards": 2 },
+    "interactive-host": { "shards": 2 }
+  }
+}

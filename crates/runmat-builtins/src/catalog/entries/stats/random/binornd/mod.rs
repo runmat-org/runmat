@@ -204,6 +204,7 @@ const EFFECTS: [EffectKind; 3] = [
     EffectKind::MayThrow,
 ];
 pub const BINORND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "binornd" },
     category: "stats/random",
     documentation: BINORND_DOCUMENTATION,

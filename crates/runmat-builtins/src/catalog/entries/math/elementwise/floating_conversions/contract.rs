@@ -156,6 +156,7 @@ macro_rules! define_floating_conversion_contract {
         const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
             category: "math/elementwise",
             documentation: $documentation,

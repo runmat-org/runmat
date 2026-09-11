@@ -45,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("bytes is a 1-by-8 uint8 vector in native byte order"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(bytes, \"uint8\"));\nassert(isequal(size(bytes), [1 8]));\nassert(isequal(typecast(bytes, \"uint32\"), values));" },
     },
     BuiltinExample {
@@ -54,6 +56,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("copy retains both uint64 values exactly"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(copy, \"uint64\"));\nassert(isequal(copy, values));" },
     },
     BuiltinExample {
@@ -63,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = [-1+2i -3+4i] with complex int16 storage"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(z, \"int16\"));\nassert(isequal(z, complex(int16([-1 -3]), int16([2 4]))));" },
     },
     BuiltinExample {
@@ -72,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("bytes is a 12-by-1 uint8 column"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(bytes), [12 1]));\nassert(isequal(typecast(bytes, \"uint32\"), words));" },
     },
 ];

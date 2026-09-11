@@ -24,6 +24,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("F = [2 2 2 5 5]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(F, [2 2 2 5 5]));",
         },
@@ -35,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("F = uint16([2 3 23])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(F, 'uint16')); assert(isequal(F, uint16([2 3 23])));",
         },
@@ -46,6 +50,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("F preserves both exact uint64 factors"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isa(F, 'uint64')); assert(isequal(F, uint64([4294967279 4294967291])));",
@@ -58,6 +64,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("F0 = 0 and F1 = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(F0, 0)); assert(isequal(F1, 1));",
         },

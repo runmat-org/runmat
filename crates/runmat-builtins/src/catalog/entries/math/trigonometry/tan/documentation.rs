@@ -39,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 1) < 1e-12);",
         },
@@ -50,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("wave = [-9.9666 -0.9047 0 0.9047 9.9666]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(wave), [1 5]));\nassert(max(abs(wave + fliplr(wave))) < 1e-12);\nassert(abs(wave(3)) < 1e-12);",
         },
@@ -61,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 0.5774; 1.0000 1.7321]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 1/sqrt(3); 1 sqrt(3)];\nassert(max(abs(result(:) - expected(:))) < 1e-10);",
         },
@@ -72,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("tz is a complex scalar"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "denominator = cos(2) + cosh(1);\nexpected = sin(2)/denominator + 1i*sinh(1)/denominator;\nassert(abs(tz - expected) < 1e-12);",
         },
@@ -83,6 +91,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("approx = [-1e-6 0 1e-6] to displayed precision"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(approx - angles)) < 1e-15);",
         },
@@ -94,6 +104,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 0.5774 1.7321 57.2900]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(result(1)) < 1e-12);\nassert(abs(result(2) - 1/sqrt(3)) < 1e-12);\nassert(abs(result(3) - sqrt(3)) < 1e-12);\nassert(result(4) > 57);",
         },
@@ -105,6 +117,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = single([0 0.5774 1.0000])"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(result, \"single\"));\nassert(max(abs(double(result) - [0 1/sqrt(3) 1])) < 1e-5);",
         },
@@ -116,6 +130,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("codes is a 1-by-3 double array"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = tan(double('ABC'));\nassert(isa(codes, \"double\"));\nassert(isequal(size(codes), [1 3]));\nassert(max(abs(codes - expected)) < 1e-12);",
         },

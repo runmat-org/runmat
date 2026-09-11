@@ -4,7 +4,20 @@ RunMat can call functions in native shared libraries through the legacy `loadlib
 
 ## Preparing An Interface
 
-Prepare an interface from a C header and one shared library:
+Prepare an interface from a C header and an existing shared library:
+
+```bash
+runmat native-interface prepare \
+  --library native/libfilters.dylib \
+  --library-name filters \
+  --header include/filters.h \
+  --interface-name filters \
+  -I include
+```
+
+Use repeated `--add-header`, `-I`, and `-D` options when the public interface spans additional declaration headers, include roots, or preprocessor definitions. The command uses the host target ABI and writes the manifest beside the library by default; `--output` selects another path and `--json` emits a machine-readable preparation record.
+
+The same preparation is available inside a RunMat session for the MATLAB-compatible `clibgen.buildInterface` forms currently supported by RunMat:
 
 ```matlab
 clibgen.buildInterface("include/filters.h", ...
@@ -12,7 +25,7 @@ clibgen.buildInterface("include/filters.h", ...
     "InterfaceName", "filters");
 ```
 
-RunMat writes a canonical `.runmat.json` manifest beside the library. The manifest records the normalized declarations, target triple, exact library digest and length, and a content-derived interface identity. Moving the manifest and matching library together does not change that identity; changing either file does.
+Both entrypoints use the same native-interface preparation library. RunMat writes a canonical `.runmat.json` manifest that records the normalized declarations, target triple, exact library digest and length, and a content-derived interface identity. Moving the manifest and matching library together does not change that identity; changing either file does.
 
 Header preparation uses a compiler frontend so structures, aliases, enumerations, pointers, arrays, calling conventions, and platform layout come from the target ABI. RunMat does not infer an interface from function calls in source code.
 

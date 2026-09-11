@@ -25,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("q = int16(-2)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(q, 'int16')); assert(q == int16(-2));",
         },
@@ -36,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("q = uint16([3 3 3])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(q, 'uint16')); assert(isequal(q, uint16([3 3 3])));",
         },

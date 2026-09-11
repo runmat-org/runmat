@@ -25,6 +25,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("The absolute path of the current working folder."),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(ischar(current)); assert(size(current, 1) == 1);",
         },
@@ -36,6 +38,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(strcmp(pwd, start_dir));",
         },
@@ -47,6 +51,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(strcmp(pwd, start_dir));",
         },
@@ -58,6 +64,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Script started in <current folder>"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Succeeds,
     },
     BuiltinExample {
@@ -67,6 +75,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(contains(contents, current));",
         },
@@ -78,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Returns a path or reports why the host could not resolve it."),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Succeeds,
     },
 ];

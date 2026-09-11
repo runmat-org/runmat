@@ -35,6 +35,7 @@ pub(super) const EFFECTS: &[runmat_types::EffectKind] = &[
 ];
 
 pub(super) const fn entry(
+    provenance: crate::BuiltinCatalogProvenance,
     name: &'static str,
     documentation: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
@@ -42,6 +43,7 @@ pub(super) const fn entry(
     integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
+        provenance,
         identity: BuiltinCatalogIdentity { name },
         category: "math/linalg/ops",
         documentation,

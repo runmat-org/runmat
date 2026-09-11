@@ -182,6 +182,7 @@ mod tests {
             ..BuiltinDocumentation::EMPTY
         };
         BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity {
                 name: "classification-test",
             },

@@ -22,7 +22,7 @@ function readBuiltinDocuments() {
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
   );
   const exportPayload = JSON.parse(encoded);
-  if (exportPayload.schema_version !== 1 || !Array.isArray(exportPayload.builtins)) {
+  if (exportPayload.schema_version !== 2 || !Array.isArray(exportPayload.builtins)) {
     throw new Error("Unsupported builtin documentation export schema");
   }
   return exportPayload.builtins;
@@ -62,9 +62,8 @@ function slugifyForPath(value) {
   return normalized || "example";
 }
 
-function buildExampleSuggestedPath(builtinKey, exampleIndex) {
-  const normalizedIndex = Number.isFinite(exampleIndex) && exampleIndex > 0 ? Math.floor(exampleIndex) : 1;
-  return `/${slugifyForPath(builtinKey)}-${normalizedIndex}.m`;
+function buildExampleSuggestedPath(builtinKey, exampleIdentity) {
+  return `/${slugifyForPath(builtinKey)}-${slugifyForPath(exampleIdentity)}.m`;
 }
 
 function removeStaleGeneratedFiles(expectedNames) {
@@ -137,6 +136,9 @@ function main() {
 
     if (Array.isArray(parsed.examples)) {
       for (const [index, example] of parsed.examples.entries()) {
+        const exampleIdentity = typeof example.id === "string" && example.id.trim()
+          ? example.id.trim().toLowerCase()
+          : String(index + 1);
         const exampleTitle =
           typeof example.description === "string" && example.description.trim()
             ? example.description.trim()
@@ -144,7 +146,7 @@ function main() {
         const code = typeof example.input === "string" ? example.input : "";
         const output = typeof example.output === "string" ? example.output : undefined;
         exampleCatalogEntries.push({
-          id: `${key}:${index + 1}`,
+          id: `${key}:${exampleIdentity}`,
           builtinKey: key,
           builtinTitle: title,
           builtinSlug: slug,
@@ -155,7 +157,7 @@ function main() {
           code,
           ...(output ? { output } : {}),
           keywords: mergedKeywords,
-          suggestedPath: buildExampleSuggestedPath(key, index + 1),
+          suggestedPath: buildExampleSuggestedPath(key, exampleIdentity),
         });
       }
     }

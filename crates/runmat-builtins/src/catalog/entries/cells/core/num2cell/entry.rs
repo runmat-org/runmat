@@ -6,6 +6,7 @@ use super::{documentation, NUM2CELL_DESCRIPTOR, NUM2CELL_INTEGER_CAPABILITIES};
 const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const NUM2CELL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "num2cell" },
     category: "cells/core",
     documentation: documentation::DOCUMENTATION,

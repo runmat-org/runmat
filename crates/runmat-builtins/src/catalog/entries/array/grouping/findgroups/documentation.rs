@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = [2; 1; 2], ID = [\"a\"; \"b\"]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(G, [2; 1; 2]));\nassert(isequal(ID, [\"a\"; \"b\"]));" },
     },
     BuiltinExample {
@@ -41,6 +43,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = [2; 1; 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(G, [2; 1; 2]));\nassert(isa(ID, \"uint64\"));\nassert(isequal(ID, uint64([0x0020000000000000u64; 0x0020000000000001u64])));" },
     },
     BuiltinExample {
@@ -50,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = [2; 1; 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(G, [2; 1; 3]));\nassert(isequal(ID1, [\"a\"; \"a\"; \"b\"]));\nassert(isequal(ID2, [1; 2; 2]));" },
     },
     BuiltinExample {
@@ -59,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("G = [2; NaN; 1; 2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isequaln(G, [2; NaN; 1; 2]));\nassert(isequal(ID, [1; 3]));" },
     },
 ];

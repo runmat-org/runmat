@@ -51,6 +51,7 @@ const PILOT_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclaratio
     availability: BuiltinBindingAvailability::Required,
 }];
 const PILOT: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: PILOT_ID,
     category: "test",
     documentation: DOCUMENTATION,
@@ -84,8 +85,51 @@ const SECOND_BINDINGS: [BuiltinBindingDeclaration; 1] = [BuiltinBindingDeclarati
     availability: BuiltinBindingAvailability::Required,
 }];
 const SECOND: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: SECOND_ID,
     bindings: &SECOND_BINDINGS,
+    ..PILOT
+};
+
+const FINGERPRINT_FILES: &[BuiltinFilesystemEntry] = &[BuiltinFilesystemEntry::File {
+    relative_path: "input.txt",
+    content: BuiltinFixtureContent::Utf8("value"),
+}];
+const FINGERPRINT_EXAMPLE_NONE: BuiltinExample = BuiltinExample {
+    id: "fixture",
+    title: "Fixture",
+    program: "value = 1;",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Succeeds,
+};
+const FINGERPRINT_EXAMPLE_FILESYSTEM: BuiltinExample = BuiltinExample {
+    fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
+        id: BuiltinExampleFixtureId {
+            local_name: "fixture",
+        },
+        root: BuiltinFilesystemRoot::IsolatedWorkspace,
+        entries: FINGERPRINT_FILES,
+    }),
+    ..FINGERPRINT_EXAMPLE_NONE
+};
+const FINGERPRINT_DOCUMENTATION_NONE: BuiltinDocumentation = BuiltinDocumentation {
+    examples: &[FINGERPRINT_EXAMPLE_NONE],
+    ..DOCUMENTATION
+};
+const FINGERPRINT_DOCUMENTATION_FILESYSTEM: BuiltinDocumentation = BuiltinDocumentation {
+    examples: &[FINGERPRINT_EXAMPLE_FILESYSTEM],
+    ..DOCUMENTATION
+};
+const FINGERPRINT_ENTRY_NONE: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    documentation: FINGERPRINT_DOCUMENTATION_NONE,
+    ..PILOT
+};
+const FINGERPRINT_ENTRY_FILESYSTEM: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    documentation: FINGERPRINT_DOCUMENTATION_FILESYSTEM,
     ..PILOT
 };
 
@@ -95,6 +139,7 @@ const INCOMPLETE_CANONICAL_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     ..BuiltinDocumentation::EMPTY
 };
 const INCOMPLETE_CANONICAL: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
         name: "incompleteCanonical",
     },
@@ -108,6 +153,14 @@ fn valid_catalog_has_stable_order_independent_fingerprint() {
     assert_eq!(
         canonical_catalog_fingerprint(&[&PILOT, &SECOND]).unwrap(),
         canonical_catalog_fingerprint(&[&SECOND, &PILOT]).unwrap()
+    );
+}
+
+#[test]
+fn fixture_contract_participates_in_catalog_fingerprint() {
+    assert_ne!(
+        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_NONE]).unwrap(),
+        canonical_catalog_fingerprint(&[&FINGERPRINT_ENTRY_FILESYSTEM]).unwrap()
     );
 }
 

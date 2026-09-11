@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("d = 180"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(d - 180) < 1e-12);",
         },
@@ -37,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("d = [0 30 45 60 90]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(isequal(size(d), size(r)));\nassert(max(abs(d - [0 30 45 60 90])) < 1e-12);",
@@ -49,6 +53,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("d is a single array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(d, \"single\"));\nassert(max(abs(double(d) - [0 90 180])) < 1e-4);",
         },
@@ -60,6 +66,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("d is a double array"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(d, \"double\"));\nassert(max(abs(d - [0 1 2]*180/pi)) < 1e-12);",
         },

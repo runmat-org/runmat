@@ -26,6 +26,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = 2.2251e-308"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"double\"));\nassert(isfinite(limit));\nassert(limit > 0);" },
     },
     BuiltinExample {
@@ -35,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit = single(1.1755e-38)"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(isa(limit, \"single\"));\nassert(isfinite(limit));\nassert(limit > single(0));" },
     },
     BuiltinExample {
@@ -44,6 +48,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("limit is a 1-by-1 sparse single value"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(issparse(limit));\nassert(isa(limit, \"single\"));\nassert(isequal(size(limit), [1 1]));\nassert(full(limit) > single(0));" },
     },
 ];

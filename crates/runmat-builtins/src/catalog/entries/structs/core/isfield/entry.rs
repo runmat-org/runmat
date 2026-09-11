@@ -13,6 +13,7 @@ use super::{documentation, ISFIELD_DESCRIPTOR, ISFIELD_INTEGER_AUDIT};
 const EFFECTS: &[EffectKind] = &[EffectKind::MayThrow];
 
 pub const ISFIELD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "isfield" },
     category: "structs/core",
     documentation: documentation::DOCUMENTATION,

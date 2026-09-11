@@ -114,6 +114,7 @@ pub const ABS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 const ABS_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const ABS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const ABS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "abs" },
     category: "math/elementwise",
     documentation: ABS_DOCUMENTATION,

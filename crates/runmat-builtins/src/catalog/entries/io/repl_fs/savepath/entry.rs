@@ -10,6 +10,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const SAVEPATH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "savepath" },
     category: "io/repl_fs",
     documentation: super::documentation::DOCUMENTATION,

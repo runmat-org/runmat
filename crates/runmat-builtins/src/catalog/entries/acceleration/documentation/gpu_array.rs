@@ -54,6 +54,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("out is sin(A) with the same 2-by-3 shape"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(out), [2 3]));\nassert(max(abs(out(:) - sin(A(:)))) < 1e-6);",
         },
@@ -65,6 +67,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host is the single-precision value nearest pi"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(host, \"single\"));\nassert(abs(double(host) - pi) < 2e-7);",
         },
@@ -76,6 +80,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = logical([0 1 1 0])"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(host, \"logical\"));\nassert(isequal(host, logical([0 1 1 0])));",
         },
@@ -87,6 +93,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = logical([1 1; 1 1])"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(host, \"logical\"));\nassert(isequal(host, logical([10 20; 30 40])));",
         },
@@ -98,6 +106,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [1 3 5; 2 4 6]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(host), [2 3]));\nassert(isequal(host, [1 3 5; 2 4 6]));",
         },
@@ -109,6 +119,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [1 2 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(host, [1 2 3]));\nassert(isequal(gather(G), [1 2 3]));",
         },
@@ -120,6 +132,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("original remains uint16; converted is single"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(original, \"uint16\"));\nassert(isa(converted, \"single\"));\nassert(isequal(original, uint16([1 2; 3 4])));\nassert(isequal(converted, single([1 2; 3 4])));",
         },

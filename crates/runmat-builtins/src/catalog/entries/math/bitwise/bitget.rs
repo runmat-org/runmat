@@ -118,6 +118,8 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("b = uint8([1 1 1])"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Portable,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(b, 'uint8')); assert(isequal(b, uint8([1 1 1])));",
     },
@@ -166,6 +168,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 const BINDINGS: [BuiltinBindingDeclaration; 1] = REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const BITGET_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "bitget" },
     category: "math/bitwise",
     documentation: DOCUMENTATION,

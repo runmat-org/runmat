@@ -10,6 +10,7 @@ pub use contract::*;
 const EFFECTS: &[EffectKind] = &[EffectKind::EnvironmentRead, EffectKind::MayThrow];
 
 pub const TEMPDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tempdir" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

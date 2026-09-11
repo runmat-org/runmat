@@ -5,6 +5,10 @@ export function evidenceDigest(value) {
   return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 }
 
+export function contentDigest(value) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
 export function canonicalJson(value) {
   return encode(value, new Set(), "$");
 }

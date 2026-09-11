@@ -128,6 +128,7 @@ const FEVAL_EFFECTS: [EffectKind; 4] = [
     EffectKind::Unknown,
 ];
 pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "feval" },
     category: "introspection",
     documentation: FEVAL_DOCUMENTATION,

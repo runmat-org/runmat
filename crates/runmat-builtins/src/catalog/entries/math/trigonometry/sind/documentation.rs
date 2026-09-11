@@ -34,6 +34,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.5"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 0.5);",
         },
@@ -45,6 +47,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0 0 0]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [0 0 0]));",
         },
@@ -56,6 +60,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0 0.5 0.7071 0.8660 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "expected = [0 0.5 sqrt(0.5) sqrt(3)/2 1];\nassert(max(abs(y - expected)) < 1e-12);",
@@ -68,6 +74,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y is a single array [0.5 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"single\"));\nassert(isequal(y, single([0.5 1])));",
         },
@@ -79,6 +87,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0 0.5 1] on the host"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(~isa(y, \"gpuArray\"));\nassert(isequal(y, [0 0.5 1]));",
         },

@@ -62,6 +62,8 @@ const DISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result retains both uint64 values exactly"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(iscodistributed(value));\nassert(isa(result, \"uint64\"));\nassert(isequal(result, source));\ndelete(gcp(\"nocreate\"));",
         },
@@ -73,6 +75,8 @@ const DISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = int16([7 2])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(iscodistributed(mapped));\nassert(isequal(result, int16([7 2])));\ndelete(gcp(\"nocreate\"));",
         },
@@ -86,6 +90,8 @@ const CODISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = uint16([1 2 3 4])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(iscodistributed(value));\nassert(isequal(result, source));\ndelete(gcp(\"nocreate\"));",
         },
@@ -97,6 +103,8 @@ const CODISTRIBUTED_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = uint16([1 2 3 4])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "resolved = getCodistributor(value);\nassert(isequal(result, source));\nassert(resolved.Dimension == uint64(2));\ndelete(pool);",
         },
@@ -109,6 +117,8 @@ const BUILD_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("result = uint64([1 2 3 4])"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isequal(result, uint64([1 2 3 4])));\nassert(iscodistributed(value{1}));\nassert(iscodistributed(value{2}));\ndelete(pool);",
     },
@@ -121,6 +131,8 @@ const REDISTRIBUTE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result equals source"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "resolved = getCodistributor(moved);\nassert(isequal(result, source));\nassert(resolved.Dimension == uint64(2));\ndelete(pool);",
         },
@@ -132,6 +144,8 @@ const REDISTRIBUTE_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result equals source"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "resolved = getCodistributor(moved);\nassert(isequal(result, source));\nassert(all(resolved.WorkerGrid == uint64([1 2])));\ndelete(pool);",
         },
@@ -144,6 +158,8 @@ const GET_CODISTRIBUTOR_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     display_output: Some("codist includes the resolved global size and partition"),
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Native,
+    fixture: crate::BuiltinExampleFixture::None,
+    requirements: crate::BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isComplete(codist));\nassert(all(codist.GlobalSize == uint64([1 4])));\nassert(sum(codist.Partition) == uint64(4));\ndelete(pool);",
     },
@@ -156,6 +172,8 @@ const GLOBAL_INDICES_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("indices contains worker 1's uint64 column indices"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(indices, \"uint64\"));\nassert(isequal(indices, uint64([1 2])));\ndelete(pool);",
         },
@@ -167,6 +185,8 @@ const GLOBAL_INDICES_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("first = 3; last = 4"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(first == uint64(3));\nassert(last == uint64(4));\ndelete(pool);",
         },
@@ -180,6 +200,8 @@ const GET_LOCAL_PART_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("local retains the exact uint64 payload"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(local, source));\ndelete(gcp(\"nocreate\"));",
         },
@@ -191,6 +213,8 @@ const GET_LOCAL_PART_EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("local contains one partition per worker"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Native,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(local{1}, uint16([1 2])));\nassert(isequal(local{2}, uint16([3 4])));\ndelete(pool);",
         },

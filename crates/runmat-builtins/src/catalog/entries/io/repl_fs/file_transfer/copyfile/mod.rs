@@ -16,6 +16,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const COPYFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "copyfile" },
     category: "io/repl_fs",
     documentation: documentation::DOCUMENTATION,

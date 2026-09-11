@@ -34,6 +34,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 1"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 1);",
         },
@@ -45,6 +47,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [Inf -Inf]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(y, [Inf -Inf]));",
         },
@@ -56,6 +60,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(y == 0);",
         },
@@ -67,6 +73,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y equals tand(15) without converting x to double"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - tand(15)) < 1e-12);",
         },
@@ -78,6 +86,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("hostY is single [0 1 Inf]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(y, \"gpuArray\"));\nassert(isa(hostY, \"single\"));\nassert(isequal(hostY, single([0 1 Inf])));",
         },

@@ -18,6 +18,7 @@ const EFFECTS: &[EffectKind] = &[
 ];
 
 pub const CELLFUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cellfun" },
     category: "cells/core",
     documentation: documentation::DOCUMENTATION,

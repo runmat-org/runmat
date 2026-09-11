@@ -17,6 +17,7 @@ const EFFECTS: &[EffectKind] = &[
     EffectKind::Unknown,
 ];
 pub const SETFIELD_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "setfield" },
     category: "structs/core",
     documentation: documentation::DOCUMENTATION,

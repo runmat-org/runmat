@@ -96,6 +96,7 @@ macro_rules! define_binary_bitwise_entry {
         const BINDINGS: [crate::BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
         const EFFECTS: [runmat_types::EffectKind; 2] = [runmat_types::EffectKind::MaySuspend, runmat_types::EffectKind::MayThrow];
         pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity { name: $name },
             category: "math/bitwise",
             documentation: $documentation,

@@ -62,6 +62,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("value = 3"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(value - 3) < 1e-12);",
         },
@@ -73,6 +75,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B = [0 1 2; -1 -2 -3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(B(:) - [0; -1; 1; -2; 2; -3])) < 1e-12);",
         },
@@ -84,6 +88,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = -Inf"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isinf(z) && z < 0);",
         },
@@ -95,6 +101,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("out = [1.0000 + 1.3644i 2.0000 + 1.3644i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "expected = [1 2] + (pi/log(10))*1i;\nassert(max(abs(out - expected)) < 1e-12);",
@@ -107,6 +115,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("host = [0 1 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(max(abs(host - [0 1 3])) < 1e-12);",
         },

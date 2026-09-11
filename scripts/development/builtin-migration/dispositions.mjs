@@ -1,8 +1,9 @@
 import { sorted } from "./constants.mjs";
 import { emptyClassification } from "./records.mjs";
+import { SAFE_IDENTITY, exact, identity as parseIdentity, kind, object, uniqueStrings } from "./schema.mjs";
 
 export function emptyDispositionInput() {
-  return { schema_version: 1, kind: "runmat-builtin-dispositions", identities: {} };
+  return { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities: {} };
 }
 
 export function buildDispositionSeed(inventory) {
@@ -15,10 +16,12 @@ export function buildDispositionSeed(inventory) {
 }
 
 export function validateDispositionInput(input) {
-  if (!input || input.schema_version !== 1 || input.kind !== "runmat-builtin-dispositions" || typeof input.identities !== "object" || Array.isArray(input.identities)) {
-    throw new Error("Disposition input must use schema_version 1, kind runmat-builtin-dispositions, and an identities object");
-  }
-  for (const [identity, value] of Object.entries(input.identities)) validateRow(identity, value);
+  kind(input, 1, "runmat-builtin-dispositions", "disposition input");
+  exact(input, ["schema_version", "kind", "authority", "identities"], "disposition input");
+  if (input.authority !== "review-input-only") throw new Error("disposition input has invalid authority");
+  object(input.identities, "disposition identities");
+  const folded = new Set();
+  for (const [identity, value] of Object.entries(input.identities)) { const key = parseIdentity(identity, "disposition identity").toLowerCase(); if (folded.has(key)) throw new Error(`disposition identities collide case-insensitively at ${identity}`); folded.add(key); validateRow(identity, value); }
 }
 
 export function normalizeDisposition(input) {
@@ -57,8 +60,11 @@ export function validateReviewedRelationships(records, diagnostics) {
 }
 
 function validateRow(identity, value) {
-  if (!/^[A-Za-z][A-Za-z0-9_.]*$/.test(identity) || !value || typeof value !== "object") throw new Error(`Invalid disposition input for ${identity}`);
-  if (!value.review || !["unreviewed", "reviewed"].includes(value.review.status) || !Array.isArray(value.review.evidence)) throw new Error(`${identity}: review must declare status and evidence array`);
+  if (!SAFE_IDENTITY.test(identity) || !value || typeof value !== "object") throw new Error(`Invalid disposition input for ${identity}`);
+  exact(value, ["disposition", "canonical", "domain", "family", "reason", "review"], `${identity} disposition row`);
+  exact(value.review, ["status", "evidence"], `${identity} disposition review`);
+  if (!["unreviewed", "reviewed"].includes(value.review.status)) throw new Error(`${identity}: review must declare status and evidence array`);
+  uniqueStrings(value.review.evidence, `${identity} review evidence`, { empty: value.review.status === "unreviewed" });
   if (value.review.status === "unreviewed") {
     if (value.disposition || value.canonical || value.domain || value.family || value.reason) throw new Error(`${identity}: unreviewed seed rows must not contain classification values`);
     return;
@@ -66,7 +72,7 @@ function validateRow(identity, value) {
   if (value.review.evidence.length === 0 || value.review.evidence.some((entry) => !String(entry).trim())) throw new Error(`${identity}: reviewed rows require nonempty evidence`);
   if (!["canonical", "alias", "internal"].includes(value.disposition)) throw new Error(`${identity}: disposition must be canonical, alias, or internal`);
   if (value.disposition === "alias" && !value.canonical) throw new Error(`${identity}: aliases require a canonical target`);
-  if (value.canonical && !/^[A-Za-z][A-Za-z0-9_.]*$/.test(value.canonical)) throw new Error(`${identity}: canonical target is not a safe identity`);
+  if (value.canonical && !SAFE_IDENTITY.test(value.canonical)) throw new Error(`${identity}: canonical target is not a safe identity`);
   for (const field of ["domain", "family"]) {
     if (value[field] && !/^[a-z][a-z0-9_]*(?:\/[a-z][a-z0-9_]*)*$/.test(value[field])) throw new Error(`${identity}: ${field} must be a lowercase path of Rust identifiers`);
   }

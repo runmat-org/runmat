@@ -34,6 +34,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.9624"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 0.962423650119207) < 1e-12);",
         },
@@ -45,6 +47,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [0 0.9624 1.3170 2.0634]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 0.962423650119207 1.316957896924817 2.063437068895561];\nassert(max(abs(y - expected)) < 1e-12);",
         },
@@ -56,6 +60,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("z = [0.0000 + 1.0472i, 0.0000 + 0.0000i, 1.3170 + 0.0000i]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [1.047197551196598i 0 1.316957896924817];\nassert(max(abs(z - expected)) < 1e-12);",
         },
@@ -67,6 +73,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0 1.3170 1.7627 2.0634 2.2924]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 1.316957896924817 1.762747174039086 2.063437068895561 2.292431669561177];\nassert(max(abs(result - expected)) < 1e-12);",
         },
@@ -78,6 +86,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w contains the principal complex inverse hyperbolic cosines"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(w), [1 2]));\nassert(max(abs(cosh(w) - z)) < 1e-12);",
         },
@@ -89,6 +99,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("Y = [0.0000 + 1.5708i, 4.8675 + 0.0000i]"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0 + 1.570796326794897i 4.867475273605342];\nassert(isequal(size(Y), [1 2]));\nassert(max(abs(Y - expected)) < 1e-12);",
         },

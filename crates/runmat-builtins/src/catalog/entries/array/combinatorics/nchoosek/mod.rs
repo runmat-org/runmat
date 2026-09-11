@@ -140,6 +140,7 @@ pub const NCHOOSEK_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2]
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
 const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
 pub const NCHOOSEK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "nchoosek" },
     category: "array/combinatorics",
     documentation: NCHOOSEK_DOCUMENTATION,

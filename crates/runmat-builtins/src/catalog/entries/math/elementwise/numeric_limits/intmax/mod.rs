@@ -46,6 +46,7 @@ const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 pub const INTMAX_CATALOG_ENTRY: crate::BuiltinCatalogEntry = super::contract::entry(
+    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     "intmax",
     documentation::DOCUMENTATION,
     &DESCRIPTOR,

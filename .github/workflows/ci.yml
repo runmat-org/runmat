@@ -17,6 +17,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  builtin-example-closure:
+    # Full product closure is deliberately a protected-branch integration gate:
+    # it builds native and browser products and is too expensive for every topic
+    # branch push. The reusable workflow is also available through manual dispatch.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    uses: ./.github/workflows/builtin-example-closure.yml
+
   build-and-test:
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)

@@ -6,6 +6,7 @@ use super::{documentation, CELL2MAT_DESCRIPTOR, CELL2MAT_INTEGER_CAPABILITIES};
 const EFFECTS: &[EffectKind] = &[EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const CELL2MAT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cell2mat" },
     category: "cells/core",
     documentation: documentation::DOCUMENTATION,

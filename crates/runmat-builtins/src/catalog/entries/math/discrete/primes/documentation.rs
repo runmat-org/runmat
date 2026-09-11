@@ -24,6 +24,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("p = [2 3 5 7 11 13 17 19 23]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(p, [2 3 5 7 11 13 17 19 23]));",
         },
@@ -35,6 +37,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("p = uint16([2 3 5 7 11])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(p, 'uint16')); assert(isequal(p, uint16([2 3 5 7 11])));",
         },
@@ -46,6 +50,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("p = int32([2 3 5 7])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(p, 'int32')); assert(isequal(p, int32([2 3 5 7])));",
         },
@@ -57,6 +63,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("p = 1x0 empty double row"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(p, 'double')); assert(isequal(size(p), [1 0]));",
         },

@@ -39,6 +39,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r = 2"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(r == 2);",
         },
@@ -50,6 +52,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("r = [-3 -3 0 -3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(r, [-3 -3 0 -3]));",
         },
@@ -61,6 +65,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [2 1 0; 2 0 3]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(R, [2 1 0; 2 0 3]));",
         },
@@ -72,6 +78,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [2 0 -2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(R, A));",
         },
@@ -84,6 +92,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R is uint64([1 1])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(R, 'uint64')); assert(isequal(R, uint64([1 1])));",
         },
@@ -95,6 +105,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R is single([0.5 0.5])"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(R, 'single')); assert(isequal(R, single([0.5 0.5])));",
         },
@@ -106,6 +118,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R retains A and B with values [2;2] and [1;2]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source:
                 "assert(istable(R)); assert(isequal(R.A, [2; 2])); assert(isequal(R.B, [1; 2]));",
@@ -118,6 +132,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [01:00:00 02:00:00]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isduration(R)); assert(max(abs(hours(R) - [1 2])) < 1e-10);",
         },
@@ -129,6 +145,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("R = [3 0 1 2 3 0 1 2 3 0 1]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(R, [3 0 1 2 3 0 1 2 3 0 1]));",
         },

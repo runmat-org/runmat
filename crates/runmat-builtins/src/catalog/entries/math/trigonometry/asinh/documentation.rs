@@ -32,6 +32,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = 0.4812"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(abs(y - 0.481211825059603) < 1e-12);",
         },
@@ -43,6 +45,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("y = [-1.4436 -0.8814 0 0.8814 1.4436]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [-1.443635475178810 -0.881373587019543 0 0.881373587019543 1.443635475178810];\nassert(max(abs(y - expected)) < 1e-12);",
         },
@@ -54,6 +58,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("B preserves the 2-by-3 shape"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(B), [2 3]));\nassert(max(abs(sinh(B) - A), [], \"all\") < 1e-12);",
         },
@@ -65,6 +71,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result = [0.2475 0.4812; 0.6931 0.8814]"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = [0.247466461547263 0.481211825059603; 0.693147180559945 0.881373587019543];\nassert(max(abs(result - expected), [], \"all\") < 1e-12);",
         },
@@ -76,6 +84,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("w contains principal complex results"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(w), [1 2]));\nassert(max(abs(sinh(w) - z)) < 1e-12);",
         },
@@ -87,6 +97,8 @@ const EXAMPLES: &[BuiltinExample] = &[
         display_output: Some("result contains the combined elementwise values"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "x = [0.125 0.25 0.5 1];\nexpected = sinh(x) + asinh(x);\nassert(max(abs(result - expected)) < 1e-12);",
         },

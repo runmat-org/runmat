@@ -8,7 +8,26 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 4;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 5;
+
+/// Physical ownership of a catalog declaration.
+///
+/// This is compiler-expanded source evidence for development tooling. It is
+/// deliberately separate from the builtin's semantic identity and contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinCatalogProvenance {
+    pub source_file: &'static str,
+    pub module_path: &'static str,
+}
+
+impl BuiltinCatalogProvenance {
+    pub const fn new(source_file: &'static str, module_path: &'static str) -> Self {
+        Self {
+            source_file,
+            module_path,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct BuiltinCatalogIdentity {
@@ -64,6 +83,8 @@ pub const REQUIRED_DEFAULT_BINDING: [BuiltinBindingDeclaration; 1] = [BuiltinBin
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltinCatalogEntry {
+    #[serde(skip)]
+    pub provenance: BuiltinCatalogProvenance,
     pub identity: BuiltinCatalogIdentity,
     pub category: &'static str,
     pub documentation: BuiltinDocumentation,

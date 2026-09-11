@@ -87,6 +87,7 @@ macro_rules! define_numeric_classification_entry {
             runmat_types::EffectKind::MayThrow,
         ];
         pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity { name: $name },
             category: "logical/tests",
             documentation: $documentation,
@@ -189,6 +190,7 @@ macro_rules! define_metadata_predicate_entry {
         const BINDINGS: [crate::BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
         const EFFECTS: [runmat_types::EffectKind; 1] = [runmat_types::EffectKind::MayThrow];
         pub const $entry: crate::BuiltinCatalogEntry = crate::BuiltinCatalogEntry {
+            provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: crate::BuiltinCatalogIdentity { name: $name },
             category: "logical/tests",
             documentation: $documentation,
