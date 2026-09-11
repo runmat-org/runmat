@@ -5,6 +5,7 @@ mod acceleration_semantics;
 mod aggregate_semantics;
 mod array;
 mod distributed;
+pub(in crate::catalog) mod field_path;
 mod introspection_semantics;
 mod logical;
 mod math;
