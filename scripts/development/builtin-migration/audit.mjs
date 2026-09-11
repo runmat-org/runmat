@@ -116,6 +116,10 @@ function auditIdentity(repository, id, observed, controlled, gates, prepares, di
   if (controlled.disposition.kind === "canonical") {
     const authority = observed.semantic_authority;
     if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push(issue("catalog-authority-count", `${authority.catalog_entries.length}:${controlled.expected_authorities.catalog_entry_count}`));
+    if (authority.constants.length !== controlled.expected_authorities.catalog_constant_count) failures.push(issue("catalog-constant-authority-count", `${authority.constants.length}:${controlled.expected_authorities.catalog_constant_count}`));
+    const actualConstants = authority.runtime_constants.map((entry) => entry.name).sort(compareCodePoint);
+    const expectedConstants = [...controlled.expected_authorities.runtime_constants].sort(compareCodePoint);
+    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push(issue("runtime-constant-set-mismatch", `${actualConstants.join("|")} != ${expectedConstants.join("|")}`));
     const actualBindings = authority.implementation_provenance.filter((entry) => entry.authority === "canonical_binding").map((entry) => `${entry.source_file}:${entry.function}:${entry.binding_variant}`).sort(compareCodePoint);
     const expectedBindings = controlled.expected_authorities.runtime_bindings.map((entry) => `${entry.path}:${entry.function}:${entry.variant}`).sort(compareCodePoint);
     if (JSON.stringify(actualBindings) !== JSON.stringify(expectedBindings)) failures.push(issue("runtime-binding-set-mismatch", `${actualBindings.join("|")} != ${expectedBindings.join("|")}`));

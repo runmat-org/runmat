@@ -32,13 +32,13 @@ The v1 `runmat-builtin-migration-control-manifest` is authored and reviewed rath
 - C00-C07 with fixed order and semantic labels;
 - atomic family bundles and their prerequisite DAG;
 - reciprocal identity membership, exact public spelling, and typed `canonical`, `alias`, or `internal` disposition;
-- domain, family, runtime owner when one exists, shared dependencies, reviewed complexity, maturity applicability, expected authorities, expected removals, and baseline evidence;
+- domain, family, runtime owner when one exists, shared dependencies, reviewed complexity, maturity applicability, exact callable and constant authorities, expected removals, and baseline evidence;
 - authored write scopes separated from integration-produced files;
 - exact reviewed dispositions for every compiled migration-readiness finding;
 - per-bundle gate plans that freeze the program source, arguments, working-directory policy, parser kind, and expected artifact roles;
 - reviewed exceptions and storage policy.
 
-Identifiers beginning with `__` are supported for real internal bindings. Distinct identity keys or public spellings that collide case-insensitively are rejected. Canonical identities require a runtime owner; aliases and internal identities may explicitly use `null`. Bundle prerequisites must exist and form a DAG. Bundle/identity membership must be reciprocal. Authored scopes cannot overlap integration outputs, and cross-bundle authored collisions are reported by the queue.
+Identifiers beginning with `__` are supported for real internal bindings. Distinct identity keys or public spellings that collide case-insensitively are rejected. Canonical callable identities require a runtime owner. A canonical constant-only identity may use `null` when its reviewed authority names at least one exact runtime constant and no callable runtime binding; aliases and internal identities may also explicitly use `null`. Catalog entry counts, catalog constant counts, runtime binding records, and case-sensitive runtime constant spellings are independent reviewed facts. Bundle prerequisites must exist and form a DAG. Bundle/identity membership must be reciprocal. Authored scopes cannot overlap integration outputs, and cross-bundle authored collisions are reported by the queue.
 
 Generating the initial review surface does not confer authority. `draft-control` emits a deterministic, content-addressed v1 scaffold for every exact inventory identity and migration finding. It pins the baseline and the compiled-authority, lexical-observation, and complete inventory-row digests, but leaves public spelling, disposition, alias target, cohort, bundle, domain, family, runtime owner, dependencies, complexity, maturity, expected authorities, removals, baseline evidence, owner, gate plans, exceptions, and storage policy unresolved. Its bundle list is empty, every review status is `unreviewed`, and the parser rejects attempts to insert inferred facts or review claims into the draft.
 

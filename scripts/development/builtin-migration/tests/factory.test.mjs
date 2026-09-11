@@ -223,9 +223,27 @@ test("internal double-underscore identities and null runtime owners are represen
   row.identity = "__register_test_classes"; row.public_spelling = "__register_test_classes";
   row.disposition = { kind: "internal", reason: "Generated registration helper", evidence: ["review"] };
   row.runtime_owner = null; row.expected_authorities.catalog_entry_count = 0; row.expected_authorities.catalog_package = null; row.expected_authorities.documentation = "none";
+  row.expected_authorities.catalog_constant_count = 0; row.expected_authorities.runtime_constants = [];
   value.identities.__register_test_classes = row;
   value.bundles[fixture.bundleId].identities = ["__register_test_classes"];
   assert.equal(parseControlManifest(value).identities.get("__register_test_classes").runtime_owner, null);
+});
+
+test("constant-only canonical identities require exact catalog and runtime constant authorities", () => {
+  const fixture = controlledFixture();
+  const value = structuredClone(fixture.controlValue);
+  const row = value.identities.foo;
+  row.runtime_owner = null;
+  row.expected_authorities.catalog_entry_count = 0;
+  row.expected_authorities.catalog_constant_count = 1;
+  row.expected_authorities.catalog_package = "crates/runmat-builtins/src/catalog/constant.rs";
+  row.expected_authorities.runtime_bindings = [];
+  row.expected_authorities.runtime_constants = ["foo"];
+  row.expected_authorities.native_link = "not-applicable";
+  assert.doesNotThrow(() => parseControlManifest(value));
+
+  row.expected_authorities.runtime_constants = [];
+  assert.throws(() => parseControlManifest(value), /canonical callable identity requires a runtime owner/);
 });
 
 test("bundle graph rejects cycles, dangling edges, and authored/generated overlap", () => {
