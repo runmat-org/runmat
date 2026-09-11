@@ -57,9 +57,6 @@ export function normalizeDisposition(input) {
 
 export function validateReviewedRelationships(records, diagnostics) {
   for (const item of records.values()) {
-    if (item.catalogPaths.size && item.input.disposition && item.input.disposition !== "canonical") {
-      diagnostics.push({ severity: "error", code: "disposition-contradicts-catalog", path: sorted(item.catalogPaths)[0], detail: `${item.identity} was reviewed as ${item.input.disposition}` });
-    }
     if (item.input.disposition === "alias" && !records.has(item.input.canonical)) {
       diagnostics.push({ severity: "error", code: "dangling-alias", path: "<disposition-input>", detail: `${item.identity} -> ${item.input.canonical}` });
     }

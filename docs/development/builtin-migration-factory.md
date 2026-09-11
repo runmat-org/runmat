@@ -42,6 +42,15 @@ Identifiers beginning with `__` are supported for real internal bindings. Distin
 
 Generating the initial review surface does not confer authority. `draft-control` emits a deterministic, content-addressed v1 scaffold for every exact inventory identity and migration finding. It pins the baseline and the compiled-authority, lexical-observation, and complete inventory-row digests, but leaves public spelling, disposition, alias target, cohort, bundle, domain, family, runtime owner, dependencies, complexity, maturity, expected authorities, removals, baseline evidence, owner, gate plans, exceptions, and storage policy unresolved. Its bundle list is empty, every review status is `unreviewed`, and the parser rejects attempts to insert inferred facts or review claims into the draft.
 
+The identity-disposition review has a compact authoring form for large inventories. A v1 `runmat-builtin-disposition-review` groups exact, explicitly enumerated identities that share one reviewed canonical, alias, or internal decision plus one domain and family. It accepts no wildcard, pattern, path-derived selector, or default disposition. Groups must cover the baseline inventory exactly once, and alias maps must cover their group exactly and target a reviewed canonical identity. Existing catalog entries are baseline evidence rather than a target-state veto: review may identify one as a duplicated alias or an accidentally exposed internal binding, provided its obsolete authority is removed and verified during the atomic cutover. The `compile-dispositions` command expands that reviewer-authored input into the complete row-per-identity disposition file consumed by inventory generation. Both artifacts remain development review evidence; neither is a runtime or catalog authority.
+
+```sh
+node scripts/development/builtin-migration-factory.mjs compile-dispositions \
+  --review /tmp/rm1064-disposition-review.json \
+  --baseline-inventory /tmp/runmat-builtin-inventory.json \
+  --output /tmp/reviewed-dispositions.json
+```
+
 ```sh
 node scripts/development/builtin-migration-factory.mjs draft-control \
   --baseline-inventory /tmp/runmat-builtin-inventory.json \
