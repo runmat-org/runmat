@@ -528,6 +528,11 @@ fn resolve_reduction_target(
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => {
             Ok(ResolvedObservationTarget::Volume {
                 element_indices: (0..projection.elements.len()).collect(),
+                element_identities: projection
+                    .elements
+                    .iter()
+                    .map(|element| element.stable_identity)
+                    .collect(),
             })
         }
         ObservationTarget::Spatial(ExcitationTarget::Region(region)) => {
@@ -539,14 +544,28 @@ fn resolve_reduction_target(
                         topology,
                     )?;
                     enforce_cardinality(region.cardinality, element_indices.len(), spec)?;
-                    Ok(ResolvedObservationTarget::Volume { element_indices })
+                    let element_identities = element_indices
+                        .iter()
+                        .map(|index| projection.elements[*index].stable_identity)
+                        .collect();
+                    Ok(ResolvedObservationTarget::Volume {
+                        element_indices,
+                        element_identities,
+                    })
                 }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
                     if spec.source_location == FieldLocation::Node =>
                 {
                     let face_indices = matching_faces(&region.region_id, projection);
                     enforce_cardinality(region.cardinality, face_indices.len(), spec)?;
-                    Ok(ResolvedObservationTarget::Boundary { face_indices })
+                    let face_identities = face_indices
+                        .iter()
+                        .map(|index| projection.boundary_faces[*index].stable_identity)
+                        .collect();
+                    Ok(ResolvedObservationTarget::Boundary {
+                        face_indices,
+                        face_identities,
+                    })
                 }
                 _ => Err(target_error(
                     spec,
@@ -717,7 +736,9 @@ fn integration_work(
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }
         | ResolvedObservationTarget::Elements { indices, .. } => Ok(indices.len()),
-        ResolvedObservationTarget::Volume { element_indices } => {
+        ResolvedObservationTarget::Volume {
+            element_indices, ..
+        } => {
             let projection =
                 topology
                     .solid_projection
@@ -735,7 +756,7 @@ fn integration_work(
                     .ok_or(ObservationError::Limit("volume reduction work"))
             })
         }
-        ResolvedObservationTarget::Boundary { face_indices } => {
+        ResolvedObservationTarget::Boundary { face_indices, .. } => {
             let projection =
                 topology
                     .solid_projection

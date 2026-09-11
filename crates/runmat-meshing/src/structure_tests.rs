@@ -239,13 +239,18 @@ fn retired_synthetic_preparation_contracts_are_absent() {
         .parent()
         .and_then(Path::parent)
         .expect("meshing crate should be nested beneath the workspace root");
+    assert!(
+        !workspace_root
+            .join("crates/runmat-meshing/src/analysis_prep")
+            .exists(),
+        "the retired synthetic meshing preparation subsystem must remain absent"
+    );
     let mut files = Vec::new();
     for relative_root in [".github", "crates", "docs", "scripts"] {
         collect_active_source_files(&workspace_root.join(relative_root), &mut files);
     }
 
     let retired_fragments = [
-        ["analysis", "_prep"].concat(),
         ["geometry", ".prep_for_analysis"].concat(),
         ["geometry", ".prep_artifact_health"].concat(),
         ["geometry", "_prep_"].concat(),

@@ -9,6 +9,8 @@ mod field;
 mod identity;
 mod object;
 mod observation;
+mod observation_assembly;
+mod observation_partition;
 mod publication;
 mod signal;
 mod solve;
@@ -23,7 +25,9 @@ pub use identity::{
     AnalysisResultIdentity, AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
     FieldRecoveryRequestIdentity, GeneratorIdentity, NumericalPlanIdentity,
-    NumericalReceiptIdentity, ObservationEvaluationRequestIdentity, ObservationIdentity,
+    NumericalReceiptIdentity, ObservationAssemblyRequestIdentity,
+    ObservationEvaluationRequestIdentity, ObservationIdentity,
+    ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
     OperatorIdentity, ProblemIdentity, PublicationIdentity, PublicationRequestIdentity,
     SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
     SolverExcitationIdentity, SolverResultIdentity, StateIdentity, StateTransitionIdentity,
@@ -37,6 +41,10 @@ pub use object::{
     DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 pub use observation::ObservationEvaluationRequest;
+pub use observation_assembly::ObservationAssemblyRequest;
+pub use observation_partition::{
+    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
+};
 pub use publication::ResultPublicationRequest;
 pub use signal::{
     CanonicalSignalContent, CanonicalSignalKnot, CanonicalSignalRealization,

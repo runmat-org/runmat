@@ -5,6 +5,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest,
     ObservationEvaluationRequest, SequenceIdentity, StepIdentity, StructuralLinearWorkload,
 };
+use runmat_analysis_fea::planning::resource::{FeaResourcePlan, ObservationResourceFacts};
 use runmat_analysis_fea::results::field::{
     RecoveredFieldSelection, StructuralRecoveredFieldTopology,
 };
@@ -12,20 +13,16 @@ use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationArtifactManifest, ObservationLimits,
     ObservationResult,
 };
-use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutionResponse};
+use runmat_execution_artifact::ArtifactAccess;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    analysis_object_references, import_analysis_output_set, import_analysis_partition,
-    prepare_analysis_objects, prepare_analysis_program, prepare_partitioned_analysis_objects,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputRoot, AnalysisPartitionImport, AnalysisWorkloadInput, AnalysisWorkloadRequest,
-    ImportedAnalysisPartition, ImportedRecoveredFields, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    import_analysis_partition, AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload,
+    AnalysisOutputRoot, AnalysisPartitionImport, AnalysisWorkloadInput, ImportedAnalysisPartition,
+    ImportedRecoveredFields, PreparedAnalysisObjects,
 };
 
 pub struct StructuralObservationPreparation {
@@ -34,6 +31,7 @@ pub struct StructuralObservationPreparation {
     pub source_fields: ImportedRecoveredFields,
     pub source_invocation: PreparedAnalysisObjects,
     pub mesh: Option<PreparedAnalysisObjects>,
+    pub resource_plan: PreparedAnalysisObjects,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
     pub limits: ObservationLimits,
@@ -42,11 +40,12 @@ pub struct StructuralObservationPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub struct PreparedStructuralObservation {
+pub(crate) struct AdmittedStructuralObservation {
     pub request: ObservationEvaluationRequest,
-    pub host: AnalysisHostWorkload,
-    pub program: PreparedAnalysisProgram,
-    pub inputs: Vec<PreparedAnalysisObjects>,
+    pub selection: RecoveredFieldSelection,
+    pub workload: StructuralLinearWorkload,
+    pub mesh: Option<SolverMeshArtifact>,
+    pub resource_plan: FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -57,10 +56,9 @@ pub struct ImportedObservations {
     pub access: ArtifactAccess,
 }
 
-pub fn prepare_structural_observation(
-    source: &impl CacheImport,
-    preparation: StructuralObservationPreparation,
-) -> AnalysisBridgeResult<PreparedStructuralObservation> {
+pub(crate) fn admit_structural_observation(
+    preparation: &StructuralObservationPreparation,
+) -> AnalysisBridgeResult<AdmittedStructuralObservation> {
     preparation.source_host.validate()?;
     preparation.source_request.validate()?;
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
@@ -68,6 +66,7 @@ pub fn prepare_structural_observation(
         || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
         || preparation.source_invocation.manifest.kind
             != AnalysisNumericalObjectKind::SolverInvocation
+        || preparation.resource_plan.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan
         || preparation
             .mesh
             .as_ref()
@@ -120,7 +119,9 @@ pub fn prepare_structural_observation(
     }
     let workload =
         StructuralLinearWorkload::from_canonical_bytes(&preparation.source_invocation.payload())?;
-    let mesh_artifact = preparation
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&preparation.resource_plan.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mesh = preparation
         .mesh
         .as_ref()
         .map(|mesh| {
@@ -128,9 +129,8 @@ pub fn prepare_structural_observation(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let topology =
-        StructuralRecoveredFieldTopology::derive(&workload.model, mesh_artifact.as_ref())
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if topology.identity != preparation.source_request.topology {
         return Err(AnalysisBridgeError::Identity(
             "observation topology differs from its field-recovery request",
@@ -153,7 +153,7 @@ pub fn prepare_structural_observation(
     let plan = resolve_structural_observation_plan(
         &preparation.step,
         &workload.model,
-        mesh_artifact.as_ref(),
+        mesh.as_ref(),
         &definitions,
         preparation.limits,
     )
@@ -177,158 +177,22 @@ pub fn prepare_structural_observation(
         topology.identity,
         plan,
     )?;
-    let selection_bytes = selection
-        .canonical_bytes()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut selected_payloads = Vec::with_capacity(selection.fields.len());
-    for field in &selection.fields {
-        selected_payloads.push((
-            *field,
-            import_analysis_partition(
-                source,
-                AnalysisPartitionImport {
-                    root: &preparation.source_fields.output.root,
-                    expected_kind: AnalysisNumericalObjectKind::Field,
-                    expected_logical_identity: preparation.source_fields.output.logical_identity,
-                    expected_payload_digest: preparation.source_fields.output.payload_digest,
-                    partition_identity: field.digest(),
-                    access: &preparation.source_host.artifact_access,
-                    limits: preparation.inventory_limits,
-                },
-            )?
-            .payload(),
-        ));
-    }
-    let mut field_partitions = Vec::with_capacity(selected_payloads.len() + 1);
-    field_partitions.push(runmat_analysis_fea::execution::AnalysisPayloadPartition {
-        logical_identity: selection.identity.digest(),
-        payload: &selection_bytes,
-    });
-    field_partitions.extend(selected_payloads.iter().map(|(identity, payload)| {
-        runmat_analysis_fea::execution::AnalysisPayloadPartition {
-            logical_identity: identity.digest(),
-            payload,
-        }
-    }));
-    let selected_field_objects = prepare_partitioned_analysis_objects(
-        AnalysisNumericalObjectKind::FieldSelection,
-        selection.identity.digest(),
-        &field_partitions,
-        preparation.chunk_bytes,
-        ObjectNamespace::InputValue,
-        preparation.inventory_limits,
-    )?;
-    let request_bytes = request.canonical_bytes()?;
-    let request_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ObservationEvaluationRequest,
-        request.identity().digest(),
-        &request_bytes,
-        preparation.chunk_bytes,
-        ObjectNamespace::InputValue,
-        preparation.inventory_limits,
-    )?;
-    let inputs = vec![
-        (request_objects, ValueRefKind::DriverObject),
-        (selected_field_objects, ValueRefKind::DriverObject),
-        (preparation.source_invocation, ValueRefKind::DriverObject),
-    ];
-    let mut inputs = inputs;
-    if let Some(mesh) = preparation.mesh {
-        inputs.push((mesh, ValueRefKind::DriverObject));
-    }
-    let workload_inputs = inputs
-        .iter()
-        .map(|(input, reference_kind)| AnalysisWorkloadInput {
-            kind: input.manifest.kind,
-            logical_identity: input.manifest.logical_identity,
-            payload_digest: input.manifest.payload_digest,
-            manifest_digest: input.root.digest,
-            manifest_encoded_length: input.root.encoded_length,
-            reference_kind: *reference_kind,
-        })
-        .collect();
-    let inputs = inputs
-        .into_iter()
-        .map(|(input, _)| input)
-        .collect::<Vec<_>>();
-    let workload = AnalysisWorkloadRequest::new(
-        preparation.source_host.workload.study,
-        preparation.source_host.workload.step,
-        preparation.source_host.workload.execution_plan,
-        AnalysisWorkKind::EvaluateObservation,
-        workload_inputs,
-        vec![AnalysisNumericalObjectKind::Observation],
-        BTreeSet::from([AnalysisCapabilityRequirement::Host {
-            abi: ANALYSIS_HOST_ABI.into(),
-        }]),
-    )?;
-    let host = AnalysisHostWorkload::new(workload, preparation.source_host.artifact_access)?;
-    let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
-    Ok(PreparedStructuralObservation {
-        request,
-        host,
-        program,
-        inputs,
-    })
-}
-
-pub fn import_structural_observations(
-    source: &impl CacheImport,
-    response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralObservation,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<ImportedObservations> {
-    response.validate_against(&prepared.program.request)?;
-    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [output] = output_set.manifest.outputs.as_slice() else {
-        return Err(AnalysisBridgeError::Invalid(
-            "observation evaluation must return exactly one observation root".into(),
-        ));
-    };
-    let imported = import_analysis_partition(
-        source,
-        AnalysisPartitionImport {
-            root: &output.root,
-            expected_kind: AnalysisNumericalObjectKind::Observation,
-            expected_logical_identity: output.logical_identity,
-            expected_payload_digest: output.payload_digest,
-            partition_identity: output.logical_identity,
-            access: &prepared.host.artifact_access,
-            limits,
-        },
-    )?;
-    let mut expected = analysis_object_references(
-        &imported.manifest,
-        &output.root,
-        &prepared.host.artifact_access,
-        ValueRefKind::ResultObject,
-    )?;
-    expected.push(output_set.root);
-    if output_set.result_objects != expected {
-        return Err(AnalysisBridgeError::Identity(
-            "observation result inventory differs from its canonical closure",
-        ));
-    }
-    let manifest = ObservationArtifactManifest::from_canonical_bytes(&imported.payload())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if manifest.identity.digest() != output.logical_identity
-        || manifest.evaluation_request != prepared.request.identity()
-        || manifest.producer != prepared.request.producer
-        || manifest.field_recovery_request != prepared.request.field_recovery_request
-        || manifest.source_fields != prepared.request.source_fields
-        || manifest.source_result != prepared.request.source_result
-        || manifest.topology_digest != prepared.request.plan.topology_digest
-        || manifest.plan_identity != prepared.request.plan.identity
+    let expected_observation_resources =
+        ObservationResourceFacts::from_plan(&request.plan, workload.observation_execution)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if resource_plan.input.topology_digest != request.plan.topology_digest
+        || resource_plan.input.observations != expected_observation_resources
     {
         return Err(AnalysisBridgeError::Identity(
-            "observation artifact differs from its admitted evaluation request",
+            "observation execution policy differs from its canonical resource plan",
         ));
     }
-    Ok(ImportedObservations {
-        manifest,
-        catalog_objects: imported,
-        output: output.clone(),
-        access: prepared.host.artifact_access.clone(),
+    Ok(AdmittedStructuralObservation {
+        request,
+        selection,
+        workload,
+        mesh,
+        resource_plan,
     })
 }
 

@@ -8,6 +8,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
 
+use super::distributed::{
+    ObservationPartitionCombination, ObservationPartitionEvidence,
+    ObservationPartitionEvidenceIdentity,
+};
 use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
 use crate::execution::{
     FieldRecoveryRequestIdentity, ObservationEvaluationRequestIdentity, SolverResultIdentity,
@@ -15,6 +19,7 @@ use crate::execution::{
 };
 use crate::results::field::{
     RecoveredFieldArtifactIdentity, RecoveredFieldDefinitionIdentity, RecoveredFieldEntityDomain,
+    RecoveredFieldSample,
 };
 
 pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
@@ -98,18 +103,22 @@ pub enum ResolvedObservationTarget {
     },
     Volume {
         element_indices: Vec<usize>,
+        element_identities: Vec<StableDigest>,
     },
     Boundary {
         face_indices: Vec<usize>,
+        face_identities: Vec<StableDigest>,
     },
 }
 
 impl ResolvedObservationTarget {
-    pub(super) fn selected_entity_count(&self) -> usize {
+    pub(crate) fn selected_entity_count(&self) -> usize {
         match self {
             Self::Nodes { indices, .. } | Self::Elements { indices, .. } => indices.len(),
-            Self::Volume { element_indices } => element_indices.len(),
-            Self::Boundary { face_indices } => face_indices.len(),
+            Self::Volume {
+                element_indices, ..
+            } => element_indices.len(),
+            Self::Boundary { face_indices, .. } => face_indices.len(),
         }
     }
 }
@@ -255,12 +264,14 @@ pub struct ObservationResult {
     pub plan_identity: ResolvedObservationPlanIdentity,
     pub topology_digest: Digest,
     pub observation_id: ObservationId,
+    pub sample: RecoveredFieldSample,
     pub quantity: ObservationQuantity,
     pub location: FieldLocation,
     pub value_shape: ObservationValueShape,
     pub entities: Vec<ObservationEntity>,
     pub field: AnalysisField,
     pub partial_access: PartialAccessPolicy,
+    pub partition_evidence: ObservationPartitionEvidence,
 }
 
 impl ObservationResult {
@@ -273,6 +284,7 @@ impl ObservationResult {
                 self.plan_identity,
                 self.topology_digest,
                 &self.observation_id,
+                self.sample,
                 self.quantity,
                 self.location,
                 &self.value_shape,
@@ -316,6 +328,19 @@ impl ObservationResult {
             };
             location == self.location && entity_ids.insert(*identity)
         });
+        let evidence_shape_is_valid = match self.partition_evidence.combination {
+            ObservationPartitionCombination::CanonicalConcatenation => !self.entities.is_empty(),
+            ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count } => {
+                self.entities.is_empty()
+                    && collective_count as usize
+                        == self
+                            .partition_evidence
+                            .contributions
+                            .len()
+                            .saturating_sub(1)
+            }
+        };
+        self.partition_evidence.validate()?;
         if self.schema_version != 1
             || self.field.field_id != self.observation_id.0
             || expected != Some(values.len())
@@ -323,6 +348,8 @@ impl ObservationResult {
             || values.iter().any(|value| !value.is_finite())
             || !entity_shape_is_valid
             || !entities_are_valid
+            || !evidence_shape_is_valid
+            || self.partition_evidence.sample != self.sample
             || self.logical_identity != self.derive_identity()?
         {
             return Err(ObservationError::Invalid(
@@ -362,12 +389,14 @@ struct ObservationResultWire {
     plan_identity: ResolvedObservationPlanIdentity,
     topology_digest: Digest,
     observation_id: ObservationId,
+    sample: RecoveredFieldSample,
     quantity: ObservationQuantity,
     location: FieldLocation,
     value_shape: ObservationValueShape,
     entities: Vec<ObservationEntity>,
     field: AnalysisField,
     partial_access: PartialAccessPolicy,
+    partition_evidence: ObservationPartitionEvidence,
 }
 
 impl TryFrom<ObservationResultWire> for ObservationResult {
@@ -380,12 +409,14 @@ impl TryFrom<ObservationResultWire> for ObservationResult {
             plan_identity: wire.plan_identity,
             topology_digest: wire.topology_digest,
             observation_id: wire.observation_id,
+            sample: wire.sample,
             quantity: wire.quantity,
             location: wire.location,
             value_shape: wire.value_shape,
             entities: wire.entities,
             field: wire.field,
             partial_access: wire.partial_access,
+            partition_evidence: wire.partition_evidence,
         };
         result.validate()?;
         Ok(result)
@@ -412,7 +443,9 @@ pub struct ObservationArtifact {
 #[serde(deny_unknown_fields)]
 pub struct ObservationArtifactEntry {
     pub result: ObservationResultIdentity,
+    pub partition_evidence: ObservationPartitionEvidenceIdentity,
     pub observation_id: ObservationId,
+    pub sample: RecoveredFieldSample,
     pub quantity: ObservationQuantity,
     pub location: FieldLocation,
     pub value_shape: ObservationValueShape,
@@ -606,7 +639,9 @@ impl ObservationArtifact {
                 .iter()
                 .map(|result| ObservationArtifactEntry {
                     result: result.logical_identity,
+                    partition_evidence: result.partition_evidence.identity,
                     observation_id: result.observation_id.clone(),
+                    sample: result.sample,
                     quantity: result.quantity,
                     location: result.location,
                     value_shape: result.value_shape.clone(),
@@ -630,7 +665,9 @@ impl ObservationArtifact {
                 .zip(&results)
                 .any(|(entry, result)| {
                     entry.result != result.logical_identity
+                        || entry.partition_evidence != result.partition_evidence.identity
                         || entry.observation_id != result.observation_id
+                        || entry.sample != result.sample
                         || entry.quantity != result.quantity
                         || entry.location != result.location
                         || entry.value_shape != result.value_shape
@@ -721,7 +758,9 @@ impl ObservationArtifact {
                 .iter()
                 .map(|result| ObservationArtifactEntry {
                     result: result.logical_identity,
+                    partition_evidence: result.partition_evidence.identity,
                     observation_id: result.observation_id.clone(),
+                    sample: result.sample,
                     quantity: result.quantity,
                     location: result.location,
                     value_shape: result.value_shape.clone(),
@@ -842,7 +881,10 @@ fn validate_resolved_observation(
                 ));
             }
         }
-        ResolvedObservationTarget::Volume { element_indices } => {
+        ResolvedObservationTarget::Volume {
+            element_indices,
+            element_identities,
+        } => {
             if observation.spec.reduction.is_none()
                 || !matches!(
                     observation.source_entity_domain,
@@ -851,18 +893,25 @@ fn validate_resolved_observation(
                 )
                 || element_indices.is_empty()
                 || !strictly_increasing(element_indices)
+                || element_indices.len() != element_identities.len()
+                || !all_unique(element_identities)
             {
                 return Err(ObservationError::Invalid(
                     "resolved volume target is empty, unordered, or lacks a reduction".into(),
                 ));
             }
         }
-        ResolvedObservationTarget::Boundary { face_indices } => {
+        ResolvedObservationTarget::Boundary {
+            face_indices,
+            face_identities,
+        } => {
             if observation.spec.source_location != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
                 || !strictly_increasing(face_indices)
+                || face_indices.len() != face_identities.len()
+                || !all_unique(face_identities)
             {
                 return Err(ObservationError::Invalid(
                     "resolved boundary target is empty, unordered, or semantically inconsistent"

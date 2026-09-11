@@ -215,12 +215,44 @@ fn structural_symbolic_plan_is_preassembly_and_material_independent() {
 
 #[test]
 fn structural_preflight_derives_numerical_facts_before_assembly() {
-    let (model, mesh, projection, constraints) = structural_fixture();
+    let (mut model, mesh, projection, constraints) = structural_fixture();
+    model.sequence.steps[0].observations = vec![runmat_analysis_core::ObservationRequest::Field(
+        runmat_analysis_core::ObservationSpec {
+            observation_id: runmat_analysis_core::ObservationId("whole_displacement".into()),
+            quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+            value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+            target: runmat_analysis_core::ObservationTarget::WholeModel,
+            source_location: runmat_analysis_core::FieldLocation::Node,
+            output_location: runmat_analysis_core::FieldLocation::Node,
+            recovery: runmat_analysis_core::RecoveryPolicy::Native,
+            component: runmat_analysis_core::ObservationComponent::All,
+            frame: runmat_analysis_core::CoordinateFrame::Global,
+            sign_convention: runmat_analysis_core::SignConvention::Native,
+            complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+            sampling: runmat_analysis_core::SamplingPolicy::Final,
+            reduction: None,
+            storage: runmat_analysis_core::ObservationStoragePolicy {
+                precision: runmat_analysis_core::SignalPrecision::Real64,
+                compression: runmat_analysis_core::CompressionPolicy::Lossless,
+                retention: runmat_analysis_core::RetentionPolicy::Canonical,
+                partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: runmat_analysis_core::ObservationPurpose::Publication,
+            cost: runmat_analysis_core::ObservationCostEstimate {
+                operation_count: 1_000,
+                peak_resident_bytes: 1_000_000,
+                stored_bytes: 1_000_000,
+                transfer_bytes: 1_000_000,
+                collective_count: 0,
+            },
+        },
+    )];
+    let field_definitions = crate::post::fields::structural_observable_field_definitions().unwrap();
     let observations = resolve_structural_observation_plan(
         &model.sequence.steps[0],
         &model,
         Some(&mesh),
-        &[],
+        &field_definitions,
         ObservationLimits::default(),
     )
     .unwrap();
@@ -232,12 +264,19 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
 
     let plan = build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload)
         .unwrap();
+    let mut serial_workload = workload.clone();
+    serial_workload.observation_execution =
+        crate::results::observation::ObservationExecutionPolicy::serial();
+    let serial_plan =
+        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &serial_workload)
+            .unwrap();
 
     assert_eq!(
         plan.input.topology_digest,
@@ -256,6 +295,8 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         plan.input.constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
+    assert!(plan.input.observations.transfer_bytes > serial_plan.input.observations.transfer_bytes);
+    assert_ne!(plan.identity, serial_plan.identity);
     let operators =
         StructuralSymbolicOperators::derive(&projection, &constraints, &workload.model, &mesh)
             .unwrap();
@@ -299,6 +340,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
@@ -363,6 +405,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };

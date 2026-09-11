@@ -7,6 +7,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{ComputeBackend, FeaRunResult};
+use crate::results::observation::ObservationExecutionPolicy;
 use crate::solve::backend::kind::LinearAlgebraBackendKind;
 use crate::solve::preconditioner::SpdPreconditionerKind;
 
@@ -31,6 +32,7 @@ pub struct StructuralLinearWorkload {
     pub formulation_requirement: FormulationRequirement,
     pub preconditioner: SpdPreconditionerKind,
     pub algebra_backend: LinearAlgebraBackendKind,
+    pub observation_execution: ObservationExecutionPolicy,
     pub require_solver_mesh_for_solid: bool,
     pub initial_guess_transition: Option<CanonicalStateTransition>,
 }

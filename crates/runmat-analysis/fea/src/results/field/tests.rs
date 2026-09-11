@@ -220,3 +220,58 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
     )
     .is_err());
 }
+
+#[test]
+fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
+    let entity_count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 3;
+    let definition = temperature_definition("temperature.large");
+    let field = RecoveredField::new(
+        definition.clone(),
+        RecoveredFieldSample::Final,
+        AnalysisField::host_f64(
+            "temperature.large",
+            vec![entity_count],
+            (0..entity_count).map(|index| index as f64).collect(),
+        ),
+    )
+    .unwrap();
+    let partitions = canonical_field_partitions(&field).unwrap();
+    assert_eq!(partitions.len(), 2);
+    assert_eq!(
+        partitions[0].source_indices.len(),
+        RECOVERED_FIELD_PARTITION_ENTITY_COUNT
+    );
+    assert_eq!(
+        partitions[1].source_indices,
+        vec![entity_count - 3, entity_count - 2, entity_count - 1]
+    );
+
+    let reconstructed = reconstruct_recovered_field(
+        field.identity(),
+        definition,
+        RecoveredFieldSample::Final,
+        partitions,
+        entity_count,
+    )
+    .unwrap();
+    assert_eq!(reconstructed, field);
+
+    let artifact = RecoveredFieldArtifact::new(
+        recovery_request(),
+        source_result(),
+        Digest::sha256("large-topology"),
+        RecoveredFieldEntityCounts {
+            structural_nodes: entity_count,
+            solid_elements: 1,
+            beam_elements: 0,
+            shell_elements: 0,
+        },
+        vec![field],
+    )
+    .unwrap();
+    let manifest = artifact.manifest().unwrap();
+    assert_eq!(manifest.fields[0].partitions.len(), 2);
+    let mut invalid = manifest;
+    invalid.fields[0].partitions[1].first_source_index = 1;
+    assert!(invalid.validate().is_err());
+}

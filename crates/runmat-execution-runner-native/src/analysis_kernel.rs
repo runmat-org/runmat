@@ -9,7 +9,9 @@ use runmat_analysis_fea::constraints::{
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind,
     CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest,
-    ObservationEvaluationRequest, ResultPublicationRequest, SemanticStatePublicationRequest,
+    ObservationAssemblyRequest, ObservationEvaluationRequest,
+    ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
+    ResultPublicationRequest, SemanticStatePublicationRequest,
     StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
     StructuralLinearWorkloadResult,
 };
@@ -25,12 +27,13 @@ use runmat_analysis_fea::results::accuracy::{
     AccuracyEvidenceScope, AccuracyMeasure,
 };
 use runmat_analysis_fea::results::field::{
-    RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldSelection,
+    canonical_field_partitions, RecoveredFieldArtifact, RecoveredFieldPartitionSet,
     StructuralRecoveredFieldTopology,
 };
 use runmat_analysis_fea::results::observation::{
-    evaluate_structural_observations, ObservationArtifact, ObservationArtifactInput,
-    ObservationArtifactManifest, ObservationLimits,
+    evaluate_structural_observation_partition, reduce_observation_partitions, ObservationArtifact,
+    ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
+    ObservationPartitionContribution, ObservationPartitionPlan,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_analysis_fea::{
@@ -49,7 +52,13 @@ impl AnalysisKernel for NativeAnalysisKernel {
         match invocation.kind {
             AnalysisWorkKind::Solve => execute_structural_linear(invocation),
             AnalysisWorkKind::RecoverField => execute_field_recovery(invocation),
-            AnalysisWorkKind::EvaluateObservation => execute_observation_evaluation(invocation),
+            AnalysisWorkKind::EvaluateObservationPartition => {
+                execute_observation_partition(invocation)
+            }
+            AnalysisWorkKind::ReduceObservationPartitions => {
+                execute_observation_partition_reduction(invocation)
+            }
+            AnalysisWorkKind::AssembleObservations => execute_observation_assembly(invocation),
             AnalysisWorkKind::EvaluateAccuracy => execute_accuracy_evaluation(invocation),
             AnalysisWorkKind::PublishResult => execute_result_publication(invocation),
             AnalysisWorkKind::PublishState => execute_state_publication(invocation),
@@ -238,50 +247,71 @@ fn execute_accuracy_evaluation(
     }])
 }
 
-fn execute_observation_evaluation(
+fn execute_observation_partition(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
-    let request = unique_input(
+    let source_request = unique_input(
         &invocation,
         AnalysisNumericalObjectKind::ObservationEvaluationRequest,
     )?;
-    let fields = unique_input(&invocation, AnalysisNumericalObjectKind::FieldSelection)?;
+    let request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationPartitionEvaluationRequest,
+    )?;
+    let partition_plan = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationPartitionPlan,
+    )?;
+    let fields = unique_input(&invocation, AnalysisNumericalObjectKind::FieldPartition)?;
     let solver_invocation =
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let mesh = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
-    if invocation.inputs.len() != 3 + usize::from(mesh.is_some())
-        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Observation]
+    if invocation.inputs.len() != 6 + usize::from(mesh.is_some())
+        || invocation.host.workload.outputs
+            != vec![AnalysisNumericalObjectKind::ObservationPartitionContribution]
     {
         return Err(AnalysisBridgeError::Invalid(
-            "observation evaluation requires one request, field selection, source invocation, optional mesh, and observation output".into(),
+            "observation partition inputs or contribution output differ from the workload contract"
+                .into(),
         ));
     }
-    let request_manifest_identity = request.manifest.logical_identity;
-    let field_selection_identity = fields.manifest.logical_identity;
-    let request = ObservationEvaluationRequest::from_canonical_bytes(&request.payload())?;
-    let selection = RecoveredFieldSelection::from_canonical_bytes(
-        &fields.partition_payload(field_selection_identity)?,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let selected_fields = selection
-        .fields
+    let source_request_identity = source_request.manifest.logical_identity;
+    let request_identity = request.manifest.logical_identity;
+    let partition_plan_identity = partition_plan.manifest.logical_identity;
+    let field_set_identity = fields.manifest.logical_identity;
+    let source_request =
+        ObservationEvaluationRequest::from_canonical_bytes(&source_request.payload())?;
+    let request = ObservationPartitionEvaluationRequest::from_canonical_bytes(&request.payload())?;
+    let partition_plan = ObservationPartitionPlan::from_canonical_bytes(&partition_plan.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let fields = RecoveredFieldPartitionSet::from_canonical_bytes(&fields.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let partition = partition_plan
+        .partitions
         .iter()
-        .map(|identity| {
-            RecoveredField::from_canonical_bytes(&fields.partition_payload(identity.digest())?)
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
-        })
-        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    if request.identity().digest() != request_manifest_identity
+        .find(|partition| partition.identity == request.partition)
+        .ok_or(AnalysisBridgeError::Identity(
+            "observation partition request names no canonical assignment",
+        ))?;
+    request.validate_for(
+        &source_request,
+        &partition_plan,
+        partition,
+        &fields,
+        &resource_plan,
+    )?;
+    if source_request.identity().digest() != source_request_identity
+        || request.identity().digest() != request_identity
+        || partition_plan.identity.digest() != partition_plan_identity
+        || fields.identity.digest() != field_set_identity
+        || resource_plan.identity.digest() != resource_plan_input.manifest.logical_identity
         || request.producer != invocation.host.workload.step
-        || selection.identity.digest() != field_selection_identity
-        || request.source_selection != selection.identity
-        || request.source_fields != selection.source.identity
-        || request.field_recovery_request != selection.source.recovery_request
-        || request.source_result != selection.source.source_result
-        || request.plan.topology_digest != selection.source.topology_digest
     {
         return Err(AnalysisBridgeError::Identity(
-            "observation inputs differ from the admitted evaluation request",
+            "observation partition inputs differ from their object identities",
         ));
     }
     let workload = StructuralLinearWorkload::from_canonical_bytes(&solver_invocation.payload())?;
@@ -291,33 +321,184 @@ fn execute_observation_evaluation(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if request.topology != topology.identity {
-        return Err(AnalysisBridgeError::Identity(
-            "observation topology differs from its admitted identity",
-        ));
-    }
-    let catalog = RecoveredFieldCatalog::new_for_topology(
-        topology.identity.discretization_digest(),
-        topology.entity_counts,
-        selected_fields,
+    let contribution = evaluate_structural_observation_partition(
+        &source_request.plan,
+        &partition_plan,
+        partition,
+        &workload.model,
+        mesh.as_ref(),
+        &fields,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let results =
-        evaluate_structural_observations(&request.plan, &workload.model, mesh.as_ref(), &catalog)
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::ObservationPartitionContribution,
+        contribution.identity.digest(),
+        contribution
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+    )])
+}
+
+fn execute_observation_partition_reduction(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let source_request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationEvaluationRequest,
+    )?;
+    let request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationPartitionReductionRequest,
+    )?;
+    let partition_plan = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationPartitionPlan,
+    )?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let contribution_inputs = invocation
+        .inputs
+        .iter()
+        .filter(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::ObservationPartitionContribution
+        })
+        .collect::<Vec<_>>();
+    if invocation.inputs.len() != 4 + contribution_inputs.len()
+        || contribution_inputs.is_empty()
+        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::ObservationResult]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "observation reduction inputs or result output differ from the workload contract"
+                .into(),
+        ));
+    }
+    let source_request_identity = source_request.manifest.logical_identity;
+    let request_identity = request.manifest.logical_identity;
+    let partition_plan_identity = partition_plan.manifest.logical_identity;
+    let source_request =
+        ObservationEvaluationRequest::from_canonical_bytes(&source_request.payload())?;
+    let request = ObservationPartitionReductionRequest::from_canonical_bytes(&request.payload())?;
+    let partition_plan = ObservationPartitionPlan::from_canonical_bytes(&partition_plan.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let contributions = contribution_inputs
+        .into_iter()
+        .map(|input| {
+            let contribution =
+                ObservationPartitionContribution::from_canonical_bytes(&input.payload())
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            if contribution.identity.digest() != input.manifest.logical_identity {
+                return Err(AnalysisBridgeError::Identity(
+                    "observation contribution differs from its object identity",
+                ));
+            }
+            Ok(contribution)
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    request.validate_for(
+        &source_request,
+        &partition_plan,
+        &contributions,
+        &resource_plan,
+    )?;
+    if source_request.identity().digest() != source_request_identity
+        || request.identity().digest() != request_identity
+        || partition_plan.identity.digest() != partition_plan_identity
+        || resource_plan.identity.digest() != resource_plan_input.manifest.logical_identity
+        || request.producer != invocation.host.workload.step
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "observation reduction inputs differ from their object identities",
+        ));
+    }
+    let result =
+        reduce_observation_partitions(&source_request.plan, &partition_plan, contributions)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::ObservationResult,
+        result.logical_identity.digest(),
+        result
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+    )])
+}
+
+fn execute_observation_assembly(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let source_request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationEvaluationRequest,
+    )?;
+    let request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationAssemblyRequest,
+    )?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let result_inputs = invocation
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ObservationResult)
+        .collect::<Vec<_>>();
+    if invocation.inputs.len() != 3 + result_inputs.len()
+        || result_inputs.is_empty()
+        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Observation]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "observation assembly inputs or artifact output differ from the workload contract"
+                .into(),
+        ));
+    }
+    let source_request_identity = source_request.manifest.logical_identity;
+    let request_identity = request.manifest.logical_identity;
+    let source_request =
+        ObservationEvaluationRequest::from_canonical_bytes(&source_request.payload())?;
+    let request = ObservationAssemblyRequest::from_canonical_bytes(&request.payload())?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let results = result_inputs
+        .into_iter()
+        .map(|input| {
+            let result =
+                runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
+                    &input.payload(),
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            if result.logical_identity.digest() != input.manifest.logical_identity {
+                return Err(AnalysisBridgeError::Identity(
+                    "observation result differs from its object identity",
+                ));
+            }
+            Ok(result)
+        })
+        .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+    request.validate_for(&source_request, &results, &resource_plan)?;
+    if source_request.identity().digest() != source_request_identity
+        || request.identity().digest() != request_identity
+        || resource_plan.identity.digest() != resource_plan_input.manifest.logical_identity
+        || request.producer != invocation.host.workload.step
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "observation assembly inputs differ from their object identities",
+        ));
+    }
     let artifact = ObservationArtifact::new(ObservationArtifactInput {
-        evaluation_request: request.identity(),
-        producer: request.producer,
-        field_recovery_request: request.field_recovery_request,
-        source_fields: request.source_fields,
-        source_result: request.source_result,
-        topology_digest: request.plan.topology_digest,
-        plan_identity: request.plan.identity,
+        evaluation_request: source_request.identity(),
+        producer: source_request.producer,
+        field_recovery_request: source_request.field_recovery_request,
+        source_fields: source_request.source_fields,
+        source_result: source_request.source_result,
+        topology_digest: source_request.plan.topology_digest,
+        plan_identity: source_request.plan.identity,
         results,
     })
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    observation_artifact_output(&artifact)
+}
+
+fn observation_artifact_output(
+    artifact: &ObservationArtifact,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let manifest = artifact
         .manifest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -405,7 +586,15 @@ fn execute_field_recovery(
     let manifest = artifact
         .manifest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut partitions = Vec::with_capacity(artifact.fields().len() + 1);
+    let storage_partition_count = artifact
+        .fields()
+        .iter()
+        .try_fold(0usize, |count, field| {
+            canonical_field_partitions(field)
+                .map(|partitions| count.saturating_add(partitions.len()))
+        })
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mut partitions = Vec::with_capacity(storage_partition_count + 1);
     partitions.push(AnalysisKernelOutputPartition {
         logical_identity: artifact.identity().digest(),
         payload: manifest
@@ -413,12 +602,16 @@ fn execute_field_recovery(
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     });
     for field in artifact.fields() {
-        partitions.push(AnalysisKernelOutputPartition {
-            logical_identity: field.identity().digest(),
-            payload: field
-                .canonical_bytes()
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        });
+        for partition in canonical_field_partitions(field)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        {
+            partitions.push(AnalysisKernelOutputPartition {
+                logical_identity: partition.identity.digest(),
+                payload: partition
+                    .canonical_bytes()
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+            });
+        }
     }
     Ok(vec![AnalysisKernelOutput::partitioned(
         AnalysisNumericalObjectKind::Field,
@@ -697,6 +890,9 @@ mod tests {
         record_resource_usage, AnalysisResourceUsage, ByteCount,
     };
     use runmat_analysis_fea::results::accuracy::{AccuracyStatus, PublicationDecision};
+    use runmat_analysis_fea::results::field::{
+        RecoveredField, RecoveredFieldCatalog, RecoveredFieldSelection,
+    };
     use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
     use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
     use runmat_analysis_fea::ComputeBackend;
@@ -848,6 +1044,10 @@ mod tests {
             formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Jacobi,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                    std::num::NonZeroU32::new(2).unwrap(),
+                ),
             require_solver_mesh_for_solid: false,
             initial_guess_transition: None,
         };
@@ -1034,104 +1234,268 @@ mod tests {
             observation_plan,
         )
         .unwrap();
-        let observation_request = runmat_analysis_execution::prepare_analysis_objects(
+        let source_observation_request = observation_request;
+        let reference_catalog = RecoveredFieldCatalog::new_for_topology(
+            recovered.topology_digest,
+            recovered.entity_counts,
+            recovered.fields().to_vec(),
+        )
+        .unwrap();
+        let reference_result =
+            runmat_analysis_fea::results::observation::evaluate_structural_observations(
+                &source_observation_request.plan,
+                &solve.model,
+                Some(&SolverMeshArtifact::canonical_decode(&field_inputs[3].payload()).unwrap()),
+                &reference_catalog,
+            )
+            .unwrap()
+            .remove(0);
+        let partition_plan = ObservationPartitionPlan::derive(
+            &source_observation_request.plan,
+            &source_observation_request.plan.observations[0]
+                .spec
+                .observation_id,
+            solve.observation_execution,
+        )
+        .unwrap();
+        let displacement = recovered
+            .fields()
+            .iter()
+            .find(|field| {
+                field.definition().identity()
+                    == source_observation_request.plan.observations[0]
+                        .source_field_definition_identity
+            })
+            .unwrap();
+        let source_request_objects = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::ObservationEvaluationRequest,
-            observation_request.identity().digest(),
-            &observation_request.canonical_bytes().unwrap(),
+            source_observation_request.identity().digest(),
+            &source_observation_request.canonical_bytes().unwrap(),
             4096,
             ObjectNamespace::InputValue,
             ObjectInventoryLimits::default(),
         )
         .unwrap();
-        let mut field_selection_partitions = vec![AnalysisKernelOutputPartition {
-            logical_identity: field_selection.identity.digest(),
-            payload: field_selection.canonical_bytes().unwrap(),
-        }];
-        field_selection_partitions.extend(recovered.fields().iter().map(|field| {
-            AnalysisKernelOutputPartition {
-                logical_identity: field.identity().digest(),
-                payload: field.canonical_bytes().unwrap(),
-            }
-        }));
-        let recovered_fields = prepare_kernel_output(&AnalysisKernelOutput::partitioned(
-            AnalysisNumericalObjectKind::FieldSelection,
-            field_selection.identity.digest(),
-            field_selection_partitions,
-        ));
-        let observation_inputs = vec![
-            observation_request,
-            recovered_fields,
-            field_inputs[1].clone(),
-            field_inputs[3].clone(),
-        ];
-        let observation_workload_inputs = observation_inputs
-            .iter()
-            .enumerate()
-            .map(|(index, input)| AnalysisWorkloadInput {
-                kind: input.manifest.kind,
-                logical_identity: input.manifest.logical_identity,
-                payload_digest: input.manifest.payload_digest,
-                manifest_digest: input.root.digest,
-                manifest_encoded_length: input.root.encoded_length,
-                reference_kind: if index == 1 {
-                    ValueRefKind::ResultObject
-                } else {
-                    ValueRefKind::DriverObject
-                },
-            })
-            .collect();
-        let observation_host = AnalysisHostWorkload::new(
-            AnalysisWorkloadRequest::new(
-                study,
-                step,
-                execution_plan,
-                AnalysisWorkKind::EvaluateObservation,
-                observation_workload_inputs,
-                vec![AnalysisNumericalObjectKind::Observation],
-                BTreeSet::from([AnalysisCapabilityRequirement::Host {
-                    abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
-                }]),
-            )
-            .unwrap(),
-            host.artifact_access.clone(),
+        let plan_objects = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ObservationPartitionPlan,
+            partition_plan.identity.digest(),
+            &partition_plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
         )
         .unwrap();
-        let observation_outputs = NativeAnalysisKernel
+        let solver_mesh = SolverMeshArtifact::canonical_decode(&field_inputs[3].payload()).unwrap();
+        let resource_plan = FeaResourcePlan::from_canonical_bytes(&inputs[3].payload()).unwrap();
+        let resource_plan_objects = inputs[3].clone();
+        let mut alternate_resource_input = resource_plan.input.clone();
+        alternate_resource_input.worker.cpu_millicores += 1;
+        let alternate_resource_plan =
+            runmat_analysis_fea::planning::resource::build_resource_plan(alternate_resource_input)
+                .unwrap();
+        assert_ne!(alternate_resource_plan.identity, resource_plan.identity);
+        let alternate_resource_plan_objects = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            alternate_resource_plan.identity.digest(),
+            &alternate_resource_plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let mut contribution_objects = Vec::new();
+        for partition in &partition_plan.partitions {
+            let source_fields = runmat_analysis_fea::results::observation::prepare_structural_observation_field_partition(
+                &source_observation_request.plan,
+                &partition_plan,
+                partition,
+                &solve.model,
+                Some(&solver_mesh),
+                displacement,
+            )
+            .unwrap();
+            let partition_request = ObservationPartitionEvaluationRequest::new(
+                &source_observation_request,
+                &partition_plan,
+                partition,
+                &source_fields,
+                &resource_plan,
+            )
+            .unwrap();
+            let partition_request_objects = runmat_analysis_execution::prepare_analysis_objects(
+                AnalysisNumericalObjectKind::ObservationPartitionEvaluationRequest,
+                partition_request.identity().digest(),
+                &partition_request.canonical_bytes().unwrap(),
+                4096,
+                ObjectNamespace::InputValue,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap();
+            let field_partition_objects = runmat_analysis_execution::prepare_analysis_objects(
+                AnalysisNumericalObjectKind::FieldPartition,
+                source_fields.identity.digest(),
+                &source_fields.canonical_bytes().unwrap(),
+                4096,
+                ObjectNamespace::InputValue,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap();
+            let partition_inputs = vec![
+                partition_request_objects,
+                source_request_objects.clone(),
+                plan_objects.clone(),
+                field_partition_objects,
+                field_inputs[1].clone(),
+                field_inputs[3].clone(),
+                resource_plan_objects.clone(),
+            ];
+            let partition_host = test_host_for_inputs(
+                &field_host,
+                AnalysisWorkKind::EvaluateObservationPartition,
+                &partition_inputs,
+                vec![AnalysisNumericalObjectKind::ObservationPartitionContribution],
+                None,
+            );
+            let mut substituted_resource_inputs = partition_inputs.clone();
+            *substituted_resource_inputs.last_mut().unwrap() =
+                alternate_resource_plan_objects.clone();
+            assert!(NativeAnalysisKernel
+                .execute(AnalysisKernelInvocation {
+                    kind: AnalysisWorkKind::EvaluateObservationPartition,
+                    host: &partition_host,
+                    inputs: &substituted_resource_inputs,
+                })
+                .is_err());
+            let outputs = NativeAnalysisKernel
+                .execute(AnalysisKernelInvocation {
+                    kind: AnalysisWorkKind::EvaluateObservationPartition,
+                    host: &partition_host,
+                    inputs: &partition_inputs,
+                })
+                .unwrap();
+            contribution_objects.push(prepare_kernel_output(&outputs[0]));
+        }
+        let contributions = contribution_objects
+            .iter()
+            .map(|objects| {
+                ObservationPartitionContribution::from_canonical_bytes(&objects.payload()).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let reduction_request = ObservationPartitionReductionRequest::new(
+            &source_observation_request,
+            &partition_plan,
+            &contributions,
+            &resource_plan,
+        )
+        .unwrap();
+        let reduction_request_objects = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ObservationPartitionReductionRequest,
+            reduction_request.identity().digest(),
+            &reduction_request.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let mut reduction_inputs = vec![
+            reduction_request_objects,
+            source_request_objects,
+            plan_objects,
+        ];
+        reduction_inputs.extend(contribution_objects);
+        reduction_inputs.push(resource_plan_objects.clone());
+        let reduction_host = test_host_for_inputs(
+            &field_host,
+            AnalysisWorkKind::ReduceObservationPartitions,
+            &reduction_inputs,
+            vec![AnalysisNumericalObjectKind::ObservationResult],
+            None,
+        );
+        let mut substituted_reduction_resources = reduction_inputs.clone();
+        *substituted_reduction_resources.last_mut().unwrap() =
+            alternate_resource_plan_objects.clone();
+        assert!(NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
-                kind: AnalysisWorkKind::EvaluateObservation,
-                host: &observation_host,
-                inputs: &observation_inputs,
+                kind: AnalysisWorkKind::ReduceObservationPartitions,
+                host: &reduction_host,
+                inputs: &substituted_reduction_resources,
+            })
+            .is_err());
+        let reduction_outputs = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::ReduceObservationPartitions,
+                host: &reduction_host,
+                inputs: &reduction_inputs,
             })
             .unwrap();
-        let observation_objects = prepare_kernel_output(&observation_outputs[0]);
-        let observation_manifest = ObservationArtifactManifest::from_canonical_bytes(
-            &observation_objects
-                .partition_payload(observation_objects.manifest.logical_identity)
+        let distributed_result =
+            runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
+                &reduction_outputs[0].payload,
+            )
+            .unwrap();
+        assert_eq!(
+            distributed_result.logical_identity,
+            reference_result.logical_identity
+        );
+        assert_eq!(distributed_result.partition_evidence.contributions.len(), 2);
+        let assembly_request = ObservationAssemblyRequest::new(
+            &source_observation_request,
+            std::slice::from_ref(&distributed_result),
+            &resource_plan,
+        )
+        .unwrap();
+        let assembly_request_objects = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ObservationAssemblyRequest,
+            assembly_request.identity().digest(),
+            &assembly_request.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let distributed_result_objects = prepare_kernel_output(&reduction_outputs[0]);
+        let assembly_inputs = vec![
+            assembly_request_objects,
+            reduction_inputs[1].clone(),
+            distributed_result_objects,
+            resource_plan_objects,
+        ];
+        let assembly_host = test_host_for_inputs(
+            &field_host,
+            AnalysisWorkKind::AssembleObservations,
+            &assembly_inputs,
+            vec![AnalysisNumericalObjectKind::Observation],
+            None,
+        );
+        let mut substituted_assembly_resources = assembly_inputs.clone();
+        *substituted_assembly_resources.last_mut().unwrap() = alternate_resource_plan_objects;
+        assert!(NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::AssembleObservations,
+                host: &assembly_host,
+                inputs: &substituted_assembly_resources,
+            })
+            .is_err());
+        let assembly_outputs = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                kind: AnalysisWorkKind::AssembleObservations,
+                host: &assembly_host,
+                inputs: &assembly_inputs,
+            })
+            .unwrap();
+        let distributed_artifact_objects = prepare_kernel_output(&assembly_outputs[0]);
+        let distributed_manifest = ObservationArtifactManifest::from_canonical_bytes(
+            &distributed_artifact_objects
+                .partition_payload(distributed_artifact_objects.manifest.logical_identity)
                 .unwrap(),
         )
         .unwrap();
-        let observation_results = observation_manifest
-            .results
-            .iter()
-            .map(|entry| {
-                runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
-                    &observation_objects
-                        .partition_payload(entry.result.digest())
-                        .unwrap(),
-                )
-                .unwrap()
-            })
-            .collect();
-        let observation = ObservationArtifact::from_manifest_and_results(
-            observation_manifest.clone(),
-            observation_results,
-        )
-        .unwrap();
-        assert_eq!(observation.results().len(), 1);
+        assert_eq!(distributed_manifest.results.len(), 1);
         assert_eq!(
-            observation.results()[0].observation_id.0,
-            "whole_displacement"
+            distributed_manifest.results[0].result,
+            reference_result.logical_identity
         );
+        let observation_manifest = distributed_manifest;
 
         let accuracy_request = AccuracyEvaluationRequest::new(
             step,
@@ -1325,16 +1689,6 @@ mod tests {
             })
             .is_err());
 
-        let mut substituted_observation_inputs = observation_inputs.clone();
-        substituted_observation_inputs[1].manifest.logical_identity = digest("substituted-fields");
-        assert!(NativeAnalysisKernel
-            .execute(AnalysisKernelInvocation {
-                kind: AnalysisWorkKind::EvaluateObservation,
-                host: &observation_host,
-                inputs: &substituted_observation_inputs,
-            })
-            .is_err());
-
         let mut substituted_field_inputs = field_inputs.clone();
         substituted_field_inputs[2].manifest.logical_identity = digest("substituted-mesh");
         assert!(NativeAnalysisKernel
@@ -1486,6 +1840,8 @@ mod tests {
             formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Jacobi,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             require_solver_mesh_for_solid: true,
             initial_guess_transition: None,
         };
@@ -1600,104 +1956,6 @@ mod tests {
                 inputs: &substituted_recovery_inputs,
             })
             .is_err());
-
-        let definitions = recovered
-            .fields()
-            .iter()
-            .map(|field| field.definition().clone())
-            .collect::<Vec<_>>();
-        let observation_plan =
-            runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
-                &solve.model.sequence.steps[0],
-                &solve.model,
-                None,
-                &definitions,
-                ObservationLimits::default(),
-            )
-            .unwrap();
-        let selection = RecoveredFieldSelection::new(
-            recovered.manifest().unwrap(),
-            recovered
-                .fields()
-                .iter()
-                .map(RecoveredField::identity)
-                .collect(),
-        )
-        .unwrap();
-        let observation_request = ObservationEvaluationRequest::new(
-            prepared.host.workload.step,
-            &selection,
-            result.constraint_result.topology,
-            observation_plan,
-        )
-        .unwrap();
-        let observation_request = runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::ObservationEvaluationRequest,
-            observation_request.identity().digest(),
-            &observation_request.canonical_bytes().unwrap(),
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap();
-        let mut selection_partitions = vec![AnalysisKernelOutputPartition {
-            logical_identity: selection.identity.digest(),
-            payload: selection.canonical_bytes().unwrap(),
-        }];
-        selection_partitions.extend(recovered.fields().iter().map(|field| {
-            AnalysisKernelOutputPartition {
-                logical_identity: field.identity().digest(),
-                payload: field.canonical_bytes().unwrap(),
-            }
-        }));
-        let selection_objects = prepare_kernel_output(&AnalysisKernelOutput::partitioned(
-            AnalysisNumericalObjectKind::FieldSelection,
-            selection.identity.digest(),
-            selection_partitions,
-        ));
-        let observation_inputs = vec![
-            observation_request,
-            selection_objects,
-            prepared.inputs[0].clone(),
-        ];
-        assert!(observation_inputs
-            .iter()
-            .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
-        let observation_host = test_host_for_inputs(
-            &prepared.host,
-            AnalysisWorkKind::EvaluateObservation,
-            &observation_inputs,
-            vec![AnalysisNumericalObjectKind::Observation],
-            Some(1),
-        );
-        let observation_outputs = NativeAnalysisKernel
-            .execute(AnalysisKernelInvocation {
-                kind: AnalysisWorkKind::EvaluateObservation,
-                host: &observation_host,
-                inputs: &observation_inputs,
-            })
-            .unwrap();
-        let mut substituted_observation_inputs = observation_inputs.clone();
-        substituted_observation_inputs[2] = substituted_invocation;
-        assert!(NativeAnalysisKernel
-            .execute(AnalysisKernelInvocation {
-                kind: AnalysisWorkKind::EvaluateObservation,
-                host: &observation_host,
-                inputs: &substituted_observation_inputs,
-            })
-            .is_err());
-        let observation_objects = prepare_kernel_output(&observation_outputs[0]);
-        let observation_manifest = ObservationArtifactManifest::from_canonical_bytes(
-            &observation_objects
-                .partition_payload(observation_objects.manifest.logical_identity)
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(observation_manifest.results.len(), 1);
-        assert_eq!(
-            observation_manifest.topology_digest,
-            result.constraint_result.topology.discretization_digest()
-        );
     }
 
     #[test]
@@ -1806,6 +2064,8 @@ mod tests {
             formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Jacobi,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
+            observation_execution:
+                runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             require_solver_mesh_for_solid: true,
             initial_guess_transition: None,
         };

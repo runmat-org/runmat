@@ -5206,6 +5206,8 @@ fn prepare_linear_static_workload_template(
         formulation_requirement,
         preconditioner: requested_preconditioner,
         algebra_backend: requested_solver_backend,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     })

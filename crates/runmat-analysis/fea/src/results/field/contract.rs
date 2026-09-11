@@ -10,6 +10,11 @@ use thiserror::Error;
 
 use crate::execution::{FieldRecoveryRequestIdentity, SolverResultIdentity};
 
+use super::partition_set::{
+    canonical_field_partition_descriptors, RecoveredFieldPartitionDescriptor,
+    RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+};
+
 const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
 const FIELD_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 4096, 32);
 
@@ -429,6 +434,7 @@ pub struct RecoveredFieldArtifactEntry {
     pub field: RecoveredFieldIdentity,
     pub definition: RecoveredFieldDefinition,
     pub sample: RecoveredFieldSample,
+    pub partitions: Vec<RecoveredFieldPartitionDescriptor>,
 }
 
 /// Lightweight semantic catalog for a recovered-field artifact.
@@ -457,9 +463,37 @@ impl RecoveredFieldArtifactManifest {
         self.entity_counts.validate()?;
         let mut field_ids = std::collections::BTreeSet::new();
         let mut sample_keys = std::collections::BTreeSet::new();
+        let mut partition_ids = std::collections::BTreeSet::new();
         for entry in &self.fields {
             entry.definition.validate()?;
             entry.sample.validate()?;
+            let expected_entity_count = self
+                .entity_counts
+                .entity_count(entry.definition.entity_domain());
+            let mut next_source_index = 0usize;
+            for (ordinal, partition) in entry.partitions.iter().enumerate() {
+                let is_last = ordinal + 1 == entry.partitions.len();
+                if partition.entity_count == 0
+                    || partition.first_source_index != next_source_index
+                    || (!is_last
+                        && partition.entity_count != RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
+                    || partition.entity_count > RECOVERED_FIELD_PARTITION_ENTITY_COUNT
+                    || !partition_ids.insert(partition.partition)
+                {
+                    return Err(RecoveredFieldError::InvalidArtifact(
+                        "field storage partitions do not canonically cover their entity domain"
+                            .into(),
+                    ));
+                }
+                next_source_index = next_source_index
+                    .checked_add(partition.entity_count)
+                    .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+            }
+            if entry.partitions.is_empty() || next_source_index != expected_entity_count {
+                return Err(RecoveredFieldError::InvalidArtifact(
+                    "field storage partitions do not cover their complete entity domain".into(),
+                ));
+            }
             if !field_ids.insert(entry.field)
                 || !sample_keys.insert(sample_identity(entry.definition.identity(), entry.sample)?)
             {
@@ -668,12 +702,15 @@ impl RecoveredFieldArtifact {
             fields: self
                 .fields
                 .iter()
-                .map(|field| RecoveredFieldArtifactEntry {
-                    field: field.identity(),
-                    definition: field.definition().clone(),
-                    sample: field.sample(),
+                .map(|field| {
+                    Ok(RecoveredFieldArtifactEntry {
+                        field: field.identity(),
+                        definition: field.definition().clone(),
+                        sample: field.sample(),
+                        partitions: canonical_field_partition_descriptors(field)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, RecoveredFieldError>>()?,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -684,13 +721,18 @@ impl RecoveredFieldArtifact {
         fields: Vec<RecoveredField>,
     ) -> Result<Self, RecoveredFieldError> {
         manifest.validate()?;
-        if manifest.fields.len() != fields.len()
-            || manifest.fields.iter().zip(&fields).any(|(entry, field)| {
-                entry.field != field.identity()
-                    || entry.definition != *field.definition()
-                    || entry.sample != field.sample()
+        let expected_entries = fields
+            .iter()
+            .map(|field| {
+                Ok(RecoveredFieldArtifactEntry {
+                    field: field.identity(),
+                    definition: field.definition().clone(),
+                    sample: field.sample(),
+                    partitions: canonical_field_partition_descriptors(field)?,
+                })
             })
-        {
+            .collect::<Result<Vec<_>, RecoveredFieldError>>()?;
+        if manifest.fields != expected_entries {
             return Err(RecoveredFieldError::IdentityMismatch);
         }
         let artifact = Self {
@@ -778,12 +820,15 @@ impl RecoveredFieldArtifact {
             fields: self
                 .fields
                 .iter()
-                .map(|field| RecoveredFieldArtifactEntry {
-                    field: field.identity(),
-                    definition: field.definition().clone(),
-                    sample: field.sample(),
+                .map(|field| {
+                    Ok(RecoveredFieldArtifactEntry {
+                        field: field.identity(),
+                        definition: field.definition().clone(),
+                        sample: field.sample(),
+                        partitions: canonical_field_partition_descriptors(field)?,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, RecoveredFieldError>>()?,
         })
     }
 }

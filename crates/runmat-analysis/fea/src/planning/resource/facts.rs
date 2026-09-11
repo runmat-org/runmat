@@ -1,7 +1,9 @@
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 use crate::{
-    algebra::SparsePattern, constraints::CanonicalStructuralConstraintPlan,
-    results::observation::ResolvedObservationPlan, topology::AnalysisProjection,
+    algebra::SparsePattern,
+    constraints::CanonicalStructuralConstraintPlan,
+    results::observation::{ObservationExecutionPolicy, ResolvedObservationPlan},
+    topology::AnalysisProjection,
 };
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 
@@ -312,13 +314,22 @@ fn estimated_owned_bytes(
 }
 
 impl ObservationResourceFacts {
-    pub fn from_plan(plan: &ResolvedObservationPlan) -> Result<Self, ResourcePlanningError> {
+    pub fn from_plan(
+        plan: &ResolvedObservationPlan,
+        execution: ObservationExecutionPolicy,
+    ) -> Result<Self, ResourcePlanningError> {
         plan.validate_identity()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let total = plan.observations.iter().try_fold(
             ObservationResourceAccumulator::default(),
             |mut total, observation| {
-                let cost = &observation.resolved_cost;
+                let partition_plan = crate::results::observation::ObservationPartitionPlan::derive(
+                    plan,
+                    &observation.spec.observation_id,
+                    execution,
+                )
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+                let cost = &partition_plan.resource_cost;
                 let produced = u64::try_from(observation.sample_bounds.maximum_produced_samples)
                     .map_err(|_| ResourcePlanningError::Overflow("observation produced samples"))?;
                 let retained = u64::try_from(observation.sample_bounds.maximum_retained_samples)

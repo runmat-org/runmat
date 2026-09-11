@@ -81,7 +81,8 @@ pub fn build_structural_resource_plan(
             .ok_or(ResourcePlanningError::Overflow(
                 "assembly contribution bytes",
             ))?;
-    let observations = ObservationResourceFacts::from_plan(observations)?;
+    let observations =
+        ObservationResourceFacts::from_plan(observations, workload.observation_execution)?;
     let dofs = sparse.rows.0;
     let stiffness_nonzeros = sparse.maximum_nonzeros();
     let constraint_matrix = resolve_constraint_matrix(mesh, constraints, workload)?;

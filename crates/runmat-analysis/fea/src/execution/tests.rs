@@ -462,6 +462,7 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };

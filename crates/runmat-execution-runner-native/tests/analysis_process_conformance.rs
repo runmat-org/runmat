@@ -455,7 +455,9 @@ async fn durable_conformance(
     };
     let solve_host = solve.host.clone();
     let solve_program = solve.program.clone();
-    let solve_success = driver.execute(&solve_host, &solve_program).await;
+    let solve_success = driver
+        .execute(&solve_host, &solve_program, Some(&solve.resource_plan))
+        .await;
     assert_eq!(
         import_result(driver.store(), solve_success.clone(), &solve.host,),
         expected_payload
@@ -470,8 +472,11 @@ async fn durable_conformance(
     .await;
     assert_eq!(publication, expected_publication);
 
-    let (mixed_host, mixed_program, _, _) = mixed_fixture(revision(), "durable-analysis");
-    let mixed_success = driver.execute(&mixed_host, &mixed_program).await;
+    let (mixed_host, mixed_program, _, mixed_resource_plan) =
+        mixed_fixture(revision(), "durable-analysis");
+    let mixed_success = driver
+        .execute(&mixed_host, &mixed_program, Some(&mixed_resource_plan))
+        .await;
     assert_eq!(
         import_result(driver.store(), mixed_success, &mixed_host),
         expected_mixed_payload
@@ -485,7 +490,13 @@ async fn durable_conformance(
         inputs: explicit_inputs,
         resource_plan: explicit_resource_plan,
     };
-    let explicit_success = driver.execute(&explicit.host, &explicit.program).await;
+    let explicit_success = driver
+        .execute(
+            &explicit.host,
+            &explicit.program,
+            Some(&explicit.resource_plan),
+        )
+        .await;
     assert_eq!(
         import_result(driver.store(), explicit_success.clone(), &explicit.host,),
         expected_explicit_payload
@@ -898,6 +909,10 @@ fn fixture_for_study(
         formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
@@ -946,6 +961,10 @@ fn explicit_fixture(
         formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
@@ -1057,6 +1076,10 @@ fn mixed_fixture(
         formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
@@ -1197,6 +1220,10 @@ fn sequence_preparation(
         formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };

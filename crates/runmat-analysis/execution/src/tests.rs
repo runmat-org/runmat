@@ -6,9 +6,9 @@ use runmat_analysis_core::{
     SequenceDependencyReason,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity, DiscretizationIdentity,
-    ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity, ProblemIdentity,
-    SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
+    AnalysisNumericalObjectKind, AnalysisTaskIdentity, AnalysisWorkKind, ConstraintPlanIdentity,
+    DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
+    ProblemIdentity, SequenceIdentity, StepIdentity, StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
@@ -907,12 +907,16 @@ impl AnalysisKernel for RecoveredFieldKernel {
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         }];
         for field in self.0.fields() {
-            partitions.push(AnalysisKernelOutputPartition {
-                logical_identity: field.identity().digest(),
-                payload: field
-                    .canonical_bytes()
-                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-            });
+            for partition in runmat_analysis_fea::results::field::canonical_field_partitions(field)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+            {
+                partitions.push(AnalysisKernelOutputPartition {
+                    logical_identity: partition.identity.digest(),
+                    payload: partition
+                        .canonical_bytes()
+                        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                });
+            }
         }
         Ok(vec![AnalysisKernelOutput::partitioned(
             AnalysisNumericalObjectKind::Field,
@@ -922,14 +926,58 @@ impl AnalysisKernel for RecoveredFieldKernel {
     }
 }
 
-struct ObservationKernel(runmat_analysis_fea::results::observation::ObservationArtifact);
+struct ObservationPartitionKernel(
+    runmat_analysis_fea::results::observation::ObservationPartitionContribution,
+);
 
-impl AnalysisKernel for ObservationKernel {
+impl AnalysisKernel for ObservationPartitionKernel {
     fn execute(
         &self,
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
-        assert_eq!(invocation.kind, AnalysisWorkKind::EvaluateObservation);
+        assert_eq!(
+            invocation.kind,
+            AnalysisWorkKind::EvaluateObservationPartition
+        );
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::ObservationPartitionContribution,
+            self.0.identity.digest(),
+            self.0
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        )])
+    }
+}
+
+struct ObservationReductionKernel(runmat_analysis_fea::results::observation::ObservationResult);
+
+impl AnalysisKernel for ObservationReductionKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(
+            invocation.kind,
+            AnalysisWorkKind::ReduceObservationPartitions
+        );
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::ObservationResult,
+            self.0.logical_identity.digest(),
+            self.0
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        )])
+    }
+}
+
+struct ObservationAssemblyKernel(runmat_analysis_fea::results::observation::ObservationArtifact);
+
+impl AnalysisKernel for ObservationAssemblyKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.kind, AnalysisWorkKind::AssembleObservations);
         let manifest = self
             .0
             .manifest()
@@ -1094,6 +1142,10 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
@@ -1222,7 +1274,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         submission.request.resources.scratch_bytes,
         prepared.resource_plan.request.scratch_bytes
     );
-    let mut understated = scheduled_resources;
+    let mut understated = scheduled_resources.clone();
     understated.memory_bytes -= 1;
     assert!(build_structural_task_submission(
         &prepared.host,
@@ -1421,14 +1473,21 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     );
 
     let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
-    let observation_prepared = prepare_structural_observation(
+    let observation_resource_plan_objects = prepared
+        .inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .unwrap()
+        .clone();
+    let observation_fanout = prepare_structural_observation_fanout(
         &store,
         StructuralObservationPreparation {
             source_host: field_prepared.host.clone(),
             source_request: field_prepared.request.clone(),
-            source_fields: imported_fields,
+            source_fields: imported_fields.clone(),
             source_invocation: prepared.inputs[0].clone(),
             mesh: Some(prepared.inputs[1].clone()),
+            resource_plan: observation_resource_plan_objects.clone(),
             sequence,
             step: producer_step.clone(),
             limits: runmat_analysis_fea::results::observation::ObservationLimits::default(),
@@ -1436,100 +1495,240 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
         },
+        runmat_analysis_fea::results::field::RecoveredFieldSample::Final,
     )
     .unwrap();
-    let selection_objects = &observation_prepared.inputs[1];
-    assert_eq!(
-        selection_objects.manifest.kind,
-        AnalysisNumericalObjectKind::FieldSelection
-    );
-    let selection =
-        runmat_analysis_fea::results::field::RecoveredFieldSelection::from_canonical_bytes(
-            &selection_objects
-                .partition_payload(selection_objects.manifest.logical_identity)
-                .unwrap(),
+    assert_eq!(observation_fanout.partitions.len(), 4);
+    let observation_resource_plan = observation_fanout.resource_plan.clone();
+    let mut partition_dependencies = BTreeMap::new();
+    for partition in &observation_fanout.partitions {
+        assert_eq!(
+            partition.host.workload.kind,
+            AnalysisWorkKind::EvaluateObservationPartition
+        );
+        assert_eq!(
+            partition.host.workload.outputs,
+            vec![AnalysisNumericalObjectKind::ObservationPartitionContribution]
+        );
+        assert!(partition
+            .inputs
+            .iter()
+            .any(|input| { input.manifest.kind == AnalysisNumericalObjectKind::FieldPartition }));
+        assert!(partition.inputs.iter().all(|input| {
+            input.manifest.kind != AnalysisNumericalObjectKind::Field
+                && input.manifest.kind != AnalysisNumericalObjectKind::FieldSelection
+        }));
+        let roots = partition
+            .program
+            .request
+            .arguments
+            .iter()
+            .map(|input| match input {
+                ValuePayload::Object(root) => (**root).clone(),
+                ValuePayload::Inline(_) => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+        let mut resources = observation_resource_plan.request.clone();
+        resources
+            .required_capabilities
+            .extend(partition.host.workload.generic_capabilities().unwrap());
+        let submission = build_structural_task_submission(
+            &partition.host,
+            &observation_resource_plan,
+            roots,
+            Vec::new(),
+            BTreeSet::new(),
+            execution_context(resources),
         )
         .unwrap();
-    assert_eq!(selection.fields.len(), 1);
-    let selected_field = recovered_artifact
-        .fields()
+        assert!(submission.dependencies.is_empty());
+        partition_dependencies
+            .entry(partition.partition_plan.identity)
+            .or_insert_with(Vec::new)
+            .push((
+                AnalysisTaskIdentity::new(partition.host.workload.identity, Vec::new()).unwrap(),
+                submission.request.id,
+            ));
+    }
+    let distributed_source_request = observation_fanout.source_request.clone();
+    let mut contribution_groups = BTreeMap::new();
+    for partition in observation_fanout.partitions {
+        let contribution =
+            runmat_analysis_fea::results::observation::evaluate_structural_observation_partition(
+                &partition.source_request.plan,
+                &partition.partition_plan,
+                &partition.partition,
+                &solve.model,
+                Some(&mesh),
+                &partition.source_fields,
+            )
+            .unwrap();
+        partition.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &partition.program.request,
+            &mut store,
+            &ObservationPartitionKernel(contribution),
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let response = AnalysisHostResponse::completed(&partition.host, &completed)
+            .unwrap()
+            .program_response();
+        let imported = import_observation_partition_contribution(
+            &store,
+            response,
+            &partition,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        contribution_groups
+            .entry(partition.partition_plan.identity)
+            .or_insert_with(|| (partition.partition_plan.clone(), Vec::new()))
+            .1
+            .push(imported);
+    }
+    let mut distributed_results = Vec::new();
+    for (_, (partition_plan, contributions)) in contribution_groups {
+        let partition_plan_identity = partition_plan.identity;
+        let expected = runmat_analysis_fea::results::observation::reduce_observation_partitions(
+            &distributed_source_request.plan,
+            &partition_plan,
+            contributions
+                .iter()
+                .map(|imported| imported.contribution.clone())
+                .collect(),
+        )
+        .unwrap();
+        let reduction =
+            prepare_structural_observation_reduction(StructuralObservationReductionPreparation {
+                source_host: field_prepared.host.clone(),
+                source_request: distributed_source_request.clone(),
+                partition_plan,
+                contributions,
+                expected_resource_plan: observation_resource_plan.clone(),
+                resource_plan: observation_resource_plan_objects.clone(),
+                program_revision: revision(),
+                chunk_bytes: 4096,
+                inventory_limits: ObjectInventoryLimits::default(),
+            })
+            .unwrap();
+        let dependencies = partition_dependencies
+            .remove(&partition_plan_identity)
+            .unwrap();
+        let roots = reduction
+            .program
+            .request
+            .arguments
+            .iter()
+            .map(|input| match input {
+                ValuePayload::Object(root) => (**root).clone(),
+                ValuePayload::Inline(_) => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+        let mut resources = reduction.resource_plan.request.clone();
+        resources
+            .required_capabilities
+            .extend(reduction.host.workload.generic_capabilities().unwrap());
+        let submission = build_structural_task_submission(
+            &reduction.host,
+            &reduction.resource_plan,
+            roots,
+            dependencies.iter().map(|(identity, _)| *identity).collect(),
+            dependencies.iter().map(|(_, task)| *task).collect(),
+            execution_context(resources),
+        )
+        .unwrap();
+        assert_eq!(submission.dependencies.len(), 2);
+        reduction.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &reduction.program.request,
+            &mut store,
+            &ObservationReductionKernel(expected),
+            4096,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let response = AnalysisHostResponse::completed(&reduction.host, &completed)
+            .unwrap()
+            .program_response();
+        distributed_results.push(
+            import_reduced_observation(
+                &store,
+                response,
+                &reduction,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap(),
+        );
+    }
+    assert!(partition_dependencies.is_empty());
+    let distributed_results_by_id = distributed_results
         .iter()
-        .find(|field| {
-            field.storage().field_id == runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
+        .map(|imported| {
+            (
+                imported.result.observation_id.clone(),
+                imported.result.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let canonical_distributed_results = distributed_source_request
+        .plan
+        .observations
+        .iter()
+        .map(|observation| distributed_results_by_id[&observation.spec.observation_id].clone())
+        .collect::<Vec<_>>();
+    let expected_distributed_artifact =
+        runmat_analysis_fea::results::observation::ObservationArtifact::new(
+            runmat_analysis_fea::results::observation::ObservationArtifactInput {
+                evaluation_request: distributed_source_request.identity(),
+                producer: distributed_source_request.producer,
+                field_recovery_request: distributed_source_request.field_recovery_request,
+                source_fields: distributed_source_request.source_fields,
+                source_result: distributed_source_request.source_result,
+                topology_digest: distributed_source_request.plan.topology_digest,
+                plan_identity: distributed_source_request.plan.identity,
+                results: canonical_distributed_results,
+            },
+        )
+        .unwrap();
+    let assembly =
+        prepare_structural_observation_assembly(StructuralObservationAssemblyPreparation {
+            source_host: field_prepared.host.clone(),
+            source_request: distributed_source_request.clone(),
+            results: distributed_results,
+            expected_resource_plan: observation_resource_plan.clone(),
+            resource_plan: observation_resource_plan_objects.clone(),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
         })
         .unwrap();
-    assert_eq!(selection.fields, vec![selected_field.identity()]);
-    let selected_chunk_digests = selection_objects
-        .manifest
-        .chunks
-        .iter()
-        .map(|chunk| chunk.digest)
-        .collect::<BTreeSet<_>>();
-    for entry in recovered_artifact
-        .fields()
-        .iter()
-        .filter(|field| field.identity() != selected_field.identity())
-    {
-        let partition = field_completed.outputs[0]
-            .manifest
-            .partitions
-            .iter()
-            .find(|partition| partition.logical_identity == entry.identity().digest())
-            .unwrap();
-        let start = partition.first_chunk_ordinal as usize;
-        let end = start + partition.chunk_count as usize;
-        assert!(field_completed.outputs[0].manifest.chunks[start..end]
-            .iter()
-            .all(|chunk| !selected_chunk_digests.contains(&chunk.digest)));
-    }
-    let recovered_catalog =
-        runmat_analysis_fea::results::field::RecoveredFieldCatalog::new_for_topology(
-            recovered_artifact.topology_digest,
-            recovered_artifact.entity_counts,
-            recovered_artifact.fields().to_vec(),
-        )
-        .unwrap();
-    let observation_results =
-        runmat_analysis_fea::results::observation::evaluate_structural_observations(
-            &observation_prepared.request.plan,
-            &solve.model,
-            Some(&mesh),
-            &recovered_catalog,
-        )
-        .unwrap();
-    let observation_artifact = runmat_analysis_fea::results::observation::ObservationArtifact::new(
-        runmat_analysis_fea::results::observation::ObservationArtifactInput {
-            evaluation_request: observation_prepared.request.identity(),
-            producer: observation_prepared.request.producer,
-            field_recovery_request: observation_prepared.request.field_recovery_request,
-            source_fields: observation_prepared.request.source_fields,
-            source_result: observation_prepared.request.source_result,
-            topology_digest: observation_prepared.request.plan.topology_digest,
-            plan_identity: observation_prepared.request.plan.identity,
-            results: observation_results,
-        },
-    )
-    .unwrap();
-    observation_prepared.program.write_to(&mut store).unwrap();
-    let observation_completed = execute_serial_analysis(
-        &observation_prepared.program.request,
+    assembly.program.write_to(&mut store).unwrap();
+    let assembly_completed = execute_serial_analysis(
+        &assembly.program.request,
         &mut store,
-        &ObservationKernel(observation_artifact.clone()),
+        &ObservationAssemblyKernel(expected_distributed_artifact.clone()),
         4096,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let observation_response =
-        AnalysisHostResponse::completed(&observation_prepared.host, &observation_completed)
-            .unwrap()
-            .program_response();
-    let imported_observations = import_structural_observations(
+    let assembly_response = AnalysisHostResponse::completed(&assembly.host, &assembly_completed)
+        .unwrap()
+        .program_response();
+    let imported_distributed_observations = import_structural_observation_assembly(
         &store,
-        observation_response,
-        &observation_prepared,
+        assembly_response,
+        &assembly,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    assert_eq!(
+        imported_distributed_observations.manifest,
+        expected_distributed_artifact.manifest().unwrap()
+    );
+    let observation_artifact = expected_distributed_artifact;
+    let imported_observations = imported_distributed_observations;
     assert_eq!(
         imported_observations.manifest,
         observation_artifact.manifest().unwrap()
@@ -1562,7 +1761,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .iter()
         .find(|entry| entry.observation_id.0 == "unrelated_displacement")
         .unwrap();
-    let unrelated_partition = observation_completed.outputs[0]
+    let unrelated_partition = assembly_completed.outputs[0]
         .manifest
         .partitions
         .iter()
@@ -1570,7 +1769,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .unwrap();
     let unrelated_start = unrelated_partition.first_chunk_ordinal as usize;
     let unrelated_end = unrelated_start + unrelated_partition.chunk_count as usize;
-    for chunk in &observation_completed.outputs[0].manifest.chunks[unrelated_start..unrelated_end] {
+    for chunk in &assembly_completed.outputs[0].manifest.chunks[unrelated_start..unrelated_end] {
         store.0.remove(&chunk.digest);
     }
     let imported_observation = import_observation_result(
@@ -2090,6 +2289,8 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };

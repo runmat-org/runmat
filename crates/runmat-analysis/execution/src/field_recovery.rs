@@ -5,8 +5,8 @@ use runmat_analysis_fea::execution::{
     StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 use runmat_analysis_fea::results::field::{
-    RecoveredField, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
-    StructuralRecoveredFieldTopology,
+    reconstruct_recovered_field, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
+    RecoveredFieldPartition, StructuralRecoveredFieldTopology,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -265,8 +265,26 @@ pub fn decode_recovered_field_artifact(
         .fields
         .iter()
         .map(|entry| {
-            RecoveredField::from_canonical_bytes(&objects.partition_payload(entry.field.digest())?)
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+            let partitions = entry
+                .partitions
+                .iter()
+                .map(|descriptor| {
+                    RecoveredFieldPartition::from_canonical_bytes(
+                        &objects.partition_payload(descriptor.partition.digest())?,
+                    )
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+                })
+                .collect::<AnalysisBridgeResult<Vec<_>>>()?;
+            reconstruct_recovered_field(
+                entry.field,
+                entry.definition.clone(),
+                entry.sample,
+                partitions,
+                manifest
+                    .entity_counts
+                    .entity_count(entry.definition.entity_domain()),
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     RecoveredFieldArtifact::from_manifest_and_fields(manifest, fields)

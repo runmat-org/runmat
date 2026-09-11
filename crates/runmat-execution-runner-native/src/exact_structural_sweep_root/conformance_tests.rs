@@ -686,6 +686,8 @@ fn box_structural_workload() -> StructuralLinearWorkload {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     }

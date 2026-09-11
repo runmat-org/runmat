@@ -1,0 +1,209 @@
+use runmat_analysis_core::AnalysisField;
+use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_execution::Digest;
+use serde::{Deserialize, Serialize};
+
+use super::{
+    RecoveredField, RecoveredFieldDefinition, RecoveredFieldError, RecoveredFieldIdentity,
+    RecoveredFieldSample,
+};
+
+const FIELD_PARTITION_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition/v1\0";
+const FIELD_PARTITION_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 32);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RecoveredFieldPartitionIdentity(Digest);
+
+impl RecoveredFieldPartitionIdentity {
+    pub const fn digest(self) -> Digest {
+        self.0
+    }
+}
+
+/// Canonical compact field values needed by one observation partition.
+///
+/// `source_indices` are global indices in the recovered field's entity domain. Values are stored
+/// in that canonical order, so a worker can evaluate its partition without loading unrelated
+/// field entities.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "RecoveredFieldPartitionWire")]
+pub struct RecoveredFieldPartition {
+    pub schema_version: u16,
+    pub identity: RecoveredFieldPartitionIdentity,
+    pub source_field: RecoveredFieldIdentity,
+    pub definition: RecoveredFieldDefinition,
+    pub sample: RecoveredFieldSample,
+    pub source_indices: Vec<usize>,
+    pub storage: AnalysisField,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveredFieldPartitionWire {
+    schema_version: u16,
+    identity: RecoveredFieldPartitionIdentity,
+    source_field: RecoveredFieldIdentity,
+    definition: RecoveredFieldDefinition,
+    sample: RecoveredFieldSample,
+    source_indices: Vec<usize>,
+    storage: AnalysisField,
+}
+
+impl TryFrom<RecoveredFieldPartitionWire> for RecoveredFieldPartition {
+    type Error = RecoveredFieldError;
+
+    fn try_from(wire: RecoveredFieldPartitionWire) -> Result<Self, Self::Error> {
+        let partition = Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            source_field: wire.source_field,
+            definition: wire.definition,
+            sample: wire.sample,
+            source_indices: wire.source_indices,
+            storage: wire.storage,
+        };
+        partition.validate()?;
+        Ok(partition)
+    }
+}
+
+impl RecoveredFieldPartition {
+    pub fn select(
+        source: &RecoveredField,
+        source_indices: Vec<usize>,
+    ) -> Result<Self, RecoveredFieldError> {
+        source.validate()?;
+        if source_indices.is_empty() || source_indices.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field partition indices must be nonempty and strictly increasing".into(),
+            ));
+        }
+        let components = source
+            .definition()
+            .value_shape()
+            .component_count()
+            .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
+        let source_values =
+            source
+                .storage()
+                .as_host_f64()
+                .ok_or(RecoveredFieldError::InvalidArtifact(
+                    "field partition extraction requires host-resident f64 values".into(),
+                ))?;
+        let mut values = Vec::with_capacity(source_indices.len().saturating_mul(components));
+        for index in &source_indices {
+            let start = index
+                .checked_mul(components)
+                .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+            let end = start
+                .checked_add(components)
+                .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+            values.extend_from_slice(
+                source_values
+                    .get(start..end)
+                    .ok_or(RecoveredFieldError::StorageShapeMismatch)?,
+            );
+        }
+        let shape = if components == 1 {
+            vec![source_indices.len()]
+        } else {
+            vec![source_indices.len(), components]
+        };
+        let mut partition = Self {
+            schema_version: 1,
+            identity: RecoveredFieldPartitionIdentity(Digest::sha256([])),
+            source_field: source.identity(),
+            definition: source.definition().clone(),
+            sample: source.sample(),
+            source_indices,
+            storage: AnalysisField::host_f64(source.definition().field_id(), shape, values),
+        };
+        partition.identity = partition.derive_identity()?;
+        partition.validate()?;
+        Ok(partition)
+    }
+
+    pub fn value(&self, source_index: usize) -> Option<&[f64]> {
+        let local_index = self.source_indices.binary_search(&source_index).ok()?;
+        let components = self.definition.value_shape().component_count()?;
+        let start = local_index.checked_mul(components)?;
+        let end = start.checked_add(components)?;
+        self.storage.as_host_f64()?.get(start..end)
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RecoveredFieldError> {
+        self.validate()?;
+        encode_contract(
+            FIELD_PARTITION_PREFIX,
+            "recovered-field-partition",
+            self,
+            FIELD_PARTITION_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, RecoveredFieldError> {
+        decode_contract(
+            FIELD_PARTITION_PREFIX,
+            "recovered-field-partition",
+            bytes,
+            FIELD_PARTITION_LIMITS,
+        )
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+
+    pub fn validate(&self) -> Result<(), RecoveredFieldError> {
+        self.definition.validate()?;
+        self.sample.validate()?;
+        let components = self
+            .definition
+            .value_shape()
+            .component_count()
+            .ok_or(RecoveredFieldError::QuantityShapeMismatch)?;
+        let expected_shape = if components == 1 {
+            vec![self.source_indices.len()]
+        } else {
+            vec![self.source_indices.len(), components]
+        };
+        if self.schema_version != 1
+            || self.source_indices.is_empty()
+            || self
+                .source_indices
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self.storage.field_id != self.definition.field_id()
+            || self.storage.shape != expected_shape
+            || self
+                .storage
+                .as_host_f64()
+                .is_none_or(|values| values.iter().any(|value| !value.is_finite()))
+            || self.identity != self.derive_identity()?
+        {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field partition metadata, values, or identity is invalid".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn derive_identity(&self) -> Result<RecoveredFieldPartitionIdentity, RecoveredFieldError> {
+        encode_contract(
+            FIELD_PARTITION_PREFIX,
+            "recovered-field-partition-identity",
+            &(
+                self.schema_version,
+                self.source_field,
+                &self.definition,
+                self.sample,
+                &self.source_indices,
+                &self.storage,
+            ),
+            FIELD_PARTITION_LIMITS,
+        )
+        .map(Digest::sha256)
+        .map(RecoveredFieldPartitionIdentity)
+        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+    }
+}

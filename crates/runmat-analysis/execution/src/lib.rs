@@ -9,7 +9,10 @@ mod history_access;
 mod host;
 mod materialized_signal;
 mod object;
+mod observation_assembly;
 mod observation_evaluation;
+mod observation_field_partitions;
+mod observation_partition;
 mod resource_usage;
 mod response;
 mod result_publication;
@@ -60,9 +63,19 @@ pub use object::{
     prepare_analysis_objects, prepare_partitioned_analysis_objects, AnalysisPartitionImport,
     ImportedAnalysisPartition, PreparedAnalysisObjects,
 };
+pub use observation_assembly::{
+    import_structural_observation_assembly, prepare_structural_observation_assembly,
+    PreparedStructuralObservationAssembly, StructuralObservationAssemblyPreparation,
+};
 pub use observation_evaluation::{
-    import_observation_result, import_structural_observations, prepare_structural_observation,
-    ImportedObservations, PreparedStructuralObservation, StructuralObservationPreparation,
+    import_observation_result, ImportedObservations, StructuralObservationPreparation,
+};
+pub use observation_partition::{
+    import_observation_partition_contribution, import_reduced_observation,
+    prepare_structural_observation_fanout, prepare_structural_observation_reduction,
+    ImportedObservationPartitionContribution, ImportedReducedObservation,
+    PreparedStructuralObservationFanout, PreparedStructuralObservationPartition,
+    PreparedStructuralObservationReduction, StructuralObservationReductionPreparation,
 };
 pub use resource_usage::{
     prepare_structural_resource_usage, validate_structural_resource_usage,

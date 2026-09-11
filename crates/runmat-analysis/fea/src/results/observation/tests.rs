@@ -278,7 +278,8 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
         ObservationLimits::default(),
     )
     .unwrap();
-    let resource_facts = ObservationResourceFacts::from_plan(&plan).unwrap();
+    let resource_facts =
+        ObservationResourceFacts::from_plan(&plan, ObservationExecutionPolicy::scalable()).unwrap();
     assert_eq!(resource_facts.maximum_samples_per_observation, Count(3));
     assert_eq!(resource_facts.produced_sample_count, Count(3));
     assert_eq!(resource_facts.retained_sample_count, Count(2));
@@ -312,7 +313,7 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
         history.samples()[0].result.logical_identity,
         result_identities[1]
     );
-    assert_eq!(result_identities[0], result_identities[1]);
+    assert_ne!(result_identities[0], result_identities[1]);
     assert_ne!(history.samples()[0].identity, history.samples()[1].identity);
     let decoded_manifest = ObservationHistoryManifest::from_canonical_bytes(
         &history.manifest().canonical_bytes().unwrap(),

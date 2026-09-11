@@ -57,6 +57,9 @@ identity_type!(SolverResultIdentity);
 identity_type!(NumericalReceiptIdentity);
 identity_type!(FieldRecoveryRequestIdentity);
 identity_type!(ObservationEvaluationRequestIdentity);
+identity_type!(ObservationPartitionEvaluationRequestIdentity);
+identity_type!(ObservationPartitionReductionRequestIdentity);
+identity_type!(ObservationAssemblyRequestIdentity);
 identity_type!(AccuracyEvaluationRequestIdentity);
 identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
@@ -71,7 +74,9 @@ pub enum AnalysisWorkKind {
     Solve,
     RecoverField,
     PublishState,
-    EvaluateObservation,
+    EvaluateObservationPartition,
+    ReduceObservationPartitions,
+    AssembleObservations,
     EvaluateAccuracy,
     PublishResult,
 }
