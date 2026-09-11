@@ -106,7 +106,7 @@ function inventoryCommand(options) {
     const inventory = buildInventory(exported, {
         ...source,
         runnerDigest: options["runner-digest"] ?? computeRunnerDigest(root),
-        scope: { builtin: options.builtin, filter: options.filter, limit: options.limit }
+        scope: { builtins: arrayOption(options.builtin), filter: options.filter, limit: options.limit }
     });
     writeJson(output, inventory);
     console.log(`Wrote ${inventory.executionUnits.length} execution units to ${resolve(output)}`);
@@ -233,7 +233,7 @@ function parseOptions(args) {
         if (name === "closure") { options[name] = true; continue; }
         const value = args[++index];
         if (value === undefined || value.startsWith("--")) throw new Error(`${arg} requires a value`);
-        if (name === "result" || name === "artifact-manifest" || name === "product-probe" || name === "file" || name === "entrypoint") options[name] = [...arrayOption(options[name]), value];
+        if (name === "result" || name === "artifact-manifest" || name === "product-probe" || name === "file" || name === "entrypoint" || name === "builtin") options[name] = [...arrayOption(options[name]), value];
         else options[name] = value;
     }
     return options;

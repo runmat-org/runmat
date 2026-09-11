@@ -7,7 +7,7 @@ import test from "node:test";
 import { auditMigration, parseBatch } from "../audit.mjs";
 import { parseControlManifest } from "../control.mjs";
 import { buildControlDraft, freezeReviewedControl, parseControlDraft } from "../control-draft.mjs";
-import { validateDispositionInput } from "../dispositions.mjs";
+import { dispositionInputFromControl, validateDispositionInput } from "../dispositions.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { runGateProducer } from "../gate-adapter.mjs";
 import { generatedProductChecks, parseGeneratedProductsProof } from "../generated-products.mjs";
@@ -42,13 +42,31 @@ test("inventory v2 binds lexical observations to content-derived source and disp
 
 test("source dirty evidence is scoped to the frozen inventory roots", () => {
   const repository = repositoryFixture();
-  execFileSync("git", ["init", "--quiet"], { cwd: repository });
-  execFileSync("git", ["add", "."], { cwd: repository });
-  execFileSync("git", ["-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid", "commit", "--quiet", "-m", "fixture"], { cwd: repository });
   fs.writeFileSync(path.join(repository, "unrelated.tmp"), "outside snapshot\n");
   assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, false);
   fs.appendFileSync(path.join(repository, "Cargo.toml"), "# scoped change\n");
   assert.equal(sourceSnapshot(repository, ["Cargo.toml"]).dirty, true);
+});
+
+test("baseline prepare evidence and subject gate evidence retain distinct provenance", () => {
+  const fixture = controlledFixture();
+  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
+  const runtimePath = "crates/runmat-runtime/src/builtins/math/basic/foo.rs";
+  fs.appendFileSync(path.join(fixture.repository, runtimePath), "\n// migrated subject\n");
+  execFileSync("git", ["add", runtimePath], { cwd: fixture.repository });
+  execFileSync("git", ["-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "subject"], { cwd: fixture.repository });
+  const subject = buildInventory(fixture.repository, dispositionInputFromControl(fixture.control), { compiledInventory: fixture.compiledInventory });
+  assert.notEqual(subject.source.revision, fixture.inventory.source.revision);
+  assert.notEqual(subject.digest, fixture.inventory.digest);
+  const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name, `gate-subject-${name}`, subject));
+  const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
+  const audit = auditMigration(fixture.repository, fixture.inventory, subject, fixture.control, fixture.lease, batch, { artifact_id: "audit-subject", changed_paths: [runtimePath], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
+  assert.equal(audit.result, "pass");
+  assert.equal(audit.source.revision, subject.source.revision);
+  assert.equal(audit.baseline_inventory_digest, fixture.inventory.digest);
+  assert.equal(audit.subject_inventory_digest, subject.digest);
+  assert.equal(prepared.inventory_digest, fixture.inventory.digest);
 });
 
 test("inventory rejects absent, future, or tampered compiled semantic authority", () => {
@@ -205,7 +223,7 @@ test("disposition v1 is closed and supports reviewed internal double-underscore 
 
 test("gate producer requests cannot inject commands, results, checks, or storage", () => {
   const fixture = controlledFixture();
-  const request = { control: fixture.controlValue, inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
+  const request = { control: fixture.controlValue, baseline_inventory: fixture.inventory, subject_inventory: fixture.inventory, bundle_id: fixture.bundleId, gate: "architecture", artifact_id: "forged", inputs: null };
   assert.throws(() => runGateProducer({ ...request, command: { executable: "/private/tmp/fake", arguments: [], cwd: "/private/tmp" } }), /fields must be exactly/);
   const fake = structuredClone(fixture.controlValue);
   fake.bundles[fixture.bundleId].gate_plans[0].program.path = "scripts/fake.mjs";
@@ -259,19 +277,21 @@ test("generated product proof requires two equal runs, checked-in equality, and 
 test("inventory delta proof admits only the reviewed bundle authority and path transition", () => {
   const fixture = controlledFixture();
   const control = { ...fixture.control, active_bundle_id: fixture.bundleId };
-  const proof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, fixture.compiledInventory);
+  const proof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, fixture.inventory, control);
   assert.equal(proof.result, "pass");
   assert.equal(inventoryDeltaChecks(proof)[0].result, "pass");
 
   const wrongBinding = structuredClone(fixture.compiledInventory);
   wrongBinding.snapshot.observed.implementation_provenance[0].source_file = "crates/runmat-runtime/src/builtins/math/basic/other.rs";
   wrongBinding.digest.value = contentDigest(Buffer.from(JSON.stringify(wrongBinding.snapshot))).slice("sha256:".length);
-  const wrongBindingProof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, wrongBinding);
+  const wrongBindingInventory = buildInventory(fixture.repository, undefined, { revision: REVISION, compiledInventory: wrongBinding });
+  const wrongBindingProof = buildInventoryDeltaProof(fixture.repository, fixture.inventory, wrongBindingInventory, control);
   assert.equal(wrongBindingProof.result, "fail");
   assert.match(wrongBindingProof.identities[0].failures.join("\n"), /binding provenance differs/);
 
   fs.appendFileSync(path.join(fixture.repository, "Cargo.toml"), "\n# unreviewed\n");
-  const escaped = buildInventoryDeltaProof(fixture.repository, fixture.inventory, control, fixture.compiledInventory);
+  const escapedInventory = buildInventory(fixture.repository, undefined, { revision: REVISION, compiledInventory: fixture.compiledInventory });
+  const escaped = buildInventoryDeltaProof(fixture.repository, fixture.inventory, escapedInventory, control);
   assert.equal(escaped.result, "fail");
   assert.match(escaped.failures.join("\n"), /source changed outside the reviewed bundle scopes/);
 });
@@ -323,7 +343,7 @@ test("control draft, freeze, and lease issuance CLI keep review and derivation s
 
 test("gate evidence rejects stale storage, filesystem identity, and forged process status", () => {
   const fixture = controlledFixture();
-  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy };
+  const expected = { source_revision: fixture.inventory.source.revision, source_digest: fixture.inventory.source.digest, baseline_source_revision: fixture.inventory.source.revision, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: fixture.inventory.digest, control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, storage_policy: fixture.control.value.storage_policy };
   const stale = gate(fixture, "architecture"); stale.storage_admission.observed_at = "2026-09-10T23:00:00.000Z";
   assert.throws(() => parseGateResult(stale, expected), /time bound/);
   const filesystem = gate(fixture, "architecture"); filesystem.storage_admission.volumes[0].filesystem_id = "posix-dev:3";
@@ -409,21 +429,21 @@ test("completed field dispositions require exact prepared leaves and review evid
   assert.throws(() => parseCompletedSourceDisposition(checklist, "foo", result.checklist_baseline_digest), /prepared baseline/);
 });
 
-test("audit v3 cannot pass on file presence or example tokens without exact gate evidence", () => {
+test("audit v4 cannot pass on file presence or example tokens without exact gate evidence", () => {
   const fixture = controlledFixture();
   const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
-  const absent = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: [] });
+  const absent = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: [] });
   assert.equal(absent.result, "fail");
   assert.ok(absent.identities[0].failures.some((entry) => entry.code === "required-gate-missing"));
   const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
-  const passed = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
+  const passed = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: gates });
   assert.equal(passed.result, "pass");
   const stale = structuredClone(gates); stale[0].source_digest = `sha256:${"b".repeat(64)}`;
-  assert.equal(auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: stale }).result, "fail");
-  const impersonated = structuredClone(gates); impersonated[0].producer_evidence.contract.source_digest = `sha256:${"e".repeat(64)}`;
-  const rejected = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: impersonated });
+  assert.equal(auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: stale }).result, "fail");
+  const impersonated = structuredClone(gates); impersonated[0].producer_evidence.contract.producer_source_digest = `sha256:${"e".repeat(64)}`;
+  const rejected = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", changed_paths: [], prepare_results: [prepared], source_dispositions: [], gate_results: impersonated });
   assert.ok(rejected.global_failures.some((entry) => entry.detail.includes("differs from the reviewed gate plan")));
 });
 
@@ -436,11 +456,11 @@ test("source-field destinations require value-digest reconciliation from the doc
   for (const source of disposition.sources) for (const leaf of source.leaves) { leaf.disposition = "preserved"; leaf.destination = { kind: "catalog-documentation", catalog_identity: "foo", pointer: leaf.pointer, value_digest: leaf.value_digest }; }
   const gates = ["catalog-contract", "runtime-binding", "documentation-cutover", "architecture"].map((name) => gate(fixture, name));
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
-  const missing = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
+  const missing = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
   assert.ok(missing.identities[0].failures.some((entry) => entry.code === "destination-proof-missing"));
   const documentation = gates.find((entry) => entry.gate === "documentation-cutover");
   for (const source of disposition.sources) for (const leaf of source.leaves) documentation.checks.push({ id: `destination:foo:${source.path}:${leaf.pointer}:${leaf.destination.kind}:${leaf.destination.pointer}`, result: "pass", evidence_digest: leaf.value_digest });
-  const reconciled = auditMigration(fixture.repository, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
+  const reconciled = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-destination", changed_paths: [], prepare_results: [prepared], source_dispositions: [disposition], gate_results: gates });
   assert.ok(!reconciled.identities[0].failures.some((entry) => entry.code === "destination-proof-missing"));
 });
 

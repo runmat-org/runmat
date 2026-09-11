@@ -4,6 +4,7 @@ import { compareUtf8, digestObject, exampleIdentity, executionIdentity, legacyEx
 import { exampleKey as legacyRunnerKey } from "./sharding.mjs";
 import { isExecutionLane, requiredExecutionLanes } from "./lanes.mjs";
 import { digest, enumValue, exactKeys, gitRevision, integer } from "./schema.mjs";
+import { matchesInventoryScope, normalizeInventoryScope, validateInventoryScope } from "./scope.mjs";
 import {
     NO_EXAMPLE_FIXTURE,
     NO_EXAMPLE_REQUIREMENTS,
@@ -11,13 +12,13 @@ import {
     validateBuiltinExampleRequirements
 } from "../../metadata/BuiltinExampleFixtureSchema.mjs";
 
-export const INVENTORY_SCHEMA = "runmat.builtin-examples.inventory.v2";
+export const INVENTORY_SCHEMA = "runmat.builtin-examples.inventory.v3";
 
 export function buildInventory(documentExport, options) {
     if (!documentExport || ![1, 2].includes(documentExport.schema_version) || !Array.isArray(documentExport.builtins)) {
         throw new Error("Unsupported builtin documentation export schema");
     }
-    const scope = normalizeScope(options.scope);
+    const scope = normalizeInventoryScope(options.scope);
     gitRevision(options.sourceRevision);
     enumValue(options.sourceState, ["clean", "dirty"], "inventory source state");
     digest(options.runnerDigest, "inventory runner digest");
@@ -37,7 +38,7 @@ export function buildInventory(documentExport, options) {
             const key = `${builtinKey}#${exampleId}`;
             if (seen.has(key)) throw new Error(`Duplicate builtin example identity: ${key}`);
             seen.add(key);
-            if (!matchesScope(normalized, scope)) continue;
+            if (!matchesInventoryScope(normalized, scope)) continue;
             records.push(normalized);
         }
     }
@@ -91,15 +92,7 @@ export function validateInventory(inventory) {
     digest(inventory.runnerDigest, "inventory runner digest");
     digest(inventory.inventoryDigest, "inventory digest");
     if (![1, 2].includes(inventory.exportSchemaVersion)) throw new Error("Inventory export schema version must be 1 or 2");
-    exactKeys(inventory.scope, ["kind", "builtin", "filter", "limit"], "inventory scope");
-    enumValue(inventory.scope.kind, ["complete", "development"], "inventory scope kind");
-    for (const field of ["builtin", "filter"]) {
-        const value = inventory.scope[field];
-        if (value !== null && (typeof value !== "string" || !value || value !== value.trim().toLowerCase())) throw new Error(`Inventory scope ${field} must be null or a normalized nonempty string`);
-    }
-    if (inventory.scope.limit !== null) integer(inventory.scope.limit, "inventory scope limit", 1);
-    const developmentScope = inventory.scope.builtin !== null || inventory.scope.filter !== null || inventory.scope.limit !== null;
-    if ((inventory.scope.kind === "development") !== developmentScope) throw new Error("Inventory scope kind does not match its selectors");
+    validateInventoryScope(inventory.scope);
     exactKeys(inventory.counts, ["documents", "sourceExamples", "selectedExamples", "executableExamples", "documentationOnly", "executionUnitsByLane"], "inventory counts");
     for (const [key, value] of Object.entries(inventory.counts).filter(([key]) => key !== "executionUnitsByLane")) integer(value, `inventory count ${key}`);
     if (!inventory.counts.executionUnitsByLane || typeof inventory.counts.executionUnitsByLane !== "object" || Array.isArray(inventory.counts.executionUnitsByLane)) throw new Error("Inventory lane counts must be an object");
@@ -280,22 +273,6 @@ function appendAssertions(program, verification) {
     return assertions && typeof assertions.source === "string"
         ? `${program.trimEnd()}\n${assertions.source}`
         : program;
-}
-
-function normalizeScope(scope = {}) {
-    const builtin = typeof scope.builtin === "string" && scope.builtin.trim() ? scope.builtin.trim().toLowerCase() : null;
-    const filter = typeof scope.filter === "string" && scope.filter.trim() ? scope.filter.trim().toLowerCase() : null;
-    if (builtin && filter) throw new Error("Builtin and text filters cannot be combined");
-    const limit = scope.limit === undefined || scope.limit === null ? null : Number(scope.limit);
-    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 1)) throw new Error("Inventory limit must be a positive integer");
-    return { kind: builtin || filter || limit !== null ? "development" : "complete", builtin, filter, limit };
-}
-
-function matchesScope(example, scope) {
-    if (scope.builtin && example.builtinKey !== scope.builtin) return false;
-    if (!scope.filter) return true;
-    return [example.builtinKey, example.description, example.program, example.category]
-        .join("\n").toLowerCase().includes(scope.filter);
 }
 
 function normalize(value, label) {

@@ -40,6 +40,9 @@ pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
  documentation: BuiltinDocumentation { summary: "Foo", examples: &["${identity}(1)"] },
 };`);
   if (sidecar) write(root, `docs/builtins/reference/${identity}.json`, JSON.stringify({ name: identity, summary: "Foo", examples: [{ input: `${identity}(1)` }] }));
+  execFileSync("git", ["init", "--quiet"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture"], { cwd: root });
   return root;
 }
 
@@ -124,7 +127,7 @@ function fixtureGatePlans(inventory) {
   ];
 }
 
-export function gate(fixture, name, artifactId = `gate-${name}`) {
+export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixture.inventory) {
   const namedProducer = producer(name);
   const plan = fixture.control.bundles.get(fixture.bundleId).gate_plans.get(name);
   const sourceDigest = plan.program.kind === "repository_script" ? plan.program.content_digest : plan.program.manifest_digest;
@@ -140,9 +143,9 @@ export function gate(fixture, name, artifactId = `gate-${name}`) {
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 1, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
-    producer: namedProducer, producer_evidence: { schema_version: 1, kind: `${namedProducer}-evidence`, contract: { source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z", source_revision: fixture.inventory.source.revision,
-    source_digest: fixture.inventory.source.digest, inventory_digest: fixture.inventory.digest,
+    schema_version: 2, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    producer: namedProducer, producer_evidence: { schema_version: 1, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z", source_revision: subject.source.revision,
+    source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: [fixture.id],
     gate: name, result: "pass", checks: [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
     storage_admission: { observed_at: "2026-09-11T00:00:00.000Z", volumes: [

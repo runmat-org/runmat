@@ -6,6 +6,26 @@ export function emptyDispositionInput() {
   return { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities: {} };
 }
 
+export function dispositionInputFromControl(control) {
+  const identities = {};
+  for (const [identity, entry] of control.identities) {
+    identities[identity] = {
+      disposition: entry.disposition.kind,
+      canonical: entry.disposition.kind === "alias" ? entry.disposition.target : null,
+      domain: entry.domain,
+      family: entry.family,
+      reason: entry.disposition.kind === "internal" ? entry.disposition.reason : null,
+      review: { status: "reviewed", evidence: [`control:${control.digest}`] },
+    };
+  }
+  return {
+    schema_version: 1,
+    kind: "runmat-builtin-dispositions",
+    authority: "review-input-only",
+    identities,
+  };
+}
+
 export function buildDispositionSeed(inventory) {
   return {
     schema_version: 1,

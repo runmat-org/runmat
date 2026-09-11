@@ -12,7 +12,9 @@ export function verifyBatch(manifestValue, loadedAudit, loadedGates) {
   }
   const expected = {
     source_revision: manifest.batch.source_revision, source_digest: manifest.batch.source_digest,
-    inventory_digest: manifest.batch.inventory_digest, control_manifest_digest: manifest.batch.control_manifest_digest,
+    baseline_inventory_digest: manifest.batch.baseline_inventory_digest,
+    subject_inventory_digest: manifest.batch.subject_inventory_digest,
+    control_manifest_digest: manifest.batch.control_manifest_digest,
     bundle_id: manifest.batch.bundle_id,
   };
   const gates = new Map();
@@ -40,9 +42,11 @@ export function verifyBatch(manifestValue, loadedAudit, loadedGates) {
   });
   const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 2, kind: "runmat-builtin-migration-verification-result", authority: "development-verification-evidence-only",
+    schema_version: 3, kind: "runmat-builtin-migration-verification-result", authority: "development-verification-evidence-only",
     artifact_id: manifest.batch.artifact_id, source_revision: manifest.batch.source_revision, source_digest: manifest.batch.source_digest,
-    inventory_digest: manifest.batch.inventory_digest, control_manifest_digest: manifest.batch.control_manifest_digest,
+    baseline_inventory_digest: manifest.batch.baseline_inventory_digest,
+    subject_inventory_digest: manifest.batch.subject_inventory_digest,
+    control_manifest_digest: manifest.batch.control_manifest_digest,
     bundle_id: manifest.batch.bundle_id, identities: manifest.batch.identities,
     inputs: { audit: manifest.audit, gates: manifest.gate_results },
     summary: { identities: identities.length, passed, failed: identities.length - passed, global_failures: failures.length },

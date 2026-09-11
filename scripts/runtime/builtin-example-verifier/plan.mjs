@@ -5,11 +5,12 @@ import { EXECUTION_LANES, isExecutionLane, laneProduct } from "./lanes.mjs";
 import { validateInventory } from "./inventory.mjs";
 import { defaultArtifactProfile, requiredArtifactRoles, requiredProductProbes } from "./product-contracts.mjs";
 import { digest, enumValue, exactKeys, gitRevision, integer } from "./schema.mjs";
+import { validateInventoryScope } from "./scope.mjs";
 
 export { defaultArtifactProfile, requiredArtifactRoles, requiredProductProbes } from "./product-contracts.mjs";
 
 export const TOPOLOGY_SCHEMA = "runmat.builtin-examples.topology.v1";
-export const PLAN_SCHEMA = "runmat.builtin-examples.plan.v1";
+export const PLAN_SCHEMA = "runmat.builtin-examples.plan.v2";
 export const PARTITION_ALGORITHM = "sha256-execution-identity-u64be-mod-v1";
 
 const DEFAULT_LIMITS = Object.freeze({
@@ -95,13 +96,7 @@ export function validatePlan(plan, inventory = null) {
     if (digestObject(plan, ["planDigest"]) !== plan.planDigest) throw new Error("Builtin example plan digest mismatch");
     if (plan.partitionAlgorithm !== PARTITION_ALGORITHM) throw new Error("Unsupported builtin example partition algorithm");
     enumValue(plan.productScope, ["all", "public-products", "native-cli", "browser-wasm", "desktop-native"], "plan product scope");
-    exactKeys(plan.scope, ["kind", "builtin", "filter", "limit"], "plan scope");
-    enumValue(plan.scope.kind, ["complete", "development"], "plan scope kind");
-    for (const field of ["builtin", "filter"]) {
-        const value = plan.scope[field];
-        if (value !== null && (typeof value !== "string" || !value || value !== value.trim().toLowerCase())) throw new Error(`Plan scope ${field} must be null or a normalized nonempty string`);
-    }
-    if (plan.scope.limit !== null) integer(plan.scope.limit, "plan scope limit", 1);
+    validateInventoryScope(plan.scope, "plan scope");
     if (!Array.isArray(plan.lanes) || !Array.isArray(plan.products)) throw new Error("Invalid builtin example plan records");
     const seenLanes = new Set();
     const seenUnits = new Set();

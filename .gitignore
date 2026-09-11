@@ -28,7 +28,7 @@ __pycache__/
 
 benchmarks/results/
 scripts/example-output-reports/
-bindings/ts/node_modules/
+bindings/ts/node_modules
 bindings/ts/pkg/
 bindings/ts/pkg-web/
 bindings/ts/src/generated/*

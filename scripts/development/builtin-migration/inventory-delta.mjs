@@ -3,13 +3,8 @@ import path from "node:path";
 
 import { compareCodePoint } from "./constants.mjs";
 import { evidenceDigest } from "./evidence.mjs";
-import { buildInventory } from "./inventory.mjs";
 
-export function buildInventoryDeltaProof(repository, baseline, control, compiledInventory) {
-  const current = buildInventory(repository, reviewedDispositions(control), {
-    compiledInventory,
-    revision: baseline.source.revision,
-  });
+export function buildInventoryDeltaProof(repository, baseline, current, control) {
   const bundle = control.bundles.get(control.active_bundle_id);
   if (!bundle) throw new Error(`${control.active_bundle_id}: inventory delta bundle is absent`);
   const failures = [];
@@ -47,11 +42,12 @@ export function buildInventoryDeltaProof(repository, baseline, control, compiled
     schema_version: 1,
     kind: "runmat-builtin-inventory-delta-proof",
     authority: "machine-derived-migration-evidence",
-    source_revision: baseline.source.revision,
+    baseline_source_revision: baseline.source.revision,
+    subject_source_revision: current.source.revision,
     baseline_inventory_digest: baseline.digest,
-    current_inventory_digest: current.digest,
-    current_source_digest: current.source.digest,
-    current_compiled_inventory_digest: current.compiled_inventory.digest,
+    subject_inventory_digest: current.digest,
+    subject_source_digest: current.source.digest,
+    subject_compiled_inventory_digest: current.compiled_inventory.digest,
     control_manifest_digest: control.digest,
     bundle_id: bundle.id,
     changed_paths: changedPaths(baseline.source.files, current.source.files),
@@ -68,21 +64,6 @@ export function inventoryDeltaChecks(proof) {
     result: proof.result === "pass" && entry.result === "pass" ? "pass" : "fail",
     evidence_digest: evidenceDigest(entry),
   }));
-}
-
-function reviewedDispositions(control) {
-  const identities = {};
-  for (const [identity, entry] of control.identities) {
-    identities[identity] = {
-      disposition: entry.disposition.kind,
-      canonical: entry.disposition.kind === "alias" ? entry.disposition.target : null,
-      domain: entry.domain,
-      family: entry.family,
-      reason: entry.disposition.kind === "internal" ? entry.disposition.reason : null,
-      review: { status: "reviewed", evidence: [`control:${control.digest}`] },
-    };
-  }
-  return { schema_version: 1, kind: "runmat-builtin-dispositions", authority: "review-input-only", identities };
 }
 
 function changedPathFailures(baseline, current, bundle) {
