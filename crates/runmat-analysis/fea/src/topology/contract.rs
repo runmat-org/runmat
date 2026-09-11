@@ -178,6 +178,17 @@ pub struct VolumeQuadraturePoint {
     pub(super) node_count: usize,
 }
 
+/// Canonical finite-element coordinates of a physical point inside the solid projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolumePointLocation {
+    pub element_index: usize,
+    pub element_identity: StableDigest,
+    pub position_m: [f64; 3],
+    pub node_indices: Vec<usize>,
+    pub node_identities: Vec<StableDigest>,
+    pub shape_values: Vec<f64>,
+}
+
 impl VolumeQuadraturePoint {
     pub fn shape_values(&self) -> &[f64] {
         &self.shape_values[..self.node_count]

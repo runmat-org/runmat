@@ -8,6 +8,7 @@ mod contract;
 mod distributed;
 mod distributed_numeric;
 mod evaluate;
+mod extrema;
 mod history;
 mod partition;
 mod publish;
@@ -19,7 +20,7 @@ pub use contract::{
     ObservationArtifactInput, ObservationArtifactManifest, ObservationEntity, ObservationError,
     ObservationLimits, ObservationResult, ObservationResultIdentity, ObservationSampleBounds,
     ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
+    ResolvedObservationPlanIdentity, ResolvedObservationPoint, ResolvedObservationTarget,
 };
 pub use distributed::{
     evaluate_solid_observation_partition, evaluate_structural_observation_partition,

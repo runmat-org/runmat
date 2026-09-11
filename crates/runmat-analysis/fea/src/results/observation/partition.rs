@@ -78,6 +78,10 @@ pub enum ObservationPartitionTarget {
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
     },
+    Points {
+        sample_ordinals: Vec<usize>,
+        identities: Vec<StableDigest>,
+    },
     Volume {
         element_indices: Vec<usize>,
         element_identities: Vec<StableDigest>,
@@ -92,6 +96,9 @@ impl ObservationPartitionTarget {
     pub fn entity_count(&self) -> usize {
         match self {
             Self::Nodes { indices, .. } | Self::Elements { indices, .. } => indices.len(),
+            Self::Points {
+                sample_ordinals, ..
+            } => sample_ordinals.len(),
             Self::Volume {
                 element_indices, ..
             } => element_indices.len(),
@@ -101,7 +108,9 @@ impl ObservationPartitionTarget {
 
     pub fn identities(&self) -> &[StableDigest] {
         match self {
-            Self::Nodes { identities, .. } | Self::Elements { identities, .. } => identities,
+            Self::Nodes { identities, .. }
+            | Self::Elements { identities, .. }
+            | Self::Points { identities, .. } => identities,
             Self::Volume {
                 element_identities, ..
             } => element_identities,
@@ -403,6 +412,13 @@ fn partition_target(
         } => ObservationPartitionTarget::Elements {
             indices: indices[start..end].to_vec(),
             identities: identities[start..end].to_vec(),
+        },
+        ResolvedObservationTarget::Points { samples } => ObservationPartitionTarget::Points {
+            sample_ordinals: (start..end).collect(),
+            identities: samples[start..end]
+                .iter()
+                .map(|sample| sample.identity)
+                .collect(),
         },
         ResolvedObservationTarget::Volume {
             element_indices,

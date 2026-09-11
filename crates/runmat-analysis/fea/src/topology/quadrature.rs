@@ -262,7 +262,10 @@ pub(super) fn visit_volume_quadrature(
     Some(())
 }
 
-fn volume_shape(order: ElementOrder, barycentric: [f64; 4]) -> ([f64; 10], [[f64; 3]; 10]) {
+pub(super) fn volume_shape(
+    order: ElementOrder,
+    barycentric: [f64; 4],
+) -> ([f64; 10], [[f64; 3]; 10]) {
     let mut values = [0.0; 10];
     let mut derivatives = [[0.0; 3]; 10];
     if order == ElementOrder::Tet4 {

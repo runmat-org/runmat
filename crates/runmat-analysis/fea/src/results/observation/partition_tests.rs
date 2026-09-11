@@ -3,7 +3,7 @@ use runmat_analysis_core::{
     FieldLocation, ObservationComponent, ObservationCostEstimate, ObservationId,
     ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationSpec,
     ObservationStoragePolicy, ObservationTarget, ObservationValueShape, PartialAccessPolicy,
-    ProcedureStep, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
+    Position, ProcedureStep, RecoveryPolicy, ReductionPolicy, RetentionPolicy, SamplingPolicy,
     SeriesReduction, SignConvention, SignalPrecision, SpatialReduction,
 };
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
@@ -182,6 +182,148 @@ fn canonical_partition_plan_covers_a_selected_field_once() {
         single.partition_evidence.identity,
         split.partition_evidence.identity
     );
+}
+
+#[test]
+fn path_interpolation_is_equivalent_across_partition_layouts() {
+    let mut path = spec(
+        "path",
+        ObservationTarget::Path {
+            positions: vec![
+                Position::new([0.1, 0.1, 0.1]),
+                Position::new([0.2, 0.3, 0.1]),
+                Position::new([0.05, 0.15, 0.4]),
+            ],
+        },
+    );
+    path.output_location = FieldLocation::Point;
+    path.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    let (projection, plan, field) = prepared(ObservationRequest::Field(path));
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let serial = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap();
+    let partitioned = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(serial.logical_identity, partitioned.logical_identity);
+    assert_eq!(serial.entities, partitioned.entities);
+    assert_eq!(serial.field, partitioned.field);
+    assert_ne!(
+        serial.partition_evidence.identity,
+        partitioned.partition_evidence.identity
+    );
+}
+
+#[test]
+fn spatial_extrema_retain_canonical_locations_and_tie_policy_across_partitions() {
+    for ties in [
+        ExtremaTiePolicy::FirstCanonical,
+        ExtremaTiePolicy::AllLocations,
+    ] {
+        let mut maximum = spec("maximum", ObservationTarget::WholeModel);
+        maximum.reduction = Some(ReductionPolicy {
+            spatial: SpatialReduction::Maximum,
+            series: SeriesReduction::None,
+            extrema_ties: ties,
+        });
+        let (projection, plan, field) = prepared(ObservationRequest::Reduction(maximum));
+        let topology = StructuralObservationTopology::from_projection(&projection);
+        let serial = evaluate_partitioned_observation(
+            &plan,
+            &plan.observations[0],
+            &field,
+            &topology,
+            ObservationExecutionPolicy::serial(),
+            None,
+        )
+        .unwrap();
+        let partitioned = evaluate_partitioned_observation(
+            &plan,
+            &plan.observations[0],
+            &field,
+            &topology,
+            ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(serial.logical_identity, partitioned.logical_identity);
+        assert_eq!(serial.field, partitioned.field);
+        assert_eq!(serial.entities, partitioned.entities);
+        assert!(serial
+            .field
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .all(|value| (*value - 1.0).abs() < 1.0e-12));
+        assert_eq!(
+            serial.entities.len(),
+            if ties == ExtremaTiePolicy::FirstCanonical {
+                1
+            } else {
+                6
+            }
+        );
+    }
+}
+
+#[test]
+fn path_extrema_return_physical_sample_locations() {
+    let mut maximum = spec(
+        "path_maximum",
+        ObservationTarget::Path {
+            positions: vec![
+                Position::new([0.0, 0.0, 0.0]),
+                Position::new([1.0, 0.0, 0.0]),
+                Position::new([0.0, 1.0, 0.0]),
+            ],
+        },
+    );
+    maximum.output_location = FieldLocation::Point;
+    maximum.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    maximum.reduction = Some(ReductionPolicy {
+        spatial: SpatialReduction::Maximum,
+        series: SeriesReduction::None,
+        extrema_ties: ExtremaTiePolicy::AllLocations,
+    });
+    let (projection, plan, field) = prepared(ObservationRequest::Reduction(maximum));
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let result = evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &topology,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap()),
+        None,
+    )
+    .unwrap();
+    assert!(result
+        .field
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .all(|value| (*value - 1.0).abs() < 1.0e-12));
+    assert_eq!(result.entities.len(), 2);
+    assert!(matches!(
+        result.entities.as_slice(),
+        [
+            super::ObservationEntity::Point { ordinal: 1, .. },
+            super::ObservationEntity::Point { ordinal: 2, .. }
+        ]
+    ));
+    super::publish_observation(&plan, &result, 1024).unwrap();
 }
 
 #[test]

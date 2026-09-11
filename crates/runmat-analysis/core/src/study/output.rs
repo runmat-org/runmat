@@ -193,6 +193,8 @@ pub enum ObservationTarget {
 #[serde(rename_all = "snake_case")]
 pub enum FieldLocation {
     Node,
+    /// A geometric sample position evaluated from an owning finite element.
+    Point,
     Cell,
     Element,
     IntegrationPoint,

@@ -195,6 +195,96 @@ fn field_and_exact_probe_use_typed_source_and_canonical_entities() {
 }
 
 #[test]
+fn path_interpolation_reproduces_linear_fields_for_tet4_and_tet10() {
+    let positions = [[0.1, 0.1, 0.1], [0.2, 0.3, 0.1], [0.05, 0.15, 0.4]];
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let projection = projection(order);
+        let definition = scalar_definition();
+        let mut path = spec(
+            "temperature_path",
+            ObservationTarget::Path {
+                positions: positions.into_iter().map(Position::new).collect(),
+            },
+        );
+        path.output_location = FieldLocation::Point;
+        path.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+        let step = thermal_step(vec![ObservationRequest::Field(path)]);
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let nodal_values = projection
+            .nodes
+            .iter()
+            .map(|node| {
+                let [x, y, z] = node.coordinates_m;
+                10.0 + 2.0 * x - 3.0 * y + 4.0 * z
+            })
+            .collect::<Vec<_>>();
+        let fields = catalog(
+            &projection,
+            &definition,
+            vec![nodal_values.len()],
+            nodal_values,
+        );
+        let result = evaluate_observations(&plan, &projection, &fields)
+            .unwrap()
+            .remove(0);
+        let expected = positions.map(|[x, y, z]| 10.0 + 2.0 * x - 3.0 * y + 4.0 * z);
+        for (actual, expected) in result.field.as_host_f64().unwrap().iter().zip(expected) {
+            assert!((actual - expected).abs() < 1.0e-11);
+        }
+        assert_eq!(result.location, FieldLocation::Point);
+        assert_eq!(result.entities.len(), positions.len());
+        for (ordinal, entity) in result.entities.iter().enumerate() {
+            let ObservationEntity::Point {
+                ordinal: actual_ordinal,
+                position_m,
+                ..
+            } = entity
+            else {
+                panic!("path result must retain physical point locations")
+            };
+            assert_eq!(*actual_ordinal, ordinal as u64);
+            assert_eq!(*position_m, positions[ordinal]);
+        }
+        let decoded =
+            ObservationResult::from_canonical_bytes(&result.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(decoded, result);
+    }
+}
+
+#[test]
+fn path_interpolation_rejects_points_outside_the_admitted_volume() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut path = spec(
+        "invalid_path",
+        ObservationTarget::Path {
+            positions: vec![
+                Position::new([0.1, 0.1, 0.1]),
+                Position::new([2.0, 0.0, 0.0]),
+            ],
+        },
+    );
+    path.output_location = FieldLocation::Point;
+    path.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    let error = resolve_observation_plan(
+        &thermal_step(vec![ObservationRequest::Field(path)]),
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("outside the admitted solid topology"));
+}
+
+#[test]
 fn volume_and_boundary_reductions_use_finite_element_quadrature() {
     let projection = projection(ElementOrder::Tet10);
     let linear_values = projection
@@ -1228,6 +1318,39 @@ fn direct_deserialization_rejects_semantically_invalid_resolved_plans() {
     let encoded = serde_json::to_value(&plan).unwrap();
     let error = serde_json::from_value::<ResolvedObservationPlan>(encoded).unwrap_err();
     assert!(error.to_string().contains("resolved node target"));
+}
+
+#[test]
+fn resolved_path_identity_rejects_interpolation_weight_substitution() {
+    let projection = projection(ElementOrder::Tet10);
+    let definition = scalar_definition();
+    let mut path = spec(
+        "path",
+        ObservationTarget::Path {
+            positions: vec![
+                Position::new([0.1, 0.1, 0.1]),
+                Position::new([0.2, 0.3, 0.1]),
+            ],
+        },
+    );
+    path.output_location = FieldLocation::Point;
+    path.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    let mut plan = resolve_observation_plan(
+        &thermal_step(vec![ObservationRequest::Field(path)]),
+        &projection,
+        &[definition],
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let ResolvedObservationTarget::Points { samples } = &mut plan.observations[0].target else {
+        panic!("path must resolve to finite-element point samples")
+    };
+    samples[0].shape_values.swap(0, 1);
+    plan.identity = plan.derive_identity().unwrap();
+
+    let encoded = serde_json::to_value(&plan).unwrap();
+    let error = serde_json::from_value::<ResolvedObservationPlan>(encoded).unwrap_err();
+    assert!(error.to_string().contains("resolved point samples"));
 }
 
 #[test]

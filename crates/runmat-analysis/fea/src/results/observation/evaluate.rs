@@ -258,6 +258,39 @@ fn validate_plan_targets(
                     ));
                 }
             }
+            ResolvedObservationTarget::Points { samples } => {
+                let projection =
+                    topology
+                        .solid_projection
+                        .as_ref()
+                        .ok_or(ObservationError::Unsupported(
+                            "point observations require admitted solid topology",
+                        ))?;
+                for sample in samples {
+                    let element = projection.elements.get(sample.source_element_index).ok_or(
+                        ObservationError::Identity(
+                            "resolved point source exceeds the topology projection",
+                        ),
+                    )?;
+                    if element.stable_identity != sample.source_element_identity
+                        || element.node_indices != sample.source_node_indices
+                        || sample
+                            .source_node_indices
+                            .iter()
+                            .zip(&sample.source_node_identities)
+                            .any(|(index, identity)| {
+                                projection
+                                    .nodes
+                                    .get(*index)
+                                    .is_none_or(|node| node.stable_identity != *identity)
+                            })
+                    {
+                        return Err(ObservationError::Identity(
+                            "resolved point source differs from the topology projection",
+                        ));
+                    }
+                }
+            }
             ResolvedObservationTarget::Volume {
                 element_indices,
                 element_identities,

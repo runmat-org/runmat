@@ -343,6 +343,13 @@ choices!(
         FieldLocation::Node
     ),
     (
+        location_point,
+        LOCATION_POINT_DESCRIPTOR,
+        LOCATION_POINT_SIGNATURES,
+        "fea.FieldLocation.point",
+        FieldLocation::Point
+    ),
+    (
         location_cell,
         LOCATION_CELL_DESCRIPTOR,
         LOCATION_CELL_SIGNATURES,
@@ -1111,8 +1118,9 @@ const QUANTITY_METHODS: [(&str, &str); 37] = [
     ("contactGap", "fea.ObservationQuantity.contactGap"),
     ("contactPressure", "fea.ObservationQuantity.contactPressure"),
 ];
-const FIELD_LOCATION_METHODS: [(&str, &str); 11] = [
+const FIELD_LOCATION_METHODS: [(&str, &str); 12] = [
     ("node", "fea.FieldLocation.node"),
+    ("point", "fea.FieldLocation.point"),
     ("cell", "fea.FieldLocation.cell"),
     ("element", "fea.FieldLocation.element"),
     ("integrationPoint", "fea.FieldLocation.integrationPoint"),
@@ -1204,3 +1212,19 @@ const SERIES_METHODS: [(&str, &str); 8] = [
     ("variance", "fea.SeriesReduction.variance"),
     ("envelope", "fea.SeriesReduction.envelope"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use futures::executor::block_on;
+
+    use super::*;
+
+    #[test]
+    fn point_field_location_constructor_preserves_the_typed_location() {
+        let value = block_on(location_point()).unwrap();
+        assert_eq!(
+            field_location("test", &value).unwrap(),
+            FieldLocation::Point
+        );
+    }
+}

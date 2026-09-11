@@ -6,12 +6,13 @@ mod derive;
 mod element;
 mod flow;
 mod identity;
+mod point_location;
 mod quadrature;
 
 pub use contract::{
     AnalysisProjection, AnalysisProjectionError, AnalysisProjectionPolicy,
     BoundaryNormalOrientation, BoundaryQuadraturePoint, ProjectedBoundaryFace, ProjectedElement,
-    ProjectedNode, VolumeQuadraturePoint,
+    ProjectedNode, VolumePointLocation, VolumeQuadraturePoint,
 };
 pub use flow::FlowTopologyProjection;
 

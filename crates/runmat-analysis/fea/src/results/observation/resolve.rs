@@ -7,7 +7,7 @@ use runmat_analysis_core::{
     RetentionPolicy, SamplingPolicy, SeriesReduction, SpatialReduction, TargetCardinality,
 };
 use runmat_execution::Digest;
-use runmat_meshing_core::SolverMeshArtifact;
+use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use crate::{
     results::field::{
@@ -17,10 +17,11 @@ use crate::{
 };
 
 use super::contract::{
-    checked_bytes, observation_result_storage_component_count, shape_component_count,
-    validate_output_numeric_contract, ObservationError, ObservationLimits, ObservationSampleBounds,
-    ResolvedComponentProjection, ResolvedObservation, ResolvedObservationPlan,
-    ResolvedObservationPlanIdentity, ResolvedObservationTarget,
+    checked_bytes, derive_resolved_point_identity, observation_result_storage_component_count,
+    shape_component_count, validate_output_numeric_contract, ObservationError, ObservationLimits,
+    ObservationSampleBounds, ResolvedComponentProjection, ResolvedObservation,
+    ResolvedObservationPlan, ResolvedObservationPlanIdentity, ResolvedObservationPoint,
+    ResolvedObservationTarget,
 };
 use super::history::resolve_history_sample_bounds;
 use super::topology::StructuralObservationTopology;
@@ -125,6 +126,17 @@ fn resolve_request(
     validate_numeric_representation(spec, &source_field)?;
     let target = resolve_target(request, spec, source_field.entity_domain(), topology)?;
     let (component, result_component_count) = resolve_component(spec, &source_field)?;
+    let spatial_extrema = spec.reduction.as_ref().is_some_and(|reduction| {
+        matches!(
+            reduction.spatial,
+            SpatialReduction::Minimum | SpatialReduction::Maximum
+        )
+    });
+    if spatial_extrema && result_component_count != 1 {
+        return Err(ObservationError::Invalid(
+            "spatial extrema require a scalar quantity or scalar component projection".into(),
+        ));
+    }
     let selected = target.selected_entity_count();
     if selected == 0 {
         return Err(target_error(
@@ -140,6 +152,15 @@ fn resolve_request(
         spec.complex_representation,
     )?;
     let value_count = match request {
+        _ if spatial_extrema
+            && spec.reduction.as_ref().is_some_and(|reduction| {
+                reduction.extrema_ties == runmat_analysis_core::ExtremaTiePolicy::AllLocations
+            }) =>
+        {
+            selected
+                .checked_mul(result_storage_component_count)
+                .ok_or(ObservationError::Limit("observation extrema value count"))?
+        }
         ObservationRequest::Reduction(_)
         | ObservationRequest::History(ObservationSpec {
             reduction: Some(_), ..
@@ -223,7 +244,16 @@ fn validate_supported_spec(
     spec: &ObservationSpec,
 ) -> Result<(), ObservationError> {
     validate_output_numeric_contract(spec)?;
-    if spec.source_location != spec.output_location || spec.recovery != RecoveryPolicy::Native {
+    let native_location =
+        spec.source_location == spec.output_location && spec.recovery == RecoveryPolicy::Native;
+    let solid_point_interpolation = spec.source_location == FieldLocation::Node
+        && spec.output_location == FieldLocation::Point
+        && spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation
+        && matches!(
+            spec.target,
+            ObservationTarget::Point { .. } | ObservationTarget::Path { .. }
+        );
+    if !native_location && !solid_point_interpolation {
         return Err(ObservationError::Unsupported(
             "field recovery and location transfer must be completed before observation evaluation",
         ));
@@ -286,6 +316,8 @@ fn validate_supported_spec(
                 | SpatialReduction::Integral
                 | SpatialReduction::Average
                 | SpatialReduction::RootMeanSquare
+                | SpatialReduction::Minimum
+                | SpatialReduction::Maximum
         ) {
             return Err(ObservationError::Unsupported(
                 "this slice supports FE-weighted integral, average, and root-mean-square reductions",
@@ -365,12 +397,29 @@ fn resolve_target(
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    if spec.reduction.as_ref().is_some_and(|reduction| {
+        matches!(
+            reduction.spatial,
+            SpatialReduction::Minimum | SpatialReduction::Maximum
+        )
+    }) {
+        return resolve_extrema_target(spec, field_domain, topology);
+    }
     match request {
+        ObservationRequest::Probe(_) if spec.output_location == FieldLocation::Point => {
+            resolve_interpolated_points(spec, field_domain, topology)
+        }
         ObservationRequest::Probe(_) => resolve_probe(spec, field_domain, topology),
         ObservationRequest::Reduction(_) => resolve_reduction_target(spec, field_domain, topology),
         ObservationRequest::Field(_) => resolve_field_target(spec, field_domain, topology),
         ObservationRequest::History(_) if spec.reduction.is_some() => {
             resolve_reduction_target(spec, field_domain, topology)
+        }
+        ObservationRequest::History(_)
+            if matches!(spec.target, ObservationTarget::Path { .. })
+                || spec.output_location == FieldLocation::Point =>
+        {
+            resolve_interpolated_points(spec, field_domain, topology)
         }
         ObservationRequest::History(_)
             if matches!(spec.target, ObservationTarget::Point { .. }) =>
@@ -382,6 +431,77 @@ fn resolve_target(
             "unsupported observation request",
         )),
     }
+}
+
+fn resolve_extrema_target(
+    spec: &ObservationSpec,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
+) -> Result<ResolvedObservationTarget, ObservationError> {
+    if matches!(spec.target, ObservationTarget::Path { .. })
+        || spec.output_location == FieldLocation::Point
+    {
+        return resolve_interpolated_points(spec, field_domain, topology);
+    }
+    resolve_field_target(spec, field_domain, topology)
+}
+
+fn resolve_interpolated_points(
+    spec: &ObservationSpec,
+    field_domain: RecoveredFieldEntityDomain,
+    topology: &StructuralObservationTopology,
+) -> Result<ResolvedObservationTarget, ObservationError> {
+    if spec.source_location != FieldLocation::Node
+        || spec.output_location != FieldLocation::Point
+        || field_domain != RecoveredFieldEntityDomain::StructuralNodes
+    {
+        return Err(target_error(
+            spec,
+            "finite-element point interpolation requires a nodal structural field and point output",
+        ));
+    }
+    let positions = match &spec.target {
+        ObservationTarget::Point { position } => std::slice::from_ref(position),
+        ObservationTarget::Path { positions } => positions.as_slice(),
+        _ => {
+            return Err(target_error(
+                spec,
+                "point interpolation requires a point or path target",
+            ))
+        }
+    };
+    let projection = topology
+        .solid_projection
+        .as_ref()
+        .ok_or(ObservationError::Unsupported(
+            "point and path interpolation require admitted solid topology",
+        ))?;
+    let samples = positions
+        .iter()
+        .enumerate()
+        .map(|(ordinal, position)| {
+            let location = projection
+                .locate_volume_point(position.meters)
+                .ok_or_else(|| {
+                    target_error(spec, "point lies outside the admitted solid topology")
+                })?;
+            let ordinal = u64::try_from(ordinal)
+                .map_err(|_| ObservationError::Limit("path sample ordinal"))?;
+            let mut sample = ResolvedObservationPoint {
+                identity: StableDigest::ZERO,
+                ordinal,
+                position_m: location.position_m,
+                source_element_index: location.element_index,
+                source_element_identity: location.element_identity,
+                source_node_indices: location.node_indices,
+                source_node_identities: location.node_identities,
+                shape_values: location.shape_values,
+            };
+            sample.identity = derive_resolved_point_identity(topology.digest(), &sample)?;
+            Ok(sample)
+        })
+        .collect::<Result<Vec<_>, ObservationError>>()?;
+    Ok(ResolvedObservationTarget::Points { samples })
 }
 
 fn resolve_probe(
@@ -452,6 +572,11 @@ fn resolve_field_target(
     field_domain: RecoveredFieldEntityDomain,
     topology: &StructuralObservationTopology,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    if matches!(spec.target, ObservationTarget::Path { .. })
+        || spec.output_location == FieldLocation::Point
+    {
+        return resolve_interpolated_points(spec, field_domain, topology);
+    }
     match &spec.target {
         ObservationTarget::WholeModel
         | ObservationTarget::Spatial(ExcitationTarget::WholeModel) => match spec.source_location {
@@ -758,6 +883,12 @@ fn integration_work(
     match target {
         ResolvedObservationTarget::Nodes { indices, .. }
         | ResolvedObservationTarget::Elements { indices, .. } => Ok(indices.len()),
+        ResolvedObservationTarget::Points { samples } => {
+            samples.iter().try_fold(0usize, |work, sample| {
+                work.checked_add(sample.source_node_indices.len().saturating_mul(8))
+                    .ok_or(ObservationError::Limit("point interpolation work"))
+            })
+        }
         ResolvedObservationTarget::Volume {
             element_indices, ..
         } => {

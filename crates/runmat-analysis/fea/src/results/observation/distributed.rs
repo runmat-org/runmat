@@ -24,8 +24,11 @@ use super::{
         OBSERVATION_LIMITS, OBSERVATION_PREFIX,
     },
     distributed_numeric::{
-        reduction_operation, required_source_indices, select_values,
+        interpolate_values, reduction_operation, required_source_indices, select_values,
         weighted_boundary_contribution, weighted_volume_contribution, CompensatedSum,
+    },
+    extrema::{
+        extrema_values, partition_selected_entities, selected_or_extrema_payload, spatial_extrema,
     },
     topology::StructuralObservationTopology,
     ObservationEntity, ObservationError, ObservationEventAttribution, ObservationExecutionPolicy,
@@ -61,6 +64,10 @@ pub enum ObservationPartitionPayload {
         entities: Vec<ObservationEntity>,
         values: Vec<f64>,
     },
+    ExtremaCandidates {
+        entities: Vec<ObservationEntity>,
+        values: Vec<f64>,
+    },
     WeightedReduction {
         linear_sum: Vec<f64>,
         square_sum: Vec<f64>,
@@ -73,6 +80,7 @@ pub enum ObservationPartitionPayload {
 pub enum ObservationPartitionCombination {
     CanonicalConcatenation,
     CanonicalCompensatedReduction { collective_count: u32 },
+    CanonicalExtremaReduction { collective_count: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -161,7 +169,8 @@ impl ObservationPartitionEvidence {
             == self.contributions.len();
         let combination_is_valid = match self.combination {
             ObservationPartitionCombination::CanonicalConcatenation => true,
-            ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count } => {
+            ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count }
+            | ObservationPartitionCombination::CanonicalExtremaReduction { collective_count } => {
                 collective_count as usize == self.contributions.len().saturating_sub(1)
             }
         };
@@ -277,9 +286,11 @@ impl ObservationPartitionContribution {
 
     pub fn validate(&self) -> Result<(), ObservationError> {
         let payload_is_valid = match &self.payload {
-            ObservationPartitionPayload::SelectedValues { entities, values } => {
+            ObservationPartitionPayload::SelectedValues { entities, values }
+            | ObservationPartitionPayload::ExtremaCandidates { entities, values } => {
                 !entities.is_empty()
                     && !values.is_empty()
+                    && entities.len() <= values.len()
                     && values.iter().all(|value| value.is_finite())
             }
             ObservationPartitionPayload::WeightedReduction {
@@ -592,25 +603,33 @@ fn evaluate_observation_partition_with_attribution(
         ObservationPartitionTarget::Nodes {
             indices,
             identities,
-        } => ObservationPartitionPayload::SelectedValues {
-            entities: identities
+        } => selected_or_extrema_payload(
+            observation,
+            identities
                 .iter()
                 .copied()
                 .map(ObservationEntity::Node)
                 .collect(),
-            values: select_values(field, indices, observation)?,
-        },
+            select_values(field, indices, observation)?,
+        )?,
         ObservationPartitionTarget::Elements {
             indices,
             identities,
-        } => ObservationPartitionPayload::SelectedValues {
-            entities: identities
+        } => selected_or_extrema_payload(
+            observation,
+            identities
                 .iter()
                 .copied()
                 .map(ObservationEntity::Element)
                 .collect(),
-            values: select_values(field, indices, observation)?,
-        },
+            select_values(field, indices, observation)?,
+        )?,
+        ObservationPartitionTarget::Points {
+            sample_ordinals, ..
+        } => {
+            let (entities, values) = interpolate_values(field, sample_ordinals, observation)?;
+            selected_or_extrema_payload(observation, entities, values)?
+        }
         ObservationPartitionTarget::Volume {
             element_indices, ..
         } => weighted_volume_contribution(
@@ -717,6 +736,12 @@ pub(crate) fn combine_observation_partitions(
         ObservationPartitionPayload::SelectedValues { .. } => {
             ObservationPartitionCombination::CanonicalConcatenation
         }
+        ObservationPartitionPayload::ExtremaCandidates { .. } => {
+            ObservationPartitionCombination::CanonicalExtremaReduction {
+                collective_count: u32::try_from(contributions.len().saturating_sub(1))
+                    .map_err(|_| ObservationError::Limit("observation collective count"))?,
+            }
+        }
         ObservationPartitionPayload::WeightedReduction { .. } => {
             ObservationPartitionCombination::CanonicalCompensatedReduction {
                 collective_count: u32::try_from(contributions.len().saturating_sub(1))
@@ -799,6 +824,25 @@ pub(crate) fn combine_observation_partitions(
                 }
             };
             (values, Vec::new())
+        }
+        ObservationPartitionPayload::ExtremaCandidates { .. } => {
+            let mut entities = Vec::new();
+            let mut values = Vec::new();
+            for contribution in contributions {
+                let ObservationPartitionPayload::ExtremaCandidates {
+                    entities: local_entities,
+                    values: local_values,
+                } = contribution.payload
+                else {
+                    return Err(ObservationError::Identity(
+                        "observation partitions contain different payload kinds",
+                    ));
+                };
+                entities.extend(local_entities);
+                values.extend(local_values);
+            }
+            let (entities, values) = extrema_values(observation, entities, values)?;
+            (values, entities)
         }
     };
     let components = observation.result_component_count;
@@ -890,6 +934,82 @@ fn validate_contribution_payload(
             {
                 return Err(ObservationError::Identity(
                     "element observation contribution differs from partition ownership",
+                ));
+            }
+        }
+        (
+            ObservationPartitionTarget::Points {
+                sample_ordinals,
+                identities,
+            },
+            ObservationPartitionPayload::SelectedValues { entities, values },
+        ) => {
+            let super::ResolvedObservationTarget::Points { samples } = &observation.target else {
+                return Err(ObservationError::Identity(
+                    "point contribution does not match its resolved target",
+                ));
+            };
+            let expected = sample_ordinals
+                .iter()
+                .map(|ordinal| {
+                    let sample = samples.get(*ordinal).ok_or(ObservationError::Identity(
+                        "point contribution exceeds its resolved target",
+                    ))?;
+                    Ok(ObservationEntity::Point {
+                        identity: sample.identity,
+                        ordinal: sample.ordinal,
+                        position_m: sample.position_m,
+                        source_element: sample.source_element_identity,
+                    })
+                })
+                .collect::<Result<Vec<_>, ObservationError>>()?;
+            if identities
+                != &expected
+                    .iter()
+                    .map(|entity| match entity {
+                        ObservationEntity::Point { identity, .. } => *identity,
+                        _ => unreachable!(),
+                    })
+                    .collect::<Vec<_>>()
+                || entities != &expected
+                || values.len()
+                    != sample_ordinals
+                        .len()
+                        .checked_mul(storage_components)
+                        .ok_or(ObservationError::Limit("partition result value count"))?
+            {
+                return Err(ObservationError::Identity(
+                    "point observation contribution differs from partition ownership",
+                ));
+            }
+        }
+        (
+            ObservationPartitionTarget::Nodes { .. }
+            | ObservationPartitionTarget::Elements { .. }
+            | ObservationPartitionTarget::Points { .. },
+            ObservationPartitionPayload::ExtremaCandidates { entities, values },
+        ) if spatial_extrema(observation).is_some() => {
+            let owned = partition_selected_entities(partition, observation)?;
+            let mut previous = None;
+            for entity in entities {
+                let Some(index) = owned.iter().position(|candidate| candidate == entity) else {
+                    return Err(ObservationError::Identity(
+                        "extrema candidate is not owned by its observation partition",
+                    ));
+                };
+                if previous.is_some_and(|previous| index <= previous) {
+                    return Err(ObservationError::Identity(
+                        "extrema candidates are not in canonical partition order",
+                    ));
+                }
+                previous = Some(index);
+            }
+            if entities.is_empty()
+                || entities.len() != values.len()
+                || values.iter().any(|value| !value.is_finite())
+            {
+                return Err(ObservationError::Identity(
+                    "extrema candidate values differ from partition ownership",
                 ));
             }
         }

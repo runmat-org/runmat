@@ -83,11 +83,17 @@ impl Default for ObservationLimits {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationEntity {
     Node(StableDigest),
     Element(StableDigest),
+    Point {
+        identity: StableDigest,
+        ordinal: u64,
+        position_m: [f64; 3],
+        source_element: StableDigest,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -101,6 +107,9 @@ pub enum ResolvedObservationTarget {
         domain: RecoveredFieldEntityDomain,
         indices: Vec<usize>,
         identities: Vec<StableDigest>,
+    },
+    Points {
+        samples: Vec<ResolvedObservationPoint>,
     },
     Volume {
         element_indices: Vec<usize>,
@@ -116,12 +125,26 @@ impl ResolvedObservationTarget {
     pub(crate) fn selected_entity_count(&self) -> usize {
         match self {
             Self::Nodes { indices, .. } | Self::Elements { indices, .. } => indices.len(),
+            Self::Points { samples } => samples.len(),
             Self::Volume {
                 element_indices, ..
             } => element_indices.len(),
             Self::Boundary { face_indices, .. } => face_indices.len(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedObservationPoint {
+    pub identity: StableDigest,
+    pub ordinal: u64,
+    pub position_m: [f64; 3],
+    pub source_element_index: usize,
+    pub source_element_identity: StableDigest,
+    pub source_node_indices: Vec<usize>,
+    pub source_node_identities: Vec<StableDigest>,
+    pub shape_values: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -203,7 +226,7 @@ impl ResolvedObservationPlan {
                     "resolved observation sampling differs from the step domain".into(),
                 ));
             }
-            validate_resolved_observation(observation)?;
+            validate_resolved_observation(self.topology_digest, observation)?;
         }
         Ok(())
     }
@@ -323,6 +346,17 @@ impl ObservationResult {
             let (location, identity) = match entity {
                 ObservationEntity::Node(identity) => (FieldLocation::Node, identity),
                 ObservationEntity::Element(identity) => (FieldLocation::Element, identity),
+                ObservationEntity::Point {
+                    identity,
+                    position_m,
+                    source_element,
+                    ..
+                } if position_m.iter().all(|value| value.is_finite())
+                    && *source_element != StableDigest::ZERO =>
+                {
+                    (FieldLocation::Point, identity)
+                }
+                ObservationEntity::Point { .. } => return false,
             };
             location == self.location && entity_ids.insert(*identity)
         });
@@ -330,6 +364,15 @@ impl ObservationResult {
             ObservationPartitionCombination::CanonicalConcatenation => !self.entities.is_empty(),
             ObservationPartitionCombination::CanonicalCompensatedReduction { collective_count } => {
                 self.entities.is_empty()
+                    && collective_count as usize
+                        == self
+                            .partition_evidence
+                            .contributions
+                            .len()
+                            .saturating_sub(1)
+            }
+            ObservationPartitionCombination::CanonicalExtremaReduction { collective_count } => {
+                !self.entities.is_empty()
                     && collective_count as usize
                         == self
                             .partition_evidence
@@ -794,6 +837,7 @@ fn derive_artifact_identity(
 }
 
 fn validate_resolved_observation(
+    topology_digest: Digest,
     observation: &ResolvedObservation,
 ) -> Result<(), ObservationError> {
     validate_output_numeric_contract(&observation.spec)?;
@@ -829,6 +873,16 @@ fn validate_resolved_observation(
         ));
     }
     let source_components = shape_component_count(&observation.spec.value_shape)?;
+    let spatial_extrema = observation
+        .spec
+        .reduction
+        .as_ref()
+        .is_some_and(|reduction| {
+            matches!(
+                reduction.spatial,
+                SpatialReduction::Minimum | SpatialReduction::Maximum
+            )
+        });
     let expected_result_components = match observation.component {
         ResolvedComponentProjection::All => source_components,
         ResolvedComponentProjection::Cartesian { axis } if axis < source_components => 1,
@@ -851,7 +905,7 @@ fn validate_resolved_observation(
         } => {
             if observation.spec.source_location != FieldLocation::Node
                 || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
-                || observation.spec.reduction.is_some()
+                || (observation.spec.reduction.is_some() && !spatial_extrema)
                 || indices.len() != identities.len()
                 || indices.is_empty()
                 || !strictly_increasing(indices)
@@ -870,7 +924,7 @@ fn validate_resolved_observation(
             if observation.spec.source_location != FieldLocation::Element
                 || observation.source_entity_domain != *domain
                 || *domain == RecoveredFieldEntityDomain::StructuralNodes
-                || observation.spec.reduction.is_some()
+                || (observation.spec.reduction.is_some() && !spatial_extrema)
                 || indices.len() != identities.len()
                 || indices.is_empty()
                 || !strictly_increasing(indices)
@@ -878,6 +932,38 @@ fn validate_resolved_observation(
             {
                 return Err(ObservationError::Invalid(
                     "resolved element target is empty, unordered, or semantically inconsistent"
+                        .into(),
+                ));
+            }
+        }
+        ResolvedObservationTarget::Points { samples } => {
+            let valid_ordinals = samples
+                .iter()
+                .enumerate()
+                .all(|(ordinal, sample)| sample.ordinal == ordinal as u64);
+            let valid_samples = samples.iter().all(|sample| {
+                sample.identity != StableDigest::ZERO
+                    && !sample.source_node_indices.is_empty()
+                    && sample.source_node_indices.len() == sample.source_node_identities.len()
+                    && sample.source_node_indices.len() == sample.shape_values.len()
+                    && sample.position_m.iter().all(|value| value.is_finite())
+                    && sample.shape_values.iter().all(|value| value.is_finite())
+                    && (sample.shape_values.iter().sum::<f64>() - 1.0).abs() <= 1.0e-9
+                    && derive_resolved_point_identity(topology_digest, sample)
+                        .is_ok_and(|identity| identity == sample.identity)
+            });
+            if observation.spec.source_location != FieldLocation::Node
+                || observation.spec.output_location != FieldLocation::Point
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
+                || observation.spec.recovery
+                    != runmat_analysis_core::RecoveryPolicy::ShapeFunctionInterpolation
+                || (observation.spec.reduction.is_some() && !spatial_extrema)
+                || samples.is_empty()
+                || !valid_ordinals
+                || !valid_samples
+            {
+                return Err(ObservationError::Invalid(
+                    "resolved point samples are empty, unordered, or semantically inconsistent"
                         .into(),
                 ));
             }
@@ -932,6 +1018,26 @@ fn validate_resolved_observation(
         ));
     }
     Ok(())
+}
+
+pub(super) fn derive_resolved_point_identity(
+    topology_digest: Digest,
+    sample: &ResolvedObservationPoint,
+) -> Result<StableDigest, ObservationError> {
+    let bytes = encode_contract(
+        OBSERVATION_PREFIX,
+        "resolved-observation-point",
+        &(
+            topology_digest,
+            sample.ordinal,
+            sample.position_m,
+            sample.source_element_identity,
+            &sample.source_node_indices,
+            &sample.shape_values,
+        ),
+        OBSERVATION_LIMITS,
+    )?;
+    Ok(StableDigest::from_bytes(*Digest::sha256(bytes).bytes()))
 }
 
 pub(super) fn validate_output_numeric_contract(

@@ -22,10 +22,54 @@ pub(super) fn validate_spec(
     validate_component(request, spec)?;
     validate_sign(request, spec)?;
     validate_complex(step, request, spec)?;
+    validate_target_location(request, spec)?;
     validate_recovery(request, spec)?;
     super::sampling::validate_sampling(step, request, &spec.sampling)?;
     super::sampling::validate_reduction(request, spec)?;
     super::sampling::validate_storage(request, spec)
+}
+
+fn validate_target_location(
+    request: &ObservationRequest,
+    spec: &ObservationSpec,
+) -> Result<(), AnalysisValidationError> {
+    match &spec.target {
+        ObservationTarget::Path { .. }
+            if spec.source_location == FieldLocation::Node
+                && spec.output_location == FieldLocation::Point
+                && spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation =>
+        {
+            Ok(())
+        }
+        ObservationTarget::Path { .. } => observation_error(
+            request,
+            "path observations require nodal source values, point output, and shape-function interpolation",
+        ),
+        ObservationTarget::Point { .. }
+            if spec.output_location == FieldLocation::Point
+                && (spec.source_location != FieldLocation::Node
+                    || spec.recovery != RecoveryPolicy::ShapeFunctionInterpolation) =>
+        {
+            observation_error(
+                request,
+                "interpolated point observations require nodal source values and shape-function interpolation",
+            )
+        }
+        ObservationTarget::Point { .. }
+            if spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation
+                && spec.output_location != FieldLocation::Point =>
+        {
+            observation_error(
+                request,
+                "shape-function point interpolation requires point output location",
+            )
+        }
+        _ if spec.output_location == FieldLocation::Point => observation_error(
+            request,
+            "point output location requires a point or path target",
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn validate_quantity_family(

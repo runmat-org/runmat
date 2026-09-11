@@ -1,4 +1,6 @@
-use runmat_analysis_core::{ObservationValueShape, PartialAccessPolicy};
+use runmat_analysis_core::{
+    ExtremaTiePolicy, ObservationValueShape, PartialAccessPolicy, SpatialReduction,
+};
 
 use crate::execution::{
     chunk_numerical_payload, AnalysisNumericalObjectKind, ChunkedAnalysisPayload,
@@ -38,9 +40,47 @@ pub fn publish_observation(
             .copied()
             .map(ObservationEntity::Element)
             .collect(),
+        ResolvedObservationTarget::Points { samples } => samples
+            .iter()
+            .map(|sample| ObservationEntity::Point {
+                identity: sample.identity,
+                ordinal: sample.ordinal,
+                position_m: sample.position_m,
+                source_element: sample.source_element_identity,
+            })
+            .collect(),
         ResolvedObservationTarget::Volume { .. } | ResolvedObservationTarget::Boundary { .. } => {
             Vec::new()
         }
+    };
+    let spatial_extrema = planned.spec.reduction.as_ref().is_some_and(|reduction| {
+        matches!(
+            reduction.spatial,
+            SpatialReduction::Minimum | SpatialReduction::Maximum
+        )
+    });
+    let entities_match = if spatial_extrema {
+        let first_only =
+            planned.spec.reduction.as_ref().is_some_and(|reduction| {
+                reduction.extrema_ties == ExtremaTiePolicy::FirstCanonical
+            });
+        !result.entities.is_empty()
+            && (!first_only || result.entities.len() == 1)
+            && result.entities.windows(2).all(|pair| {
+                let left = expected_entities
+                    .iter()
+                    .position(|entity| entity == &pair[0]);
+                let right = expected_entities
+                    .iter()
+                    .position(|entity| entity == &pair[1]);
+                left.zip(right).is_some_and(|(left, right)| left < right)
+            })
+            && result
+                .entities
+                .iter()
+                .all(|entity| expected_entities.contains(entity))
+    } else {
+        result.entities == expected_entities
     };
     if result.plan_identity != plan.identity
         || result.topology_digest != plan.topology_digest
@@ -49,7 +89,7 @@ pub fn publish_observation(
         || result.location != planned.spec.output_location
         || result.value_shape != expected_shape
         || result.complex_representation != planned.spec.complex_representation
-        || result.entities != expected_entities
+        || !entities_match
     {
         return Err(ObservationError::Identity(
             "observation result differs from its resolved plan",

@@ -21,67 +21,144 @@ pub(super) fn required_source_indices(
     partition: &ObservationPartition,
     topology: &StructuralObservationTopology,
 ) -> Result<Vec<usize>, ObservationError> {
-    let indices =
-        match &partition.target {
-            ObservationPartitionTarget::Nodes { indices, .. }
-            | ObservationPartitionTarget::Elements { indices, .. } => indices.clone(),
-            ObservationPartitionTarget::Volume {
-                element_indices, ..
-            } => {
-                match observation.spec.source_location {
-                    FieldLocation::Node => {
-                        let projection = topology.solid_projection.as_ref().ok_or(
-                            ObservationError::Unsupported(
-                                "volume observations require admitted solid topology",
-                            ),
-                        )?;
-                        let mut nodes = BTreeSet::new();
-                        for index in element_indices {
-                            let element = projection.elements.get(*index).ok_or(
-                                ObservationError::Identity(
-                                    "observation partition exceeds solid element topology",
-                                ),
-                            )?;
-                            nodes.extend(element.node_indices.iter().copied());
-                        }
-                        nodes.into_iter().collect()
-                    }
-                    FieldLocation::Element => element_indices.clone(),
-                    _ => {
-                        return Err(ObservationError::Unsupported(
-                            "volume observation field location is unsupported",
-                        ))
-                    }
-                }
+    let indices = match &partition.target {
+        ObservationPartitionTarget::Nodes { indices, .. }
+        | ObservationPartitionTarget::Elements { indices, .. } => indices.clone(),
+        ObservationPartitionTarget::Points {
+            sample_ordinals, ..
+        } => {
+            let super::ResolvedObservationTarget::Points { samples } = &observation.target else {
+                return Err(ObservationError::Identity(
+                    "point partition does not match its resolved target",
+                ));
+            };
+            let mut nodes = BTreeSet::new();
+            for ordinal in sample_ordinals {
+                let sample = samples.get(*ordinal).ok_or(ObservationError::Identity(
+                    "point partition exceeds its resolved target",
+                ))?;
+                nodes.extend(sample.source_node_indices.iter().copied());
             }
-            ObservationPartitionTarget::Boundary { face_indices, .. } => {
+            nodes.into_iter().collect()
+        }
+        ObservationPartitionTarget::Volume {
+            element_indices, ..
+        } => match observation.spec.source_location {
+            FieldLocation::Node => {
                 let projection =
                     topology
                         .solid_projection
                         .as_ref()
                         .ok_or(ObservationError::Unsupported(
-                            "boundary observations require admitted solid topology",
+                            "volume observations require admitted solid topology",
                         ))?;
                 let mut nodes = BTreeSet::new();
-                for index in face_indices {
-                    let face =
+                for index in element_indices {
+                    let element =
                         projection
-                            .boundary_faces
+                            .elements
                             .get(*index)
                             .ok_or(ObservationError::Identity(
-                                "observation partition exceeds boundary-face topology",
+                                "observation partition exceeds solid element topology",
                             ))?;
-                    nodes.extend(face.node_indices.iter().copied());
+                    nodes.extend(element.node_indices.iter().copied());
                 }
                 nodes.into_iter().collect()
             }
-        };
+            FieldLocation::Element => element_indices.clone(),
+            _ => {
+                return Err(ObservationError::Unsupported(
+                    "volume observation field location is unsupported",
+                ))
+            }
+        },
+        ObservationPartitionTarget::Boundary { face_indices, .. } => {
+            let projection =
+                topology
+                    .solid_projection
+                    .as_ref()
+                    .ok_or(ObservationError::Unsupported(
+                        "boundary observations require admitted solid topology",
+                    ))?;
+            let mut nodes = BTreeSet::new();
+            for index in face_indices {
+                let face =
+                    projection
+                        .boundary_faces
+                        .get(*index)
+                        .ok_or(ObservationError::Identity(
+                            "observation partition exceeds boundary-face topology",
+                        ))?;
+                nodes.extend(face.node_indices.iter().copied());
+            }
+            nodes.into_iter().collect()
+        }
+    };
     if indices.is_empty() {
         return Err(ObservationError::Invalid(
             "observation partition requires at least one source field entity".into(),
         ));
     }
     Ok(indices)
+}
+
+pub(super) fn interpolate_values(
+    field: &RecoveredFieldPartitionSet,
+    sample_ordinals: &[usize],
+    observation: &ResolvedObservation,
+) -> Result<(Vec<super::ObservationEntity>, Vec<f64>), ObservationError> {
+    let super::ResolvedObservationTarget::Points { samples } = &observation.target else {
+        return Err(ObservationError::Identity(
+            "point partition does not match its resolved target",
+        ));
+    };
+    let mut entities = Vec::with_capacity(sample_ordinals.len());
+    let mut values = Vec::new();
+    for ordinal in sample_ordinals {
+        let sample = samples.get(*ordinal).ok_or(ObservationError::Identity(
+            "point partition exceeds its resolved target",
+        ))?;
+        let first_index = *sample
+            .source_node_indices
+            .first()
+            .ok_or_else(|| ObservationError::Invalid("point sample has no source nodes".into()))?;
+        let width = field
+            .value(first_index)
+            .ok_or(ObservationError::Identity(
+                "point interpolation is missing an owned source node",
+            ))?
+            .len();
+        let mut sums = vec![CompensatedSum::default(); width];
+        for (node_index, weight) in sample.source_node_indices.iter().zip(&sample.shape_values) {
+            let nodal = field.value(*node_index).ok_or(ObservationError::Identity(
+                "point interpolation is missing an owned source node",
+            ))?;
+            if nodal.len() != width {
+                return Err(ObservationError::Identity(
+                    "point interpolation source values have inconsistent shapes",
+                ));
+            }
+            for (sum, component) in sums.iter_mut().zip(nodal) {
+                sum.add(weight * component);
+            }
+        }
+        let interpolated = sums
+            .into_iter()
+            .map(CompensatedSum::total)
+            .collect::<Vec<_>>();
+        values.extend(project_observation_value(
+            field,
+            &interpolated,
+            observation,
+        )?);
+        entities.push(super::ObservationEntity::Point {
+            identity: sample.identity,
+            ordinal: sample.ordinal,
+            position_m: sample.position_m,
+            source_element: sample.source_element_identity,
+        });
+    }
+    Ok((entities, values))
 }
 
 impl CompensatedSum {
