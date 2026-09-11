@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const registryPath = join(
+const defaultRegistryPath = join(
   repoRoot,
   "crates",
   "runmat-runtime",
@@ -13,6 +13,7 @@ const registryPath = join(
   "builtins",
   "generated_wasm_registry.rs",
 );
+const registryPath = outputPath(process.argv.slice(2), defaultRegistryPath);
 const tmpDir = mkdtempSync(join(dirname(registryPath), ".runmat-wasm-registry-"));
 const tmpRegistry = join(tmpDir, "generated_wasm_registry.rs");
 
@@ -21,6 +22,14 @@ class GenerationFailure extends Error {
     super(`wasm registry generation failed with status ${status}`);
     this.status = status;
   }
+}
+
+function outputPath(args, fallback) {
+  if (args.length === 0) return fallback;
+  if (args.length !== 2 || args[0] !== "--output" || !args[1]) {
+    throw new Error("usage: regenerate-wasm-registry.mjs [--output PATH]");
+  }
+  return resolve(args[1]);
 }
 
 try {

@@ -4,7 +4,6 @@ export const GATE_PRODUCERS = Object.freeze({
   "documentation-cutover": "builtin-documentation-cutover-audit",
   "native-link": "runmat-native-link-validator",
   "wasm-registry": "runmat-wasm-registry-validator",
-  "source-removal": "builtin-source-removal-validator",
   architecture: "runmat-architecture-boundary-validator",
   "focused-tests": "runmat-test-result-adapter",
   "strict-clippy": "runmat-clippy-result-adapter",

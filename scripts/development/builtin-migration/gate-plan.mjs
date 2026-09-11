@@ -4,7 +4,7 @@ import { array, digest, enumValue, exact, nonempty, repositoryPath, uniqueString
 
 export const GATE_PARSERS = Object.freeze([
   "compiled_inventory", "documentation_cutover", "example_reconciliation", "exit_status",
-  "generated_products", "source_removal", "inventory_delta",
+  "generated_products", "inventory_delta",
 ]);
 
 const PARSERS_BY_GATE = Object.freeze({
@@ -13,7 +13,6 @@ const PARSERS_BY_GATE = Object.freeze({
   "documentation-cutover": ["documentation_cutover"],
   "native-link": ["exit_status"],
   "wasm-registry": ["exit_status"],
-  "source-removal": ["source_removal"],
   architecture: ["exit_status"],
   "focused-tests": ["exit_status"],
   "strict-clippy": ["exit_status"],

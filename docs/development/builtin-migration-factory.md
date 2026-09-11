@@ -140,13 +140,9 @@ node scripts/development/builtin-migration-factory.mjs produce-gate \
   --output /tmp/array-shape-documentation-gate.json
 ```
 
-Three reserved parser kinds remain fail-closed because the repository does not yet expose evidence strong enough for their contracts:
+The deterministic-product producer runs each reviewed integration generator twice into disposable outputs, compares both content digests, and compares the result with the checked-in product. Its parser requires exact coverage of the bundle's reviewed product IDs and paths and verifies the generator bytes against the frozen source inventory. The inventory-delta producer rebuilds the compiler-backed and lexical inventory from the current worktree, admits changes only within the bundle's authored and integration scopes, requires compiled authority outside the bundle to remain unchanged, reconciles every migration finding disposition, and checks each identity against its reviewed final authority and removals.
 
-- `source_removal` needs syntax-aware baseline and current proof for exact Rust items, macro registrations, and match arms.
-- `generated_products` needs a closed two-run determinism report over the bundle's exact integration outputs and content digests.
-- `inventory_delta` needs a closed final-versus-baseline reconciliation covering identities, authorities, removals, and migration-finding dispositions.
-
-The factory rejects these gates before executing their reviewed command. Nearby files, matching tokens, successful exit codes, file-presence counts, or authored delta JSON cannot substitute for the missing machine contracts.
+Nearby files, matching tokens, successful exit codes, file-presence counts, or authored delta JSON cannot substitute for these machine contracts. Expected removals are complete files tied to their frozen baseline bytes. In-file authority transitions are proven by compiled catalog/binding provenance and the final lexical ownership inventory; the factory does not maintain a second parser for Rust items or match arms.
 
 Run a reviewed producer with:
 
@@ -158,9 +154,9 @@ node scripts/development/builtin-migration-factory.mjs produce-gate \
   --output /tmp/array-shape-architecture.json
 ```
 
-Each result pins its artifact, source revision and digest, inventory digest, control digest, bundle, complete identity set, checks, result, and storage admission. Gate identities cover catalog contracts, runtime bindings, documentation cutover, native linking, WASM registration, exact source-item removal, architecture boundaries, focused tests, strict Clippy, formatting/diff checks, native/browser examples, provider/host/foreign tests, deterministic generated products, and inventory delta.
+Each result pins its artifact, source revision and digest, inventory digest, control digest, bundle, complete identity set, checks, result, and storage admission. Gate identities cover catalog contracts, runtime bindings, documentation cutover, native linking, WASM registration, architecture boundaries, focused tests, strict Clippy, formatting/diff checks, native/browser examples, provider/host/foreign tests, deterministic generated products, and inventory delta.
 
-Audit maps each reviewed maturity requirement to structural gate evidence. A passing token search, test filename, example string, or file-presence count is not closure. Canonical identities additionally require exact catalog cardinality and removal of legacy sidecars, runtime documentation shadows, and legacy resolvers. Aliases and internal identities use disposition-specific rules. Expected file removals require matching baseline path/digest evidence in control and actual absence; source-item removals require the typed source-removal producer.
+Audit maps each reviewed maturity requirement to structural gate evidence. A passing token search, test filename, example string, or file-presence count is not closure. Canonical identities additionally require exact catalog cardinality and removal of legacy sidecars, runtime documentation shadows, and legacy resolvers. Aliases and internal identities use disposition-specific rules. Expected file removals require matching baseline path/digest evidence in control and actual absence. In-file registration and ownership transitions are admitted only when the compiler-backed inventory delta and current lexical inventory both agree with the reviewed destination.
 
 For every preserved, normalized, or corrected legacy documentation leaf, the documentation producer reports the exact source path and JSON Pointer, typed catalog destination identity and pointer, reviewed expected value digest, and observed destination value digest. This destination reconciliation prevents a completed checklist from passing when the destination field is absent or contains unrelated content.
 
