@@ -3618,6 +3618,7 @@ pub fn analysis_run_fsi_with_options_op(
         diagnostics: coupling.diagnostics,
         spatial_projection_evidence: Vec::new(),
         observations: Vec::new(),
+        observation_histories: Vec::new(),
         fields: coupling.fields,
     };
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;

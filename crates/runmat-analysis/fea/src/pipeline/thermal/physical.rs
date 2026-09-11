@@ -18,6 +18,9 @@ use crate::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
         constitutive_stats, initial_state,
     },
+    pipeline::observation_history::{
+        evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
         backend::{
@@ -27,6 +30,10 @@ use crate::{
         preconditioner::SpdPreconditionerKind,
     },
 };
+
+const THERMAL_TEMPERATURE_HISTORY_SOURCE: &str = "thermal.temperature";
+const THERMAL_TEMPERATURE_GRADIENT_HISTORY_SOURCE: &str = "thermal.temperature_gradient";
+const THERMAL_HEAT_FLUX_HISTORY_SOURCE: &str = "thermal.heat_flux";
 
 pub(super) fn run(
     model: &AnalysisModel,
@@ -56,6 +63,8 @@ pub(super) fn run(
     )?;
 
     let thermal_step = thermal_step(model, procedure)?;
+    let required_history_samples = required_time_history_samples(thermal_step)
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let time_origin_s = match &thermal_step.independent_domain {
         IndependentDomain::TimeSeconds { start, .. } => *start,
         IndependentDomain::Static => 0.0,
@@ -128,6 +137,7 @@ pub(super) fn run(
                 initial_assembly: &initial_assembly,
                 initial_temperature_k: &initial.temperature_k,
                 time_grid,
+                required_history_samples: &required_history_samples,
                 requested_solver_backend,
                 algebra: algebra.as_ref(),
             })?
@@ -157,7 +167,22 @@ pub(super) fn run(
     } else {
         outcome.device_apply_count as f64 / outcome.device_apply_attempt_count as f64
     };
-    let run = FeaRunResult {
+    let time_points_s = outcome.time_points_s;
+    let temperature_snapshots = scalar_snapshots(
+        outcome.recovered.temperatures,
+        fea_thermal_temperature_field_id,
+    );
+    let temperature_gradient_snapshots = vector_snapshots(
+        outcome.recovered.gradients,
+        fea_thermal_temperature_gradient_field_id,
+    );
+    let heat_flux_snapshots =
+        vector_snapshots(outcome.recovered.heat_flux, fea_thermal_heat_flux_field_id);
+    let energy_storage_rate_snapshots = scalar_snapshots(
+        outcome.recovered.storage_rates,
+        fea_thermal_energy_storage_rate_field_id,
+    );
+    let mut run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::from_solver_backend(outcome.last_solve.solver_backend),
@@ -170,8 +195,54 @@ pub(super) fn run(
         diagnostics,
         spatial_projection_evidence: outcome.source_evidence,
         observations: Vec::new(),
+        observation_histories: Vec::new(),
         fields: Vec::new(),
     };
+    if thermal_step.observations.iter().any(|request| {
+        matches!(
+            request,
+            runmat_analysis_core::ObservationRequest::History(_)
+        )
+    }) {
+        let coordinates = time_points_s
+            .iter()
+            .copied()
+            .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
+            .collect::<Vec<_>>();
+        run.observation_histories = evaluate_field_histories(
+            thermal_step,
+            &initial_assembly.projection,
+            &coordinates,
+            &[
+                HistoryFieldSeries {
+                    quantity: runmat_analysis_core::ObservationQuantity::Temperature,
+                    source_field_id: THERMAL_TEMPERATURE_HISTORY_SOURCE,
+                    location: runmat_analysis_core::FieldLocation::Node,
+                    entity_domain:
+                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
+                    snapshots: &temperature_snapshots,
+                },
+                HistoryFieldSeries {
+                    quantity: runmat_analysis_core::ObservationQuantity::TemperatureGradient,
+                    source_field_id: THERMAL_TEMPERATURE_GRADIENT_HISTORY_SOURCE,
+                    location: runmat_analysis_core::FieldLocation::Element,
+                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    snapshots: &temperature_gradient_snapshots,
+                },
+                HistoryFieldSeries {
+                    quantity: runmat_analysis_core::ObservationQuantity::HeatFlux,
+                    source_field_id: THERMAL_HEAT_FLUX_HISTORY_SOURCE,
+                    location: runmat_analysis_core::FieldLocation::Element,
+                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                    snapshots: &heat_flux_snapshots,
+                },
+            ],
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    }
 
     emit_phase(
         "fea.run_thermal",
@@ -183,23 +254,11 @@ pub(super) fn run(
     );
     Ok(FeaThermalRunResult {
         run,
-        time_points_s: outcome.time_points_s,
-        temperature_snapshots: scalar_snapshots(
-            outcome.recovered.temperatures,
-            fea_thermal_temperature_field_id,
-        ),
-        temperature_gradient_snapshots: vector_snapshots(
-            outcome.recovered.gradients,
-            fea_thermal_temperature_gradient_field_id,
-        ),
-        heat_flux_snapshots: vector_snapshots(
-            outcome.recovered.heat_flux,
-            fea_thermal_heat_flux_field_id,
-        ),
-        energy_storage_rate_snapshots: scalar_snapshots(
-            outcome.recovered.storage_rates,
-            fea_thermal_energy_storage_rate_field_id,
-        ),
+        time_points_s,
+        temperature_snapshots,
+        temperature_gradient_snapshots,
+        heat_flux_snapshots,
+        energy_storage_rate_snapshots,
         residual_norms: outcome.residual_norms,
         reference_temperature_k: domain.reference_temperature.kelvin,
         initial_state: initial.evidence,
@@ -260,6 +319,7 @@ struct TransientSolveInput<'a> {
     initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
     initial_temperature_k: &'a [f64],
     time_grid: crate::excitation::ProcedureTimeGrid,
+    required_history_samples: &'a [f64],
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
 }
@@ -278,6 +338,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         .iter()
         .copied()
         .chain(events.iter().copied())
+        .chain(input.required_history_samples.iter().copied())
         .collect::<Vec<_>>();
     solve_times.sort_by(f64::total_cmp);
     solve_times.dedup_by(|left, right| left.to_bits() == right.to_bits());

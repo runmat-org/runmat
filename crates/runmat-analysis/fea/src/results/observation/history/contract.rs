@@ -281,7 +281,8 @@ impl ObservationHistoryManifest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, try_from = "ObservationHistoryWire")]
 pub struct ObservationHistory {
     manifest: ObservationHistoryManifest,
     samples: Vec<ObservationHistorySample>,
@@ -292,6 +293,14 @@ pub struct ObservationHistory {
 struct ObservationHistoryWire {
     manifest: ObservationHistoryManifest,
     samples: Vec<ObservationHistorySample>,
+}
+
+impl TryFrom<ObservationHistoryWire> for ObservationHistory {
+    type Error = ObservationError;
+
+    fn try_from(wire: ObservationHistoryWire) -> Result<Self, Self::Error> {
+        Self::from_manifest_and_samples(wire.manifest, wire.samples)
+    }
 }
 
 impl ObservationHistory {

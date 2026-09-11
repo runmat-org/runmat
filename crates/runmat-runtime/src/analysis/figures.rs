@@ -2388,6 +2388,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
                 observations: Vec::new(),
+                observation_histories: Vec::new(),
                 fields,
             },
             render_topology: Some(render_topology),

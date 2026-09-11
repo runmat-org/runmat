@@ -136,7 +136,7 @@ pub(super) fn validate_history_policy(
     }
 }
 
-pub(in crate::results::observation) fn sample_matches_policy(
+pub(crate) fn sample_matches_policy(
     sampling: &SamplingPolicy,
     coordinate: RecoveredFieldSample,
 ) -> Result<bool, ObservationError> {
@@ -187,6 +187,90 @@ pub(in crate::results::observation) fn sample_matches_policy(
         }
         _ => false,
     })
+}
+
+pub(crate) fn exact_scheduled_coordinates(
+    sampling: &SamplingPolicy,
+    maximum_samples: usize,
+) -> Result<Option<Vec<RecoveredFieldSample>>, ObservationError> {
+    let Some(sample_count) = exact_scheduled_sample_count(sampling)? else {
+        return Ok(None);
+    };
+    if sample_count > maximum_samples {
+        return Err(ObservationError::Limit("history produced sample count"));
+    }
+    let coordinates = match sampling {
+        SamplingPolicy::TimeSeconds(values) => values
+            .iter()
+            .copied()
+            .map(normalize_zero)
+            .map(RecoveredFieldSample::TimeSeconds)
+            .collect(),
+        SamplingPolicy::FrequencyHertz(values) => values
+            .iter()
+            .copied()
+            .map(normalize_zero)
+            .map(RecoveredFieldSample::FrequencyHertz)
+            .collect(),
+        SamplingPolicy::LoadFactors(values) => values
+            .iter()
+            .copied()
+            .map(normalize_zero)
+            .map(RecoveredFieldSample::LoadFactor)
+            .collect(),
+        SamplingPolicy::ModeIndices(values) => values
+            .iter()
+            .copied()
+            .map(RecoveredFieldSample::ModeIndex)
+            .collect(),
+        SamplingPolicy::TimeIntervalSeconds {
+            start, interval, ..
+        } => interval_coordinates(*start, *interval, sample_count, |value| {
+            RecoveredFieldSample::TimeSeconds(value)
+        }),
+        SamplingPolicy::FrequencyIntervalHertz {
+            start, interval, ..
+        } => interval_coordinates(*start, *interval, sample_count, |value| {
+            RecoveredFieldSample::FrequencyHertz(value)
+        }),
+        SamplingPolicy::LoadFactorInterval {
+            start, interval, ..
+        } => interval_coordinates(*start, *interval, sample_count, |value| {
+            RecoveredFieldSample::LoadFactor(value)
+        }),
+        SamplingPolicy::Final
+        | SamplingPolicy::EveryAcceptedIncrement
+        | SamplingPolicy::Event(_)
+        | SamplingPolicy::Adaptive { .. } => {
+            return Err(ObservationError::Invalid(
+                "history schedule classification is inconsistent".into(),
+            ));
+        }
+    };
+    for coordinate in &coordinates {
+        validate_coordinate(*coordinate)?;
+    }
+    Ok(Some(coordinates))
+}
+
+fn interval_coordinates(
+    start: f64,
+    interval: f64,
+    sample_count: usize,
+    wrap: impl Fn(f64) -> RecoveredFieldSample,
+) -> Vec<RecoveredFieldSample> {
+    (0..sample_count)
+        .map(|index| normalize_zero(start + index as f64 * interval))
+        .map(wrap)
+        .collect()
+}
+
+fn normalize_zero(value: f64) -> f64 {
+    if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
 }
 
 fn interval_contains(start: f64, end: f64, interval: f64, value: f64) -> bool {
@@ -255,5 +339,62 @@ pub(super) fn validate_coordinate(
         _ => Err(ObservationError::Invalid(
             "history sample requires a finite non-final coordinate".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_interval_schedule_uses_only_authored_lattice_points() {
+        let coordinates = exact_scheduled_coordinates(
+            &SamplingPolicy::TimeIntervalSeconds {
+                start: -0.0,
+                end: 1.0,
+                interval: 0.3,
+            },
+            4,
+        )
+        .unwrap()
+        .unwrap();
+        let values = coordinates
+            .iter()
+            .map(|coordinate| match coordinate {
+                RecoveredFieldSample::TimeSeconds(value) => *value,
+                _ => panic!("time interval must retain its coordinate domain"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![0.0, 0.3, 0.6, 3.0 * 0.3]);
+        assert!(values[3] < 1.0);
+        assert!(matches!(
+            exact_scheduled_coordinates(
+                &SamplingPolicy::TimeIntervalSeconds {
+                    start: 0.0,
+                    end: 1.0,
+                    interval: 0.3,
+                },
+                3,
+            ),
+            Err(ObservationError::Limit("history produced sample count"))
+        ));
+    }
+
+    #[test]
+    fn exact_schedule_preserves_coordinate_domains() {
+        assert_eq!(
+            exact_scheduled_coordinates(&SamplingPolicy::ModeIndices(vec![1, 3]), 2).unwrap(),
+            Some(vec![
+                RecoveredFieldSample::ModeIndex(1),
+                RecoveredFieldSample::ModeIndex(3),
+            ])
+        );
+        assert_eq!(
+            exact_scheduled_coordinates(&SamplingPolicy::LoadFactors(vec![0.25, 1.0]), 2).unwrap(),
+            Some(vec![
+                RecoveredFieldSample::LoadFactor(0.25),
+                RecoveredFieldSample::LoadFactor(1.0),
+            ])
+        );
     }
 }

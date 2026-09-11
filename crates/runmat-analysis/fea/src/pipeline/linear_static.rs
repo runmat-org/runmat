@@ -428,6 +428,7 @@ fn run_linear_static_with_constraint_plan(
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations,
+        observation_histories: Vec::new(),
         fields,
     })
 }

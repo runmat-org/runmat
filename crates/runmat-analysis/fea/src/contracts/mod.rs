@@ -391,6 +391,7 @@ pub struct FeaRunResult {
     pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     #[serde(default)]
     pub observations: Vec<crate::results::observation::ObservationResult>,
+    pub observation_histories: Vec<crate::results::observation::ObservationHistory>,
     pub fields: Vec<AnalysisField>,
 }
 

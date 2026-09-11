@@ -13,9 +13,15 @@ use crate::{
     },
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
+    pipeline::observation_history::{
+        evaluate_field_histories, required_mode_history_indices, HistoryFieldSeries,
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::modal::solve_modal_system,
+    topology::AnalysisProjection,
 };
+
+const MODAL_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.modal.displacement";
 
 pub fn run_modal(
     model: &AnalysisModel,
@@ -44,6 +50,16 @@ pub fn run_modal_with_options(
     );
     check_cancelled("fea.run_modal")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    let required_history_modes = required_mode_history_indices(execution_step)
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    if required_history_modes
+        .last()
+        .is_some_and(|mode| *mode > options.mode_count)
+    {
+        return Err(FeaRunError::Observation(
+            "modal history requests a mode beyond the admitted solver mode count".into(),
+        ));
+    }
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -69,7 +85,7 @@ pub fn run_modal_with_options(
     let summary = assemble_structural_system(
         model,
         &excitations,
-        options.solver_mesh,
+        options.solver_mesh.clone(),
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
@@ -151,7 +167,7 @@ pub fn run_modal_with_options(
     ];
     run_fields.extend(modal_fields);
 
-    let run = FeaRunResult {
+    let mut run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: crate::contracts::ExecutionBackend::from_solver_backend(
@@ -174,6 +190,7 @@ pub fn run_modal_with_options(
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
+        observation_histories: Vec::new(),
         fields: run_fields,
     };
 
@@ -192,7 +209,46 @@ pub fn run_modal_with_options(
                 values,
             )
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let observation_histories = if execution_step.observations.iter().any(|request| {
+        matches!(
+            request,
+            runmat_analysis_core::ObservationRequest::History(_)
+        )
+    }) {
+        if summary.structural_rotational_dof_count != 0 {
+            return Err(FeaRunError::Observation(
+                "modal nodal histories require a pure translational structural topology".into(),
+            ));
+        }
+        let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
+            FeaRunError::Observation(
+                "modal spatial histories require the canonical solver mesh used by assembly".into(),
+            )
+        })?;
+        let projection = AnalysisProjection::derive(mesh)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let coordinates = (1..=mode_shapes.len())
+            .map(crate::results::field::RecoveredFieldSample::ModeIndex)
+            .collect::<Vec<_>>();
+        evaluate_field_histories(
+            execution_step,
+            &projection,
+            &coordinates,
+            &[HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                snapshots: &mode_shapes,
+            }],
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?
+    } else {
+        Vec::new()
+    };
+    run.observation_histories = observation_histories;
 
     emit_phase(
         "fea.run_modal",

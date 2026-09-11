@@ -3,6 +3,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
+use thiserror::Error;
 
 use crate::{
     assembly::AssemblySummary,
@@ -101,6 +102,83 @@ pub struct TransientSolveResult {
     pub(crate) strain_energy_snapshots: Vec<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransientStepBoundaryKind {
+    RequiredSample,
+    SignalDiscontinuity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TransientStepBoundary {
+    time_s: f64,
+    kind: TransientStepBoundaryKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub(crate) enum TransientStepBoundaryError {
+    #[error("transient time domain is nonfinite or reversed")]
+    InvalidDomain,
+    #[error("transient step boundary lies outside the finite time domain")]
+    OutsideDomain,
+}
+
+impl TransientStepBoundary {
+    fn approach(self) -> SignalSampleApproach {
+        match self.kind {
+            TransientStepBoundaryKind::RequiredSample => SignalSampleApproach::At,
+            TransientStepBoundaryKind::SignalDiscontinuity => SignalSampleApproach::LeftLimit,
+        }
+    }
+}
+
+pub(crate) fn canonical_transient_step_boundaries(
+    signal_discontinuities_s: &[f64],
+    required_samples_s: &[f64],
+    start_time_s: f64,
+    end_time_s: f64,
+) -> Result<Vec<TransientStepBoundary>, TransientStepBoundaryError> {
+    if !start_time_s.is_finite() || !end_time_s.is_finite() || end_time_s < start_time_s {
+        return Err(TransientStepBoundaryError::InvalidDomain);
+    }
+    let mut boundaries = Vec::with_capacity(
+        signal_discontinuities_s
+            .len()
+            .saturating_add(required_samples_s.len()),
+    );
+    for (times, kind) in [
+        (
+            signal_discontinuities_s,
+            TransientStepBoundaryKind::SignalDiscontinuity,
+        ),
+        (
+            required_samples_s,
+            TransientStepBoundaryKind::RequiredSample,
+        ),
+    ] {
+        for &time_s in times {
+            if !time_s.is_finite() || time_s < start_time_s || time_s > end_time_s {
+                return Err(TransientStepBoundaryError::OutsideDomain);
+            }
+            boundaries.push(TransientStepBoundary { time_s, kind });
+        }
+    }
+    boundaries.sort_by(|left, right| left.time_s.total_cmp(&right.time_s));
+    let mut canonical: Vec<TransientStepBoundary> = Vec::with_capacity(boundaries.len());
+    for boundary in boundaries {
+        if let Some(previous) = canonical
+            .last_mut()
+            .filter(|previous| previous.time_s.to_bits() == boundary.time_s.to_bits())
+        {
+            if boundary.kind == TransientStepBoundaryKind::SignalDiscontinuity {
+                previous.kind = boundary.kind;
+            }
+        } else {
+            canonical.push(boundary);
+        }
+    }
+    Ok(canonical)
+}
+
 pub fn solve_transient_system(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
@@ -120,7 +198,7 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
     backend: ComputeBackend,
     start_time_s: f64,
     end_time_s: f64,
-    discontinuities: &[f64],
+    step_boundaries: &[TransientStepBoundary],
     mut assembly_at: impl FnMut(f64, SignalSampleApproach) -> Result<AssemblySummary, E>,
 ) -> Result<TransientSolveResult, E> {
     if summary.dof_count == 0 || options.interval_count == 0 {
@@ -235,10 +313,11 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
             accepted_thermo_growth_limit,
             accepted_thermo_nonconverged_shrink,
             accepted_assembly,
+            accepted_time_s,
         ) = loop {
             let current_time = time_points_s.last().copied().unwrap_or(start_time_s);
             let (next_time, approach) =
-                next_step_boundary(current_time, step_dt, final_time_s, discontinuities);
+                next_step_boundary(current_time, step_dt, final_time_s, step_boundaries);
             step_dt = next_time - current_time;
             let step_summary = assembly_at(next_time, approach)?;
             let thermo_severity =
@@ -291,6 +370,7 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
                     thermo_growth_limit,
                     thermo_nonconverged_shrink,
                     step_summary,
+                    next_time,
                 );
             }
             let (candidate_x, candidate_residual, candidate_converged, candidate_stats) = solved;
@@ -304,6 +384,7 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
                     thermo_growth_limit,
                     thermo_nonconverged_shrink,
                     step_summary,
+                    next_time,
                 );
             }
             if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
@@ -317,6 +398,7 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
                     thermo_growth_limit,
                     thermo_nonconverged_shrink,
                     step_summary,
+                    next_time,
                 );
             }
             step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
@@ -347,8 +429,7 @@ pub(crate) fn solve_transient_system_with_assembly<E>(
         }
 
         x = next_x;
-        let next_time = time_points_s.last().copied().unwrap_or(0.0) + step_dt;
-        time_points_s.push(next_time);
+        time_points_s.push(accepted_time_s);
         displacement_snapshots.push(x.clone());
         residual_norms.push(residual_norm);
         accepted_time_steps_s.push(step_dt);
@@ -531,15 +612,15 @@ fn next_step_boundary(
     current_time_s: f64,
     proposed_dt_s: f64,
     final_time_s: f64,
-    discontinuities: &[f64],
+    step_boundaries: &[TransientStepBoundary],
 ) -> (f64, SignalSampleApproach) {
     let proposed_end = (current_time_s + proposed_dt_s).min(final_time_s);
-    match discontinuities
+    match step_boundaries
         .iter()
         .copied()
-        .find(|event| *event > current_time_s && *event <= proposed_end)
+        .find(|boundary| boundary.time_s > current_time_s && boundary.time_s <= proposed_end)
     {
-        Some(event) => (event, SignalSampleApproach::LeftLimit),
+        Some(boundary) => (boundary.time_s, boundary.approach()),
         None => (proposed_end, SignalSampleApproach::At),
     }
 }
@@ -553,7 +634,7 @@ mod event_step_tests {
         let start = 0.0;
         let final_time = 1.2;
         let nominal_dt = 0.6;
-        let events = [0.5];
+        let events = canonical_transient_step_boundaries(&[0.5], &[], start, final_time).unwrap();
         let mut time = start;
         let mut steps = Vec::new();
         while time < final_time {
@@ -565,6 +646,21 @@ mod event_step_tests {
         assert_eq!(steps, vec![(0.0, 0.5), (0.5, 1.1), (1.1, 1.2)]);
         assert!(steps
             .iter()
-            .all(|(left, right)| !(left < &events[0] && right > &events[0])));
+            .all(|(left, right)| !(left < &0.5 && right > &0.5)));
+    }
+
+    #[test]
+    fn required_samples_split_steps_without_changing_signal_continuity() {
+        let boundaries = canonical_transient_step_boundaries(&[], &[0.25], 0.0, 1.0).unwrap();
+        assert_eq!(
+            next_step_boundary(0.0, 0.5, 1.0, &boundaries),
+            (0.25, SignalSampleApproach::At)
+        );
+
+        let coincident = canonical_transient_step_boundaries(&[0.25], &[0.25], 0.0, 1.0).unwrap();
+        assert_eq!(
+            next_step_boundary(0.0, 0.5, 1.0, &coincident),
+            (0.25, SignalSampleApproach::LeftLimit)
+        );
     }
 }

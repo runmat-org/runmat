@@ -154,6 +154,56 @@ fn experimental_nonlinear_options() -> NonlinearSolveOptions {
     }
 }
 
+fn nodal_history_observation(
+    id: &str,
+    quantity: runmat_analysis_core::ObservationQuantity,
+    sampling: runmat_analysis_core::SamplingPolicy,
+) -> runmat_analysis_core::ObservationRequest {
+    history_observation(
+        id,
+        quantity,
+        sampling,
+        runmat_analysis_core::FieldLocation::Node,
+    )
+}
+
+fn history_observation(
+    id: &str,
+    quantity: runmat_analysis_core::ObservationQuantity,
+    sampling: runmat_analysis_core::SamplingPolicy,
+    location: runmat_analysis_core::FieldLocation,
+) -> runmat_analysis_core::ObservationRequest {
+    runmat_analysis_core::ObservationRequest::History(runmat_analysis_core::ObservationSpec {
+        observation_id: runmat_analysis_core::ObservationId(id.to_owned()),
+        quantity,
+        value_shape: quantity.canonical_value_shape(),
+        target: runmat_analysis_core::ObservationTarget::WholeModel,
+        source_location: location,
+        output_location: location,
+        recovery: runmat_analysis_core::RecoveryPolicy::Native,
+        component: runmat_analysis_core::ObservationComponent::All,
+        frame: runmat_analysis_core::CoordinateFrame::Global,
+        sign_convention: runmat_analysis_core::SignConvention::Native,
+        complex_representation: runmat_analysis_core::ComplexRepresentation::Real,
+        sampling,
+        reduction: None,
+        storage: runmat_analysis_core::ObservationStoragePolicy {
+            precision: runmat_analysis_core::SignalPrecision::Real64,
+            compression: runmat_analysis_core::CompressionPolicy::Lossless,
+            retention: runmat_analysis_core::RetentionPolicy::Canonical,
+            partial_access: runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: runmat_analysis_core::ObservationPurpose::Publication,
+        cost: runmat_analysis_core::ObservationCostEstimate {
+            operation_count: 1_000_000,
+            peak_resident_bytes: 1_000_000,
+            stored_bytes: 1_000_000,
+            transfer_bytes: 1_000_000,
+            collective_count: 0,
+        },
+    })
+}
+
 #[test]
 fn production_requirement_rejects_before_structural_solver_progress() {
     use std::sync::{Arc, Mutex};
@@ -1972,6 +2022,312 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
         .expect("transient energy balance diagnostic should be emitted");
     assert!(energy_diag.message.contains("max_total_energy="));
     assert!(energy_diag.message.contains("energy_growth_ratio="));
+}
+
+#[test]
+fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_transient("transient_history");
+    let requested_times = vec![0.0, 0.25, 0.7, 1.0];
+    step.observations = vec![nodal_history_observation(
+        "displacement_history",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
+    )];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            interval_count: 2,
+            min_time_step_s: 0.5,
+            max_time_step_s: 0.5,
+            adaptive_time_step: false,
+            solver_mesh: Some(mesh),
+            ..experimental_transient_options()
+        },
+    )
+    .expect("an explicit history schedule should become exact solve boundaries");
+
+    assert!(requested_times
+        .iter()
+        .all(|time| result.time_points_s.contains(time)));
+    assert_eq!(result.run.observation_histories.len(), 1);
+    let history = &result.run.observation_histories[0];
+    assert_eq!(history.manifest().observed_sample_count, 4);
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        requested_times
+            .iter()
+            .copied()
+            .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
+            .collect::<Vec<_>>()
+    );
+    for sample in history.samples() {
+        let crate::results::field::RecoveredFieldSample::TimeSeconds(time_s) = sample.coordinate
+        else {
+            panic!("transient history must publish time coordinates")
+        };
+        let snapshot_index = result
+            .time_points_s
+            .iter()
+            .position(|candidate| *candidate == time_s)
+            .expect("history coordinate must identify an accepted snapshot");
+        assert_eq!(
+            sample.result.field.as_host_f64(),
+            result.displacement_snapshots[snapshot_index].as_host_f64()
+        );
+    }
+    let encoded = history
+        .canonical_bytes()
+        .expect("history should serialize canonically");
+    let decoded = crate::results::observation::ObservationHistory::from_canonical_bytes(&encoded)
+        .expect("history should deserialize through validation");
+    assert_eq!(&decoded, history);
+    let json = serde_json::to_vec(history).expect("history should serialize as JSON");
+    let decoded_json: crate::results::observation::ObservationHistory =
+        serde_json::from_slice(&json).expect("history JSON should deserialize through validation");
+    assert_eq!(&decoded_json, history);
+}
+
+#[test]
+fn transient_every_accepted_increment_history_tracks_the_solver_grid() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_transient("accepted_increment_history");
+    step.accuracy.resources.maximum_samples = 20;
+    step.observations = vec![nodal_history_observation(
+        "accepted_displacement_history",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement,
+    )];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_transient_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        TransientSolveOptions {
+            interval_count: 2,
+            min_time_step_s: 0.5,
+            max_time_step_s: 0.5,
+            adaptive_time_step: false,
+            solver_mesh: Some(mesh),
+            ..experimental_transient_options()
+        },
+    )
+    .expect("every-accepted-increment history should follow accepted solve points");
+
+    let history = &result.run.observation_histories[0];
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        result
+            .time_points_s
+            .iter()
+            .copied()
+            .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_state() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_nonlinear("nonlinear_history");
+    let requested_load_factors = vec![0.0, 0.3, 1.0];
+    step.observations = vec![nodal_history_observation(
+        "nonlinear_displacement_history",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::LoadFactors(requested_load_factors.clone()),
+    )];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_nonlinear_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        NonlinearSolveOptions {
+            increment_count: 2,
+            solver_mesh: Some(mesh),
+            ..experimental_nonlinear_options()
+        },
+    )
+    .expect("an explicit load-factor history should become exact increment boundaries");
+
+    assert!(result.load_factors.contains(&0.3));
+    assert_eq!(result.run.observation_histories.len(), 1);
+    let history = &result.run.observation_histories[0];
+    assert_eq!(history.manifest().observed_sample_count, 3);
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        requested_load_factors
+            .iter()
+            .copied()
+            .map(crate::results::field::RecoveredFieldSample::LoadFactor)
+            .collect::<Vec<_>>()
+    );
+    let initial_values = history.samples()[0]
+        .result
+        .field
+        .as_host_f64()
+        .expect("initial displacement history should be host-backed");
+    assert!(initial_values.iter().all(|value| *value == 0.0));
+    for sample in &history.samples()[1..] {
+        let crate::results::field::RecoveredFieldSample::LoadFactor(load_factor) =
+            sample.coordinate
+        else {
+            panic!("nonlinear history must publish load-factor coordinates")
+        };
+        let snapshot_index = result
+            .load_factors
+            .iter()
+            .position(|candidate| *candidate == load_factor)
+            .expect("history coordinate must identify an accepted increment");
+        assert_eq!(
+            sample.result.field.as_host_f64(),
+            result.displacement_snapshots[snapshot_index].as_host_f64()
+        );
+    }
+}
+
+#[test]
+fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut step = ProcedureStep::structural_modal("modal_history");
+    step.observations = vec![nodal_history_observation(
+        "modal_displacement_history",
+        runmat_analysis_core::ObservationQuantity::Displacement,
+        runmat_analysis_core::SamplingPolicy::ModeIndices(vec![1, 2]),
+    )];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            mode_count: 2,
+            solver_mesh: Some(mesh),
+            ..experimental_modal_options()
+        },
+    )
+    .expect("requested modal histories should publish solved mode shapes");
+
+    assert_eq!(result.run.observation_histories.len(), 1);
+    let history = &result.run.observation_histories[0];
+    assert_eq!(history.manifest().observed_sample_count, 2);
+    assert_eq!(
+        history
+            .samples()
+            .iter()
+            .map(|sample| sample.coordinate)
+            .collect::<Vec<_>>(),
+        vec![
+            crate::results::field::RecoveredFieldSample::ModeIndex(1),
+            crate::results::field::RecoveredFieldSample::ModeIndex(2),
+        ]
+    );
+    for (sample, mode_shape) in history.samples().iter().zip(&result.mode_shapes) {
+        assert_eq!(sample.result.field.as_host_f64(), mode_shape.as_host_f64());
+    }
+}
+
+#[test]
+fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: runmat_analysis_core::Temperature::new(293.15),
+    });
+    let mut step = ProcedureStep::thermal_transient("thermal_history");
+    let requested_times = vec![0.0, 0.2, 0.65, 1.0];
+    step.observations = vec![
+        nodal_history_observation(
+            "temperature_history",
+            runmat_analysis_core::ObservationQuantity::Temperature,
+            runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
+        ),
+        history_observation(
+            "temperature_gradient_history",
+            runmat_analysis_core::ObservationQuantity::TemperatureGradient,
+            runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
+            runmat_analysis_core::FieldLocation::Element,
+        ),
+        history_observation(
+            "heat_flux_history",
+            runmat_analysis_core::ObservationQuantity::HeatFlux,
+            runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
+            runmat_analysis_core::FieldLocation::Element,
+        ),
+    ];
+    model.sequence.steps = vec![step];
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+
+    let result = crate::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
+            solver_mesh: Some(mesh),
+            ..experimental_thermal_options()
+        },
+    )
+    .expect("thermal history samples should become exact solve points");
+
+    assert!(requested_times
+        .iter()
+        .all(|time| result.time_points_s.contains(time)));
+    assert_eq!(result.run.observation_histories.len(), 3);
+    for (quantity, snapshots) in [
+        (
+            runmat_analysis_core::ObservationQuantity::Temperature,
+            &result.temperature_snapshots,
+        ),
+        (
+            runmat_analysis_core::ObservationQuantity::TemperatureGradient,
+            &result.temperature_gradient_snapshots,
+        ),
+        (
+            runmat_analysis_core::ObservationQuantity::HeatFlux,
+            &result.heat_flux_snapshots,
+        ),
+    ] {
+        let history = result
+            .run
+            .observation_histories
+            .iter()
+            .find(|history| history.manifest().quantity == quantity)
+            .expect("each requested thermal quantity should own one history");
+        assert_eq!(history.manifest().observed_sample_count, 4);
+        for sample in history.samples() {
+            let crate::results::field::RecoveredFieldSample::TimeSeconds(time_s) =
+                sample.coordinate
+            else {
+                panic!("thermal history must publish time coordinates")
+            };
+            let snapshot_index = result
+                .time_points_s
+                .iter()
+                .position(|candidate| *candidate == time_s)
+                .expect("thermal history coordinate must identify a solve point");
+            assert_eq!(
+                sample.result.field.as_host_f64(),
+                snapshots[snapshot_index].as_host_f64()
+            );
+        }
+    }
 }
 
 #[test]

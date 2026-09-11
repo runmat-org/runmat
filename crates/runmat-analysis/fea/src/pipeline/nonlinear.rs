@@ -1,4 +1,6 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, AnalysisProcedure};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, IndependentDomain,
+};
 
 use crate::assembly::{dofs::StructuralDofKind, AssemblySummary};
 use crate::{
@@ -15,13 +17,21 @@ use crate::{
     diagnostics::builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     pipeline::electro_thermal::recover_electro_thermal_fields,
+    pipeline::observation_history::{
+        evaluate_field_histories, required_load_factor_history_samples, HistoryFieldSeries,
+    },
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
+    solve::{
+        nonlinear::{solve_nonlinear_system_at_boundaries, NonlinearSolveOptions},
+        transient::canonical_transient_step_boundaries,
+    },
+    topology::AnalysisProjection,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
+const NONLINEAR_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.nonlinear.displacement";
 
 pub fn run_nonlinear(
     model: &AnalysisModel,
@@ -50,6 +60,24 @@ pub fn run_nonlinear_with_options(
     );
     check_cancelled("fea.run_nonlinear")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    let required_history_samples = required_load_factor_history_samples(execution_step)
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    let IndependentDomain::LoadFactor {
+        start: load_factor_start,
+        end: load_factor_end,
+    } = execution_step.independent_domain
+    else {
+        return Err(FeaRunError::InvalidModel(
+            "nonlinear structural execution requires a load-factor domain".into(),
+        ));
+    };
+    let step_boundaries = canonical_transient_step_boundaries(
+        &[],
+        &required_history_samples,
+        load_factor_start,
+        load_factor_end,
+    )
+    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::RegionResolution,
@@ -101,7 +129,14 @@ pub fn run_nonlinear_with_options(
         Some(2),
         Some(5),
     );
-    let nonlinear = solve_nonlinear_system(&summary, options.clone(), backend);
+    let nonlinear = solve_nonlinear_system_at_boundaries(
+        &summary,
+        options.clone(),
+        backend,
+        load_factor_start,
+        load_factor_end,
+        &step_boundaries,
+    );
     emit_phase(
         "fea.run_nonlinear",
         FeaProgressPhase::Solve,
@@ -159,6 +194,7 @@ pub fn run_nonlinear_with_options(
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
+        observation_histories: Vec::new(),
         fields: vec![
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_DISPLACEMENT,
@@ -305,6 +341,62 @@ pub fn run_nonlinear_with_options(
     run.diagnostics.extend(thermo_mechanical_fields.diagnostics);
     run.diagnostics.extend(electro_thermal_fields.diagnostics);
     run.fields.extend(electro_thermal_fields.static_fields);
+    let observation_histories = if execution_step.observations.iter().any(|request| {
+        matches!(
+            request,
+            runmat_analysis_core::ObservationRequest::History(_)
+        )
+    }) {
+        if summary.structural_rotational_dof_count != 0 {
+            return Err(FeaRunError::Observation(
+                "nonlinear nodal histories require a pure translational structural topology".into(),
+            ));
+        }
+        let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
+            FeaRunError::Observation(
+                "nonlinear spatial histories require the canonical solver mesh used by assembly"
+                    .into(),
+            )
+        })?;
+        let projection = AnalysisProjection::derive(mesh)
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let mut coordinates = nonlinear
+            .load_factors
+            .iter()
+            .copied()
+            .map(crate::results::field::RecoveredFieldSample::LoadFactor)
+            .collect::<Vec<_>>();
+        let mut history_displacement_snapshots = displacement_snapshots.clone();
+        coordinates.insert(
+            0,
+            crate::results::field::RecoveredFieldSample::LoadFactor(load_factor_start),
+        );
+        history_displacement_snapshots.insert(
+            0,
+            AnalysisField::host_f64(
+                "structural.nonlinear.initial_displacement",
+                vector_shape(nonlinear.initial_displacement.len()),
+                padded_vector_values(nonlinear.initial_displacement.clone(), summary.dof_count),
+            ),
+        );
+        evaluate_field_histories(
+            execution_step,
+            &projection,
+            &coordinates,
+            &[HistoryFieldSeries {
+                quantity: runmat_analysis_core::ObservationQuantity::Displacement,
+                source_field_id: NONLINEAR_DISPLACEMENT_HISTORY_SOURCE,
+                location: runmat_analysis_core::FieldLocation::Node,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
+                snapshots: &history_displacement_snapshots,
+            }],
+        )
+        .map_err(|error| FeaRunError::Observation(error.to_string()))?
+    } else {
+        Vec::new()
+    };
+    run.observation_histories = observation_histories;
 
     emit_phase(
         "fea.run_nonlinear",

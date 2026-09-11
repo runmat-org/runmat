@@ -33,6 +33,7 @@ pub use evaluate::{
     evaluate_observation_sample, evaluate_observations, evaluate_structural_observation_sample,
     evaluate_structural_observations,
 };
+pub(crate) use history::{exact_scheduled_coordinates, sample_matches_policy};
 pub use history::{
     BoundedObservationHistory, ObservationHistory, ObservationHistoryEntry,
     ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,

@@ -1414,6 +1414,7 @@ pub fn run_electromagnetic_with_options(
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
         observations: Vec::new(),
+        observation_histories: Vec::new(),
         fields: Vec::new(),
     };
 

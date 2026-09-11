@@ -13,7 +13,9 @@ use crate::{
     },
     solve::{
         backend::kind::LinearAlgebraBackendKind,
-        transient::{solve_transient_system, TransientSolveOptions},
+        transient::{
+            solve_transient_system_with_assembly, TransientSolveOptions, TransientStepBoundary,
+        },
     },
     ComputeBackend, FeaContactInterfaceContext, FeaPlasticityConstitutiveContext,
 };
@@ -64,6 +66,7 @@ pub struct NonlinearSolveResult {
     pub converged_increments: usize,
     pub total_increments: usize,
     pub load_factors: Vec<f64>,
+    pub initial_displacement: Vec<f64>,
     pub displacement_snapshots: Vec<Vec<f64>>,
     pub von_mises_snapshots: Vec<Vec<f64>>,
     pub plastic_strain_snapshots: Vec<Vec<f64>>,
@@ -95,11 +98,23 @@ pub fn solve_nonlinear_system(
     options: NonlinearSolveOptions,
     backend: ComputeBackend,
 ) -> NonlinearSolveResult {
+    solve_nonlinear_system_at_boundaries(summary, options, backend, 0.0, 1.0, &[])
+}
+
+pub(crate) fn solve_nonlinear_system_at_boundaries(
+    summary: &AssemblySummary,
+    options: NonlinearSolveOptions,
+    backend: ComputeBackend,
+    load_factor_start: f64,
+    load_factor_end: f64,
+    step_boundaries: &[TransientStepBoundary],
+) -> NonlinearSolveResult {
     if summary.dof_count == 0 || options.increment_count == 0 {
         return NonlinearSolveResult {
             converged_increments: 0,
             total_increments: options.increment_count,
             load_factors: Vec::new(),
+            initial_displacement: vec![0.0; summary.dof_count],
             displacement_snapshots: vec![vec![0.0; summary.dof_count]],
             von_mises_snapshots: Vec::new(),
             plastic_strain_snapshots: Vec::new(),
@@ -133,13 +148,14 @@ pub fn solve_nonlinear_system(
     }
 
     let solve_start = Instant::now();
-    let transient = solve_transient_system(
+    let nominal_increment = (load_factor_end - load_factor_start) / options.increment_count as f64;
+    let transient = match solve_transient_system_with_assembly(
         summary,
         TransientSolveOptions {
             formulation_requirement: options.formulation_requirement,
             solver_mesh: None,
-            min_time_step_s: 1.0 / options.increment_count as f64,
-            max_time_step_s: 1.0 / options.increment_count as f64,
+            min_time_step_s: nominal_increment,
+            max_time_step_s: nominal_increment,
             interval_count: options.increment_count,
             max_linear_iters: options.max_newton_iters.saturating_mul(8).max(32),
             tolerance: options.tolerance,
@@ -155,11 +171,22 @@ pub fn solve_nonlinear_system(
             progress_operation: "fea.run_nonlinear".to_string(),
         },
         backend,
-    );
+        load_factor_start,
+        load_factor_end,
+        step_boundaries,
+        |_, _| Ok::<_, std::convert::Infallible>(summary.clone()),
+    ) {
+        Ok(result) => result,
+        Err(error) => match error {},
+    };
 
-    let load_factors = (1..=options.increment_count)
-        .map(|idx| idx as f64 / options.increment_count as f64)
+    let load_factors = transient
+        .time_points_s
+        .iter()
+        .copied()
+        .skip(1)
         .collect::<Vec<_>>();
+    let increment_count = load_factors.len();
     let plasticity_context = options.plasticity_context.as_ref();
     let contact_context = options.contact_context.as_ref();
     let thermo_severity_base = thermo_mechanical::severity(summary.thermo_mechanical.as_ref());
@@ -169,15 +196,15 @@ pub fn solve_nonlinear_system(
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
-    let mut displacement_snapshots = Vec::with_capacity(options.increment_count);
-    let mut von_mises_snapshots = Vec::with_capacity(options.increment_count);
-    let mut plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
-    let mut equivalent_plastic_strain_snapshots = Vec::with_capacity(options.increment_count);
-    let mut contact_pressure_snapshots = Vec::with_capacity(options.increment_count);
-    let mut contact_gap_snapshots = Vec::with_capacity(options.increment_count);
-    let mut residual_norms = Vec::with_capacity(options.increment_count);
-    let mut increment_norms = Vec::with_capacity(options.increment_count);
-    let mut iteration_counts = Vec::with_capacity(options.increment_count);
+    let mut displacement_snapshots = Vec::with_capacity(increment_count);
+    let mut von_mises_snapshots = Vec::with_capacity(increment_count);
+    let mut plastic_strain_snapshots = Vec::with_capacity(increment_count);
+    let mut equivalent_plastic_strain_snapshots = Vec::with_capacity(increment_count);
+    let mut contact_pressure_snapshots = Vec::with_capacity(increment_count);
+    let mut contact_gap_snapshots = Vec::with_capacity(increment_count);
+    let mut residual_norms = Vec::with_capacity(increment_count);
+    let mut increment_norms = Vec::with_capacity(increment_count);
+    let mut iteration_counts = Vec::with_capacity(increment_count);
     let mut converged_increments = 0usize;
     let mut failed_increments = 0usize;
     let mut line_search_backtracks = 0usize;
@@ -209,6 +236,7 @@ pub fn solve_nonlinear_system(
             }
             state
         });
+    let initial_displacement = previous.clone();
     let complexity_scale = ((summary.load_count as f64 / 512.0).max(1.0))
         * ((summary.dof_count as f64 / 384.0).max(1.0));
     let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
@@ -234,7 +262,7 @@ pub fn solve_nonlinear_system(
     let mut min_contact_gap = f64::INFINITY;
     let mut contact_active_entity_count = 0usize;
 
-    'increments: for index in 0..options.increment_count {
+    'increments: for index in 0..increment_count {
         if crate::is_fea_cancelled() {
             break;
         }
@@ -429,19 +457,19 @@ pub fn solve_nonlinear_system(
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
             "solver=incremental_newton_raphson increments={} line_search={} tangent_refresh_interval={}",
-            options.increment_count, options.line_search, tangent_refresh_interval
+            increment_count, options.line_search, tangent_refresh_interval
         ),
     }];
     diagnostics.push(FeaDiagnostic {
         code: "FEA_NONLINEAR_CONVERGENCE".to_string(),
-        severity: if converged_increments == options.increment_count {
+        severity: if converged_increments == increment_count {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
             "increments={} converged_increments={} failed_increments={} max_newton_iters={} max_iterations_used={} mean_iterations_used={} tolerance={} residual_convergence_target={} max_residual_norm={} max_increment_norm={} line_search_backtracks={} max_line_search_backtracks_per_increment={} tangent_rebuild_count={} iteration_spike_count={} convergence_stall_count={} backtrack_burst_count={}",
-            options.increment_count,
+            increment_count,
             converged_increments,
             failed_increments,
             options.max_newton_iters,
@@ -539,20 +567,20 @@ pub fn solve_nonlinear_system(
             message: format!(
                 "severity_peak={} severity_mean={}",
                 electro_severity_peak,
-                if options.increment_count == 0 {
+                if increment_count == 0 {
                     0.0
                 } else {
-                    electro_severity_sum / options.increment_count as f64
+                    electro_severity_sum / increment_count as f64
                 },
             ),
         });
     }
     if plasticity_severity_peak > 0.0 {
         let plasticity = options.plasticity_context.as_ref();
-        let plasticity_severity_mean = if options.increment_count == 0 {
+        let plasticity_severity_mean = if increment_count == 0 {
             0.0
         } else {
-            plasticity_severity_sum / options.increment_count as f64
+            plasticity_severity_sum / increment_count as f64
         };
         let plasticity_load_realization_ratio = if plasticity_severity_base > 0.0 {
             plasticity_severity_mean / plasticity_severity_base
@@ -590,10 +618,10 @@ pub fn solve_nonlinear_system(
     }
     if contact_severity_peak > 0.0 {
         let contact = options.contact_context.as_ref();
-        let contact_severity_mean = if options.increment_count == 0 {
+        let contact_severity_mean = if increment_count == 0 {
             0.0
         } else {
-            contact_severity_sum / options.increment_count as f64
+            contact_severity_sum / increment_count as f64
         };
         let contact_load_realization_ratio = if contact_severity_base > 0.0 {
             contact_severity_mean / contact_severity_base
@@ -636,8 +664,9 @@ pub fn solve_nonlinear_system(
 
     NonlinearSolveResult {
         converged_increments,
-        total_increments: options.increment_count,
+        total_increments: increment_count,
         load_factors,
+        initial_displacement,
         displacement_snapshots,
         von_mises_snapshots,
         plastic_strain_snapshots,
