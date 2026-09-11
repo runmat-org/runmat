@@ -6,16 +6,12 @@ use runmat_meshing_core::StableDigest;
 use crate::assembly::dofs::StructuralDofLayout;
 
 use super::{
-    digest, numerical_rank, rigid_body::RigidBodyFrame, validate_operator, verify_null_mode,
-    MatrixDefiniteness, NullspaceAnchoring, NullspaceComponentEvidence,
-    NullspaceEliminationEvidence, NullspaceEvidenceError, NullspaceKind, OperatorRole,
-    RealSparseMatrix,
+    digest, validate_operator, MatrixDefiniteness, NullspaceEliminationEvidence,
+    NullspaceEvidenceError, NullspaceKind, OperatorRole, RealSparseMatrix,
 };
 
 const TOPOLOGY_DOMAIN: &str = "fea-explicit-structural-frame-topology";
 const NODE_DOMAIN: &str = "fea-explicit-structural-frame-node";
-const CONSTRAINT_DOMAIN: &str = "fea-explicit-structural-frame-constraint-state";
-const RIGID_MODE_COUNT: usize = 6;
 
 pub(super) fn prove(
     structural: &StructuralModel,
@@ -117,111 +113,27 @@ fn prove_impl(
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
     let components = structural_frame_components(structural, &node_by_id)?;
-    let component_by_node = components
+    let positions = structural
+        .nodes
         .iter()
-        .enumerate()
-        .flat_map(|(component, nodes)| nodes.iter().map(move |node| (*node, component)))
-        .collect::<BTreeMap<_, _>>();
-    let frames = components
-        .iter()
-        .map(|nodes| {
-            let positions = nodes
-                .iter()
-                .map(|node| structural.nodes[*node].coordinates_m)
-                .collect::<Vec<_>>();
-            RigidBodyFrame::from_positions(&positions)
-        })
+        .map(|node| node.coordinates_m)
+        .collect::<Vec<_>>();
+    let identities = (0..structural.nodes.len())
+        .map(|node| explicit_node_identity(structural, node))
         .collect::<Result<Vec<_>, _>>()?;
-    let mode_count = components
-        .len()
-        .checked_mul(RIGID_MODE_COUNT)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let context = FrameModeContext {
-        structural,
+    super::canonical_frame::prove(
+        super::canonical_frame::CanonicalFrameTopology {
+            positions_m: &positions,
+            node_identities: &identities,
+            components,
+            topology_identity: digest(TOPOLOGY_DOMAIN, &(&structural.nodes, &structural.elements))?,
+            kind: NullspaceKind::StructuralFrameRigidBody3d,
+        },
         layout,
-        component_by_node: &component_by_node,
-        frames: &frames,
-        mode_count,
-    };
-
-    let mut modes = vec![vec![0.0; combined_operator.columns()]; mode_count];
-    for column in 0..combined_operator.columns() {
-        for (mode, value) in rigid_mode_response(column, &context)?
-            .into_iter()
-            .enumerate()
-        {
-            modes[mode][column] = value;
-        }
-    }
-    for mode in &modes {
-        let applied = super::spmv(element_operator, mode)
-            .map_err(|_| NullspaceEvidenceError::DimensionMismatch)?;
-        verify_null_mode(element_operator, mode, &applied)?;
-    }
-    let mut projected = constrained_dofs
-        .iter()
-        .copied()
-        .enumerate()
-        .filter(|(_, constrained)| *constrained)
-        .map(|(column, _)| rigid_mode_response(column, &context))
-        .collect::<Result<Vec<_>, _>>()?;
-    if let Some(operator) = connector_operator {
-        let applied_modes = modes
-            .iter()
-            .map(|mode| {
-                super::spmv(operator, mode).map_err(|_| NullspaceEvidenceError::DimensionMismatch)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        projected.extend((0..operator.rows()).map(|row| {
-            applied_modes
-                .iter()
-                .map(|applied| applied[row])
-                .collect::<Vec<_>>()
-        }));
-    }
-    if numerical_rank(projected) != mode_count {
-        return Err(NullspaceEvidenceError::UnderconstrainedComponent);
-    }
-
-    let component_evidence = if connector_operator.is_some() {
-        let mut node_identities = (0..structural.nodes.len())
-            .map(|node| explicit_node_identity(structural, node))
-            .collect::<Result<Vec<_>, _>>()?;
-        node_identities.sort_unstable();
-        vec![NullspaceComponentEvidence {
-            component_index: 0,
-            node_identities,
-            null_mode_count: mode_count,
-            projected_anchor_rank: mode_count,
-            anchoring: NullspaceAnchoring::OperatorAndConstraintRowSpace,
-        }]
-    } else {
-        components
-            .into_iter()
-            .enumerate()
-            .map(|(component_index, nodes)| {
-                let mut node_identities = nodes
-                    .iter()
-                    .map(|node| explicit_node_identity(structural, *node))
-                    .collect::<Result<Vec<_>, _>>()?;
-                node_identities.sort_unstable();
-                Ok(NullspaceComponentEvidence {
-                    component_index,
-                    node_identities,
-                    null_mode_count: RIGID_MODE_COUNT,
-                    projected_anchor_rank: RIGID_MODE_COUNT,
-                    anchoring: NullspaceAnchoring::ConstraintRowSpace,
-                })
-            })
-            .collect::<Result<Vec<_>, NullspaceEvidenceError>>()?
-    };
-    NullspaceEliminationEvidence::new(
-        NullspaceKind::StructuralFrameRigidBody3d,
-        digest(TOPOLOGY_DOMAIN, &(&structural.nodes, &structural.elements))?,
+        element_operator,
+        connector_operator,
         combined_operator,
-        digest(CONSTRAINT_DOMAIN, &constrained_dofs)?,
         constrained_dofs,
-        component_evidence,
     )
 }
 
@@ -273,43 +185,6 @@ fn structural_frame_components(
         components.push(component);
     }
     Ok(components)
-}
-
-struct FrameModeContext<'a> {
-    structural: &'a StructuralModel,
-    layout: &'a StructuralDofLayout,
-    component_by_node: &'a BTreeMap<usize, usize>,
-    frames: &'a [RigidBodyFrame],
-    mode_count: usize,
-}
-
-fn rigid_mode_response(
-    column: usize,
-    context: &FrameModeContext<'_>,
-) -> Result<Vec<f64>, NullspaceEvidenceError> {
-    let address = context
-        .layout
-        .address(column)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let node = context
-        .structural
-        .nodes
-        .get(address.node_index)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let component = context
-        .component_by_node
-        .get(&address.node_index)
-        .copied()
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let frame = context
-        .frames
-        .get(component)
-        .ok_or(NullspaceEvidenceError::DimensionMismatch)?;
-    let values = frame.response(node.coordinates_m, address.kind);
-    let mut response = vec![0.0; context.mode_count];
-    let offset = component * RIGID_MODE_COUNT;
-    response[offset..offset + RIGID_MODE_COUNT].copy_from_slice(&values);
-    Ok(response)
 }
 
 fn explicit_node_identity(

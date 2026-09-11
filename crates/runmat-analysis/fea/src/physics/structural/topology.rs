@@ -2,6 +2,8 @@ use runmat_analysis_core::StructuralModel;
 use runmat_canonical_codec::{encode_contract, CanonicalCodecError, CanonicalLimits};
 use runmat_execution::Digest;
 
+pub(crate) mod mixed;
+
 const EXPLICIT_TOPOLOGY_PREFIX: &[u8] = b"runmat-fea-explicit-structural-topology/v1\0";
 const EXPLICIT_TOPOLOGY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);

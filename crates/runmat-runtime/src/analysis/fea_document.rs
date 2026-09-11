@@ -247,6 +247,14 @@ struct FeaStructuralDocument {
 struct FeaStructuralNodeDocument {
     id: u32,
     coordinates_m: [f64; 3],
+    #[serde(default)]
+    solid_attachment: Option<FeaConformalSolidAttachmentDocument>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeaConformalSolidAttachmentDocument {
+    geometry_vertex: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -692,11 +700,29 @@ fn resolve_structural_model(
     Ok(StructuralModel {
         nodes: node_docs
             .iter()
-            .map(|node| StructuralNode {
-                node_id: node.id,
-                coordinates_m: node.coordinates_m,
+            .map(|node| {
+                Ok(StructuralNode {
+                    node_id: node.id,
+                    coordinates_m: node.coordinates_m,
+                    solid_attachment: node
+                        .solid_attachment
+                        .as_ref()
+                        .map(|attachment| {
+                            let geometry_vertex_id = attachment.geometry_vertex.trim();
+                            if geometry_vertex_id.is_empty() {
+                                return Err(format!(
+                                    "structural node {} has an empty solid_attachment.geometry_vertex",
+                                    node.id
+                                ));
+                            }
+                            Ok(runmat_analysis_core::ConformalSolidAttachment {
+                                geometry_vertex_id: geometry_vertex_id.to_string(),
+                            })
+                        })
+                        .transpose()?,
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, String>>()?,
         elements: element_docs
             .iter()
             .map(|element| resolve_structural_element(element, geometry, &study.regions))
@@ -1397,6 +1423,66 @@ mod tests {
         assert_eq!(study.constraints[0].constraint_id(), "fixed");
         assert_eq!(study.signals[0].signal_id().0, "push");
         assert_eq!(study.sequence.steps[0].step_id.as_str(), "solve");
+    }
+
+    #[test]
+    fn structural_solid_attachment_preserves_exact_cad_vertex_identity() {
+        let mut document = minimal_study_yaml();
+        document
+            .as_mapping_mut()
+            .expect("study mapping")
+            .insert(
+                "structural".into(),
+                serde_yaml::from_str(
+                    "nodes:\n  - id: 7\n    coordinates_m: [0.0, 0.0, 0.0]\n    solid_attachment:\n      geometry_vertex: vertex_000007\n",
+                )
+                .expect("structural YAML"),
+            );
+        let RawFeaDocument::Study(study) = parse_raw_fea_value(document).expect("study document")
+        else {
+            panic!("expected study")
+        };
+        let intent = AnalysisCreateModelIntentSpec {
+            model_id: "mixed-model".into(),
+            template: study.model.template,
+        };
+        let model = resolve_model(&study, &sample_geometry(), &intent)
+            .expect("resolve model")
+            .expect("model");
+        assert_eq!(
+            model.structural.as_ref().unwrap().nodes[0]
+                .solid_attachment
+                .as_ref()
+                .unwrap()
+                .geometry_vertex_id,
+            "vertex_000007"
+        );
+    }
+
+    #[test]
+    fn structural_solid_attachment_rejects_empty_vertex_identity() {
+        let mut document = minimal_study_yaml();
+        document
+            .as_mapping_mut()
+            .expect("study mapping")
+            .insert(
+                "structural".into(),
+                serde_yaml::from_str(
+                    "nodes:\n  - id: 7\n    coordinates_m: [0.0, 0.0, 0.0]\n    solid_attachment:\n      geometry_vertex: '   '\n",
+                )
+                .expect("structural YAML"),
+            );
+        let RawFeaDocument::Study(study) = parse_raw_fea_value(document).expect("study document")
+        else {
+            panic!("expected study")
+        };
+        let intent = AnalysisCreateModelIntentSpec {
+            model_id: "mixed-model".into(),
+            template: study.model.template,
+        };
+        let error = resolve_model(&study, &sample_geometry(), &intent)
+            .expect_err("empty persistent vertex identity must fail");
+        assert!(error.contains("empty solid_attachment.geometry_vertex"));
     }
 
     #[test]

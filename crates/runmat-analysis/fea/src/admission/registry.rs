@@ -156,14 +156,19 @@ fn validate_structural_identity(
         ));
     }
     let structural_components = &request.realization.components[..structural_component_count];
-    let sources = structural_components[0].sources.clone();
-    if structural_components
+    let mut sources = Vec::new();
+    for source in structural_components
         .iter()
-        .any(|component| component.sources != sources)
+        .flat_map(|component| component.sources.iter().copied())
     {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::Source,
-        ));
+        if source != runmat_analysis_core::SourceImplementation::NotApplicable
+            && !sources.contains(&source)
+        {
+            sources.push(source);
+        }
+    }
+    if sources.is_empty() {
+        sources.push(runmat_analysis_core::SourceImplementation::NotApplicable);
     }
     let assemblies = structural_components
         .iter()

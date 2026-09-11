@@ -2345,7 +2345,7 @@ mod tests {
         );
         let realization = runmat_analysis_fea::admission::structural_exact_realization(
             runmat_analysis_fea::admission::StructuralRealizationInput {
-                assembly,
+                assemblies: vec![assembly],
                 procedure: runmat_analysis_core::AnalysisProcedure::Static,
                 coupling: runmat_analysis_core::CouplingImplementation::Uncoupled,
                 sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],

@@ -34,6 +34,33 @@ pub(super) fn apply_explicit_structural_loads(
         .iter()
         .map(|node| node.coordinates_m)
         .collect::<Vec<_>>();
+    let canonical_node_indices = (0..structural.nodes.len()).collect::<Vec<_>>();
+    apply_projected_explicit_structural_loads(
+        structural,
+        excitations,
+        layout,
+        rhs,
+        projection_digest,
+        &node_coordinates_m,
+        &canonical_node_indices,
+    )
+}
+
+pub(super) fn apply_projected_explicit_structural_loads(
+    structural: &StructuralModel,
+    excitations: &RealizedExcitations,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    projection_digest: runmat_execution::Digest,
+    canonical_node_coordinates_m: &[[f64; 3]],
+    canonical_node_indices: &[usize],
+) -> Result<ExplicitLoadProjection, StructuralAssemblyError> {
+    if canonical_node_indices.len() != structural.nodes.len() {
+        return Err(StructuralAssemblyError::InvalidCanonicalNodeMap {
+            expected: structural.nodes.len(),
+            actual: canonical_node_indices.len(),
+        });
+    }
     let mut direct_rotational_moment_count = 0;
     let mut moment_projection = Vec::new();
     let mut evidence = Vec::new();
@@ -53,23 +80,27 @@ pub(super) fn apply_explicit_structural_loads(
                 load_kind: super::explicit_load_kind(&load.kind),
             }
         })?;
-        let target_nodes = structural_target_nodes(structural, region_id);
-        if target_nodes.is_empty() {
+        let explicit_target_nodes = structural_target_nodes(structural, region_id);
+        if explicit_target_nodes.is_empty() {
             return Err(StructuralAssemblyError::UnmappedStructuralLoad {
                 load_id: load.excitation_id.0.clone(),
                 region_id: region_id.to_string(),
                 load_kind: super::explicit_load_kind(&load.kind),
             });
         }
+        let target_nodes = explicit_target_nodes
+            .into_iter()
+            .map(|node| canonical_node_indices[node])
+            .collect::<Vec<_>>();
         let resolved_entity_count = explicit_target_entity_count(structural, region_id);
-        let reference_point_m = target_centroid(&node_coordinates_m, &target_nodes);
+        let reference_point_m = target_centroid(canonical_node_coordinates_m, &target_nodes);
         let scale = 1.0 / target_nodes.len() as f64;
         match load.kind {
             RealizedExcitationKind::Force(value) => {
                 let mut item = SpatialProjectionAccumulator::for_explicit_topology(
                     load,
                     projection_digest,
-                    &node_coordinates_m,
+                    canonical_node_coordinates_m,
                     SpatialIntegrationRule::UniformResultant,
                     resolved_entity_count,
                     reference_point_m,
@@ -134,7 +165,7 @@ pub(super) fn apply_explicit_structural_loads(
                     let mut item = SpatialProjectionAccumulator::for_explicit_topology(
                         load,
                         projection_digest,
-                        &node_coordinates_m,
+                        canonical_node_coordinates_m,
                         SpatialIntegrationRule::UniformResultant,
                         resolved_entity_count,
                         reference_point_m,
@@ -145,7 +176,7 @@ pub(super) fn apply_explicit_structural_loads(
                     record_evidence(&mut evidence, item.finish())?;
                 } else {
                     let summary = add_moment_projection_rhs(
-                        &node_coordinates_m,
+                        canonical_node_coordinates_m,
                         layout,
                         rhs,
                         &target_nodes,
@@ -154,7 +185,7 @@ pub(super) fn apply_explicit_structural_loads(
                     let mut item = SpatialProjectionAccumulator::for_explicit_topology(
                         load,
                         projection_digest,
-                        &node_coordinates_m,
+                        canonical_node_coordinates_m,
                         SpatialIntegrationRule::UniformResultant,
                         resolved_entity_count,
                         summary.projection_point_m,

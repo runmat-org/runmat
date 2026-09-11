@@ -12,10 +12,20 @@ pub struct StructuralModel {
     pub shell_sections: Vec<ShellSectionModel>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuralNode {
     pub node_id: u32,
     pub coordinates_m: [f64; 3],
+    pub solid_attachment: Option<ConformalSolidAttachment>,
+}
+
+/// Declares that an explicit beam/shell node and the unique solid-mesh node carrying this exact
+/// CAD vertex provenance are one structural node. Translation is shared; the explicit
+/// formulation contributes any rotational degrees of freedom.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConformalSolidAttachment {
+    pub geometry_vertex_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

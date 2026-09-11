@@ -108,8 +108,8 @@ pub use problem::signal::{
     StandardWaveform, StandardWaveformKind, TabulatedSignal, TabulatedSignalDomain,
 };
 pub use problem::structure::{
-    BeamElementModel, BeamSectionModel, ShellElementModel, ShellSectionModel, StructuralElement,
-    StructuralElementKind, StructuralModel, StructuralNode,
+    BeamElementModel, BeamSectionModel, ConformalSolidAttachment, ShellElementModel,
+    ShellSectionModel, StructuralElement, StructuralElementKind, StructuralModel, StructuralNode,
 };
 pub use problem::target::{
     EntityDimension, ExpectedTopology, RegionTarget, ResolvedTopologyTarget, TargetCardinality,
@@ -336,10 +336,12 @@ mod tests {
                 StructuralNode {
                     node_id: 1,
                     coordinates_m: [0.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 2,
                     coordinates_m: [1.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
             ],
             elements: vec![StructuralElement {
@@ -383,14 +385,17 @@ mod tests {
                 StructuralNode {
                     node_id: 1,
                     coordinates_m: [0.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 2,
                     coordinates_m: [1.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 3,
                     coordinates_m: [0.0, 1.0, 0.0],
+                    solid_attachment: None,
                 },
             ],
             elements: vec![StructuralElement {

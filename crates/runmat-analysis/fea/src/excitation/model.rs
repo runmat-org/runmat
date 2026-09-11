@@ -122,4 +122,17 @@ impl RealizedExcitations {
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
+
+    pub(crate) fn filtered(
+        &self,
+        retain: impl Fn(&RealizedExcitation) -> bool,
+    ) -> RealizedExcitations {
+        RealizedExcitations::new(
+            self.entries
+                .iter()
+                .filter(|entry| retain(entry))
+                .cloned()
+                .collect(),
+        )
+    }
 }

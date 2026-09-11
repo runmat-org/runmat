@@ -14,7 +14,9 @@ use crate::{
 
 use super::{spmv, MatrixDefiniteness, MatrixSymmetry, OperatorRole, RealSparseMatrix};
 
+mod canonical_frame;
 mod components;
+mod mixed_structural;
 mod rigid_body;
 mod solid;
 mod solid_components;
@@ -36,6 +38,7 @@ pub enum NullspaceKind {
     ScalarConstantPerComponent,
     SolidRigidBody3d,
     StructuralFrameRigidBody3d,
+    MixedStructuralRigidBody3d,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -158,6 +161,12 @@ impl NullspaceEliminationEvidence {
             combined_operator,
             constrained_dofs,
         )
+    }
+
+    pub(crate) fn prove_mixed_structural(
+        input: MixedStructuralNullspaceInput<'_>,
+    ) -> Result<Self, NullspaceEvidenceError> {
+        mixed_structural::prove(input)
     }
 
     pub(super) fn new(
@@ -287,6 +296,17 @@ impl NullspaceEliminationEvidence {
     }
 }
 
+pub(crate) struct MixedStructuralNullspaceInput<'a> {
+    pub mesh: &'a SolverMeshArtifact,
+    pub structural: &'a runmat_analysis_core::StructuralModel,
+    pub topology: &'a crate::physics::structural::topology::mixed::CanonicalMixedStructuralTopology,
+    pub layout: &'a StructuralDofLayout,
+    pub element_operator: &'a RealSparseMatrix,
+    pub connector_operator: Option<&'a RealSparseMatrix>,
+    pub combined_operator: &'a RealSparseMatrix,
+    pub constrained_dofs: &'a [bool],
+}
+
 impl PreparedNullspaceEvidence {
     pub(super) const fn identity(&self) -> Digest {
         self.binding_identity
@@ -332,11 +352,13 @@ fn anchoring_matches(component: &NullspaceComponentEvidence, kind: NullspaceKind
         ) => *prescribed_count > 0 && *robin_count > 0,
         (
             NullspaceAnchoring::ConstraintRowSpace,
-            NullspaceKind::SolidRigidBody3d | NullspaceKind::StructuralFrameRigidBody3d,
+            NullspaceKind::SolidRigidBody3d
+            | NullspaceKind::StructuralFrameRigidBody3d
+            | NullspaceKind::MixedStructuralRigidBody3d,
         ) => true,
         (
             NullspaceAnchoring::OperatorAndConstraintRowSpace,
-            NullspaceKind::StructuralFrameRigidBody3d,
+            NullspaceKind::StructuralFrameRigidBody3d | NullspaceKind::MixedStructuralRigidBody3d,
         ) => true,
         _ => false,
     }

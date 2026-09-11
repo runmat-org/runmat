@@ -1,7 +1,12 @@
+mod direct_constraints;
 pub mod dofs;
 pub mod elements;
 mod explicit_connectors;
+mod explicit_constraints;
+mod explicit_elements;
 mod explicit_loads;
+mod mixed_structural;
+mod mixed_targets;
 mod moment_projection;
 mod reduced_rhs;
 mod solid_matrix;
@@ -12,28 +17,24 @@ mod structural_inputs;
 use std::{collections::BTreeMap, fmt};
 
 use runmat_analysis_core::{
-    AnalysisModel, BeamSectionModel, BoundaryTransferImplementation, ShellSectionModel,
-    SourceImplementation, StructuralConstraintKind, StructuralElementKind,
+    AnalysisModel, BoundaryTransferImplementation, SourceImplementation, StructuralElementKind,
     StructuralFormulationRealization, StructuralModel, StructuralOperatorImplementation,
-    StructuralRecoveryImplementation, StructuralRotationDof, StructuralTranslationDof,
+    StructuralRecoveryImplementation, StructuralTranslationDof,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
 
 use self::elements::solid::SolidMaterial;
 use self::{
+    direct_constraints::DirectConstraintAssignments,
     dofs::{StructuralDofKind, StructuralDofLayout, StructuralNodeDofSet},
-    elements::beam::{
-        global_stiffness_matrix as beam_global_stiffness_matrix, transformation_matrix,
-        BeamElementError, BeamElementGeometry, BeamMaterial, BeamSection, BeamTransform12,
-        BEAM_ELEMENT_DOF_COUNT,
-    },
-    elements::shell::{
-        global_stiffness_matrix as shell_global_stiffness_matrix, ShellElementError,
-        ShellElementGeometry, ShellMaterial, ShellSection, SHELL_ELEMENT_DOF_COUNT,
-        SHELL_NODE_DOF_COUNT,
+    elements::{
+        beam::{BeamElementError, BeamMaterial, BeamSection, BeamTransform12},
+        shell::{ShellElementError, ShellElementGeometry, ShellMaterial, ShellSection},
     },
     explicit_connectors::assemble_explicit_connectors,
+    explicit_constraints::apply_explicit_constraints,
+    explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
     explicit_loads::apply_explicit_structural_loads,
     solver_solid::{
         assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
@@ -228,9 +229,7 @@ impl fmt::Display for StructuralLoadKind {
 pub enum StructuralAssemblyError {
     SparseOperator(String),
     MissingDiscretization,
-    MixedSolidAndExplicit {
-        explicit_element_count: usize,
-    },
+    MixedTopology(String),
     MissingNodes,
     DuplicateNodeId {
         node_id: u32,
@@ -241,6 +240,26 @@ pub enum StructuralAssemblyError {
     UnknownNode {
         element_id: String,
         node_id: u32,
+    },
+    MissingRotationalDof {
+        element_id: String,
+    },
+    InvalidDirectConstraintValue {
+        constraint_id: String,
+    },
+    ConflictingDirectConstraints {
+        first_constraint_id: String,
+        second_constraint_id: String,
+        node_index: usize,
+        dof: StructuralDofKind,
+    },
+    InvalidDirectConstraintState {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidCanonicalNodeMap {
+        expected: usize,
+        actual: usize,
     },
     UnknownBeamSection {
         element_id: String,
@@ -302,6 +321,16 @@ pub enum StructuralAssemblyError {
         constraint_id: String,
         region_id: String,
     },
+    UnmappedMixedTarget {
+        target_id: String,
+        selector: String,
+    },
+    AmbiguousMixedTarget {
+        target_id: String,
+        selector: String,
+        solid_node_count: usize,
+        explicit_node_count: usize,
+    },
     UnsupportedScheduledConstraint {
         constraint_id: String,
     },
@@ -322,12 +351,9 @@ impl fmt::Display for StructuralAssemblyError {
                 f,
                 "structural analysis requires a canonical solid mesh or explicit beam/shell connectivity"
             ),
-            Self::MixedSolidAndExplicit {
-                explicit_element_count,
-            } => write!(
-                f,
-                "solid and explicit beam/shell discretizations cannot be assembled together until typed coupling is implemented: explicit_element_count={explicit_element_count}"
-            ),
+            Self::MixedTopology(message) => {
+                write!(f, "mixed structural topology is invalid: {message}")
+            }
             Self::MissingNodes => write!(
                 f,
                 "explicit structural connectivity requires at least one structural node"
@@ -345,6 +371,31 @@ impl fmt::Display for StructuralAssemblyError {
             } => write!(
                 f,
                 "explicit structural element references an unknown node: element_id={element_id} node_id={node_id}"
+            ),
+            Self::MissingRotationalDof { element_id } => write!(
+                f,
+                "explicit structural element requires rotational DOFs on every attached canonical node: element_id={element_id}"
+            ),
+            Self::InvalidDirectConstraintValue { constraint_id } => write!(
+                f,
+                "structural constraint `{constraint_id}` resolves to a non-finite direct value"
+            ),
+            Self::ConflictingDirectConstraints {
+                first_constraint_id,
+                second_constraint_id,
+                node_index,
+                dof,
+            } => write!(
+                f,
+                "structural constraints `{first_constraint_id}` and `{second_constraint_id}` prescribe conflicting values on canonical node {node_index} DOF {dof:?}"
+            ),
+            Self::InvalidDirectConstraintState { expected, actual } => write!(
+                f,
+                "direct structural constraint state has {actual} solver rows; expected {expected}"
+            ),
+            Self::InvalidCanonicalNodeMap { expected, actual } => write!(
+                f,
+                "explicit structural node projection has the wrong size: expected={expected} actual={actual}"
             ),
             Self::UnknownBeamSection {
                 element_id,
@@ -443,6 +494,22 @@ impl fmt::Display for StructuralAssemblyError {
             } => write!(
                 f,
                 "explicit structural constraint target does not resolve to connectivity: constraint_id={constraint_id} region_id={region_id}"
+            ),
+            Self::UnmappedMixedTarget {
+                target_id,
+                selector,
+            } => write!(
+                f,
+                "mixed structural target does not resolve to solid or explicit topology: target_id={target_id} selector={selector}"
+            ),
+            Self::AmbiguousMixedTarget {
+                target_id,
+                selector,
+                solid_node_count,
+                explicit_node_count,
+            } => write!(
+                f,
+                "mixed structural target resolves to different solid and explicit node sets: target_id={target_id} selector={selector} solid_node_count={solid_node_count} explicit_node_count={explicit_node_count}"
             ),
             Self::UnsupportedScheduledConstraint { constraint_id } => write!(
                 f,
@@ -730,14 +797,21 @@ fn assemble_linear_system_impl(
         .as_ref()
         .map(|structural| structural.elements.len())
         .unwrap_or(0);
-    if structural_requirement.is_some() && solver_mesh.is_some() && explicit_element_count > 0 {
-        return Err(LinearAssemblyError::Structural(
-            StructuralAssemblyError::MixedSolidAndExplicit {
-                explicit_element_count,
-            },
-        ));
-    }
-    if structural_requirement.is_some() && solver_mesh.is_none() && explicit_element_count > 0 {
+    if structural_requirement.is_some() && explicit_element_count > 0 {
+        if let Some(solver_mesh) = solver_mesh.as_ref() {
+            if supplied_constraint_plan.is_some() {
+                return Err(LinearAssemblyError::ConstraintPlan(
+                    ConstraintPlanError::Invalid(
+                        "mixed structural constraint-plan projection is not complete".into(),
+                    ),
+                ));
+            }
+            return mixed_structural::assemble_mixed_structural_system(
+                model,
+                excitations,
+                solver_mesh,
+            );
+        }
         if supplied_constraint_plan.is_some() {
             return Err(LinearAssemblyError::ConstraintPlan(
                 ConstraintPlanError::Invalid(
@@ -947,14 +1021,13 @@ fn assemble_linear_system_impl(
                 }
                 constraint_matrix = Some(matrix);
             } else {
-                apply_solid_constraint_plan(
-                    constraint_plan,
-                    mesh,
-                    &structural_dof_layout,
-                    &mut constrained,
-                    &mut rhs,
-                )
-                .map_err(LinearAssemblyError::Structural)?;
+                let mut direct_constraints =
+                    DirectConstraintAssignments::new(&structural_dof_layout);
+                lower_solid_direct_constraints(constraint_plan, mesh, &mut direct_constraints)
+                    .map_err(LinearAssemblyError::Structural)?;
+                constrained = direct_constraints
+                    .apply(&mut rhs)
+                    .map_err(LinearAssemblyError::Structural)?;
             }
         }
     }
@@ -1470,39 +1543,6 @@ fn assemble_explicit_structural_system(
         excitations,
         StructuralProjectionBasis::ExplicitConnectivity,
     )?;
-    let beam_elements = structural
-        .elements
-        .iter()
-        .filter(|element| matches!(element.kind, StructuralElementKind::Beam(_)))
-        .collect::<Vec<_>>();
-    let shell_elements = structural
-        .elements
-        .iter()
-        .filter(|element| matches!(element.kind, StructuralElementKind::Shell(_)))
-        .collect::<Vec<_>>();
-    if beam_elements.is_empty() && shell_elements.is_empty() {
-        return Err(StructuralAssemblyError::MissingDiscretization);
-    }
-    if structural.nodes.is_empty() {
-        return Err(StructuralAssemblyError::MissingNodes);
-    }
-    let mut node_ids = std::collections::BTreeSet::new();
-    for node in &structural.nodes {
-        if !node_ids.insert(node.node_id) {
-            return Err(StructuralAssemblyError::DuplicateNodeId {
-                node_id: node.node_id,
-            });
-        }
-    }
-    let mut element_ids = std::collections::BTreeSet::new();
-    for element in &structural.elements {
-        if !element_ids.insert(element.element_id.as_str()) {
-            return Err(StructuralAssemblyError::DuplicateElementId {
-                element_id: element.element_id.clone(),
-            });
-        }
-    }
-
     let structural_material = structural_material_summary(model);
     let materials = StructuralMaterialInventory::from_model(model);
     let node_count = structural.nodes.len();
@@ -1511,213 +1551,23 @@ fn assemble_explicit_structural_system(
         node_count
     ]);
     let dof_count = structural_dof_layout.total_dof_count();
-    let mut stiffness_assembler = RealSparseAssembler::square(
-        dof_count,
-        OperatorRole::Stiffness,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    );
-    stiffness_assembler.add_contribution(ContributionProvenance {
-        domain: ContributionDomain::Structural,
-        contribution_id: ContributionId("explicit_beam_shell_stiffness".to_string()),
-    });
-    let mut damping_assembler = RealSparseAssembler::square(
-        dof_count,
-        OperatorRole::Damping,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    );
-    let mut has_rayleigh_damping = false;
+    let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
+    let ExplicitElementAssembly {
+        stiffness: element_stiffness,
+        damping: element_damping,
+        lumped_mass: mass_diag,
+        beam_recovery: structural_beam_recovery,
+        shell_recovery: structural_shell_recovery,
+        formulations: structural_formulations,
+        beam_count,
+        shell_count,
+    } = assemble_explicit_elements(
+        structural,
+        &materials,
+        &structural_dof_layout,
+        &canonical_node_indices,
+    )?;
     let mut rhs = vec![0.0_f64; dof_count];
-    let mut mass_diag = vec![0.0_f64; dof_count];
-    let mut structural_beam_recovery = Vec::new();
-    let mut structural_shell_recovery = Vec::new();
-
-    for element in &beam_elements {
-        let StructuralElementKind::Beam(beam) = &element.kind else {
-            continue;
-        };
-        let node_i_index =
-            structural_node_index(structural, beam.node_ids[0]).ok_or_else(|| {
-                StructuralAssemblyError::UnknownNode {
-                    element_id: element.element_id.clone(),
-                    node_id: beam.node_ids[0],
-                }
-            })?;
-        let node_j_index =
-            structural_node_index(structural, beam.node_ids[1]).ok_or_else(|| {
-                StructuralAssemblyError::UnknownNode {
-                    element_id: element.element_id.clone(),
-                    node_id: beam.node_ids[1],
-                }
-            })?;
-        let section = structural_beam_section(structural, &beam.section_id).ok_or_else(|| {
-            StructuralAssemblyError::UnknownBeamSection {
-                element_id: element.element_id.clone(),
-                section_id: beam.section_id.clone(),
-            }
-        })?;
-        let material = materials.resolve(&element.region_id).ok_or_else(|| {
-            StructuralAssemblyError::UnassignedExplicitRegion {
-                element_id: element.element_id.clone(),
-                region_id: element.region_id.clone(),
-            }
-        })?;
-        let beam_material = BeamMaterial {
-            youngs_modulus_pa: material.youngs_modulus_pa,
-            shear_modulus_pa: material.shear_modulus_pa(),
-        };
-        let geometry = BeamElementGeometry {
-            node_i_m: structural.nodes[node_i_index].coordinates_m,
-            node_j_m: structural.nodes[node_j_index].coordinates_m,
-            reference_axis: beam.reference_axis,
-        };
-        let frame =
-            geometry
-                .local_frame()
-                .map_err(|error| StructuralAssemblyError::BeamElement {
-                    element_id: element.element_id.clone(),
-                    error,
-                })?;
-        let transform_global_to_local = transformation_matrix(frame);
-        let stiffness =
-            beam_global_stiffness_matrix(section, beam_material, geometry).map_err(|error| {
-                StructuralAssemblyError::BeamElement {
-                    element_id: element.element_id.clone(),
-                    error,
-                }
-            })?;
-        let element_dofs =
-            beam_element_dof_indices(&structural_dof_layout, node_i_index, node_j_index)
-                .expect("six-degree-of-freedom structural layout must address every beam node");
-        for (local_row, &global_row) in element_dofs.iter().enumerate() {
-            for (local_col, &global_col) in element_dofs.iter().enumerate() {
-                stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
-            }
-        }
-        let element_mass = lumped_beam_mass(
-            section,
-            material.density_kg_per_m3,
-            frame.length_m,
-            &transform_global_to_local,
-        );
-        for (local, &global) in element_dofs.iter().enumerate() {
-            mass_diag[global] += element_mass[local];
-        }
-        has_rayleigh_damping |= add_rayleigh_element_damping(
-            &mut damping_assembler,
-            &element_dofs,
-            &stiffness,
-            &element_mass,
-            material.damping,
-        );
-        structural_beam_recovery.push(BeamRecoveryElementSummary {
-            element_id: element.element_id.clone(),
-            region_id: element.region_id.clone(),
-            node_i_index,
-            node_j_index,
-            length_m: frame.length_m,
-            section,
-            material: beam_material,
-            transform_global_to_local,
-        });
-    }
-
-    for element in &shell_elements {
-        let StructuralElementKind::Shell(shell) = &element.kind else {
-            continue;
-        };
-        let mut node_indices = [0_usize; 3];
-        for (local, node_id) in shell.node_ids.iter().copied().enumerate() {
-            node_indices[local] = structural_node_index(structural, node_id).ok_or_else(|| {
-                StructuralAssemblyError::UnknownNode {
-                    element_id: element.element_id.clone(),
-                    node_id,
-                }
-            })?;
-        }
-        let section = structural_shell_section(structural, &shell.section_id).ok_or_else(|| {
-            StructuralAssemblyError::UnknownShellSection {
-                element_id: element.element_id.clone(),
-                section_id: shell.section_id.clone(),
-            }
-        })?;
-        let material = materials.resolve(&element.region_id).ok_or_else(|| {
-            StructuralAssemblyError::UnassignedExplicitRegion {
-                element_id: element.element_id.clone(),
-                region_id: element.region_id.clone(),
-            }
-        })?;
-        let shell_material = ShellMaterial {
-            youngs_modulus_pa: material.youngs_modulus_pa,
-            poisson_ratio: material.poisson_ratio,
-            shear_modulus_pa: material.shear_modulus_pa(),
-        };
-        let geometry = ShellElementGeometry {
-            nodes_m: [
-                structural.nodes[node_indices[0]].coordinates_m,
-                structural.nodes[node_indices[1]].coordinates_m,
-                structural.nodes[node_indices[2]].coordinates_m,
-            ],
-            reference_axis: shell.reference_axis,
-        };
-        let frame =
-            geometry
-                .local_frame()
-                .map_err(|error| StructuralAssemblyError::ShellElement {
-                    element_id: element.element_id.clone(),
-                    error,
-                })?;
-        let stiffness =
-            shell_global_stiffness_matrix(section, shell_material, geometry).map_err(|error| {
-                StructuralAssemblyError::ShellElement {
-                    element_id: element.element_id.clone(),
-                    error,
-                }
-            })?;
-        let element_dofs = shell_element_dof_indices(&structural_dof_layout, node_indices)
-            .expect("six-degree-of-freedom structural layout must address every shell node");
-        for (local_row, &global_row) in element_dofs.iter().enumerate() {
-            for (local_col, &global_col) in element_dofs.iter().enumerate() {
-                stiffness_assembler.add(global_row, global_col, stiffness[local_row][local_col]);
-            }
-        }
-        let element_mass = lumped_shell_mass(section, material.density_kg_per_m3, frame.area_m2);
-        for (local, &global) in element_dofs.iter().enumerate() {
-            mass_diag[global] += element_mass[local];
-        }
-        has_rayleigh_damping |= add_rayleigh_element_damping(
-            &mut damping_assembler,
-            &element_dofs,
-            &stiffness,
-            &element_mass,
-            material.damping,
-        );
-        structural_shell_recovery.push(ShellRecoveryElementSummary {
-            element_id: element.element_id.clone(),
-            region_id: element.region_id.clone(),
-            node_indices,
-            geometry,
-            section,
-            material: shell_material,
-        });
-    }
-
-    let element_stiffness = stiffness_assembler
-        .finish()
-        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
-    if has_rayleigh_damping {
-        damping_assembler.add_contribution(ContributionProvenance {
-            domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("explicit_element_rayleigh_damping".to_string()),
-        });
-    } else {
-        damping_assembler.add_contribution(ContributionProvenance {
-            domain: ContributionDomain::Structural,
-            contribution_id: ContributionId("undamped_explicit_structure".to_string()),
-        });
-    }
-    let element_damping = damping_assembler
-        .finish()
-        .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
     let mut connector_stiffness_assembler = RealSparseAssembler::square(
         dof_count,
         OperatorRole::Stiffness,
@@ -1748,116 +1598,20 @@ fn assemble_explicit_structural_system(
     let structural_moment_projection = source_projection.moment_projection;
     let spatial_projection_evidence = source_projection.evidence;
 
-    let mut constrained = vec![false; dof_count];
-    for constraint in model
-        .constraints
-        .iter()
-        .filter_map(|value| value.structural())
-    {
-        if !matches!(
-            constraint.kind,
-            StructuralConstraintKind::Fixed { .. } | StructuralConstraintKind::Prescribed(_)
-        ) {
-            return Err(StructuralAssemblyError::UnsupportedStructuralConstraint {
-                constraint_id: constraint.constraint_id.clone(),
-                constraint_kind: structural_constraint_kind_name(&constraint.kind),
-            });
-        }
-        let target = constraint.kind.target().ok_or_else(|| {
-            StructuralAssemblyError::UnsupportedStructuralConstraint {
-                constraint_id: constraint.constraint_id.clone(),
-                constraint_kind: structural_constraint_kind_name(&constraint.kind),
-            }
-        })?;
-        let target_nodes = structural_target_nodes(structural, &target.region_id);
-        if target_nodes.is_empty() {
-            return Err(StructuralAssemblyError::UnmappedExplicitConstraint {
-                constraint_id: constraint.constraint_id.clone(),
-                region_id: target.region_id.clone(),
-            });
-        }
-        for node_index in target_nodes {
-            match &constraint.kind {
-                StructuralConstraintKind::Fixed { .. } => {
-                    for kind in StructuralDofKind::ORDER {
-                        constrain_dof(
-                            &structural_dof_layout,
-                            &mut constrained,
-                            &mut rhs,
-                            node_index,
-                            kind,
-                            0.0,
-                        );
-                    }
-                }
-                StructuralConstraintKind::Prescribed(values) => {
-                    for prescribed in &values.translations {
-                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
-                            continue;
-                        };
-                        let kind = match prescribed.dof {
-                            StructuralTranslationDof::Ux => StructuralDofKind::Ux,
-                            StructuralTranslationDof::Uy => StructuralDofKind::Uy,
-                            StructuralTranslationDof::Uz => StructuralDofKind::Uz,
-                        };
-                        constrain_dof(
-                            &structural_dof_layout,
-                            &mut constrained,
-                            &mut rhs,
-                            node_index,
-                            kind,
-                            value.meters,
-                        );
-                    }
-                    for prescribed in &values.rotations {
-                        let Some(value) = prescribed.value.study_constant(&model.signals) else {
-                            continue;
-                        };
-                        let kind = match prescribed.dof {
-                            StructuralRotationDof::Rx => StructuralDofKind::Rx,
-                            StructuralRotationDof::Ry => StructuralDofKind::Ry,
-                            StructuralRotationDof::Rz => StructuralDofKind::Rz,
-                        };
-                        constrain_dof(
-                            &structural_dof_layout,
-                            &mut constrained,
-                            &mut rhs,
-                            node_index,
-                            kind,
-                            value.radians,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    let explicit_node_indices = (0..node_count).collect::<Vec<_>>();
+    let mut direct_constraints = DirectConstraintAssignments::new(&structural_dof_layout);
+    apply_explicit_constraints(
+        model,
+        structural,
+        &explicit_node_indices,
+        &mut direct_constraints,
+        true,
+    )?;
+    let constrained_dof_count = direct_constraints.constrained_dof_count();
+    let rotational_constraint_count = direct_constraints.rotational_constraint_count();
+    let constrained = direct_constraints.apply(&mut rhs)?;
+    drop(direct_constraints);
 
-    let constrained_dof_count = constrained.iter().filter(|value| **value).count();
-    let rotational_constraint_count = constrained
-        .iter()
-        .enumerate()
-        .filter(|(_, is_constrained)| **is_constrained)
-        .filter(|(row, _)| {
-            structural_dof_layout
-                .address(*row)
-                .is_some_and(|address| address.kind.is_rotational())
-        })
-        .count();
-
-    let mut structural_formulations = Vec::new();
-    if !beam_elements.is_empty() {
-        structural_formulations.push(StructuralFormulationRealization::new(
-            StructuralOperatorImplementation::EulerBernoulliBeam3d,
-            Some(StructuralRecoveryImplementation::BeamSectionResultants),
-        ));
-    }
-    if !shell_elements.is_empty() {
-        structural_formulations.push(StructuralFormulationRealization::new(
-            StructuralOperatorImplementation::Mitc3TriangularShell,
-            Some(StructuralRecoveryImplementation::Mitc3ShellStressResultants),
-        ));
-    }
     let stiffness = if connector_summary.stiffness_count == 0 {
         element_stiffness.clone()
     } else {
@@ -1934,8 +1688,8 @@ fn assemble_explicit_structural_system(
         structural_moment_projection,
         spatial_projection_evidence,
         structural_rotational_constraint_count: rotational_constraint_count,
-        structural_beam_element_count: beam_elements.len(),
-        structural_shell_element_count: shell_elements.len(),
+        structural_beam_element_count: beam_count,
+        structural_shell_element_count: shell_count,
         structural_connector_stiffness_count: connector_summary.stiffness_count,
         structural_connector_damping_count: connector_summary.damping_count,
         structural_solid_element_count: 0,
@@ -2012,157 +1766,6 @@ fn structural_node_index(structural: &StructuralModel, node_id: u32) -> Option<u
         .nodes
         .iter()
         .position(|node| node.node_id == node_id)
-}
-
-fn structural_beam_section(structural: &StructuralModel, section_id: &str) -> Option<BeamSection> {
-    structural
-        .beam_sections
-        .iter()
-        .find(|section| section.section_id == section_id)
-        .map(section_from_model)
-}
-
-fn structural_shell_section(
-    structural: &StructuralModel,
-    section_id: &str,
-) -> Option<ShellSection> {
-    structural
-        .shell_sections
-        .iter()
-        .find(|section| section.section_id == section_id)
-        .map(shell_section_from_model)
-}
-
-fn section_from_model(section: &BeamSectionModel) -> BeamSection {
-    BeamSection {
-        area_m2: section.area_m2,
-        iy_m4: section.iy_m4,
-        iz_m4: section.iz_m4,
-        torsion_j_m4: section.torsion_j_m4,
-        outer_fiber_y_m: section.outer_fiber_y_m,
-        outer_fiber_z_m: section.outer_fiber_z_m,
-        torsion_outer_radius_m: section.torsion_outer_radius_m,
-    }
-}
-
-fn shell_section_from_model(section: &ShellSectionModel) -> ShellSection {
-    ShellSection {
-        thickness_m: section.thickness_m,
-        shear_correction: section.shear_correction,
-        drilling_stiffness_scale: section.drilling_stiffness_scale,
-    }
-}
-
-fn beam_element_dof_indices(
-    layout: &StructuralDofLayout,
-    node_i_index: usize,
-    node_j_index: usize,
-) -> Option<[usize; BEAM_ELEMENT_DOF_COUNT]> {
-    let mut indices = [0usize; BEAM_ELEMENT_DOF_COUNT];
-    for (local, kind) in StructuralDofKind::ORDER.iter().copied().enumerate() {
-        indices[local] = layout.index(node_i_index, kind)?;
-        indices[local + 6] = layout.index(node_j_index, kind)?;
-    }
-    Some(indices)
-}
-
-fn shell_element_dof_indices(
-    layout: &StructuralDofLayout,
-    node_indices: [usize; 3],
-) -> Option<[usize; SHELL_ELEMENT_DOF_COUNT]> {
-    let mut indices = [0usize; SHELL_ELEMENT_DOF_COUNT];
-    for (node_offset, node_index) in node_indices.iter().enumerate() {
-        for (component, kind) in StructuralDofKind::ORDER.iter().enumerate() {
-            indices[node_offset * SHELL_NODE_DOF_COUNT + component] =
-                layout.index(*node_index, *kind)?;
-        }
-    }
-    Some(indices)
-}
-
-fn lumped_beam_mass(
-    section: BeamSection,
-    density_kg_per_m3: f64,
-    length_m: f64,
-    transform_global_to_local: &BeamTransform12,
-) -> [f64; BEAM_ELEMENT_DOF_COUNT] {
-    let nodal_mass = density_kg_per_m3 * section.area_m2 * length_m / 2.0;
-    let local_rotational_inertia = [
-        density_kg_per_m3 * section.torsion_j_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iy_m4 * length_m / 2.0,
-        density_kg_per_m3 * section.iz_m4 * length_m / 2.0,
-    ];
-    let mut element_mass = [0.0; BEAM_ELEMENT_DOF_COUNT];
-
-    for node_offset in [0usize, 6] {
-        for component in 0..3 {
-            element_mass[node_offset + component] = nodal_mass;
-        }
-        for global_component in 0..3 {
-            let local_col = node_offset + 3 + global_component;
-            let inertia = local_rotational_inertia
-                .iter()
-                .enumerate()
-                .map(|(local_component, local_inertia)| {
-                    let row = node_offset + 3 + local_component;
-                    local_inertia * transform_global_to_local[row][local_col].powi(2)
-                })
-                .sum::<f64>();
-            element_mass[node_offset + 3 + global_component] = inertia;
-        }
-    }
-    element_mass
-}
-
-fn add_rayleigh_element_damping<const D: usize>(
-    damping: &mut RealSparseAssembler,
-    element_dofs: &[usize; D],
-    stiffness: &[[f64; D]; D],
-    lumped_mass: &[f64; D],
-    law: runmat_analysis_core::MechanicalDampingModel,
-) -> bool {
-    let runmat_analysis_core::MechanicalDampingModel::Rayleigh {
-        mass_coefficient,
-        stiffness_coefficient,
-    } = law
-    else {
-        return false;
-    };
-    for (local_row, &global_row) in element_dofs.iter().enumerate() {
-        for (local_column, &global_column) in element_dofs.iter().enumerate() {
-            let mass = if local_row == local_column {
-                lumped_mass[local_row]
-            } else {
-                0.0
-            };
-            damping.add(
-                global_row,
-                global_column,
-                mass_coefficient.per_second * mass
-                    + stiffness_coefficient.seconds * stiffness[local_row][local_column],
-            );
-        }
-    }
-    true
-}
-
-fn lumped_shell_mass(
-    section: ShellSection,
-    density_kg_per_m3: f64,
-    area_m2: f64,
-) -> [f64; SHELL_ELEMENT_DOF_COUNT] {
-    let nodal_mass = density_kg_per_m3 * section.thickness_m * area_m2 / 3.0;
-    let nodal_rotary_inertia = nodal_mass * section.thickness_m.powi(2) / 12.0;
-    let mut element_mass = [0.0; SHELL_ELEMENT_DOF_COUNT];
-    for node_offset in [0usize, 6, 12] {
-        for component in 0..3 {
-            element_mass[node_offset + component] = nodal_mass;
-        }
-        for component in 3..6 {
-            element_mass[node_offset + component] = nodal_rotary_inertia;
-        }
-    }
-    element_mass
 }
 
 fn structural_target_nodes(structural: &StructuralModel, region_id: &str) -> Vec<usize> {
@@ -2259,26 +1862,10 @@ fn add_translational_rhs(
     add_rhs(layout, rhs, node_index, StructuralDofKind::Uz, force[2]);
 }
 
-fn constrain_dof(
-    layout: &StructuralDofLayout,
-    constrained: &mut [bool],
-    rhs: &mut [f64],
-    node_index: usize,
-    kind: StructuralDofKind,
-    value: f64,
-) {
-    if let Some(dof) = layout.index(node_index, kind) {
-        constrained[dof] = true;
-        rhs[dof] = value;
-    }
-}
-
-fn apply_solid_constraint_plan(
+fn lower_solid_direct_constraints(
     plan: &CanonicalStructuralConstraintPlan,
     mesh: &SolverMeshArtifact,
-    layout: &StructuralDofLayout,
-    constrained: &mut [bool],
-    rhs: &mut [f64],
+    assignments: &mut DirectConstraintAssignments<'_>,
 ) -> Result<(), StructuralAssemblyError> {
     let node_indices = mesh
         .topology
@@ -2321,14 +1908,12 @@ fn apply_solid_constraint_plan(
                 });
             }
         };
-        constrain_dof(
-            layout,
-            constrained,
-            rhs,
+        assignments.assign(
+            &row.constraint_id,
             node_index,
             kind,
             row.right_hand_side / term.coefficient,
-        );
+        )?;
     }
     Ok(())
 }
@@ -2562,8 +2147,8 @@ fn region_hash(region_id: &str) -> u64 {
 mod tests {
     use super::*;
     use crate::fixtures::{
-        fixture_model, replace_fixture_excitations, replace_fixture_with_electric_current,
-        FixtureExcitation, FixtureExcitationKind, FixtureId,
+        fixture_model, mixed_solid_beam_model, replace_fixture_excitations,
+        replace_fixture_with_electric_current, FixtureExcitation, FixtureExcitationKind, FixtureId,
     };
     use runmat_meshing_core::{
         ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, StableDigest,
@@ -2694,17 +2279,21 @@ mod tests {
     }
 
     #[test]
-    fn solver_mesh_rejects_uncoupled_explicit_beam_topology() {
+    fn solver_mesh_keeps_uncoupled_solid_and_beam_components_underconstrained() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.excitations.clear();
+        model.constraints.clear();
         model.structural = Some(runmat_analysis_core::StructuralModel {
             nodes: vec![
                 runmat_analysis_core::StructuralNode {
                     node_id: 1,
                     coordinates_m: [0.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
                 runmat_analysis_core::StructuralNode {
                     node_id: 2,
                     coordinates_m: [1.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
             ],
             elements: vec![runmat_analysis_core::StructuralElement {
@@ -2731,20 +2320,211 @@ mod tests {
             shell_sections: Vec::new(),
         });
 
-        let error = assemble_structural_system(
+        let summary = assemble_structural_system(
             &model,
             &static_excitations(&model),
             Some(tetrahedron4_mesh()),
             StructuralFormulationRequirement::PhysicalDiscretization,
         )
-        .expect_err("an uncoupled solid-plus-beam model must be rejected");
+        .expect("unloaded disconnected components retain their physical semidefinite operator");
 
-        assert_eq!(
-            error,
-            LinearAssemblyError::Structural(StructuralAssemblyError::MixedSolidAndExplicit {
-                explicit_element_count: 1,
-            })
+        assert_eq!(summary.structural_node_count, 6);
+        assert_eq!(summary.structural_translational_dof_count, 18);
+        assert_eq!(summary.structural_rotational_dof_count, 6);
+        assert_eq!(summary.dof_count, 24);
+        assert_eq!(summary.structural_solid_element_count, 1);
+        assert_eq!(summary.structural_beam_element_count, 1);
+        assert!(summary.operator.nullspace_evidence().is_none());
+        assert!(
+            summary
+                .operator
+                .operators()
+                .stiffness()
+                .contributions()
+                .len()
+                >= 2
         );
+    }
+
+    #[test]
+    fn solver_mesh_and_beam_share_attached_translation_rows() {
+        let mut mesh = tetrahedron4_mesh();
+        let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
+            kind: PersistentEntityKind::Vertex,
+            source_topology_id: "beam_root".into(),
+            assembly_path: vec!["root".into()],
+        }];
+        set_boundary_regions(&mut mesh, 0, &["root"]);
+        set_boundary_regions(&mut mesh, 1, &["solid_load"]);
+        reseal(&mut mesh);
+        let model = mixed_solid_beam_model(attached_coordinates);
+        let materials = StructuralMaterialInventory::from_model(&model);
+        let solid = assemble_solver_solid_operators(&mesh, &materials).expect("solid operator");
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            Some(mesh.clone()),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("attached mixed topology");
+
+        assert_eq!(summary.structural_node_count, 5);
+        assert_eq!(summary.structural_translational_dof_count, 15);
+        assert_eq!(summary.structural_rotational_dof_count, 6);
+        assert_eq!(summary.dof_count, 21);
+        let root_ux = summary
+            .structural_dof_layout
+            .index(0, StructuralDofKind::Ux)
+            .expect("shared root translation");
+        let tip_ux = summary
+            .structural_dof_layout
+            .index(4, StructuralDofKind::Ux)
+            .expect("beam tip translation");
+        let combined = summary.operator.operators().stiffness();
+        assert!(combined.get(root_ux, root_ux) > solid.stiffness.get(0, 0));
+        assert!(combined.get(root_ux, tip_ux).abs() > 0.0);
+        assert!(summary
+            .structural_dof_layout
+            .index(0, StructuralDofKind::Rx)
+            .is_some());
+        assert!(summary
+            .structural_dof_layout
+            .index(1, StructuralDofKind::Rx)
+            .is_none());
+        assert_eq!(summary.structural_rotational_constraint_count, 3);
+        assert_eq!(summary.structural_connector_stiffness_count, 1);
+        assert!(summary.constrained_dof_count >= 6);
+        assert!(summary.operator.nullspace_evidence().is_some());
+        assert_eq!(summary.spatial_projection_evidence.len(), 2);
+        assert!(summary
+            .spatial_projection_evidence
+            .iter()
+            .all(|evidence| evidence.accepted));
+        assert_eq!(
+            summary.structural_sources,
+            vec![
+                SourceImplementation::CanonicalBoundaryProjection,
+                SourceImplementation::ExplicitRegionNodalDistribution,
+            ]
+        );
+        assert_eq!(
+            summary.structural_boundary_transfers,
+            vec![
+                BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                BoundaryTransferImplementation::ExplicitRegionConnectivity,
+            ]
+        );
+        assert!(summary
+            .operator
+            .load()
+            .iter()
+            .any(|value| value.abs() > 0.0));
+        summary
+            .operator
+            .prepare_linear()
+            .expect("solid face plus attached beam-root support must be coercive");
+        let solve = crate::solve::linear::solve_linear_system(
+            &summary,
+            crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            &crate::solve::backend::cpu_reference::CpuReferenceBackend,
+            None,
+        );
+        assert!(solve.converged, "{:?}", solve.diagnostics);
+        assert!(solve.solution[tip_ux].abs() > 0.0);
+        let fields =
+            crate::post::fields::recover_result_fields(&summary, &solve).expect("mixed recovery");
+        let solid_stress = fields
+            .iter()
+            .find(|field| field.field_id == crate::contracts::FEA_FIELD_STRUCTURAL_STRESS)
+            .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+            .expect("solid stress field");
+        let beam_force = fields
+            .iter()
+            .find(|field| field.field_id == crate::contracts::FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)
+            .and_then(runmat_analysis_core::AnalysisField::as_host_f64)
+            .expect("beam force field");
+        assert_eq!(solid_stress.len(), 6);
+        assert!(solid_stress.iter().all(|value| value.is_finite()));
+        assert_eq!(beam_force.len(), 1);
+        assert!(beam_force[0].is_finite() && beam_force[0].abs() > 0.0);
+
+        let mut prescribed = model.clone();
+        prescribed
+            .constraints
+            .push(runmat_analysis_core::AnalysisConstraint::Structural(
+                runmat_analysis_core::StructuralConstraint {
+                    constraint_id: "prescribed_tip_y".into(),
+                    frame: runmat_analysis_core::CoordinateFrame::Global,
+                    kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                        runmat_analysis_core::PrescribedStructuralDofs {
+                            target: runmat_analysis_core::RegionTarget::point("node:102"),
+                            translations: vec![runmat_analysis_core::TranslationDofValue {
+                                dof: runmat_analysis_core::StructuralTranslationDof::Uy,
+                                value: runmat_analysis_core::PrescribedValue::Constant(
+                                    runmat_analysis_core::Displacement::new(1.0e-3),
+                                ),
+                            }],
+                            rotations: Vec::new(),
+                        },
+                    ),
+                },
+            ));
+        let prescribed_summary = assemble_structural_system(
+            &prescribed,
+            &static_excitations(&prescribed),
+            Some(mesh.clone()),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect("mixed prescribed value must survive solid load projection");
+        let tip_uy = prescribed_summary
+            .structural_dof_layout
+            .index(4, StructuralDofKind::Uy)
+            .expect("beam tip y translation");
+        assert_eq!(prescribed_summary.operator.load()[tip_uy], 1.0e-3);
+
+        let mut conflicting = model.clone();
+        conflicting
+            .constraints
+            .push(runmat_analysis_core::AnalysisConstraint::Structural(
+                runmat_analysis_core::StructuralConstraint {
+                    constraint_id: "conflicting_shared_translation".into(),
+                    frame: runmat_analysis_core::CoordinateFrame::Global,
+                    kind: runmat_analysis_core::StructuralConstraintKind::Prescribed(
+                        runmat_analysis_core::PrescribedStructuralDofs {
+                            target: runmat_analysis_core::RegionTarget::point("node:101"),
+                            translations: vec![runmat_analysis_core::TranslationDofValue {
+                                dof: runmat_analysis_core::StructuralTranslationDof::Ux,
+                                value: runmat_analysis_core::PrescribedValue::Constant(
+                                    runmat_analysis_core::Displacement::new(1.0e-3),
+                                ),
+                            }],
+                            rotations: Vec::new(),
+                        },
+                    ),
+                },
+            ));
+        let error = assemble_structural_system(
+            &conflicting,
+            &static_excitations(&conflicting),
+            Some(mesh),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .expect_err("solid and explicit prescriptions must not disagree on a shared row");
+        assert!(matches!(
+            error,
+            LinearAssemblyError::Structural(
+                StructuralAssemblyError::ConflictingDirectConstraints {
+                    first_constraint_id,
+                    second_constraint_id,
+                    node_index: 0,
+                    dof: StructuralDofKind::Ux,
+                }
+            ) if first_constraint_id == "conflicting_shared_translation"
+                && second_constraint_id == "fixed_root"
+        ));
     }
 
     #[test]
@@ -3185,6 +2965,7 @@ mod tests {
         structural.nodes.push(runmat_analysis_core::StructuralNode {
             node_id: 3,
             coordinates_m: [2.0, 0.0, 0.0],
+            solid_attachment: None,
         });
         let mut second_element = structural.elements[0].clone();
         second_element.element_id = "beam_2".into();
@@ -3883,7 +3664,7 @@ mod tests {
         let shell = shell_model
             .structural
             .expect("shell fixture has structural topology");
-        structural.nodes.push(shell.nodes[2]);
+        structural.nodes.push(shell.nodes[2].clone());
         structural.elements.push(shell.elements[0].clone());
         structural.shell_sections = shell.shell_sections;
 
@@ -4280,10 +4061,12 @@ mod tests {
             runmat_analysis_core::StructuralNode {
                 node_id: 3,
                 coordinates_m: [0.0, 2.0, 0.0],
+                solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 4,
                 coordinates_m: [1.0, 2.0, 0.0],
+                solid_attachment: None,
             },
         ]);
         structural

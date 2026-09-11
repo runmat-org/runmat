@@ -21,14 +21,30 @@ pub(super) fn assemble_explicit_connectors(
     stiffness: &mut RealSparseAssembler,
     damping: &mut RealSparseAssembler,
 ) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
+    assemble_connectors_with_resolver(
+        connectors,
+        layout,
+        stiffness,
+        damping,
+        |connector, primary| resolved_nodes(connector, structural, primary),
+    )
+}
+
+pub(super) fn assemble_connectors_with_resolver(
+    connectors: &[AnalysisConnector],
+    layout: &StructuralDofLayout,
+    stiffness: &mut RealSparseAssembler,
+    damping: &mut RealSparseAssembler,
+    mut resolve: impl FnMut(&AnalysisConnector, bool) -> Result<Vec<usize>, StructuralAssemblyError>,
+) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
     let mut stiffness_count = 0;
     let mut damping_count = 0;
     for connector in connectors {
-        let primary = resolved_nodes(connector, structural, true)?;
+        let primary = resolve(connector, true)?;
         let secondary = connector
             .secondary
             .as_ref()
-            .map(|_| resolved_nodes(connector, structural, false))
+            .map(|_| resolve(connector, false))
             .transpose()?;
         match connector.kind {
             ConnectorKind::TranslationalSpring { stiffness: value } => {

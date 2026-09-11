@@ -98,6 +98,7 @@ initial_conditions:
         signal_sample:
           signal_id: initial_velocity
           abscissa: 0.0
+          approach: at
       applies_before_step_id: transient
 
 sequence:

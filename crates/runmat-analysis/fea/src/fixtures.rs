@@ -1,3 +1,9 @@
+#[cfg(test)]
+use runmat_analysis_core::{
+    AnalysisConnector, ConformalSolidAttachment, ConnectorKind, ElectricCurrent, ElectricPotential,
+    Position, ReferencePoint, Rotation, RotationDofValue, Stiffness, StructuralRotationDof,
+    Temperature, Traction,
+};
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisExcitation, AnalysisModel, AnalysisModelId, AnalysisSequence,
     BeamElementModel, BeamSectionModel, BodyForceDensity, CoordinateFrame, Direction, Displacement,
@@ -10,10 +16,6 @@ use runmat_analysis_core::{
     SignalShape, SignalValue, StructuralConstraint, StructuralConstraintKind, StructuralElement,
     StructuralElementKind, StructuralModel, StructuralNode, StructuralTranslationDof,
     TranslationDofValue,
-};
-#[cfg(test)]
-use runmat_analysis_core::{
-    ElectricCurrent, ElectricPotential, Position, ReferencePoint, Temperature, Traction,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -50,6 +52,97 @@ pub(crate) fn replace_fixture_excitations(
     for specification in specifications {
         append_fixture_excitation(model, specification);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.structural = Some(StructuralModel {
+        nodes: vec![
+            StructuralNode {
+                node_id: 101,
+                coordinates_m: attached_coordinates_m,
+                solid_attachment: Some(ConformalSolidAttachment {
+                    geometry_vertex_id: "beam_root".into(),
+                }),
+            },
+            StructuralNode {
+                node_id: 102,
+                coordinates_m: [
+                    attached_coordinates_m[0] + 1.0,
+                    attached_coordinates_m[1],
+                    attached_coordinates_m[2],
+                ],
+                solid_attachment: None,
+            },
+        ],
+        elements: vec![StructuralElement {
+            element_id: "beam_1".into(),
+            region_id: "span".into(),
+            kind: StructuralElementKind::Beam(BeamElementModel {
+                node_ids: [101, 102],
+                section_id: "rect".into(),
+                reference_axis: [0.0, 1.0, 0.0],
+            }),
+        }],
+        beam_sections: vec![BeamSectionModel {
+            section_id: "rect".into(),
+            area_m2: 1.0e-4,
+            iy_m4: 1.0e-9,
+            iz_m4: 1.0e-9,
+            torsion_j_m4: 1.0e-9,
+            outer_fiber_y_m: 0.01,
+            outer_fiber_z_m: 0.01,
+            torsion_outer_radius_m: 0.01,
+        }],
+        shell_sections: Vec::new(),
+    });
+    model.constraints = vec![
+        fixed_constraint("fixed_root", "root"),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "beam_root_rotation".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::point("node:101"),
+                translations: Vec::new(),
+                rotations: [
+                    StructuralRotationDof::Rx,
+                    StructuralRotationDof::Ry,
+                    StructuralRotationDof::Rz,
+                ]
+                .into_iter()
+                .map(|dof| RotationDofValue {
+                    dof,
+                    value: PrescribedValue::Constant(Rotation::new(0.0)),
+                })
+                .collect(),
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![
+            FixtureExcitation {
+                id: "beam_tip_force".into(),
+                region_id: "span".into(),
+                kind: FixtureExcitationKind::Force([1_000.0, 0.0, 0.0]),
+            },
+            FixtureExcitation {
+                id: "solid_face_force".into(),
+                region_id: "solid_load".into(),
+                kind: FixtureExcitationKind::Force([0.0, 250.0, 0.0]),
+            },
+        ],
+    );
+    model.connectors = vec![AnalysisConnector {
+        connector_id: "mixed_span_foundation".into(),
+        primary: RegionTarget::authored("span"),
+        secondary: None,
+        kind: ConnectorKind::ElasticFoundation {
+            stiffness: Stiffness::new(2_000.0),
+        },
+    }];
+    model
 }
 
 #[cfg(test)]
@@ -761,14 +854,17 @@ fn structural_shell_plate_moment_reference() -> AnalysisModel {
             StructuralNode {
                 node_id: 1,
                 coordinates_m: [0.0, 0.0, 0.0],
+                solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
                 coordinates_m: [1.0, 0.0, 0.0],
+                solid_attachment: None,
             },
             StructuralNode {
                 node_id: 3,
                 coordinates_m: [0.0, 1.0, 0.0],
+                solid_attachment: None,
             },
         ],
         elements: vec![StructuralElement {
@@ -812,10 +908,12 @@ fn structural_beam_reference_model(
             StructuralNode {
                 node_id: 1,
                 coordinates_m: [0.0, 0.0, 0.0],
+                solid_attachment: None,
             },
             StructuralNode {
                 node_id: 2,
                 coordinates_m: [1.0, 0.0, 0.0],
+                solid_attachment: None,
             },
         ],
         elements: vec![StructuralElement {

@@ -14,8 +14,8 @@ use crate::{
     fea_transient_velocity_field_id, fea_transient_von_mises_field_id,
     fixtures::{
         append_fixture_temperature_field, append_fixture_terminal_voltage, fixture_model,
-        replace_fixture_excitations, replace_fixture_with_electric_current, FixtureExcitation,
-        FixtureExcitationKind, FixtureId,
+        mixed_solid_beam_model, replace_fixture_excitations, replace_fixture_with_electric_current,
+        FixtureExcitation, FixtureExcitationKind, FixtureId,
     },
     parity::{assert_vectors_within_tolerance, ParityTolerance},
     solve::{nonlinear::NonlinearSolveOptions, transient::TransientSolveOptions},
@@ -708,7 +708,7 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
         .extend(shell_model.material_assignments.clone());
     let shell = shell_model.structural.expect("shell topology");
     let structural = model.structural.as_mut().expect("beam topology");
-    structural.nodes.push(shell.nodes[2]);
+    structural.nodes.push(shell.nodes[2].clone());
     structural.elements.push(shell.elements[0].clone());
     structural.shell_sections = shell.shell_sections;
 
@@ -731,6 +731,51 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
 }
 
 #[test]
+fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
+    let mut mesh = single_tetrahedron_solver_mesh();
+    let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
+    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
+        kind: PersistentEntityKind::Vertex,
+        source_topology_id: "beam_root".into(),
+        assembly_path: vec!["root".into()],
+    });
+    mesh.topology.nodes[0].provenance.sort();
+    add_face_region(&mut mesh, 1, "solid_load");
+    reseal_solver_mesh(&mut mesh);
+    let model = mixed_solid_beam_model(attached_coordinates);
+    let options = LinearStaticSolveOptions {
+        solver_mesh: Some(mesh),
+        solver_mesh_artifact_path: Some("mixed-solid-beam.rmmesh".into()),
+        ..experimental_linear_static_options()
+    };
+
+    let first = crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
+        .expect("mixed solid-beam pipeline");
+    let second = crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options)
+        .expect("deterministic replay");
+
+    assert_eq!(first.fields, second.fields);
+    assert_eq!(first.diagnostics, second.diagnostics);
+    assert_eq!(
+        field(&first, FEA_FIELD_STRUCTURAL_DISPLACEMENT).shape,
+        vec![5, 3]
+    );
+    assert_eq!(
+        field(&first, FEA_FIELD_STRUCTURAL_ROTATION).shape,
+        vec![5, 3]
+    );
+    assert_eq!(field(&first, FEA_FIELD_STRUCTURAL_STRESS).shape, vec![1, 6]);
+    assert_eq!(
+        field(&first, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE).shape,
+        vec![1]
+    );
+    assert!(host_field(&first, FEA_FIELD_STRUCTURAL_STRESS)
+        .iter()
+        .all(|value| value.is_finite()));
+    assert!(host_field(&first, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE)[0].abs() > 0.0);
+}
+
+#[test]
 fn beam_end_moment_solves_rotation_and_reaction_moment() {
     let moment_n_m = 1.25;
     let length_m = 1.0;
@@ -743,10 +788,12 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
             runmat_analysis_core::StructuralNode {
                 node_id: 1,
                 coordinates_m: [0.0, 0.0, 0.0],
+                solid_attachment: None,
             },
             runmat_analysis_core::StructuralNode {
                 node_id: 2,
                 coordinates_m: [length_m, 0.0, 0.0],
+                solid_attachment: None,
             },
         ],
         elements: vec![runmat_analysis_core::StructuralElement {

@@ -50,16 +50,13 @@ pub fn structural_exact_realization(
 
     canonicalize_sources(&mut input.sources);
     canonicalize_boundary_transfers(&mut input.boundary_transfers);
+    validate_projection_inventory(&input.assemblies, &input.sources, &input.boundary_transfers)?;
     let components = input
         .assemblies
         .into_iter()
         .map(|assembly| {
-            structural_component(
-                assembly,
-                input.procedure,
-                &input.sources,
-                &input.boundary_transfers,
-            )
+            let sources = component_sources(assembly.operator, &input.sources);
+            structural_component(assembly, input.procedure, sources)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -74,8 +71,7 @@ pub fn structural_exact_realization(
 fn structural_component(
     assembly: StructuralFormulationRealization,
     procedure: AnalysisProcedure,
-    sources: &[SourceImplementation],
-    boundary_transfers: &[BoundaryTransferImplementation],
+    sources: Vec<SourceImplementation>,
 ) -> Result<ExactFormulationComponent, FormulationAdmissionRejectionReason> {
     let (topologies, recovery) = match assembly.operator {
         StructuralOperatorImplementation::Tet4LinearElasticity => (
@@ -106,8 +102,6 @@ fn structural_component(
         ),
     };
 
-    validate_projection_evidence(assembly.operator, sources, boundary_transfers)?;
-
     let expected_recovery = match recovery {
         RecoveryImplementation::Structural(value) => Some(value),
         RecoveryImplementation::Unavailable => None,
@@ -128,7 +122,7 @@ fn structural_component(
         },
         recovery,
         topologies,
-        sources: sources.to_vec(),
+        sources,
     })
 }
 
@@ -236,8 +230,8 @@ const fn boundary_transfer_order(transfer: BoundaryTransferImplementation) -> u8
     }
 }
 
-fn validate_projection_evidence(
-    operator: StructuralOperatorImplementation,
+fn validate_projection_inventory(
+    assemblies: &[StructuralFormulationRealization],
     sources: &[SourceImplementation],
     boundary_transfers: &[BoundaryTransferImplementation],
 ) -> Result<(), FormulationAdmissionRejectionReason> {
@@ -249,10 +243,51 @@ fn validate_projection_evidence(
     {
         return Err(FormulationAdmissionRejectionReason::InvalidRealization);
     }
-    let valid_sources: &[SourceImplementation] = match operator {
+    if sources.iter().any(|source| {
+        *source != SourceImplementation::NotApplicable
+            && !assemblies
+                .iter()
+                .any(|assembly| valid_sources(assembly.operator).contains(source))
+    }) {
+        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+            FormulationAxis::Source,
+        ));
+    }
+    if boundary_transfers.iter().any(|boundary| {
+        *boundary != BoundaryTransferImplementation::NotApplicable
+            && !assemblies
+                .iter()
+                .any(|assembly| valid_boundary(assembly.operator) == *boundary)
+    }) {
+        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
+            FormulationAxis::BoundaryTransfer,
+        ));
+    }
+    Ok(())
+}
+
+fn component_sources(
+    operator: StructuralOperatorImplementation,
+    sources: &[SourceImplementation],
+) -> Vec<SourceImplementation> {
+    let mut component = sources
+        .iter()
+        .copied()
+        .filter(|source| {
+            *source != SourceImplementation::NotApplicable
+                && valid_sources(operator).contains(source)
+        })
+        .collect::<Vec<_>>();
+    if component.is_empty() {
+        component.push(SourceImplementation::NotApplicable);
+    }
+    component
+}
+
+fn valid_sources(operator: StructuralOperatorImplementation) -> &'static [SourceImplementation] {
+    match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity => &[
-            SourceImplementation::NotApplicable,
             SourceImplementation::CanonicalBoundaryProjection,
             SourceImplementation::CanonicalBoundaryPressureIntegration,
             SourceImplementation::BoundaryResultantMomentProjection,
@@ -261,16 +296,17 @@ fn validate_projection_evidence(
         ],
         StructuralOperatorImplementation::EulerBernoulliBeam3d
         | StructuralOperatorImplementation::Mitc3TriangularShell => &[
-            SourceImplementation::NotApplicable,
             SourceImplementation::ExplicitRegionNodalDistribution,
             SourceImplementation::BoundaryResultantMomentProjection,
         ],
-        StructuralOperatorImplementation::SyntheticDiagonalChain => &[
-            SourceImplementation::NotApplicable,
-            SourceImplementation::OrdinalDistribution,
-        ],
-    };
-    let valid_boundary = match operator {
+        StructuralOperatorImplementation::SyntheticDiagonalChain => {
+            &[SourceImplementation::OrdinalDistribution]
+        }
+    }
+}
+
+fn valid_boundary(operator: StructuralOperatorImplementation) -> BoundaryTransferImplementation {
+    match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
         | StructuralOperatorImplementation::Tet10LinearElasticity => {
             BoundaryTransferImplementation::CanonicalBoundaryProjection
@@ -282,20 +318,7 @@ fn validate_projection_evidence(
         StructuralOperatorImplementation::SyntheticDiagonalChain => {
             BoundaryTransferImplementation::GlobalCountProfile
         }
-    };
-    if sources.iter().any(|source| !valid_sources.contains(source)) {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::Source,
-        ));
     }
-    if boundary_transfers.iter().any(|boundary| {
-        *boundary != BoundaryTransferImplementation::NotApplicable && *boundary != valid_boundary
-    }) {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::BoundaryTransfer,
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<TemporalImplementation> {
@@ -446,5 +469,49 @@ mod tests {
             realization,
         })
         .expect("the exact mixed formulation must pass admission");
+    }
+
+    #[test]
+    fn mixed_solid_beam_realization_assigns_each_source_to_its_owner() {
+        let realization = structural_exact_realization(StructuralRealizationInput {
+            assemblies: vec![
+                StructuralFormulationRealization::new(
+                    StructuralOperatorImplementation::EulerBernoulliBeam3d,
+                    Some(StructuralRecoveryImplementation::BeamSectionResultants),
+                ),
+                StructuralFormulationRealization::new(
+                    StructuralOperatorImplementation::Tet4LinearElasticity,
+                    Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
+                ),
+            ],
+            procedure: AnalysisProcedure::Static,
+            coupling: CouplingImplementation::Uncoupled,
+            sources: vec![
+                SourceImplementation::ExplicitRegionNodalDistribution,
+                SourceImplementation::CanonicalBoundaryProjection,
+            ],
+            boundary_transfers: vec![
+                BoundaryTransferImplementation::ExplicitRegionConnectivity,
+                BoundaryTransferImplementation::CanonicalBoundaryProjection,
+            ],
+        })
+        .expect("valid mixed solid-beam realization");
+
+        assert_eq!(
+            realization.components[0].sources,
+            vec![SourceImplementation::CanonicalBoundaryProjection]
+        );
+        assert_eq!(
+            realization.components[1].sources,
+            vec![SourceImplementation::ExplicitRegionNodalDistribution]
+        );
+        admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::Static,
+            solution_space: SolutionSpace::Direct,
+            requirement: FormulationRequirement::Experimental,
+            realization,
+        })
+        .expect("component-owned mixed sources must round-trip through admission");
     }
 }

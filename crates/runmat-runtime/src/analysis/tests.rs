@@ -272,10 +272,12 @@ fn sample_model() -> AnalysisModel {
                 StructuralNode {
                     node_id: 1,
                     coordinates_m: [0.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
                 StructuralNode {
                     node_id: 2,
                     coordinates_m: [1.0, 0.0, 0.0],
+                    solid_attachment: None,
                 },
             ],
             elements: vec![StructuralElement {
