@@ -55,7 +55,23 @@ export function controlledFixture(options = {}) {
   const repository = repositoryFixture(options);
   const id = options.identity ?? "foo";
   const compiledInventory = compiledInventoryFixture(id, options);
-  const inventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  const seedInventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  const dispositions = {
+    schema_version: 1,
+    kind: "runmat-builtin-dispositions",
+    authority: "review-input-only",
+    identities: {
+      [id]: {
+        disposition: "canonical",
+        canonical: null,
+        domain: "math",
+        family: "basic",
+        reason: null,
+        review: { status: "reviewed", evidence: ["fixture review"] },
+      },
+    },
+  };
+  const inventory = buildInventory(repository, dispositions, { revision: REVISION, compiledInventory });
   const bundleId = "math-basic-foo";
   const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity" || gate === "disposition" || gate === "catalog-contract" || gate === "runtime-binding" || gate === "documentation"
     ? { applicability: "required", reason: null, evidence: [] }

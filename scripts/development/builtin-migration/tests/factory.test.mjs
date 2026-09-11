@@ -147,6 +147,12 @@ test("control is closed, reviewed, reciprocal, and rejects case-fold ambiguity",
   assert.throws(() => parseControlManifest(collision), /collide case-insensitively/);
   const spelling = structuredClone(fixture.controlValue); spelling.identities.foo.public_spelling = "bar";
   assert.throws(() => parseControlManifest(spelling), /case-fold to the identity key/);
+  const observedSpelling = structuredClone(fixture.controlValue); observedSpelling.identities.foo.public_spelling = "Foo";
+  assert.throws(() => parseControlManifest(observedSpelling, fixture.inventory), /public spelling differs from the reviewed inventory/);
+  const domain = structuredClone(fixture.controlValue); domain.bundles[fixture.bundleId].domain = "other"; domain.identities.foo.domain = "other";
+  assert.throws(() => parseControlManifest(domain, fixture.inventory), /domain or family differs from the reviewed inventory/);
+  const disposition = structuredClone(fixture.controlValue); disposition.identities.foo.disposition = { kind: "internal", reason: "Changed after disposition review", evidence: ["late control edit"] }; disposition.identities.foo.runtime_owner = null;
+  assert.throws(() => parseControlManifest(disposition, fixture.inventory), /disposition differs from the reviewed inventory/);
   const unsafeStorage = structuredClone(fixture.controlValue); unsafeStorage.storage_policy.volume_roles.target_temp.filesystem_id = unsafeStorage.storage_policy.volume_roles.source_worktree.filesystem_id;
   assert.throws(() => parseControlManifest(unsafeStorage), /disjoint filesystem/);
   const removal = structuredClone(fixture.controlValue); removal.identities.foo.expected_removals = [{ kind: "file", path: "docs/builtins/reference/foo.json", baseline_digest: `sha256:${"a".repeat(64)}` }];
