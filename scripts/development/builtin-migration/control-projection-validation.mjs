@@ -6,7 +6,8 @@ import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
 import {
   parseExceptionManifestPolicy, parseIdentityControlPolicy,
-  parseOperationalBundleControlPolicy, parseStoragePolicy,
+  parseOperationalBundleControlPolicy, parseExecutionTargets,
+  validateStorageTargetCoverage,
 } from "./control-authoring/policy-schema.mjs";
 
 export function validateControlProjection({
@@ -17,6 +18,7 @@ export function validateControlProjection({
   identityControls: identityControlValues,
   migrationFindings,
   exceptionManifest,
+  executionTargets,
   storagePolicy,
 }) {
   assertValidatedTopologyView(topology);
@@ -35,8 +37,9 @@ export function validateControlProjection({
   validateInventoryAuthority(materialized.identities, inventory);
   parseFindingDispositions(migrationFindings, bundles, inventory.migration_findings);
   parseExceptionManifestPolicy(exceptionManifest, bundles);
-  parseStoragePolicy(storagePolicy);
-  return { bundles, identities: materialized.identities };
+  const parsedExecutionTargets = parseExecutionTargets(executionTargets);
+  validateStorageTargetCoverage(storagePolicy, parsedExecutionTargets);
+  return { bundles, identities: materialized.identities, executionTargets: parsedExecutionTargets };
 }
 
 function parseBundleControls(value, inventory) {

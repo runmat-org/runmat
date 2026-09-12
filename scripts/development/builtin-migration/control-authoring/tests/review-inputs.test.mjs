@@ -42,6 +42,21 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   drift.bindings.scaffold_bundle_row_digest = `sha256:${"0".repeat(64)}`;
   resign(drift);
   assert.throws(() => parseBundleControlReview(drift, fixture.scaffold, fixture.topology), /scaffold row digest mismatch/);
+
+  const uncoveredTarget = structuredClone(fixture.globalReview);
+  uncoveredTarget.storage_policy.host_profiles["linux-host"] = {
+    operating_system: "linux",
+    architecture: "x86_64",
+    execution_host: "runmat-linux-builder",
+    volume_roles: structuredClone(
+      uncoveredTarget.storage_policy.host_profiles["fixture-host"].volume_roles,
+    ),
+  };
+  resign(uncoveredTarget);
+  assert.throws(
+    () => parseGlobalControlReview(uncoveredTarget, fixture.scaffold, fixture.topology),
+    /must exactly cover every reviewed execution target/,
+  );
 });
 
 test("review-set loader verifies exact bytes, coverage, and global profile references", () => {
@@ -362,6 +377,10 @@ function reviewFixture() {
     } },
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
+    execution_targets: [{
+      operating_system: inventory.compiled_inventory.build.operating_system,
+      architecture: inventory.compiled_inventory.build.architecture,
+    }],
     storage_policy: { host_profiles: { "fixture-host": {
       operating_system: inventory.compiled_inventory.build.operating_system,
       architecture: inventory.compiled_inventory.build.architecture,

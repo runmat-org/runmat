@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import { compareCodePoint } from "./constants.mjs";
 import { contentDigest, evidenceDigest } from "./evidence.mjs";
+import { executionTargetKey, parseExecutionTarget, parseExecutionTargets, sameExecutionTarget } from "./execution-target.mjs";
 import { gatePlanEvidence } from "./gate-plan.mjs";
 import { GATE_PRODUCERS } from "./gate-kinds.mjs";
 import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity, integer, kind, nonempty, sourceRevision, stableId, timestamp, uniqueStrings } from "./schema.mjs";
@@ -9,12 +10,13 @@ import { SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesyste
 export { GATE_PRODUCERS } from "./gate-kinds.mjs";
 
 export function parseGateResult(value, expected) {
-  kind(value, 2, "runmat-builtin-migration-gate-result", "gate result");
-  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
+  kind(value, 3, "runmat-builtin-migration-gate-result", "gate result");
+  exact(value, ["schema_version", "kind", "authority", "producer", "producer_evidence", "artifact_id", "produced_at", "execution_target", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities", "gate", "result", "checks", "artifacts", "storage_admission"], "gate result");
   if (value.authority !== "machine-verification-only") throw new Error("gate result has invalid authority");
   const gate = enumValue(value.gate, Object.keys(GATE_PRODUCERS), "gate result gate");
   if (value.producer !== GATE_PRODUCERS[gate]) throw new Error(`${gate}: unexpected gate producer`);
   const producedAt = timestamp(value.produced_at, "gate produced_at");
+  const executionTarget = parseExecutionTarget(value.execution_target, "gate execution target");
   const producerEvidence = parseProducerEvidence(value.producer_evidence, value.producer);
   stableId(value.artifact_id, "gate artifact id");
   sourceRevision(value.source_revision, "gate source revision");
@@ -40,12 +42,21 @@ export function parseGateResult(value, expected) {
   if (JSON.stringify(artifactRoles) !== JSON.stringify([...artifactRoles].sort(compareCodePoint))) throw new Error(`${gate}: gate artifacts must use canonical role ordering`);
   const derivedResult = value.producer_evidence.process.exit_code === 0 && checks.every((entry) => entry.result === "pass") ? "pass" : "fail";
   if (value.result !== derivedResult) throw new Error("gate result conflicts with captured process status or checks");
-  parseStorageAdmission(value.storage_admission, value.result, expected, producedAt);
+  if (expected?.compiled_build && !sameExecutionTarget(executionTarget, expected.compiled_build)) {
+    throw new Error(`${gate}: execution target differs from the subject build target`);
+  }
+  if (expected?.execution_targets) {
+    const reviewedTargets = parseExecutionTargets(expected.execution_targets);
+    if (!reviewedTargets.some((entry) => sameExecutionTarget(entry, executionTarget))) {
+      throw new Error(`${gate}: execution target is absent from the reviewed control target set`);
+    }
+  }
+  parseStorageAdmission(value.storage_admission, value.result, expected, producedAt, executionTarget);
   if (expected) {
     if (value.source_revision !== expected.source_revision || value.source_digest !== expected.source_digest || value.baseline_inventory_digest !== expected.baseline_inventory_digest || value.subject_inventory_digest !== expected.subject_inventory_digest || value.control_manifest_digest !== expected.control_manifest_digest || value.bundle_id !== expected.bundle_id) {
       throw new Error(`${gate}: stale or mismatched gate provenance`);
     }
-    if (expected.gate_plans) validateReviewedPlan(gate, value.result, producerEvidence, artifacts, expected);
+    if (expected.gate_plans) validateReviewedPlan(gate, value.result, producerEvidence, artifacts, expected, executionTarget);
   }
   return { ...value, identities: identities.sort(compareCodePoint), checks, artifacts };
 }
@@ -83,10 +94,10 @@ function parseProducerEvidence(value, producer) {
   return value;
 }
 
-function validateReviewedPlan(gate, result, evidence, artifacts, expected) {
+function validateReviewedPlan(gate, result, evidence, artifacts, expected, executionTarget) {
   const plan = expected.gate_plans.get(gate);
   if (!plan) throw new Error(`${gate}: gate evidence has no reviewed bundle plan`);
-  const contract = gatePlanEvidence(plan, expected.compiled_build, expected.repository);
+  const contract = gatePlanEvidence(plan, executionTarget, expected.repository);
   if (evidence.contract.reviewed_source_revision !== expected.baseline_source_revision || evidence.contract.executable_digest !== contract.executable_digest || evidence.contract.producer_source_digest !== contract.source_digest) throw new Error(`${gate}: producer contract differs from the reviewed gate plan`);
   if (JSON.stringify(evidence.invocation.arguments) !== JSON.stringify(contract.arguments) || evidence.invocation.cwd !== contract.cwd) throw new Error(`${gate}: producer invocation differs from the reviewed gate plan`);
   const actualRoles = artifacts.map((entry) => entry.role);
@@ -94,7 +105,7 @@ function validateReviewedPlan(gate, result, evidence, artifacts, expected) {
   if (result === "pass" && JSON.stringify(actualRoles) !== JSON.stringify(plan.expected_artifact_roles)) throw new Error(`${gate}: passing evidence does not cover the reviewed artifact roles`);
 }
 
-function parseStorageAdmission(value, gateResult, expected, producedAt) {
+function parseStorageAdmission(value, gateResult, expected, producedAt, executionTarget) {
   exact(value, ["profile_id", "execution_host", "observed_at", "volumes"], "gate storage admission");
   const profileId = stableId(value.profile_id, "gate storage profile id");
   const executionHost = nonempty(value.execution_host, "gate storage execution host");
@@ -121,8 +132,7 @@ function parseStorageAdmission(value, gateResult, expected, producedAt) {
       if (executionHost !== profile.execution_host) {
         throw new Error(`gate storage execution host differs from reviewed profile ${profileId}`);
       }
-      if (expected.compiled_build && (profile.operating_system !== expected.compiled_build.operating_system
-        || profile.architecture !== expected.compiled_build.architecture)) {
+      if (executionTargetKey(profile) !== executionTargetKey(executionTarget)) {
         throw new Error(`gate storage profile ${profileId} differs from the subject build target`);
       }
       const configured = profile.volume_roles[key];

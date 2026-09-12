@@ -62,6 +62,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     identity_controls: identityControls,
     migration_findings: structuredClone(reviewSet.globalReview.value.migration_findings),
     exception_manifest: structuredClone(reviewSet.globalReview.value.exception_manifest),
+    execution_targets: structuredClone(reviewSet.globalReview.value.execution_targets),
     storage_policy: structuredClone(reviewSet.globalReview.value.storage_policy),
   };
   validateControlProjection({
@@ -72,6 +73,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
     identityControls: payload.identity_controls,
     migrationFindings: payload.migration_findings,
     exceptionManifest: payload.exception_manifest,
+    executionTargets: payload.execution_targets,
     storagePolicy: payload.storage_policy,
   });
   const candidate = deepImmutable({ ...payload, digest: evidenceDigest(payload) });
@@ -82,7 +84,7 @@ export function composeControlCandidate({ inventory: inventoryValue, topology, s
 export function parseControlCandidate(value, expected) {
   assertValidatedControlCandidate(expected);
   kind(value, 1, "runmat-builtin-migration-control-candidate", "control candidate");
-  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "storage_policy", "digest"], "control candidate");
+  exact(value, ["schema_version", "kind", "authority", "program", "inputs", "baseline_context", "cohorts", "bundle_controls", "identity_controls", "migration_findings", "exception_manifest", "execution_targets", "storage_policy", "digest"], "control candidate");
   if (value.authority !== "deterministically-composed-unreviewed-candidate" || value.program !== PROGRAM) {
     throw new Error("control candidate has invalid authority or program");
   }

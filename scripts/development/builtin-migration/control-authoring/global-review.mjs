@@ -7,7 +7,8 @@ import { digest, exact, kind } from "../schema.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 import {
   assertEvidenceDigest, assertScaffoldTopologyBinding, parseExceptionManifestPolicy,
-  parseProgramProfile, parseReviewedEvidence, parseStoragePolicy,
+  parseExecutionTargets, parseProgramProfile, parseReviewedEvidence,
+  validateStorageTargetCoverage,
 } from "./policy-schema.mjs";
 
 export const GLOBAL_CONTROL_REVIEW_KIND = "runmat-builtin-migration-global-control-review";
@@ -19,7 +20,7 @@ export function parseGlobalControlReview(value, scaffoldValue, topology) {
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
   kind(value, 1, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
-  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "migration_findings", "exception_manifest", "storage_policy", "review", "digest"], "global control review");
+  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "migration_findings", "exception_manifest", "execution_targets", "storage_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);
   const programProfiles = parseProgramProfiles(value.program_profiles);
@@ -27,10 +28,13 @@ export function parseGlobalControlReview(value, scaffoldValue, topology) {
   const currentFindings = scaffold.migration_finding_rows.map((entry) => entry.observations);
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, currentFindings);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
-  parseStoragePolicy(value.storage_policy);
+  const executionTargets = parseExecutionTargets(value.execution_targets);
+  validateStorageTargetCoverage(value.storage_policy, executionTargets);
   parseReviewedEvidence(value.review, "global control review");
   assertEvidenceDigest(value, "global control review");
-  const parsed = deepImmutable({ value, digest: value.digest, programProfiles, migrationFindings });
+  const parsed = deepImmutable({
+    value, digest: value.digest, programProfiles, migrationFindings, executionTargets,
+  });
   VALIDATED_GLOBAL_REVIEWS.add(parsed);
   return parsed;
 }

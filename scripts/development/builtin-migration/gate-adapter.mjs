@@ -33,7 +33,7 @@ export function runGateProducer(input) {
   if (!plan) throw new Error(`${input.bundle_id}/${input.gate}: no reviewed gate plan is registered`);
   const parser = parserFor(plan.parser, input.gate, { input, baseline, subject, control, bundle });
   const repository = fs.realpathSync(REPOSITORY);
-  const command = commandFor(plan, repository, baseline);
+  const command = commandFor(plan, repository, baseline, subject.compiled_inventory.build);
   const executable = resolveExecutable(command.executable);
   const executableDigest = contentDigest(fs.readFileSync(executable));
   if (executableDigest !== command.executableDigest) throw new Error(`${input.gate}: executable bytes differ from the reviewed platform plan`);
@@ -60,10 +60,11 @@ export function runGateProducer(input) {
     baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest,
     bundle_id: bundle.id, storage_policy: control.value.storage_policy,
-    gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build, repository,
+    gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
+    execution_targets: control.executionTargets, repository,
   };
   return parseGateResult({
-    schema_version: 2, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 3, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: GATE_PRODUCERS[input.gate],
     producer_evidence: {
       schema_version: 1, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
@@ -76,6 +77,10 @@ export function runGateProducer(input) {
       process: processEvidence, captured_process_digest: evidenceDigest(processEvidence),
     },
     artifact_id: input.artifact_id, produced_at: new Date().toISOString(),
+    execution_target: {
+      operating_system: subject.compiled_inventory.build.operating_system,
+      architecture: subject.compiled_inventory.build.architecture,
+    },
     source_revision: subject.source.revision, source_digest: subject.source.digest,
     baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest,
@@ -84,14 +89,26 @@ export function runGateProducer(input) {
   }, expected);
 }
 
-function commandFor(plan, repository, inventory) {
-  const build = inventory.compiled_inventory.build;
-  const executableDigest = plan.program.approved_executables.find((entry) => entry.operating_system === build.operating_system && entry.architecture === build.architecture).content_digest;
+function commandFor(plan, repository, baselineInventory, subjectBuild) {
+  const approvedExecutable = plan.program.approved_executables.find(
+    (entry) => entry.operating_system === subjectBuild.operating_system
+      && entry.architecture === subjectBuild.architecture,
+  );
+  if (!approvedExecutable) {
+    throw new Error(
+      `${plan.gate}: reviewed program has no executable approval for ${subjectBuild.operating_system}/${subjectBuild.architecture}`,
+    );
+  }
+  const executableDigest = approvedExecutable.content_digest;
   if (plan.program.kind === "repository_script") {
-    const sourceDigest = pinnedSourceDigest(repository, plan.program.path, plan.program.content_digest, inventory);
+    const sourceDigest = pinnedSourceDigest(
+      repository, plan.program.path, plan.program.content_digest, baselineInventory,
+    );
     return { executable: process.execPath, arguments: [path.join(repository, plan.program.path), ...plan.arguments], sourceDigest, executableDigest };
   }
-  const sourceDigest = pinnedSourceDigest(repository, plan.program.manifest_path, plan.program.manifest_digest, inventory);
+  const sourceDigest = pinnedSourceDigest(
+    repository, plan.program.manifest_path, plan.program.manifest_digest, baselineInventory,
+  );
   return {
     executable: "cargo",
     arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments],

@@ -19,7 +19,8 @@ export function sealBundle(manifest, verification, gateValues, prerequisiteValue
     baseline_inventory_digest: parsed.baseline_inventory_digest,
     subject_inventory_digest: parsed.subject_inventory_digest,
     control_manifest_digest: parsed.control_manifest_digest, bundle_id: parsed.bundle_id,
-    gate_plans: control.bundles.get(parsed.bundle_id).gate_plans, compiled_build: control.baseline.compiled_target,
+    gate_plans: control.bundles.get(parsed.bundle_id).gate_plans,
+    execution_targets: control.executionTargets,
     repository,
   };
   if (!repository) throw new Error("seal requires the trusted repository path for gate-plan verification");

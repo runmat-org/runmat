@@ -41,6 +41,7 @@ const FINDING_DECISIONS = Object.freeze([
 
 const GLOBAL_DECISIONS = Object.freeze([
   "exception_manifest",
+  "execution_targets",
   "storage_policy",
 ]);
 

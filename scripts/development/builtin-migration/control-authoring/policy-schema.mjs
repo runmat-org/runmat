@@ -1,11 +1,14 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
+import { executionTargetKey, parseExecutionTargets } from "../execution-target.mjs";
 import { GATE_PRODUCERS } from "../gate-kinds.mjs";
 import { GATE_PARSERS, parseGatePlans } from "../gate-plan.mjs";
 import {
   SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity,
   identity, integer, nonempty, repositoryPath, stableId, uniqueStrings,
 } from "../schema.mjs";
+
+export { executionTargetKey, parseExecutionTargets } from "../execution-target.mjs";
 
 export function assertScaffoldTopologyBinding(scaffold, topology) {
   if (topology.baseline?.control_draft_digest !== scaffold.bindings?.control_draft_digest
@@ -150,6 +153,16 @@ export function parseStoragePolicy(value) {
   if (new Set(selectors).size !== selectors.length) throw new Error("storage host profile selectors must be unique");
   if (value.targets_must_be_disjoint !== true || value.occt_default !== "disabled-unless-affected") throw new Error("storage policy must require disjoint targets and scoped OCCT");
   return value;
+}
+
+export function validateStorageTargetCoverage(storagePolicy, executionTargets) {
+  parseStoragePolicy(storagePolicy);
+  const profileTargets = [...new Set(Object.values(storagePolicy.host_profiles).map(executionTargetKey))]
+    .sort(compareCodePoint);
+  const reviewedTargets = parseExecutionTargets(executionTargets).map(executionTargetKey);
+  if (JSON.stringify(profileTargets) !== JSON.stringify(reviewedTargets)) {
+    throw new Error("storage host profiles must exactly cover every reviewed execution target");
+  }
 }
 
 export function parseReviewedEvidence(value, label) {
