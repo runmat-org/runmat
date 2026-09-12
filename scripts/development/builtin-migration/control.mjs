@@ -214,7 +214,7 @@ function parseBundle(id, value, current) {
     atomic_reason: nonempty(value.atomic_reason, `${id} atomic reason`),
     prerequisites: array(value.prerequisites, `${id} prerequisites`, { empty: true }).map((entry) => parsePrerequisite(entry, id)),
     authored_write_set: array(value.authored_write_set, `${id} authored write set`).map((entry) => parseScope(entry, `${id} authored scope`)),
-    integration_outputs: array(value.integration_outputs, `${id} integration outputs`, { empty: true }).map((entry) => parseIntegrationOutput(entry, id)),
+    integration_outputs: parseIntegrationOutputs(value.integration_outputs, id),
     gate_plans: parseGatePlans(value.gate_plans, id, current),
     owner_role: nonempty(value.owner_role, `${id} owner role`),
     complexity: parseComplexity(value.complexity, `${id} complexity`),
@@ -273,10 +273,19 @@ export function parseScope(value, label) {
 
 function parseIntegrationOutput(value, id) {
   exact(value, ["product_id", "path", "producer"], `${id} integration output`);
-  nonempty(value.product_id, `${id} integration product id`);
+  stableId(value.product_id, `${id} integration product id`);
   repositoryPath(value.path, `${id} integration output path`);
   if (value.producer !== "integration") throw new Error(`${id}: integration output producer must be integration`);
   return { kind: "file", ...value };
+}
+
+function parseIntegrationOutputs(value, id) {
+  const outputs = array(value, `${id} integration outputs`, { empty: true }).map((entry) => parseIntegrationOutput(entry, id));
+  const keys = outputs.map((entry) => `${entry.product_id}\0${entry.path}`);
+  if (new Set(keys).size !== keys.length || JSON.stringify(keys) !== JSON.stringify([...keys].sort())) {
+    throw new Error(`${id}: integration outputs must be unique and canonically ordered`);
+  }
+  return outputs;
 }
 
 function parseComplexity(value, label) {

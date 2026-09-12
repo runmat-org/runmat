@@ -48,12 +48,14 @@ function parseBundlePolicy(value, id, parsePlans) {
     enumValue(entry.kind, ["representation", "infrastructure", "semantic", "cohort"], `${id} prerequisite kind`);
   });
   array(value.additional_authored_write_set, `${id} additional authored write set`, { empty: true }).forEach((entry) => parseScope(entry, `${id} additional authored scope`));
-  array(value.integration_outputs, `${id} integration outputs`, { empty: true }).forEach((entry) => {
+  const integrationOutputKeys = array(value.integration_outputs, `${id} integration outputs`, { empty: true }).map((entry) => {
     exact(entry, ["product_id", "path", "producer"], `${id} integration output`);
-    nonempty(entry.product_id, `${id} integration product id`);
+    stableId(entry.product_id, `${id} integration product id`);
     repositoryPath(entry.path, `${id} integration output path`);
     if (entry.producer !== "integration") throw new Error(`${id}: integration output producer must be integration`);
+    return `${entry.product_id}\0${entry.path}`;
   });
+  requireCanonicalUnique(integrationOutputKeys, `${id} integration outputs`);
   parsePlans(value.gate_plans);
   nonempty(value.owner_role, `${id} owner role`);
   parseComplexity(value.complexity, `${id} complexity`);

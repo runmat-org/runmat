@@ -22,12 +22,27 @@ export function validateBundleGraph(bundles, identities) {
       }
     }
   }
-  const outputs = new Map();
+  const outputsByPath = new Map();
+  const outputsById = new Map();
   for (const [ownerId, owner] of bundles) for (const output of owner.integration_outputs) {
-    const prior = outputs.get(output.path);
-    if (prior) throw new Error(`integration output ${output.path} is declared by both ${prior} and ${ownerId}`);
-    outputs.set(output.path, ownerId);
-    for (const [authorId, author] of bundles) for (const scope of author.authored_write_set) if (scopesOverlap(scope, output)) throw new Error(`${authorId}: authored scope ${scope.path} overlaps ${ownerId} integration output ${output.path}`);
+    const declaration = { product_id: output.product_id, path: output.path, producer: output.producer };
+    const priorPath = outputsByPath.get(output.path);
+    const priorId = outputsById.get(output.product_id);
+    if (priorPath && JSON.stringify(priorPath.declaration) !== JSON.stringify(declaration)) {
+      throw new Error(`integration output ${output.path} has conflicting declarations in ${priorPath.owner} and ${ownerId}`);
+    }
+    if (priorId && JSON.stringify(priorId.declaration) !== JSON.stringify(declaration)) {
+      throw new Error(`integration product ${output.product_id} has conflicting declarations in ${priorId.owner} and ${ownerId}`);
+    }
+    outputsByPath.set(output.path, { owner: ownerId, declaration });
+    outputsById.set(output.product_id, { owner: ownerId, declaration });
+  }
+  for (const { owner, declaration } of outputsByPath.values()) {
+    for (const [authorId, author] of bundles) for (const scope of author.authored_write_set) {
+      if (scopesOverlap(scope, declaration)) {
+        throw new Error(`${authorId}: authored scope ${scope.path} overlaps ${owner} integration output ${declaration.path}`);
+      }
+    }
   }
   detectCycles(bundles);
 }
