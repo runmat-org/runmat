@@ -2,6 +2,7 @@ import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
 import { parseIntegrationProductRegistry } from "../integration-products.mjs";
+import { validateReviewedModuleCompositionAuthority } from "../module-composition/authority.mjs";
 import { bindModuleCompositionProjection } from "../module-composition/binding.mjs";
 import { parseFindingDispositions } from "../migration-findings.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
@@ -30,6 +31,7 @@ export function parseGlobalControlReview(value, scaffoldValue, topology, invento
   const moduleCompositionBaseline = bindModuleCompositionProjection(
     [...integrationProducts.values()], value.module_composition_baseline,
   );
+  validateReviewedModuleCompositionAuthority(integrationProducts, moduleCompositionBaseline);
   const bundles = new Map([...topology.bundles.keys()].map((id) => [id, true]));
   const currentFindings = scaffold.migration_finding_rows.map((entry) => entry.observations);
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, currentFindings);

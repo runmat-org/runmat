@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const productionFiles = [
-  "binding.mjs", "control.mjs", "effective-state.mjs", "generate.mjs", "index.mjs",
+  "binding.mjs", "condition.mjs", "control.mjs", "effective-state.mjs", "generate.mjs", "index.mjs",
   "projection.mjs", "registry.mjs", "rust-schema.mjs", "schema.mjs", "verify.mjs",
 ];
 

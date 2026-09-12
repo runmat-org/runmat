@@ -15,7 +15,7 @@ export function applyModuleCompositionTransitions(baselineValue, transitionValue
     applyTransition(products, transition);
   }
   return parseModuleCompositionProjection({
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-module-composition-projection",
     products: [...products.values()].sort((left, right) => compareCodePoint(left.product_id, right.product_id)),
   });
@@ -27,7 +27,7 @@ export function parseModuleCompositionTransition(value, projectionValue) {
 }
 
 function parseTransition(value, products) {
-  kind(value, 2, "runmat-builtin-module-composition-transition", "module composition transition");
+  kind(value, 3, "runmat-builtin-module-composition-transition", "module composition transition");
   exact(value, ["schema_version", "kind", "transition_id", "changes"], "module composition transition");
   const transitionId = stableId(value.transition_id, "module composition transition id");
   const changes = array(value.changes, `${transitionId} composition changes`).map((entry) => parseChange(entry, products, transitionId));

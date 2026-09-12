@@ -10,6 +10,7 @@ import {
   validateIntegrationProductCoverage,
 } from "./integration-products.mjs";
 import { parseFindingDispositions } from "./migration-findings.mjs";
+import { validateReviewedModuleCompositionAuthority } from "./module-composition/authority.mjs";
 import { validateModuleCompositionControl } from "./module-composition/control.mjs";
 import { materializeTopologyControl } from "./topology/control-projection.mjs";
 import { assertValidatedTopologyView } from "./topology/freeze.mjs";
@@ -47,6 +48,9 @@ export function validateControlProjection({
   const bundles = materialized.bundles;
   const moduleComposition = validateModuleCompositionControl(
     moduleCompositionBaseline, integrationProducts, bundles,
+  );
+  validateReviewedModuleCompositionAuthority(
+    integrationProducts, moduleComposition.baseline,
   );
   validateBundleGraph(bundles, materialized.identities, integrationProducts);
   validateGeneratedRegistryCoverage(

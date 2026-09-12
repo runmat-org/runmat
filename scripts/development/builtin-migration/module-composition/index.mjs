@@ -1,5 +1,5 @@
 export {
-  AGGREGATION_ROLES, CHILD_ROLES, CRATE_ROLES, FEATURE_POLICIES, VISIBILITIES,
+  AGGREGATION_ROLES, CHILD_ROLES, CRATE_ROLES, VISIBILITIES,
   parseCompositionChild, parseCompositionProduct, parseModuleCompositionContract,
   parseModuleCompositionProjection,
   rustItemIdentifier, rustModuleIdentifier,
@@ -19,3 +19,4 @@ export {
 export {
   MODULE_COMPOSITION_SUFFIXES, moduleCompositionProductRegistry,
 } from "./registry.mjs";
+export { validateReviewedModuleCompositionAuthority } from "./authority.mjs";

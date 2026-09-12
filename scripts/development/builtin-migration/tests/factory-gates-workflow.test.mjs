@@ -90,7 +90,10 @@ test("generated product proof requires two equal runs, checked-in equality, and 
     result: "pass",
   };
   const integrationProducts = Object.entries(fixture.control.value.integration_products)
-    .map(([product_id, definition]) => ({ product_id, ...definition }))
+    .filter(([productId]) => productId === "wasm-registry")
+    .map(([product_id, { lifecycle: _lifecycle, ...definition }]) => ({
+      product_id, ...definition,
+    }))
     .sort((left, right) => left.product_id.localeCompare(right.product_id));
   const expected = {
     integration_products: integrationProducts,

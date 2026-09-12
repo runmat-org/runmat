@@ -42,10 +42,10 @@ function catalogProduct() {
       source_path: "crates/runmat-builtins/src/catalog/entries/math/arithmetic/mod.rs",
       role: "group",
       visibility: "private",
-      feature_policy: { kind: "always" },
+      declaration_condition: { kind: "always" },
       macro_use: false,
-      reexport: { kind: "glob", visibility: "public" },
-      aggregation_sources: [{ role: "entries", kind: "slice" }],
+      reexports: [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }],
+      aggregation_sources: [{ role: "entries", kind: "slice", order: 0 }],
     }],
   };
 }

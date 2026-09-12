@@ -118,13 +118,13 @@ test("module composition input and proof bind the exact reviewed parent projecti
     source_path: "crates/runmat-builtins/src/catalog/entries/math/arithmetic/mod.rs",
     role: "group",
     visibility: "private",
-    feature_policy: { kind: "always" },
+    declaration_condition: { kind: "always" },
     macro_use: false,
-    reexport: { kind: "glob", visibility: "public" },
-    aggregation_sources: [{ role: "entries", kind: "slice" }],
+    reexports: [{ kind: "glob", visibility: "public", condition: { kind: "always" }, doc_hidden: false }],
+    aggregation_sources: [{ role: "entries", kind: "slice", order: 0 }],
   };
   const projection = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-module-composition-projection",
     products: [{
       product_id: composition.product_id,
@@ -198,7 +198,7 @@ test("empty runtime composition remains a verified baseline product", () => {
     children: [],
   };
   const projection = {
-    schema_version: 2,
+    schema_version: 3,
     kind: "runmat-builtin-module-composition-projection",
     products: [product],
   };

@@ -11,7 +11,8 @@ import { contentDigest, evidenceDigest } from "../../evidence.mjs";
 import { buildInventory } from "../../inventory.mjs";
 import {
   REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, fixtureIntegrationProducts,
-  fixtureGatePlans, fixtureTargetPolicy, repositoryFixture, topologyFixture,
+  fixtureGatePlans, fixtureModuleCompositionBaseline, fixtureTargetPolicy, repositoryFixture,
+  topologyFixture,
 } from "../../tests/helpers.mjs";
 import { parseBundleControlReview } from "../bundle-review.mjs";
 import { validateControlReviewChain } from "../authority.mjs";
@@ -102,6 +103,37 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
       uncoveredTarget, fixture.scaffold, fixture.topology, fixture.inventory,
     ),
     /must exactly cover every reviewed execution target/,
+  );
+});
+
+test("production global review cannot bypass the fixed composition registry", () => {
+  const fixture = reviewFixture();
+  assert.ok(parseGlobalControlReview(
+    fixture.globalReview, fixture.scaffold, fixture.topology, fixture.inventory,
+  ).integrationProducts.has("wasm-registry"), "unrelated reviewed products remain admitted");
+
+  const omitted = structuredClone(fixture.globalReview);
+  delete omitted.integration_products["catalog-aliases"];
+  omitted.module_composition_baseline.products = omitted.module_composition_baseline.products
+    .filter((entry) => entry.product_id !== "catalog-aliases");
+  resign(omitted);
+  assert.throws(
+    () => parseGlobalControlReview(
+      omitted, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /reviewed module composition products.*missing catalog-aliases/,
+  );
+
+  const aggregationDrift = structuredClone(fixture.globalReview);
+  aggregationDrift.module_composition_baseline.products
+    .find((entry) => entry.product_id === "catalog-constants")
+    .aggregations = ["entries", "constants"];
+  resign(aggregationDrift);
+  assert.throws(
+    () => parseGlobalControlReview(
+      aggregationDrift, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /catalog-constants: projection aggregation roles do not match/,
   );
 });
 
@@ -240,7 +272,7 @@ test("review templates, indexing, and attestation sealing form a non-overwriting
   const rejectedOutput = path.join(parent, "rejected-index");
   assert.throws(
     () => indexControlReviews(path.join(parent, "templates"), rejectedOutput, fixture),
-    /must be reviewed|must be an array|must be an object/,
+    /must be reviewed|must be an array|must be an object|must exactly cover the fixed registry/,
   );
   assert.equal(fs.existsSync(rejectedOutput), false);
 
@@ -439,7 +471,7 @@ function reviewFixture() {
     bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows) },
     program_profiles: gatePolicy.programProfiles,
     integration_products: fixtureIntegrationProducts(inventory),
-    module_composition_baseline: null,
+    module_composition_baseline: fixtureModuleCompositionBaseline(),
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     target_policy: fixtureTargetPolicy([{
