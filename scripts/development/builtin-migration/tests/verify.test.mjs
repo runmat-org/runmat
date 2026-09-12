@@ -59,7 +59,7 @@ test("a passing product gate is rejected below either reviewed storage pause wat
   const input = evidence();
   const low = structuredClone(input.loadedGates);
   low[0].value.storage_admission.volumes[0].available_bytes = 0;
-  low[0].value.storage_admission.volumes[0].status = "paused";
+  low[0].value.storage_admission.volumes[0].status = "rejected";
   low[0].reference.digest = evidenceDigest(low[0].value);
   const manifest = structuredClone(input.manifest);
   manifest.gate_results[0].digest = low[0].reference.digest;

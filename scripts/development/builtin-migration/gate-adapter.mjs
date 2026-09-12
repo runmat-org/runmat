@@ -1,6 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +14,7 @@ import { buildInventoryDeltaProof, inventoryDeltaChecks } from "./inventory-delt
 import { parseExampleGateProof } from "./example-gate.mjs";
 import { absolutePath, exact } from "./schema.mjs";
 import { sourceFieldBaselineSource } from "./source-fields.mjs";
+import { prepareGateStorage } from "./storage-admission.mjs";
 
 const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // The reviewed control owns the complete command. Callers select only a bundle
@@ -37,8 +37,18 @@ export function runGateProducer(input) {
   const executable = resolveExecutable(command.executable);
   const executableDigest = contentDigest(fs.readFileSync(executable));
   if (executableDigest !== command.executableDigest) throw new Error(`${input.gate}: executable bytes differ from the reviewed platform plan`);
+  const storage = prepareGateStorage(
+    control.value.storage_policy,
+    subject.compiled_inventory.build,
+    repository,
+    plannedArtifactOutputs(plan, input.inputs),
+    { control_digest: control.digest, bundle_id: bundle.id, artifact_id: input.artifact_id },
+  );
   const processResult = spawnSync(executable, command.arguments, {
-    cwd: repository, encoding: "utf8", env: process.env, maxBuffer: 128 * 1024 * 1024,
+    cwd: repository,
+    encoding: "utf8",
+    env: { ...process.env, ...storage.environment },
+    maxBuffer: 128 * 1024 * 1024,
   });
   if (processResult.error) throw new Error(`${input.gate}: could not execute producer: ${processResult.error.message}`);
   const stdout = processResult.stdout ?? "";
@@ -64,16 +74,16 @@ export function runGateProducer(input) {
     execution_targets: control.executionTargets, repository,
   };
   return parseGateResult({
-    schema_version: 3, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 4, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: GATE_PRODUCERS[input.gate],
     producer_evidence: {
-      schema_version: 1, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
+      schema_version: 2, kind: `${GATE_PRODUCERS[input.gate]}-evidence`,
       contract: {
         reviewed_source_revision: baseline.source.revision,
         executable_digest: executableDigest,
         producer_source_digest: command.sourceDigest,
       },
-      invocation: { executable, arguments: command.arguments, cwd: repository },
+      invocation: { executable, arguments: command.arguments, cwd: repository, environment: storage.environment },
       process: processEvidence, captured_process_digest: evidenceDigest(processEvidence),
     },
     artifact_id: input.artifact_id, produced_at: new Date().toISOString(),
@@ -85,8 +95,16 @@ export function runGateProducer(input) {
     baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest,
     bundle_id: bundle.id, identities, gate: input.gate, result, checks, artifacts,
-    storage_admission: observeStorage(control.value.storage_policy, subject.compiled_inventory.build),
+    storage_admission: storage.admission,
   }, expected);
+}
+
+function plannedArtifactOutputs(plan, inputs) {
+  if (plan.expected_artifact_roles.length === 0) return [];
+  if (plan.expected_artifact_roles.length !== 1 || typeof inputs?.artifact_output !== "string") {
+    throw new Error(`${plan.gate}: reviewed artifact output is required before storage admission`);
+  }
+  return [{ role: plan.expected_artifact_roles[0], output: inputs.artifact_output }];
 }
 
 function commandFor(plan, repository, baselineInventory, subjectBuild) {
@@ -281,23 +299,6 @@ function primaryChecks(gate, identities, passed) {
 function resolveExecutable(name) {
   if (path.isAbsolute(name)) return name;
   return execFileSync("/usr/bin/which", [name], { encoding: "utf8" }).trim();
-}
-
-function observeStorage(policy, build) {
-  const observedAt = new Date().toISOString();
-  const executionHost = os.hostname();
-  const matches = Object.entries(policy.host_profiles).filter(([, profile]) => profile.operating_system === build.operating_system
-    && profile.architecture === build.architecture && profile.execution_host === executionHost);
-  if (matches.length !== 1) throw new Error(`storage policy must select exactly one profile for ${build.operating_system}/${build.architecture}/${executionHost}`);
-  const [profileId, profile] = matches[0];
-  const volumes = [profile.volume_roles.source_worktree, profile.volume_roles.target_temp].map((configured) => {
-    const stats = fs.statSync(configured.mount_path, { bigint: true });
-    const space = fs.statfsSync(configured.mount_path, { bigint: true });
-    const filesystemId = process.platform === "win32" ? `windows-volume:${stats.dev.toString(16).padStart(8, "0")}` : `posix-dev:${stats.dev}`;
-    const availableBytes = Number(space.bavail * space.bsize);
-    return { role: configured.role, evidence_path: configured.mount_path, filesystem_id: filesystemId, available_bytes: availableBytes, minimum_free_bytes: configured.minimum_free_bytes, pause_below_bytes: configured.pause_below_bytes, status: availableBytes >= configured.pause_below_bytes ? "admitted" : "paused" };
-  });
-  return { profile_id: profileId, execution_host: executionHost, observed_at: observedAt, volumes };
 }
 
 function canonicalPotentialPath(target) {

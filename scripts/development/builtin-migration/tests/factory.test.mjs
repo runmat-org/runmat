@@ -27,6 +27,7 @@ import { prepareIdentity } from "../prepare.mjs";
 import { buildQueue } from "../queue.mjs";
 import { sourceSnapshot } from "../snapshot.mjs";
 import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceFieldBaselineSource } from "../source-fields.mjs";
+import { prepareGateStorage, storageStatus } from "../storage-admission.mjs";
 import { composeTopologyCandidate } from "../topology/compose.mjs";
 import { candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } from "../topology/freeze.mjs";
 import { fullTopologyChainFixture } from "../topology/tests/full-chain-fixture.mjs";
@@ -814,6 +815,23 @@ test("gate evidence binds the subject execution target through production and la
   assert.throws(() => parseGateResult(stale, expected), /time bound/);
   const filesystem = gate(fixture, "architecture"); filesystem.storage_admission.volumes[0].filesystem_id = "posix-dev:3";
   assert.throws(() => parseGateResult(filesystem, expected), /differs from reviewed/);
+  const repositoryVolume = gate(fixture, "architecture");
+  repositoryVolume.storage_admission.path_bindings.repository.filesystem_id = "posix-dev:2";
+  assert.throws(() => parseGateResult(repositoryVolume, expected), /source-worktree volume/);
+  const targetVolume = gate(fixture, "architecture");
+  targetVolume.storage_admission.path_bindings.cargo_target.filesystem_id = "posix-dev:1";
+  assert.throws(() => parseGateResult(targetVolume, expected), /target-temp volume/);
+  const environment = gate(fixture, "architecture");
+  environment.producer_evidence.invocation.environment.CARGO_TARGET_DIR = "/private/tmp/unreviewed-target";
+  assert.throws(() => parseGateResult(environment, expected), /environment differs/);
+  const paused = gate(fixture, "architecture");
+  paused.storage_admission.volumes[0].available_bytes = 1;
+  paused.storage_admission.volumes[0].status = "paused";
+  assert.throws(() => parseGateResult(paused, expected), /cannot pass below/);
+  const rejected = gate(fixture, "architecture");
+  rejected.storage_admission.volumes[0].available_bytes = 0;
+  rejected.storage_admission.volumes[0].status = "rejected";
+  assert.throws(() => parseGateResult(rejected, expected), /cannot pass below/);
   const foreignPolicy = structuredClone(fixture.control.value.storage_policy);
   foreignPolicy.host_profiles["linux-host"] = {
     operating_system: "linux", architecture: "x86_64", execution_host: "linux-builder",
@@ -868,15 +886,65 @@ test("gate evidence binds the subject execution target through production and la
   const forged = gate(fixture, "architecture"); forged.producer_evidence.process.exit_code = 1;
   assert.throws(() => parseGateResult(forged, expected), /conflicts|inconsistent/);
   const artifactExpected = { ...expected, gate_plans: fixture.control.bundles.get(fixture.bundleId).gate_plans, compiled_build: fixture.inventory.compiled_inventory.build, repository: fixture.repository };
-  const missing = gate(fixture, "catalog-contract"); missing.artifacts = [];
+  const missing = gate(fixture, "catalog-contract");
+  missing.artifacts = [];
+  missing.storage_admission.path_bindings.artifacts = [];
   assert.throws(() => parseGateResult(missing, artifactExpected), /does not cover the reviewed artifact roles/);
   const unreviewed = gate(fixture, "architecture");
   const unreviewedPath = path.join(fixture.repository, "..", "unreviewed-artifact.json");
   const unreviewedBytes = Buffer.from("{}\n"); fs.writeFileSync(unreviewedPath, unreviewedBytes);
   unreviewed.artifacts.push({ role: "invented", path: unreviewedPath, byte_length: unreviewedBytes.length, content_digest: contentDigest(unreviewedBytes) });
+  unreviewed.storage_admission.path_bindings.artifacts.push({ role: "invented", path: unreviewedPath, filesystem_id: "posix-dev:2" });
   assert.throws(() => parseGateResult(unreviewed, artifactExpected), /unreviewed artifact role/);
   const tampered = gate(fixture, "runtime-binding"); fs.appendFileSync(tampered.artifacts[0].path, "tamper");
   assert.throws(() => parseGateResult(tampered, artifactExpected), /artifact bytes differ/);
+});
+
+test("storage admission binds the real repository, build, temporary, and artifact paths before execution", () => {
+  const repository = repositoryFixture();
+  const targetRoot = path.join(path.dirname(repository), "target-volume");
+  fs.mkdirSync(targetRoot);
+  const stats = fs.statSync(repository, { bigint: true });
+  const filesystemId = process.platform === "win32"
+    ? `windows-volume:${stats.dev.toString(16).padStart(8, "0")}`
+    : `posix-dev:${stats.dev}`;
+  const volume = (role, mountPath) => ({
+    role,
+    mount_path: fs.realpathSync(mountPath),
+    filesystem_id: filesystemId,
+    minimum_free_bytes: 1,
+    pause_below_bytes: 2,
+    maximum_observation_age_seconds: 60,
+  });
+  const policy = { host_profiles: { fixture: {
+    operating_system: "fixture-os",
+    architecture: "fixture-arch",
+    execution_host: os.hostname(),
+    volume_roles: {
+      source_worktree: volume("source-worktree", repository),
+      target_temp: volume("target-temp", targetRoot),
+    },
+  } } };
+  const artifactOutput = path.join(targetRoot, "evidence", "architecture.json");
+  const prepared = prepareGateStorage(
+    policy,
+    { operating_system: "fixture-os", architecture: "fixture-arch" },
+    repository,
+    [{ role: "architecture-proof", output: artifactOutput }],
+    { control_digest: `sha256:${"a".repeat(64)}`, bundle_id: "fixture-bundle", artifact_id: "fixture-artifact" },
+  );
+  assert.equal(prepared.admission.path_bindings.repository.path, fs.realpathSync(repository));
+  assert.equal(
+    prepared.admission.path_bindings.artifacts[0].path,
+    path.join(fs.realpathSync(targetRoot), "evidence", "architecture.json"),
+  );
+  assert.equal(prepared.environment.CARGO_TARGET_DIR, prepared.admission.path_bindings.cargo_target.path);
+  assert.equal(prepared.environment.TMPDIR, prepared.admission.path_bindings.temporary.path);
+  assert.ok(fs.statSync(prepared.environment.CARGO_TARGET_DIR).isDirectory());
+  assert.ok(fs.statSync(prepared.environment.TMPDIR).isDirectory());
+  assert.equal(storageStatus(0, 1, 2), "rejected");
+  assert.equal(storageStatus(1, 1, 2), "paused");
+  assert.equal(storageStatus(2, 1, 2), "admitted");
 });
 
 test("queue is derived by bundle and carries prerequisite, scope, and maturity facts", () => {

@@ -333,9 +333,16 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
   const plan = fixture.control.bundles.get(fixture.bundleId).gate_plans.get(name);
   const sourceDigest = plan.program.kind === "repository_script" ? plan.program.content_digest : plan.program.manifest_digest;
   const executableDigest = plan.program.approved_executables[0].content_digest;
+  const repository = fs.realpathSync(fixture.repository);
+  const environment = {
+    CARGO_TARGET_DIR: "/private/tmp/runmat-integration-tmp/cargo-target",
+    TMPDIR: "/private/tmp/runmat-integration-tmp/tmp",
+    TMP: "/private/tmp/runmat-integration-tmp/tmp",
+    TEMP: "/private/tmp/runmat-integration-tmp/tmp",
+  };
   const invocation = plan.program.kind === "repository_script"
-    ? { executable: process.execPath, arguments: [path.join(fixture.repository, plan.program.path), ...plan.arguments], cwd: fixture.repository }
-    : { executable: execFileSync("/usr/bin/which", ["cargo"], { encoding: "utf8" }).trim(), arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments], cwd: fixture.repository };
+    ? { executable: process.execPath, arguments: [path.join(repository, plan.program.path), ...plan.arguments], cwd: repository, environment }
+    : { executable: execFileSync("/usr/bin/which", ["cargo"], { encoding: "utf8" }).trim(), arguments: ["run", "--quiet", "-p", plan.program.package, "--bin", plan.program.binary, "--", ...plan.arguments], cwd: repository, environment };
   const processEvidence = { exit_code: 0, signal: null, stdout_digest: `sha256:${"c".repeat(64)}`, stderr_digest: `sha256:${"d".repeat(64)}` };
   const artifacts = plan.expected_artifact_roles.map((role) => {
     const artifactPath = path.join(fixture.repository, "..", `${artifactId}-${role}.json`);
@@ -344,14 +351,19 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 3, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
-    producer: namedProducer, producer_evidence: { schema_version: 1, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
+    schema_version: 4, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    producer: namedProducer, producer_evidence: { schema_version: 2, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, executable_digest: executableDigest, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
     execution_target: { operating_system: subject.compiled_inventory.build.operating_system, architecture: subject.compiled_inventory.build.architecture },
     source_revision: subject.source.revision,
     source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
     control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: [fixture.id],
     gate: name, result: "pass", checks: [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
-    storage_admission: { profile_id: "fixture-host", execution_host: os.hostname(), observed_at: "2026-09-11T00:00:00.000Z", volumes: [
+    storage_admission: { profile_id: "fixture-host", execution_host: os.hostname(), observed_at: "2026-09-11T00:00:00.000Z", path_bindings: {
+      repository: { role: "repository", path: repository, filesystem_id: "posix-dev:1" },
+      cargo_target: { role: "cargo-target", path: environment.CARGO_TARGET_DIR, filesystem_id: "posix-dev:2" },
+      temporary: { role: "temporary", path: environment.TMPDIR, filesystem_id: "posix-dev:2" },
+      artifacts: artifacts.map((entry) => ({ role: entry.role, path: entry.path, filesystem_id: "posix-dev:2" })),
+    }, volumes: [
       { role: "source-worktree", evidence_path: "/System/Volumes/Data", filesystem_id: "posix-dev:1", available_bytes: 10, minimum_free_bytes: 1, pause_below_bytes: 2, status: "admitted" },
       { role: "target-temp", evidence_path: "/private/tmp/runmat-integration-tmp", filesystem_id: "posix-dev:2", available_bytes: 10, minimum_free_bytes: 1, pause_below_bytes: 2, status: "admitted" },
     ] },
