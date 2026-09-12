@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { auditMigration, parseBatch } from "../audit.mjs";
@@ -13,6 +12,7 @@ import { buildQueue } from "../queue.mjs";
 import { parseCompletedSourceDisposition, sourceFieldBaselineDigest, sourceFieldBaselineSource } from "../source-fields.mjs";
 import { cleanupRepositoryFixtures, controlledFixture, gate, REVISION } from "./helpers.mjs";
 import { reviewed } from "./factory-workflow-fixture.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
@@ -81,7 +81,7 @@ test("lease issuance derives immutable scopes from a reviewed request and contro
 
 test("prepare v3 is source-neutral and inventories every legacy JSON leaf", () => {
   const fixture = controlledFixture({ sidecar: true });
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const output = createTemporaryDirectory("runmat-review-");
   const result = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   assert.equal(result.schema_version, 3);
   assert.equal(result.source_changes, false);
@@ -94,7 +94,7 @@ test("prepare v3 is source-neutral and inventories every legacy JSON leaf", () =
 
 test("completed field dispositions require exact prepared leaves and review evidence", () => {
   const fixture = controlledFixture({ sidecar: true });
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const output = createTemporaryDirectory("runmat-review-");
   const result = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   const checklist = JSON.parse(fs.readFileSync(path.join(result.workspace, "source-field-disposition.json")));
   checklist.review = { status: "reviewed", evidence: ["review"] };
@@ -106,7 +106,7 @@ test("completed field dispositions require exact prepared leaves and review evid
 
 test("audit v7 cannot pass on file presence or example tokens without exact gate evidence", () => {
   const fixture = controlledFixture();
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const output = createTemporaryDirectory("runmat-review-");
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   const batch = { schema_version: 1, kind: "runmat-builtin-migration-batch", identities: ["foo"] };
   const absent = auditMigration(fixture.repository, fixture.inventory, fixture.inventory, fixture.inventory, fixture.control, fixture.lease, batch, { artifact_id: "audit-foo", authored_revision: fixture.inventory.source.revision, prepare_results: [prepared], source_dispositions: [], gate_results: [] });
@@ -124,7 +124,7 @@ test("audit v7 cannot pass on file presence or example tokens without exact gate
 
 test("source-field destinations require value-digest reconciliation from the documentation producer", () => {
   const fixture = controlledFixture({ sidecar: true });
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const output = createTemporaryDirectory("runmat-review-");
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   const disposition = JSON.parse(fs.readFileSync(path.join(prepared.workspace, "source-field-disposition.json")));
   disposition.review = { status: "reviewed", evidence: ["review"] };

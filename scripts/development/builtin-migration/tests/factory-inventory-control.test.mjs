@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { auditMigration } from "../audit.mjs";
@@ -27,6 +26,7 @@ import {
 import {
   parseFixtureControl, resealEvidence, reviewed, runtimeConstant, setRegistrationManifest,
 } from "./factory-workflow-fixture.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
@@ -86,7 +86,7 @@ test("source dirty evidence is scoped to the frozen inventory roots", () => {
 
 test("baseline prepare evidence and subject gate evidence retain distinct provenance", () => {
   const fixture = controlledFixture();
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-review-"));
+  const output = createTemporaryDirectory("runmat-review-");
   const prepared = prepareIdentity(fixture.repository, fixture.inventory, fixture.control, fixture.lease, "foo", output);
   const runtimePath = "crates/runmat-runtime/src/builtins/math/basic/foo.rs";
   fs.appendFileSync(path.join(fixture.repository, runtimePath), "\n// migrated subject\n");
@@ -393,7 +393,7 @@ test("control overlay cannot restate topology-owned bundle or identity facts", (
 test("validated controls remain bound to their exact baseline and subject target", () => {
   const fixture = controlledFixture();
   const foreign = controlledFixture({ identity: "bar" });
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-binding-"));
+  const output = createTemporaryDirectory("runmat-control-binding-");
   assert.throws(() => buildQueue(foreign.inventory, fixture.control), /control baseline/);
   assert.throws(
     () => prepareIdentity(fixture.repository, foreign.inventory, fixture.control, fixture.lease, fixture.id, output),
@@ -485,7 +485,7 @@ test("subject admission accepts reviewed cross-platform targets and rechecks eve
 
 test("migration operations require the exact validated authored lease", () => {
   const fixture = controlledFixture();
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-lease-binding-"));
+  const output = createTemporaryDirectory("runmat-lease-binding-");
   const forgedLease = {
     value: fixture.lease.value,
     bundle: fixture.lease.bundle,
@@ -840,7 +840,7 @@ test("reviewed target disposition may replace an existing catalog authority", ()
 
 test("compile-dispositions CLI expands only a baseline-bound reviewed input", () => {
   const fixture = controlledFixture();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-disposition-review-"));
+  const directory = createTemporaryDirectory("runmat-disposition-review-");
   const inventoryPath = path.join(directory, "inventory.json");
   const reviewPath = path.join(directory, "review.json");
   const outputPath = path.join(directory, "dispositions.json");

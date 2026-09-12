@@ -18,6 +18,7 @@ import {
   cleanFactoryCliRepository, copyReviewSetAsAuthoringFiles, parseFixtureControl,
   resealEvidence, reviewed, writeFullControlWorkflow,
 } from "./factory-workflow-fixture.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 test.afterEach(cleanupRepositoryFixtures);
 
@@ -116,7 +117,7 @@ test("inventory delta proof admits only the reviewed bundle authority and path t
 
 test("validate-control CLI requires the full reproducible topology chain", () => {
   const fixture = controlledFixture();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-cli-"));
+  const directory = createTemporaryDirectory("runmat-control-cli-");
   const controlPath = path.join(directory, "control.json");
   const inventoryPath = path.join(directory, "inventory.json");
   fs.writeFileSync(controlPath, JSON.stringify(fixture.controlValue));
@@ -136,7 +137,7 @@ test("validate-control CLI requires the full reproducible topology chain", () =>
 
 test("control draft CLI remains separate while control freeze requires reviewed topology", () => {
   const fixture = controlledFixture();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-control-workflow-"));
+  const directory = createTemporaryDirectory("runmat-control-workflow-");
   const inventoryPath = path.join(directory, "inventory.json");
   const draftPath = path.join(directory, "draft.json");
   const reviewedPath = path.join(directory, "reviewed.json");
@@ -153,7 +154,7 @@ test("control draft CLI remains separate while control freeze requires reviewed 
 });
 
 test("control CLI reconstructs the complete reviewed topology chain before freeze, validation, and lease issuance", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "runmat-full-control-workflow-"));
+  const directory = createTemporaryDirectory("runmat-full-control-workflow-");
   const cliRepository = cleanFactoryCliRepository();
   const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: cliRepository,

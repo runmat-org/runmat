@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 
 import { auditMigration } from "../audit.mjs";
@@ -15,6 +12,7 @@ import { sealBundle } from "../seal.mjs";
 import {
   cleanupRepositoryFixtures, controlledFixture, gate,
 } from "./helpers.mjs";
+import { createTemporaryDirectory } from "./temporary-directories.mjs";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
@@ -71,7 +69,7 @@ test("live prepare, gate, audit, phase capture, and seal reject an expired lease
   const fixture = controlledFixture();
   const expired = parseLease(historicalLease(fixture), fixture.control, fixture.repository);
   const clock = () => Date.parse("2026-09-12T00:00:00.000Z");
-  const output = fs.mkdtempSync(path.join(os.tmpdir(), "expired-lease-"));
+  const output = createTemporaryDirectory("expired-lease-");
   assert.throws(() => prepareIdentity(
     fixture.repository, fixture.inventory, fixture.control, expired, "foo", output, clock,
   ), /has expired/);
