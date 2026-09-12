@@ -367,12 +367,19 @@ const declaredCatalogDomains = [...catalogEntriesRoot.matchAll(/^(?:pub\(in\s+cr
   .map((match) => match[1])
   .sort();
 const registeredCatalogDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_entries\(entries\);$/gm)]
-  .map((match) => match[1])
-  .sort();
-if (declaredCatalogDomains.join("\n") !== registeredCatalogDomains.join("\n")) {
+  .map((match) => match[1]);
+const registeredConstantDomains = [...catalogEntriesRoot.matchAll(/^\s+([a-z][a-z0-9_]*)::extend_constants\(values\);$/gm)]
+  .map((match) => match[1]);
+const duplicateCatalogDomains = [...new Set([
+  ...registeredCatalogDomains.filter((domain, index, domains) => domains.indexOf(domain) !== index),
+  ...registeredConstantDomains.filter((domain, index, domains) => domains.indexOf(domain) !== index),
+])].sort();
+const composedCatalogDomains = [...new Set([...registeredCatalogDomains, ...registeredConstantDomains])].sort();
+if (duplicateCatalogDomains.length > 0 || declaredCatalogDomains.join("\n") !== composedCatalogDomains.join("\n")) {
   fail(
-    `${catalogEntriesRootPath} must register every declared domain exactly once; ` +
-    `declared=${declaredCatalogDomains.join(",")}, registered=${registeredCatalogDomains.join(",")}`
+    `${catalogEntriesRootPath} must compose every declared domain through entries, constants, or both; ` +
+    `declared=${declaredCatalogDomains.join(",")}, composed=${composedCatalogDomains.join(",")}, ` +
+    `duplicates=${duplicateCatalogDomains.join(",")}`
   );
 }
 
