@@ -1,22 +1,45 @@
 import { compareCodePoint } from "./constants.mjs";
 import { evidenceDigest } from "./evidence.mjs";
+import { parseMigrationPhases } from "./integration-phases.mjs";
+import {
+  validateAcceptedSealSet, validateBarrierSealSet,
+} from "./seal-set-schema.mjs";
 import { array, digest, enumValue, exact, integer, kind, nonempty, repositoryPath, sourceRevision, stableId, uniqueStrings, SAFE_IDENTITY } from "./schema.mjs";
 
 export function parseVerificationManifest(value) {
-  kind(value, 3, "runmat-builtin-migration-verification-manifest", "verification manifest");
+  kind(value, 6, "runmat-builtin-migration-verification-manifest", "verification manifest");
   exact(value, ["schema_version", "kind", "authority", "batch", "audit", "gate_results", "expectations"], "verification manifest");
   if (value.authority !== "reviewed-verification-request") throw new Error("verification manifest has invalid authority");
-  exact(value.batch, ["artifact_id", "source_revision", "source_digest", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "identities"], "verification batch");
+  exact(value.batch, ["artifact_id", "source_revision", "source_digest", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "identities", "phases"], "verification batch");
   const identities = uniqueStrings(value.batch.identities, "verification identities", { pattern: SAFE_IDENTITY, lower: true }).sort(compareCodePoint);
+  const accepted = validateAcceptedSealSet(
+    value.batch.control_manifest_digest, value.batch.accepted_seals,
+    value.batch.accepted_seal_set_digest, "verification accepted seals",
+  );
+  const barriers = validateBarrierSealSet(
+    value.batch.control_manifest_digest, value.batch.bundle_id, value.batch.barrier_seals,
+    value.batch.barrier_seal_set_digest, "verification barrier seals",
+  );
   const batch = {
     artifact_id: stableId(value.batch.artifact_id, "verification artifact id"),
     source_revision: sourceRevision(value.batch.source_revision, "verification source revision"),
     source_digest: digest(value.batch.source_digest, "verification source digest"),
-    baseline_inventory_digest: digest(value.batch.baseline_inventory_digest, "verification baseline inventory digest"),
+    control_baseline_inventory_digest: digest(value.batch.control_baseline_inventory_digest, "verification control baseline inventory digest"),
+    lease_base_inventory_digest: digest(value.batch.lease_base_inventory_digest, "verification lease base inventory digest"),
     subject_inventory_digest: digest(value.batch.subject_inventory_digest, "verification subject inventory digest"),
     control_manifest_digest: digest(value.batch.control_manifest_digest, "verification control digest"),
-    bundle_id: stableId(value.batch.bundle_id, "verification bundle id"), identities,
+    bundle_id: stableId(value.batch.bundle_id, "verification bundle id"),
+    lease_id: stableId(value.batch.lease_id, "verification lease id"),
+    lease_digest: digest(value.batch.lease_digest, "verification lease digest"), identities,
+    accepted_seals: accepted.seals,
+    accepted_seal_set_digest: digest(value.batch.accepted_seal_set_digest, "verification accepted seal-set digest"),
+    barrier_seals: barriers.seals,
+    barrier_seal_set_digest: digest(value.batch.barrier_seal_set_digest, "verification barrier seal-set digest"),
+    phases: parseMigrationPhases(value.batch.phases),
   };
+  if (batch.source_revision !== batch.phases.integrated_revision) {
+    throw new Error("verification source revision differs from its integrated phase revision");
+  }
   const audit = parseReference(value.audit, "audit reference");
   const gates = array(value.gate_results, "gate references").map((entry) => parseReference(entry, "gate reference"));
   if (!gates.length || new Set(gates.map((entry) => entry.artifact_id)).size !== gates.length) throw new Error("gate references must be nonempty and unique");
@@ -26,15 +49,26 @@ export function parseVerificationManifest(value) {
 }
 
 export function validateAudit(value, batch) {
-  kind(value, 4, "runmat-builtin-migration-audit", "migration audit");
-  exact(value, ["schema_version", "kind", "authority", "artifact_id", "source", "baseline_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "requested_identities", "evidence", "summary", "result", "global_failures", "identities"], "migration audit");
+  kind(value, 7, "runmat-builtin-migration-audit", "migration audit");
+  exact(value, ["schema_version", "kind", "authority", "artifact_id", "source", "control_baseline_inventory_digest", "lease_base_inventory_digest", "subject_inventory_digest", "control_manifest_digest", "bundle_id", "lease_id", "lease_digest", "accepted_seals", "accepted_seal_set_digest", "barrier_seals", "barrier_seal_set_digest", "phases", "requested_identities", "evidence", "summary", "result", "global_failures", "identities"], "migration audit");
   if (value.authority !== "development-verification-evidence-only") throw new Error("migration audit has invalid authority");
   stableId(value.artifact_id, "migration audit artifact id");
-  digest(value.baseline_inventory_digest, "migration audit baseline inventory digest");
+  digest(value.control_baseline_inventory_digest, "migration audit control baseline inventory digest");
+  digest(value.lease_base_inventory_digest, "migration audit lease base inventory digest");
   digest(value.subject_inventory_digest, "migration audit subject inventory digest");
   digest(value.control_manifest_digest, "migration audit control digest");
   stableId(value.bundle_id, "migration audit bundle id");
   stableId(value.lease_id, "migration audit lease id");
+  digest(value.lease_digest, "migration audit lease digest");
+  validateAcceptedSealSet(
+    value.control_manifest_digest, value.accepted_seals, value.accepted_seal_set_digest,
+    "migration audit accepted seals",
+  );
+  validateBarrierSealSet(
+    value.control_manifest_digest, value.bundle_id, value.barrier_seals,
+    value.barrier_seal_set_digest, "migration audit barrier seals",
+  );
+  const phases = parseMigrationPhases(value.phases);
   exact(value.source, ["revision", "dirty", "roots", "files", "digest"], "migration audit source");
   sourceRevision(value.source.revision, "migration audit source revision"); digest(value.source.digest, "migration audit source digest");
   if (![true, false, null].includes(value.source.dirty)) throw new Error("migration audit source dirty must be boolean or null");
@@ -66,7 +100,7 @@ export function validateAudit(value, batch) {
   const failed = value.identities.filter((entry) => entry.result === "fail").length;
   const expectedResult = failed === 0 && value.global_failures.length === 0 ? "pass" : "fail";
   if (value.summary.identities !== value.identities.length || value.summary.passed !== value.identities.length - failed || value.summary.failed !== failed || value.summary.global_failures !== value.global_failures.length || value.result !== expectedResult) throw new Error("migration audit result or summary is inconsistent");
-  if (value.artifact_id !== batch.audit_artifact_id || value.source.revision !== batch.source_revision || value.source.digest !== batch.source_digest || value.baseline_inventory_digest !== batch.baseline_inventory_digest || value.subject_inventory_digest !== batch.subject_inventory_digest || value.control_manifest_digest !== batch.control_manifest_digest || value.bundle_id !== batch.bundle_id) throw new Error("migration audit provenance is stale or mismatched");
+  if (value.artifact_id !== batch.audit_artifact_id || value.source.revision !== batch.source_revision || value.source.digest !== batch.source_digest || value.control_baseline_inventory_digest !== batch.control_baseline_inventory_digest || value.lease_base_inventory_digest !== batch.lease_base_inventory_digest || value.subject_inventory_digest !== batch.subject_inventory_digest || value.control_manifest_digest !== batch.control_manifest_digest || value.bundle_id !== batch.bundle_id || value.lease_id !== batch.lease_id || value.lease_digest !== batch.lease_digest || JSON.stringify(value.accepted_seals) !== JSON.stringify(batch.accepted_seals) || value.accepted_seal_set_digest !== batch.accepted_seal_set_digest || JSON.stringify(value.barrier_seals) !== JSON.stringify(batch.barrier_seals) || value.barrier_seal_set_digest !== batch.barrier_seal_set_digest || JSON.stringify(phases) !== JSON.stringify(batch.phases)) throw new Error("migration audit provenance is stale or mismatched");
   if (JSON.stringify(value.requested_identities) !== JSON.stringify(batch.identities)) throw new Error("migration audit identities differ from verification batch");
   if (value.result !== "pass" || value.global_failures.length || value.identities.some((entry) => entry.result !== "pass")) throw new Error("migration audit is not passing");
   return value;

@@ -1,48 +1,75 @@
-import fs from "node:fs";
-import path from "node:path";
+import { subjectAuthorityPathFailures } from "./authority-paths.mjs";
 import { compareCodePoint, sorted } from "./constants.mjs";
 import { assertControlBaseline, assertControlSubject } from "./control.mjs";
 import { evidenceDigest } from "./evidence.mjs";
 import { parseGateResult } from "./gate-result.mjs";
 import { requiredGateNames } from "./gate-requirements.mjs";
-import { assertValidatedLease, validateLeaseDiff } from "./lease.mjs";
+import { captureMigrationPhases } from "./integration-phases.mjs";
+import { finalIdentityAuthorityFailures } from "./inventory-delta.mjs";
+import { assertLeaseBaseInventory } from "./lease.mjs";
 import { parsePrepareResult } from "./prepare.mjs";
 import { SAFE_IDENTITY, exact, kind, stableId, uniqueStrings } from "./schema.mjs";
 import { parseCompletedSourceDisposition } from "./source-fields.mjs";
 
-export function auditMigration(repository, baseline, subject, control, lease, batchValue, evidence) {
-  assertControlBaseline(control, baseline);
+export function auditMigration(
+  repository, controlBaseline, leaseBase, subject, control, lease, batchValue, evidence,
+  clock = Date.now,
+) {
+  assertControlBaseline(control, controlBaseline);
+  assertLeaseBaseInventory(lease, control, leaseBase);
   assertControlSubject(control, subject);
-  assertValidatedLease(lease, control);
   stableId(evidence.artifact_id, "audit artifact id");
   const requested = parseBatch(batchValue);
   const bundle = lease.bundle;
   const failures = [];
-  if (subject.source.dirty !== false) failures.push(issue("subject-source-not-clean", "audit subject must be a clean committed source snapshot"));
+  const phases = captureMigrationPhases(
+    repository, lease, control, subject, evidence.authored_revision, clock,
+  );
   if (JSON.stringify(requested) !== JSON.stringify(sorted(bundle.identities))) failures.push(issue("partial-bundle", "audit batch must cover the complete reviewed bundle"));
-  try { validateLeaseDiff(lease, control, evidence.changed_paths ?? []); } catch (error) { failures.push(issue("lease-violation", error.message)); }
+  failures.push(...subjectAuthorityPathFailures(control, subject, [bundle.id])
+    .map((failure) => issue("authority-path", failure)));
+  const prepares = indexPrepare(evidence.prepare_results ?? [], leaseBase, control, lease, requested, failures);
+  const dispositions = indexDispositions(evidence.source_dispositions ?? [], prepares, requested, failures);
   const expected = {
     source_revision: subject.source.revision, source_digest: subject.source.digest,
-    baseline_source_revision: baseline.source.revision,
-    baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
+    control_baseline_source_revision: controlBaseline.source.revision,
+    control_baseline_inventory_digest: controlBaseline.digest,
+    lease_base_inventory_digest: leaseBase.digest,
+    subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest, bundle_id: bundle.id,
+    lease_id: lease.value.lease_id,
+    lease_digest: lease.value.digest,
     storage_policy: control.value.storage_policy,
     source_files: subject.source.files,
     repository, gate_plans: bundle.gate_plans, compiled_build: subject.compiled_inventory.build,
     execution_targets: control.executionTargets,
+    subject_compiled_inventory_digest: subject.compiled_inventory.digest,
+    documentation_source_dispositions: requested.flatMap((identity) => {
+      const prepared = prepares.get(identity);
+      const disposition = dispositions.get(identity);
+      return prepared && disposition
+        ? [{ baseline_digest: prepared.checklist_baseline_digest, value: disposition }]
+        : [];
+    }),
   };
   const gates = parseGates(evidence.gate_results ?? [], expected, requested, failures);
-  const prepares = indexPrepare(evidence.prepare_results ?? [], baseline, control, lease, requested, failures);
-  const dispositions = indexDispositions(evidence.source_dispositions ?? [], prepares, requested, failures);
   const inventoryByIdentity = new Map(subject.identities.map((entry) => [entry.identity, entry]));
   const identities = requested.map((id) => auditIdentity(repository, id, inventoryByIdentity.get(id), control.identities.get(id), gates, prepares, dispositions));
   failures.push(...subject.diagnostics.filter((entry) => entry.severity === "error").map((entry) => issue("inventory-error", `${entry.code}:${entry.path ?? ""}`)));
   const passed = identities.filter((entry) => entry.result === "pass").length;
   return {
-    schema_version: 4, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
+    schema_version: 7, kind: "runmat-builtin-migration-audit", authority: "development-verification-evidence-only",
     artifact_id: evidence.artifact_id, source: subject.source,
-    baseline_inventory_digest: baseline.digest, subject_inventory_digest: subject.digest,
+    control_baseline_inventory_digest: controlBaseline.digest,
+    lease_base_inventory_digest: leaseBase.digest,
+    subject_inventory_digest: subject.digest,
     control_manifest_digest: control.digest, bundle_id: bundle.id, lease_id: lease.value.lease_id,
+    lease_digest: lease.value.digest,
+    accepted_seals: lease.value.accepted_seals,
+    accepted_seal_set_digest: lease.value.accepted_seal_set_digest,
+    barrier_seals: lease.value.barrier_seals,
+    barrier_seal_set_digest: lease.value.barrier_seal_set_digest,
+    phases,
     requested_identities: requested, evidence: {
       gate_artifacts: [...gates.values()].map((entry) => entry.artifact_id).sort(compareCodePoint),
       prepare_digests: [...prepares.values()].map(evidenceDigest).sort(compareCodePoint),
@@ -77,7 +104,7 @@ function indexPrepare(values, baseline, control, lease, requested, failures) {
   const result = new Map();
   for (const raw of values) {
     try {
-      const parsed = parsePrepareResult(raw, { bundle_id: lease.bundle.id, control_manifest_digest: control.digest, lease_id: lease.value.lease_id });
+      const parsed = parsePrepareResult(raw, { bundle_id: lease.bundle.id, control_manifest_digest: control.digest, lease_id: lease.value.lease_id, lease_digest: lease.value.digest });
       if (!requested.includes(parsed.identity)) throw new Error(`${parsed.identity}: prepare result is outside the batch`);
       if (parsed.source.revision !== baseline.source.revision || parsed.source.digest !== baseline.source.digest || parsed.inventory_digest !== baseline.digest) throw new Error(`${parsed.identity}: stale prepare result`);
       if (result.has(parsed.identity)) throw new Error(`${parsed.identity}: duplicate prepare result`);
@@ -110,39 +137,22 @@ function auditIdentity(repository, id, observed, controlled, gates, prepares, di
   if (!controlled) failures.push(issue("identity-not-in-control", id));
   if (!observed || !controlled) return identityResult(id, failures);
   if (observed.unresolved.length) failures.push(issue("unresolved-inventory", observed.unresolved.join(",")));
-  if (observed.disposition.kind !== controlled.disposition.kind) failures.push(issue("disposition-mismatch", `${observed.disposition.kind}:${controlled.disposition.kind}`));
-  if (!observed.spellings.includes(controlled.public_spelling)) failures.push(issue("public-spelling-not-observed", controlled.public_spelling));
+  const expectedDisposition = controlled.public_identity.kind === "primary"
+    ? "canonical" : controlled.public_identity.kind;
+  if (observed.disposition.kind !== expectedDisposition) failures.push(issue("disposition-mismatch", `${observed.disposition.kind}:${expectedDisposition}`));
+  const expectedSpelling = controlled.public_identity.kind === "primary"
+    ? controlled.public_identity.primary_spelling.spelling
+    : controlled.public_identity.kind === "alias"
+      ? controlled.public_identity.alias_spelling.spelling : null;
+  if (expectedSpelling !== null && !observed.spellings.includes(expectedSpelling)) failures.push(issue("public-spelling-not-observed", expectedSpelling));
   if (!prepares.has(id)) failures.push(issue("prepare-result-missing", id));
   const legacySources = observed.ownership.sidecars.length + observed.ownership.runtime_documentation_shadows.length;
   if (legacySources && !dispositions.has(id)) failures.push(issue("source-field-disposition-missing", id));
   if (dispositions.has(id)) verifyDestinations(id, dispositions.get(id), gates, failures);
   for (const gate of requiredGateNames(controlled)) if (!gates.has(gate)) failures.push(issue("required-gate-missing", gate));
-  for (const removal of controlled.expected_removals) verifyRemoval(repository, removal, failures);
-  if (controlled.disposition.kind === "canonical") {
-    const authority = observed.semantic_authority;
-    if (authority.catalog_entries.length !== controlled.expected_authorities.catalog_entry_count) failures.push(issue("catalog-authority-count", `${authority.catalog_entries.length}:${controlled.expected_authorities.catalog_entry_count}`));
-    if (authority.constants.length !== controlled.expected_authorities.catalog_constant_count) failures.push(issue("catalog-constant-authority-count", `${authority.constants.length}:${controlled.expected_authorities.catalog_constant_count}`));
-    const actualConstants = authority.runtime_constants.map((entry) => entry.name).sort(compareCodePoint);
-    const expectedConstants = [...controlled.expected_authorities.runtime_constants].sort(compareCodePoint);
-    if (JSON.stringify(actualConstants) !== JSON.stringify(expectedConstants)) failures.push(issue("runtime-constant-set-mismatch", `${actualConstants.join("|")} != ${expectedConstants.join("|")}`));
-    const actualBindings = authority.implementation_provenance.filter((entry) => entry.authority === "canonical_binding").map((entry) => `${entry.source_file}:${entry.function}:${entry.binding_variant}`).sort(compareCodePoint);
-    const expectedBindings = controlled.expected_authorities.runtime_bindings.map((entry) => `${entry.path}:${entry.function}:${entry.variant}`).sort(compareCodePoint);
-    if (JSON.stringify(actualBindings) !== JSON.stringify(expectedBindings)) failures.push(issue("runtime-binding-set-mismatch", `${actualBindings.join("|")} != ${expectedBindings.join("|")}`));
-    if (observed.ownership.sidecars.length) failures.push(issue("legacy-sidecar-present", observed.ownership.sidecars.join(",")));
-    if (observed.ownership.runtime_documentation_shadows.length) failures.push(issue("runtime-shadow-present", observed.ownership.runtime_documentation_shadows.join(",")));
-    if (observed.dependencies.legacy_resolver_paths.length) failures.push(issue("legacy-resolver-present", observed.dependencies.legacy_resolver_paths.join(",")));
-  } else if (controlled.disposition.kind === "alias") {
-    const target = controlled.disposition.target.toLowerCase();
-    if (!observed.disposition.canonical || observed.disposition.canonical.toLowerCase() !== target) failures.push(issue("alias-target-mismatch", target));
-    if (observed.ownership.catalog_documentation.length + legacySources) failures.push(issue("alias-copied-documentation", id));
-  } else if (observed.semantic_authority.catalog_entries.length || observed.ownership.catalog_documentation.length + observed.ownership.sidecars.length) {
-    failures.push(issue("internal-public-authority-present", id));
-  }
+  failures.push(...finalIdentityAuthorityFailures(id, observed, controlled)
+    .map((failure) => issue("final-authority", failure)));
   return identityResult(id, failures);
-}
-
-function verifyRemoval(repository, removal, failures) {
-  if (fs.existsSync(path.join(repository, removal.path))) failures.push(issue("expected-file-removal-present", removal.path));
 }
 
 function verifyDestinations(identity, disposition, gates, failures) {

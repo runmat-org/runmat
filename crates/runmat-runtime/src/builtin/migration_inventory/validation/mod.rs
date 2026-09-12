@@ -1,8 +1,10 @@
 mod catalog;
 mod constants;
+mod declaration;
 mod identity;
 mod placement;
 mod provenance;
+mod registration_manifest;
 mod runtime;
 
 use std::collections::BTreeSet;
@@ -11,9 +13,13 @@ use runmat_builtins::{builtin_catalog_entries, builtin_functions, validate_built
 
 use super::schema::{
     CatalogProvenanceRecord, FusionSpecRecord, GpuSpecRecord, ImplementationProvenanceRecord,
-    InventoryValidation, InventoryValidationError, MigrationReadiness, RuntimeBindingRecord,
-    RuntimeConstantRecord,
+    InventoryValidation, InventoryValidationError, MigrationReadiness, RegistrationManifestRecord,
+    RuntimeBindingRecord, RuntimeConstantRecord,
 };
+
+pub(super) fn canonical_compiler_source_path(path: &str) -> String {
+    declaration::canonical_compiler_source_path(path)
+}
 
 pub(super) fn validate_inventory(
     catalog_provenance: &[CatalogProvenanceRecord],
@@ -22,6 +28,7 @@ pub(super) fn validate_inventory(
     gpu_specs: &[GpuSpecRecord],
     fusion_specs: &[FusionSpecRecord],
     runtime_constants: &[RuntimeConstantRecord],
+    registration_manifest: &[RegistrationManifestRecord],
 ) -> InventoryValidation {
     let mut errors = validate_builtin_catalog(builtin_catalog_entries())
         .into_iter()
@@ -57,6 +64,14 @@ pub(super) fn validate_inventory(
     );
     placement::validate(&mut findings, gpu_specs, fusion_specs);
     constants::validate(&mut errors, runtime_constants);
+    registration_manifest::validate(
+        &mut errors,
+        registration_manifest,
+        implementation_provenance,
+        runtime_constants,
+        gpu_specs,
+        fusion_specs,
+    );
 
     errors.sort_unstable_by(|left, right| {
         (left.source, &left.identity, &left.message).cmp(&(
@@ -66,10 +81,10 @@ pub(super) fn validate_inventory(
         ))
     });
     findings.sort_unstable_by(|left, right| {
-        (left.code, left.source, &left.identity, &left.message).cmp(&(
+        (left.code, left.source, &left.affected, &left.message).cmp(&(
             right.code,
             right.source,
-            &right.identity,
+            &right.affected,
             &right.message,
         ))
     });

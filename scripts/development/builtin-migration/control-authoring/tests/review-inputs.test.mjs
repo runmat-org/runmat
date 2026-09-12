@@ -5,11 +5,13 @@ import path from "node:path";
 import test, { afterEach } from "node:test";
 
 import { buildControlDraft } from "../../control-draft.mjs";
+import { bundleBaselineEvidence } from "../../baseline-evidence.mjs";
 import { parseControlManifest } from "../../control.mjs";
 import { contentDigest, evidenceDigest } from "../../evidence.mjs";
 import { buildInventory } from "../../inventory.mjs";
 import {
-  REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, repositoryFixture, topologyFixture,
+  REVISION, cleanupRepositoryFixtures, compiledInventoryFixture, fixtureIntegrationProducts,
+  fixtureGatePlans, fixtureTargetPolicy, repositoryFixture, topologyFixture,
 } from "../../tests/helpers.mjs";
 import { parseBundleControlReview } from "../bundle-review.mjs";
 import { validateControlReviewChain } from "../authority.mjs";
@@ -31,8 +33,12 @@ afterEach(() => {
 
 test("bundle and global reviews bind exact scaffold and topology rows", () => {
   const fixture = reviewFixture();
-  const bundle = parseBundleControlReview(fixture.bundleReview, fixture.scaffold, fixture.topology);
-  const global = parseGlobalControlReview(fixture.globalReview, fixture.scaffold, fixture.topology);
+  const bundle = parseBundleControlReview(
+    fixture.bundleReview, fixture.scaffold, fixture.topology, fixture.inventory,
+  );
+  const global = parseGlobalControlReview(
+    fixture.globalReview, fixture.scaffold, fixture.topology, fixture.inventory,
+  );
   assert.equal(bundle.bundleId, fixture.bundleId);
   assert.deepEqual([...bundle.identityControls.keys()], [fixture.id]);
   assert.deepEqual([...global.programProfiles.keys()], [...new Set(fixture.bundleReview.bundle_control.gate_plans.map((entry) => entry.program_profile_id))]);
@@ -41,7 +47,22 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   const drift = structuredClone(fixture.bundleReview);
   drift.bindings.scaffold_bundle_row_digest = `sha256:${"0".repeat(64)}`;
   resign(drift);
-  assert.throws(() => parseBundleControlReview(drift, fixture.scaffold, fixture.topology), /scaffold row digest mismatch/);
+  assert.throws(
+    () => parseBundleControlReview(
+      drift, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /scaffold row digest mismatch/,
+  );
+
+  const proposalDrift = structuredClone(fixture.bundleReview);
+  proposalDrift.bindings.identity_rows[0].authority_proposal_digest = `sha256:${"0".repeat(64)}`;
+  resign(proposalDrift);
+  assert.throws(
+    () => parseBundleControlReview(
+      proposalDrift, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
+    /authority proposal digest mismatch/,
+  );
 
   const uncoveredTarget = structuredClone(fixture.globalReview);
   uncoveredTarget.storage_policy.host_profiles["linux-host"] = {
@@ -54,7 +75,9 @@ test("bundle and global reviews bind exact scaffold and topology rows", () => {
   };
   resign(uncoveredTarget);
   assert.throws(
-    () => parseGlobalControlReview(uncoveredTarget, fixture.scaffold, fixture.topology),
+    () => parseGlobalControlReview(
+      uncoveredTarget, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
     /must exactly cover every reviewed execution target/,
   );
 });
@@ -213,10 +236,13 @@ test("candidate composition rejects cross-row defects before independent attesta
   for (const [label, mutate, message] of [
     ["self prerequisite", (bundle) => { bundle.bundle_control.prerequisites = [{ bundle_id: fixture.bundleId, kind: "semantic" }]; }, /cannot depend on itself/],
     ["scope overlap", (bundle) => {
-      bundle.bundle_control.integration_outputs = [{ product_id: "duplicate-owner", path: `crates/runmat-runtime/src/builtins/math/basic/${fixture.id}.rs`, producer: "integration" }];
+      bundle.bundle_control.additional_authored_write_set.push({
+        kind: "file",
+        path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+      });
     }, /overlaps authored write scope/],
     ["missing required gate", (bundle) => { bundle.bundle_control.gate_plans = bundle.bundle_control.gate_plans.filter((plan) => plan.gate !== "catalog-contract"); }, /required gate catalog-contract/],
-    ["baseline spelling drift", (bundle) => { bundle.identity_controls[fixture.id].public_spelling = "Foo"; }, /public spelling differs/],
+    ["baseline spelling drift", (bundle) => { bundle.identity_controls[fixture.id].public_identity.primary_spelling.spelling = "Foo"; }, /public identity spelling differs/],
   ]) {
     const directory = writeReviewSet(fixture);
     const bundle = readJson(path.join(directory, "bundle.json"));
@@ -244,7 +270,9 @@ test("global review rejects duplicate program authority under different profile 
   );
   resign(duplicate);
   assert.throws(
-    () => parseGlobalControlReview(duplicate, fixture.scaffold, fixture.topology),
+    () => parseGlobalControlReview(
+      duplicate, fixture.scaffold, fixture.topology, fixture.inventory,
+    ),
     /program payload duplicates reviewed profile/,
   );
 });
@@ -298,26 +326,35 @@ function reviewFixture() {
   const draft = buildControlDraft(inventory);
   const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
   const scaffold = buildControlOverlayScaffold(inventory, draft, topology);
+  const gatePolicy = reviewedGatePolicy(inventory);
   const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity"
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Outside the review-input fixture", evidence: ["fixture review"] }]));
   const bundleControl = {
     prerequisites: [],
-    additional_authored_write_set: [{ kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }],
-    integration_outputs: [],
-    gate_plans: [{
-      gate: "architecture", program_profile_id: "profile-architecture", arguments: [],
-      working_directory: "repository", parser: "exit_status", expected_artifact_roles: [],
-    }, {
-      gate: "catalog-contract", program_profile_id: "profile-architecture", arguments: [],
-      working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"],
-    }],
+    additional_authored_write_set: [
+      { kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` },
+      { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` },
+    ],
+    integration_product_refs: ["wasm-registry"],
+    expected_removals: [],
+    baseline_evidence: bundleBaselineEvidence(inventory, [id]),
+    gate_plans: gatePolicy.gatePlans,
     owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] },
     review: { status: "reviewed", evidence: ["fixture review"] },
   };
+  const runtimeOwner = `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`;
   const identityControls = { [id]: {
-    public_spelling: id,
-    runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`,
+    public_identity: { kind: "primary", primary_spelling: { identity: id, spelling: id } },
+    forms: { kind: "callable", callable_spellings: [id], constant_spellings: [] },
+    implementation: {
+      callable: { kind: "owned", owner_path: runtimeOwner, bindings: [{
+        kind: "canonical_binding", function: `${id}_builtin`,
+        variant: "default", builtin_path: `builtins::${id}`,
+        native_symbol: `runmat_builtin_binding_v1_${Buffer.from(id).toString("hex")}_${Buffer.from("default").toString("hex")}`,
+      }] },
+      constant: { kind: "none", reason: "no-constant-form" },
+    },
     shared_dependencies: [],
     complexity: { class: "low", weight: 1, basis: ["single identity"] },
     maturity,
@@ -326,16 +363,15 @@ function reviewFixture() {
       catalog_entry_count: 1,
       catalog_constant_count: 0,
       documentation: "catalog",
-      runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }],
-      runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable",
+      native_link: "not-applicable", wasm_registry: "not-applicable",
     },
-    expected_removals: [], baseline_evidence: [], owner: "fixture",
+    owner: "fixture",
     review: { status: "reviewed", evidence: ["fixture review"] },
   } };
   const scaffoldBundle = scaffold.bundle_rows.find((entry) => entry.bundle_id === bundleId);
   const scaffoldIdentity = scaffold.identity_rows.find((entry) => entry.identity === id);
   const bundlePayload = {
-    schema_version: 1,
+    schema_version: 3,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -349,6 +385,8 @@ function reviewFixture() {
         identity: id,
         scaffold_identity_row_digest: evidenceDigest(scaffoldIdentity),
         topology_identity_digest: evidenceDigest(topology.identities.get(id)),
+        authority_proposal_digest: scaffold.authority_proposals.identity_rows
+          .find((entry) => entry.identity === id).proposal_digest,
       }],
     },
     bundle_control: bundleControl,
@@ -357,30 +395,19 @@ function reviewFixture() {
   };
   const bundleReview = { ...bundlePayload, digest: evidenceDigest(bundlePayload) };
   const globalPayload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
     bindings: { scaffold_digest: scaffold.digest, topology_digest: topology.digest, migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows) },
-    program_profiles: { "profile-architecture": {
-      program: {
-        kind: "repository_script",
-        path: "scripts/development/check-architecture-boundaries.mjs",
-        content_digest: inventory.source.files.find((entry) => entry.path === "scripts/development/check-architecture-boundaries.mjs").content_digest,
-        approved_toolchains: [{
-          operating_system: inventory.compiled_inventory.build.operating_system,
-          architecture: inventory.compiled_inventory.build.architecture,
-          tools: [{ role: "node", content_digest: contentDigest(fs.readFileSync(process.execPath)) }],
-        }],
-      },
-      review: { status: "reviewed", evidence: ["fixture program review"] },
-    } },
+    program_profiles: gatePolicy.programProfiles,
+    integration_products: fixtureIntegrationProducts(inventory),
     migration_findings: { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: [], review: { status: "reviewed", evidence: ["fixture review"] } },
     exception_manifest: { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } },
-    execution_targets: [{
+    target_policy: fixtureTargetPolicy([{
       operating_system: inventory.compiled_inventory.build.operating_system,
       architecture: inventory.compiled_inventory.build.architecture,
-    }],
+    }]),
     storage_policy: { host_profiles: { "fixture-host": {
       operating_system: inventory.compiled_inventory.build.operating_system,
       architecture: inventory.compiled_inventory.build.architecture,
@@ -394,6 +421,26 @@ function reviewFixture() {
   };
   const globalReview = { ...globalPayload, digest: evidenceDigest(globalPayload) };
   return { repository, inventory, compiledInventory, id, bundleId, draft, topology, scaffold, bundleReview, globalReview };
+}
+
+function reviewedGatePolicy(inventory) {
+  const profiles = new Map();
+  const gatePlans = fixtureGatePlans(inventory).map(({ program, ...plan }) => {
+    const key = JSON.stringify(program);
+    if (!profiles.has(key)) profiles.set(key, `profile-${plan.gate}`);
+    return { ...plan, program_profile_id: profiles.get(key) };
+  });
+  const programs = new Map(fixtureGatePlans(inventory).map((plan) => [
+    JSON.stringify(plan.program),
+    plan.program,
+  ]));
+  const programProfiles = Object.fromEntries([...profiles]
+    .map(([key, id]) => [id, {
+      program: programs.get(key),
+      review: { status: "reviewed", evidence: ["fixture program review"] },
+    }])
+    .sort(([left], [right]) => left.localeCompare(right)));
+  return { gatePlans, programProfiles };
 }
 
 function writeReviewSet(fixture) {

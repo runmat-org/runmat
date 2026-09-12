@@ -5,6 +5,7 @@ use runmat_builtins::builtin_functions;
 use super::super::schema::{
     ImplementationProvenanceRecord, InventoryValidationError, RuntimeBindingRecord,
 };
+use super::declaration::validate_registration_provenance;
 
 pub(super) fn validate(
     errors: &mut Vec<InventoryValidationError>,
@@ -13,6 +14,15 @@ pub(super) fn validate(
 ) {
     let mut counts = BTreeMap::new();
     for record in provenance {
+        validate_registration_provenance(
+            errors,
+            "implementation_provenance",
+            record.name,
+            &record.source_file,
+            record.module_path,
+            record.builtin_path,
+            Some(record.function),
+        );
         *counts
             .entry((record.name, record.binding_variant, record.authority))
             .or_insert(0usize) += 1;

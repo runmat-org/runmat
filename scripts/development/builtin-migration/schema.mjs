@@ -77,6 +77,22 @@ export function repositoryPath(value, label) {
   return result;
 }
 
+export function rustModulePath(value, label) {
+  const result = nonempty(value, label);
+  if (!/^(?:(?:crate|[A-Za-z_][A-Za-z0-9_]*)::)?(?:r#)?[A-Za-z_][A-Za-z0-9_]*(?:::(?:r#)?[A-Za-z_][A-Za-z0-9_]*)*$/.test(result)) {
+    throw new Error(`${label} must be a canonical Rust module path`);
+  }
+  return result;
+}
+
+export function rustIdentifier(value, label) {
+  const result = nonempty(value, label);
+  if (!/^(?:r#)?[A-Za-z_][A-Za-z0-9_]*$/.test(result)) {
+    throw new Error(`${label} must be a Rust identifier`);
+  }
+  return result;
+}
+
 export function absolutePath(value, label) {
   const result = nonempty(value, label);
   if (!path.isAbsolute(result) || path.normalize(result) !== result) throw new Error(`${label} must be a normalized absolute path`);

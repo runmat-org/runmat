@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_builtins::builtin_constant_catalog_entries;
 
 use super::super::schema::{InventoryValidationError, RuntimeConstantRecord};
+use super::declaration::validate_registration_provenance;
 
 pub(super) fn validate(
     errors: &mut Vec<InventoryValidationError>,
@@ -14,6 +15,15 @@ pub(super) fn validate(
         .collect::<BTreeSet<_>>();
     let mut observed = BTreeMap::new();
     for constant in runtime_constants {
+        validate_registration_provenance(
+            errors,
+            "constant_registry",
+            constant.name,
+            &constant.source_file,
+            constant.module_path,
+            constant.builtin_path,
+            None,
+        );
         *observed.entry(constant.name).or_insert(0usize) += 1;
     }
     for (name, count) in &observed {

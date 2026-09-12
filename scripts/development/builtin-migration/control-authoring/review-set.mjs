@@ -4,6 +4,7 @@ import path from "node:path";
 import { compareCodePoint } from "../constants.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
+import { validateIntegrationProductCoverage } from "../integration-products.mjs";
 import { parseGatePlans } from "../gate-plan.mjs";
 import { parseInventoryEvidence } from "../inventory.mjs";
 import { array, digest, exact, kind, repositoryPath, stableId } from "../schema.mjs";
@@ -27,15 +28,26 @@ export function loadControlReviewSet(manifestPath, { scaffold, topology, invento
   const manifestBytes = fs.readFileSync(canonicalManifest);
   const value = parseManifest(parseJson(manifestBytes, "control review-set manifest"), scaffold, topology, inventory);
   const globalBytes = readBoundFile(directory, value.global_review, "global control review");
-  const globalReview = parseGlobalControlReview(parseJson(globalBytes, "global control review"), scaffold, topology);
+  const globalReview = parseGlobalControlReview(
+    parseJson(globalBytes, "global control review"), scaffold, topology, inventory,
+  );
   const bundleReviews = new Map();
   for (const reference of value.bundle_reviews) {
     const bytes = readBoundFile(directory, reference, `${reference.bundle_id} bundle control review`);
-    const review = parseBundleControlReview(parseJson(bytes, `${reference.bundle_id} bundle control review`), scaffold, topology);
+    const review = parseBundleControlReview(
+      parseJson(bytes, `${reference.bundle_id} bundle control review`),
+      scaffold,
+      topology,
+      inventory,
+    );
     if (review.bundleId !== reference.bundle_id) throw new Error(`${reference.bundle_id}: manifest key and bundle review differ`);
     bundleReviews.set(reference.bundle_id, review);
   }
   validateProfileReferences(bundleReviews, globalReview, inventory);
+  validateIntegrationProductCoverage(
+    new Map([...bundleReviews].map(([id, review]) => [id, review.bundleControl])),
+    globalReview.integrationProducts,
+  );
   validateBundleReferences(bundleReviews, topology);
   const parsed = deepImmutable({ value, digest: value.digest, bundleReviews, globalReview });
   VALIDATED_REVIEW_SETS.add(parsed);

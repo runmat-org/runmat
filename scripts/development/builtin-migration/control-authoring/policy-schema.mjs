@@ -1,10 +1,17 @@
 import { compareCodePoint } from "../constants.mjs";
+import {
+  parseBundleRemovals, validateCompleteBundleBaselineEvidence,
+} from "../baseline-evidence.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { executionTargetKey, parseExecutionTargets } from "../execution-target.mjs";
 import { GATE_PRODUCERS } from "../gate-kinds.mjs";
 import { GATE_PARSERS, parseGatePlans, parseGateProgram } from "../gate-plan.mjs";
+import { parseIntegrationProductReferences } from "../integration-products.mjs";
 import {
-  SAFE_IDENTITY, absolutePath, array, digest, enumValue, exact, filesystemIdentity,
+  parseIdentityForms, parseImplementationAuthority, parsePublicIdentity,
+} from "../identity-authority.mjs";
+import {
+  absolutePath, array, digest, enumValue, exact, filesystemIdentity,
   identity, integer, nonempty, repositoryPath, stableId, uniqueStrings,
 } from "../schema.mjs";
 
@@ -28,34 +35,47 @@ export function assertEvidenceDigest(value, label) {
 export const MATURITY_GATES = Object.freeze([
   "identity", "disposition", "catalog-contract", "requested-output", "effects-capabilities",
   "inference", "runtime-facts", "runtime-binding", "native-ir-deopt", "placement",
-  "provider", "fusion", "link-reachability", "interop-parallel", "documentation",
-  "examples", "tests", "wasm",
+  "provider", "fusion", "link-reachability", "foreign", "parallel", "host",
+  "documentation", "native-example", "browser-example", "browser-runtime", "tests",
+  "wasm-registry",
 ]);
 
-export function parseBundleControlPolicy(value, id) {
-  return parseBundlePolicy(value, id, (plans) => parseGateReferences(plans, id));
+export function parseBundleControlPolicy(value, id, identities, inventory) {
+  return parseBundlePolicy(
+    value,
+    id,
+    identities,
+    inventory,
+    (plans) => parseGateReferences(plans, id),
+  );
 }
 
-export function parseOperationalBundleControlPolicy(value, id, inventory) {
-  return parseBundlePolicy(value, id, (plans) => parseGatePlans(plans, id, inventory));
+export function parseOperationalBundleControlPolicy(value, id, inventory, identities) {
+  return parseBundlePolicy(
+    value,
+    id,
+    identities,
+    inventory,
+    (plans) => parseGatePlans(plans, id, inventory),
+  );
 }
 
-function parseBundlePolicy(value, id, parsePlans) {
-  exact(value, ["prerequisites", "additional_authored_write_set", "integration_outputs", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
+function parseBundlePolicy(value, id, identities, inventory, parsePlans) {
+  exact(value, ["prerequisites", "additional_authored_write_set", "integration_product_refs", "expected_removals", "baseline_evidence", "gate_plans", "owner_role", "complexity", "review"], `${id} bundle control`);
   array(value.prerequisites, `${id} prerequisites`, { empty: true }).forEach((entry) => {
     exact(entry, ["bundle_id", "kind"], `${id} prerequisite`);
     stableId(entry.bundle_id, `${id} prerequisite bundle`);
     enumValue(entry.kind, ["representation", "infrastructure", "semantic", "cohort"], `${id} prerequisite kind`);
   });
   array(value.additional_authored_write_set, `${id} additional authored write set`, { empty: true }).forEach((entry) => parseScope(entry, `${id} additional authored scope`));
-  const integrationOutputKeys = array(value.integration_outputs, `${id} integration outputs`, { empty: true }).map((entry) => {
-    exact(entry, ["product_id", "path", "producer"], `${id} integration output`);
-    stableId(entry.product_id, `${id} integration product id`);
-    repositoryPath(entry.path, `${id} integration output path`);
-    if (entry.producer !== "integration") throw new Error(`${id}: integration output producer must be integration`);
-    return `${entry.product_id}\0${entry.path}`;
-  });
-  requireCanonicalUnique(integrationOutputKeys, `${id} integration outputs`);
+  parseIntegrationProductReferences(value.integration_product_refs, id);
+  const baselineEvidence = validateCompleteBundleBaselineEvidence(
+    value.baseline_evidence,
+    inventory,
+    identities,
+    id,
+  );
+  parseBundleRemovals(value.expected_removals, id, identities, baselineEvidence);
   parsePlans(value.gate_plans);
   nonempty(value.owner_role, `${id} owner role`);
   parseComplexity(value.complexity, `${id} complexity`);
@@ -66,25 +86,21 @@ function parseBundlePolicy(value, id, parsePlans) {
 export function parseIdentityControlPolicy(value, id) {
   const normalized = identity(id, "identity control id").toLowerCase();
   exact(value, [
-    "public_spelling", "runtime_owner", "shared_dependencies", "complexity", "maturity",
-    "expected_authorities", "expected_removals", "baseline_evidence", "owner", "review",
+    "public_identity", "forms", "implementation", "shared_dependencies", "complexity", "maturity",
+    "expected_authorities", "owner", "review",
   ], `${id} identity control`);
-  const spelling = identity(value.public_spelling, `${id} public spelling`);
-  if (spelling.toLowerCase() !== normalized) throw new Error(`${id}: public spelling must case-fold to the identity key`);
-  if (value.runtime_owner !== null) repositoryPath(value.runtime_owner, `${id} runtime owner`);
-  array(value.shared_dependencies, `${id} shared dependencies`, { empty: true }).forEach((entry) => parseSharedDependency(entry, id));
+  parsePublicIdentity(value.public_identity, normalized);
+  parseIdentityForms(value.forms, normalized);
+  parseImplementationAuthority(value.implementation, normalized);
+  const dependencyKeys = array(value.shared_dependencies, `${id} shared dependencies`, { empty: true })
+    .map((entry) => {
+      parseSharedDependency(entry, id);
+      return `${entry.ownership}\0${entry.owner_id}\0${entry.kind}\0${entry.path}`;
+    });
+  requireCanonicalUnique(dependencyKeys, `${id} shared dependencies`);
   parseComplexity(value.complexity, `${id} complexity`);
   parseMaturity(value.maturity, id);
   parseAuthorities(value.expected_authorities, id);
-  const removals = array(value.expected_removals, `${id} expected removals`, { empty: true });
-  const evidence = array(value.baseline_evidence, `${id} baseline evidence`, { empty: true });
-  removals.forEach((entry) => parseRemoval(entry, id));
-  evidence.forEach((entry) => parseBaselineEvidence(entry, id));
-  for (const removal of removals) {
-    if (!evidence.some((entry) => entry.path === removal.path && entry.digest === removal.baseline_digest)) {
-      throw new Error(`${id}: expected removal ${removal.path} lacks matching baseline path/digest evidence`);
-    }
-  }
   nonempty(value.owner, `${id} owner`);
   parseReviewedEvidence(value.review, `${id} identity control review`);
   return value;
@@ -218,45 +234,14 @@ function parseMaturity(value, id) {
 function parseAuthorities(value, id) {
   exact(value, [
     "catalog_package", "catalog_entry_count", "catalog_constant_count", "documentation",
-    "runtime_bindings", "runtime_constants", "native_link", "wasm_registry",
+    "native_link", "wasm_registry",
   ], `${id} expected authorities`);
   if (value.catalog_package !== null) repositoryPath(value.catalog_package, `${id} catalog package`);
   integer(value.catalog_entry_count, `${id} catalog entry count`);
   integer(value.catalog_constant_count, `${id} catalog constant count`);
   enumValue(value.documentation, ["catalog", "alias", "none"], `${id} documentation authority`);
-  array(value.runtime_bindings, `${id} runtime bindings`, { empty: true }).forEach((entry) => {
-    exact(entry, ["path", "function", "variant"], `${id} runtime binding`);
-    repositoryPath(entry.path, `${id} runtime binding path`);
-    nonempty(entry.function, `${id} runtime binding function`);
-    nonempty(entry.variant, `${id} runtime binding variant`);
-  });
-  const constants = uniqueStrings(value.runtime_constants, `${id} runtime constants`, {
-    empty: true,
-    pattern: SAFE_IDENTITY,
-  });
-  if (JSON.stringify(constants) !== JSON.stringify([...constants].sort(compareCodePoint))) {
-    throw new Error(`${id}: runtime constants must use canonical order`);
-  }
   enumValue(value.native_link, ["required", "not-applicable"], `${id} native link`);
   enumValue(value.wasm_registry, ["required", "not-applicable"], `${id} wasm registry`);
-}
-
-function parseRemoval(value, id) {
-  exact(value, ["kind", "path", "baseline_digest"], `${id} file removal`);
-  if (value.kind !== "file") throw new Error(`${id}: expected removal must be a file`);
-  repositoryPath(value.path, `${id} removal path`);
-  digest(value.baseline_digest, `${id} removal baseline digest`);
-}
-
-function parseBaselineEvidence(value, id) {
-  exact(value, ["kind", "path", "locator", "digest"], `${id} baseline evidence`);
-  enumValue(value.kind, [
-    "catalog", "runtime", "sidecar", "runtime-shadow", "resolver",
-    "provider", "fusion", "test", "example",
-  ], `${id} evidence kind`);
-  repositoryPath(value.path, `${id} evidence path`);
-  if (value.locator !== null) throw new Error(`${id}: baseline source-item locators are obsolete; compiled and lexical inventory rows are the typed item authority`);
-  digest(value.digest, `${id} evidence digest`);
 }
 
 function parseVolumePolicy(value, role) {

@@ -9,37 +9,50 @@ use once_cell::sync::OnceCell;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm_registry {
     #![allow(dead_code)]
-    use super::{BuiltinFusionSpec, BuiltinGpuSpec};
+    use super::{BuiltinFusionSpec, BuiltinGpuSpec, FusionSpecRegistration, GpuSpecRegistration};
     use once_cell::sync::Lazy;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    static GPU_SPECS: Lazy<Mutex<Vec<&'static BuiltinGpuSpec>>> =
-        Lazy::new(|| Mutex::new(Vec::new()));
-    static FUSION_SPECS: Lazy<Mutex<Vec<&'static BuiltinFusionSpec>>> =
+    static GPU_SPECS: Lazy<Mutex<Vec<GpuSpecRegistration>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static FUSION_SPECS: Lazy<Mutex<Vec<FusionSpecRegistration>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
     static RESIDENCY_POLICIES: Lazy<Mutex<HashMap<String, super::ResidencyPolicy>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
 
-    pub(crate) fn submit_gpu_spec(spec: &'static BuiltinGpuSpec) {
+    pub(crate) fn submit_gpu_spec(registration: GpuSpecRegistration) {
         GPU_SPECS
             .lock()
             .expect("gpu spec registry poisoned")
-            .push(spec);
+            .push(registration);
         RESIDENCY_POLICIES
             .lock()
             .expect("gpu spec registry poisoned")
-            .insert(spec.name.to_ascii_lowercase(), spec.residency);
+            .insert(
+                registration.spec.name.to_ascii_lowercase(),
+                registration.spec.residency,
+            );
     }
 
-    pub(crate) fn submit_fusion_spec(spec: &'static BuiltinFusionSpec) {
+    pub(crate) fn submit_fusion_spec(registration: FusionSpecRegistration) {
         FUSION_SPECS
             .lock()
             .expect("fusion spec registry poisoned")
-            .push(spec);
+            .push(registration);
     }
 
     pub(crate) fn gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
+        GPU_SPECS
+            .lock()
+            .expect("gpu spec registry poisoned")
+            .clone()
+            .into_iter()
+            .map(|registration| registration.spec)
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub(crate) fn gpu_spec_registrations() -> std::vec::IntoIter<GpuSpecRegistration> {
         GPU_SPECS
             .lock()
             .expect("gpu spec registry poisoned")
@@ -56,6 +69,17 @@ pub(crate) mod wasm_registry {
     }
 
     pub(crate) fn fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
+        FUSION_SPECS
+            .lock()
+            .expect("fusion spec registry poisoned")
+            .clone()
+            .into_iter()
+            .map(|registration| registration.spec)
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub(crate) fn fusion_spec_registrations() -> std::vec::IntoIter<FusionSpecRegistration> {
         FUSION_SPECS
             .lock()
             .expect("fusion spec registry poisoned")
@@ -211,11 +235,37 @@ pub struct BuiltinFusionSpec {
 /// Inventory wrapper for GPU specs.
 pub struct GpuSpecInventory {
     pub spec: &'static BuiltinGpuSpec,
+    pub builtin_path: &'static str,
+    pub declaration: &'static str,
+    pub source_file: &'static str,
+    pub module_path: &'static str,
 }
 
 /// Inventory wrapper for fusion specs.
 pub struct FusionSpecInventory {
     pub spec: &'static BuiltinFusionSpec,
+    pub builtin_path: &'static str,
+    pub declaration: &'static str,
+    pub source_file: &'static str,
+    pub module_path: &'static str,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GpuSpecRegistration {
+    pub spec: &'static BuiltinGpuSpec,
+    pub builtin_path: &'static str,
+    pub declaration: &'static str,
+    pub source_file: &'static str,
+    pub module_path: &'static str,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct FusionSpecRegistration {
+    pub spec: &'static BuiltinFusionSpec,
+    pub builtin_path: &'static str,
+    pub declaration: &'static str,
+    pub source_file: &'static str,
+    pub module_path: &'static str,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -227,6 +277,22 @@ inventory::collect!(FusionSpecInventory);
 #[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_gpu_specs() -> impl Iterator<Item = &'static BuiltinGpuSpec> {
     inventory::iter::<GpuSpecInventory>().map(|entry| entry.spec)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn builtin_gpu_spec_registrations() -> impl Iterator<Item = GpuSpecRegistration> {
+    inventory::iter::<GpuSpecInventory>().map(|entry| GpuSpecRegistration {
+        spec: entry.spec,
+        builtin_path: entry.builtin_path,
+        declaration: entry.declaration,
+        source_file: entry.source_file,
+        module_path: entry.module_path,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn builtin_gpu_spec_registrations() -> std::vec::IntoIter<GpuSpecRegistration> {
+    wasm_registry::gpu_spec_registrations()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -243,6 +309,22 @@ pub fn builtin_fusion_specs() -> impl Iterator<Item = &'static BuiltinFusionSpec
 #[cfg(target_arch = "wasm32")]
 pub fn builtin_fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> {
     wasm_registry::fusion_specs()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = FusionSpecRegistration> {
+    inventory::iter::<FusionSpecInventory>().map(|entry| FusionSpecRegistration {
+        spec: entry.spec,
+        builtin_path: entry.builtin_path,
+        declaration: entry.declaration,
+        source_file: entry.source_file,
+        module_path: entry.module_path,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn builtin_fusion_spec_registrations() -> std::vec::IntoIter<FusionSpecRegistration> {
+    wasm_registry::fusion_spec_registrations()
 }
 
 #[cfg(not(target_arch = "wasm32"))]

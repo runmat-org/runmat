@@ -1,39 +1,43 @@
 import { compareCodePoint } from "../constants.mjs";
 import { evidenceDigest } from "../evidence.mjs";
 import { deepImmutable } from "../immutable.mjs";
+import { parseIntegrationProductRegistry } from "../integration-products.mjs";
 import { parseFindingDispositions } from "../migration-findings.mjs";
 import { assertValidatedTopologyView } from "../topology/freeze.mjs";
+import { parseTargetPolicy } from "../target-policy.mjs";
 import { digest, exact, kind } from "../schema.mjs";
 import { assertValidatedControlOverlayScaffold } from "./scaffold.mjs";
 import {
   assertEvidenceDigest, assertScaffoldTopologyBinding, parseExceptionManifestPolicy,
-  parseExecutionTargets, parseProgramProfile, parseReviewedEvidence,
-  validateStorageTargetCoverage,
+  parseProgramProfile, parseReviewedEvidence, validateStorageTargetCoverage,
 } from "./policy-schema.mjs";
 
 export const GLOBAL_CONTROL_REVIEW_KIND = "runmat-builtin-migration-global-control-review";
 const PROGRAM = "RM-1064/C00-C07";
 const VALIDATED_GLOBAL_REVIEWS = new WeakSet();
 
-export function parseGlobalControlReview(value, scaffoldValue, topology) {
+export function parseGlobalControlReview(value, scaffoldValue, topology, inventory) {
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 1, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
-  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "migration_findings", "exception_manifest", "execution_targets", "storage_policy", "review", "digest"], "global control review");
+  kind(value, 2, GLOBAL_CONTROL_REVIEW_KIND, "global control review");
+  exact(value, ["schema_version", "kind", "authority", "program", "bindings", "program_profiles", "integration_products", "migration_findings", "exception_manifest", "target_policy", "storage_policy", "review", "digest"], "global control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("global control review has invalid authority or program");
   parseArtifactBindings(value.bindings, scaffold, topology);
   const programProfiles = parseProgramProfiles(value.program_profiles);
+  const integrationProducts = parseIntegrationProductRegistry(value.integration_products, inventory);
   const bundles = new Map([...topology.bundles.keys()].map((id) => [id, true]));
   const currentFindings = scaffold.migration_finding_rows.map((entry) => entry.observations);
   const migrationFindings = parseFindingDispositions(value.migration_findings, bundles, currentFindings);
   parseExceptionManifestPolicy(value.exception_manifest, bundles);
-  const executionTargets = parseExecutionTargets(value.execution_targets);
+  const targetPolicy = parseTargetPolicy(value.target_policy);
+  const executionTargets = targetPolicy.migrationExecutionTargets;
   validateStorageTargetCoverage(value.storage_policy, executionTargets);
   parseReviewedEvidence(value.review, "global control review");
   assertEvidenceDigest(value, "global control review");
   const parsed = deepImmutable({
-    value, digest: value.digest, programProfiles, migrationFindings, executionTargets,
+    value, digest: value.digest, programProfiles, integrationProducts, migrationFindings,
+    targetPolicy, executionTargets,
   });
   VALIDATED_GLOBAL_REVIEWS.add(parsed);
   return parsed;

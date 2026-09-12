@@ -171,3 +171,7 @@ wgpu = "0.19"
 
 [dependencies.serde_json]
 version = "1.0"
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1.0"

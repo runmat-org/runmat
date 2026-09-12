@@ -7,8 +7,8 @@ import { claimDiscrepancies, reconcileTopologyClaims } from "../reconciliation.m
 import { parseCohortReview } from "../reviews.mjs";
 import { topologyStateFromReviews } from "../state.mjs";
 
-export function fullTopologyChainFixture() {
-  const baselineInventory = inventory();
+export function fullTopologyChainFixture(options = {}) {
+  const baselineInventory = inventory(options.revision, options.sourceContentDigest, options.sourceMode);
   const componentGraph = buildAuthorityComponentGraph(baselineInventory);
   const controlDraft = buildControlDraft(baselineInventory);
   const baseline = {
@@ -119,12 +119,12 @@ export function fixtureDigest(character) {
   return `sha256:${character.repeat(64)}`;
 }
 
-function inventory() {
+function inventory(revision = `git:${"1".repeat(40)}`, sourceContentDigest = fixtureDigest("6"), sourceMode = 0o644) {
   const sourceRoots = ["scripts/development/check-architecture-boundaries.mjs"];
   const sourceFiles = [{
     path: "scripts/development/check-architecture-boundaries.mjs",
-    mode: 0o644,
-    content_digest: fixtureDigest("6"),
+    mode: sourceMode,
+    content_digest: sourceContentDigest,
   }];
   const identities = ["alpha", "beta", "betaaux", "datetime", "delta", "gamma", "linalg", "parallel", "shape"].map((identity) => ({
     identity,
@@ -147,15 +147,15 @@ function inventory() {
     schema_version: 2,
     kind: "runmat-builtin-migration-inventory",
     authority: "development-evidence-only",
-    generated_from: ["fixture"],
+    generated_from: sourceRoots,
     source: {
-      revision: `git:${"1".repeat(40)}`,
+      revision,
       dirty: false,
       roots: sourceRoots,
       files: sourceFiles,
       digest: evidenceDigest({ roots: sourceRoots, files: sourceFiles }),
     },
-    compiled_inventory: { schema_version: 1, kind: "fixture", digest: fixtureDigest("3"), build: { operating_system: "fixture-os", architecture: "fixture-arch" } },
+    compiled_inventory: { schema_version: 1, kind: "fixture", digest: fixtureDigest("3"), build: { operating_system: "macos", architecture: "aarch64" } },
     migration_findings: [],
     migration_findings_digest: evidenceDigest([]),
     scanned_source_coverage: { paths: [], digest: fixtureDigest("4") },

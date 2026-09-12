@@ -3,15 +3,20 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { MATURITY_GATES, parseControlManifest } from "../control.mjs";
+import { bundleBaselineEvidence } from "../baseline-evidence.mjs";
 import { buildControlDraft } from "../control-draft.mjs";
 import { validateControlReviewChain } from "../control-authoring/authority.mjs";
 import { composeControlCandidate, controlCandidateInputDigests } from "../control-authoring/compose.mjs";
 import { loadControlReviewSet } from "../control-authoring/review-set.mjs";
 import { buildControlOverlayScaffold } from "../control-authoring/scaffold.mjs";
 import { contentDigest, evidenceDigest } from "../evidence.mjs";
+import { buildDocumentationCutoverArtifact, documentationCutoverChecks } from "../documentation-cutover.mjs";
 import { gatePlanEvidence } from "../gate-plan.mjs";
 import { buildInventory } from "../inventory.mjs";
 import { issueLease, parseLease } from "../lease.mjs";
+import { acceptedSealSet, barrierSealSet, emptyQueueState, validateQueueState } from "../queue.mjs";
+import { validateQueueCheckpoint } from "../queue-checkpoint.mjs";
+import { R31_REQUIRED_LANES } from "../target-policy.mjs";
 import {
   candidateInputDigests, freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView,
 } from "../topology/freeze.mjs";
@@ -26,13 +31,16 @@ export function repositoryFixture({ sidecar = false, identity = "foo" } = {}) {
   fs.mkdirSync(root);
   write(root, "Cargo.toml", "[workspace]\nresolver = \"2\"\n");
   write(root, "scripts/development/check-architecture-boundaries.mjs", "process.exit(0);\n");
+  write(root, "scripts/development/builtin-migration/documentation-export-cli.mjs", "process.stdout.write('{}\\n');\n");
   write(root, "scripts/regenerate-wasm-registry.mjs", "// fixture generator identity\n");
   write(root, "scripts/development/verify-builtin-generated-products.mjs", `
 import fs from "node:fs"; import crypto from "node:crypto";
 const digest = (bytes) => "sha256:" + crypto.createHash("sha256").update(bytes).digest("hex");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
 const observed = fs.readFileSync("crates/runmat-runtime/src/builtins/generated_wasm_registry.rs");
 const generator = fs.readFileSync("scripts/regenerate-wasm-registry.mjs");
-const value = { schema_version: 1, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", generator: { path: "scripts/regenerate-wasm-registry.mjs", content_digest: digest(generator) }, checked_in: { byte_length: observed.length, content_digest: digest(observed) }, first: { byte_length: observed.length, content_digest: digest(observed) }, second: { byte_length: observed.length, content_digest: digest(observed) }, deterministic: true, synchronized: true }], result: "pass" };
+const manifest = input.native_registration_manifest;
+const value = { schema_version: 1, kind: "runmat-builtin-generated-products-proof", authority: "machine-derived-integration-evidence", products: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", generator: { path: "scripts/regenerate-wasm-registry.mjs", content_digest: digest(generator) }, checked_in: { byte_length: observed.length, content_digest: digest(observed) }, first: { byte_length: observed.length, content_digest: digest(observed) }, second: { byte_length: observed.length, content_digest: digest(observed) }, deterministic: true, synchronized: true, verification: { kind: "native_wasm_registration_manifest", generated_manifest: manifest, native_manifest: manifest, result: "pass" } }], result: "pass" };
 process.stdout.write(JSON.stringify(value) + "\\n");
 `);
   write(root, `crates/runmat-runtime/src/builtins/math/basic/${identity}.rs`, `
@@ -40,7 +48,7 @@ process.stdout.write(JSON.stringify(value) + "\\n");
 fn ${identity.replaceAll(".", "_")}_builtin() {}
 #[cfg(test)] mod tests {}
 `);
-  write(root, "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", `crate::builtins::math::basic::${identity}::__runmat_wasm_register_builtin_${identity}_builtin();`);
+  write(root, "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", "// no fixture WASM registrations\n");
   write(root, `crates/runmat-builtins/src/catalog/entries/math/basic/${identity}/mod.rs`, `
 pub const ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
  identity: BuiltinCatalogIdentity { name: "${identity}" },
@@ -62,9 +70,10 @@ export function cleanupRepositoryFixtures() {
 
 export function controlledFixture(options = {}) {
   const repository = repositoryFixture(options);
+  const revision = `git:${execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()}`;
   const id = options.identity ?? "foo";
   const compiledInventory = compiledInventoryFixture(id, options);
-  const seedInventory = buildInventory(repository, undefined, { revision: REVISION, compiledInventory });
+  const seedInventory = buildInventory(repository, undefined, { revision, compiledInventory });
   const dispositions = {
     schema_version: 1,
     kind: "runmat-builtin-dispositions",
@@ -80,7 +89,7 @@ export function controlledFixture(options = {}) {
       },
     },
   };
-  const inventory = buildInventory(repository, dispositions, { revision: REVISION, compiledInventory });
+  const inventory = buildInventory(repository, dispositions, { revision, compiledInventory });
   if (options.unresolved) {
     inventory.identities[0].unresolved = [...options.unresolved];
     const { digest: _ignored, ...payload } = inventory;
@@ -92,8 +101,29 @@ export function controlledFixture(options = {}) {
     : { applicability: "not-applicable", reason: "Reviewed as outside this fixture's behavior", evidence: ["fixture review"] }]));
   const draft = buildControlDraft(inventory);
   const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
-  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: "crates/runmat-builtins/src/catalog/entries/math/basic/foo" }, { kind: "file", path: "crates/runmat-runtime/src/builtins/math/basic/foo.rs" }], integration_outputs: [{ product_id: "wasm-registry", path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs", producer: "integration" }], gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
-  const identityControl = { public_spelling: id, runtime_owner: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, shared_dependencies: [], complexity: { class: "low", weight: 1, basis: ["single identity"] }, maturity, expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", runtime_bindings: [{ path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, function: `${id}_builtin`, variant: "default" }], runtime_constants: [], native_link: "not-applicable", wasm_registry: "not-applicable" }, expected_removals: [], baseline_evidence: [], owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] } };
+  const bundleControl = { prerequisites: [], additional_authored_write_set: [{ kind: "tree", path: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}` }, { kind: "file", path: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs` }, ...(options.sidecar ? [{ kind: "file", path: `docs/builtins/reference/${id}.json` }] : [])], integration_product_refs: ["wasm-registry"], expected_removals: [], baseline_evidence: bundleBaselineEvidence(inventory, [id]), gate_plans: fixtureGatePlans(inventory, Object.values(options.storageProfiles ?? {})), owner_role: "builtin-migrator", complexity: { class: "low", weight: 1, basis: ["single identity"] }, review: { status: "reviewed", evidence: ["fixture review"] } };
+  const runtimeOwner = `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`;
+  const identityControl = {
+    public_identity: {
+      kind: "primary", primary_spelling: { identity: id, spelling: id },
+    },
+    forms: { kind: "callable", callable_spellings: [id], constant_spellings: [] },
+    implementation: {
+      callable: {
+        kind: "owned", owner_path: runtimeOwner, bindings: [{
+          kind: "canonical_binding", function: `${id}_builtin`,
+          variant: "default", builtin_path: `builtins::${id}`,
+          native_symbol: nativeSymbol(id, "default"),
+        }],
+      },
+      constant: { kind: "none", reason: "no-constant-form" },
+    },
+    shared_dependencies: [],
+    complexity: { class: "low", weight: 1, basis: ["single identity"] },
+    maturity,
+    expected_authorities: { catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, catalog_entry_count: 1, catalog_constant_count: 0, documentation: "catalog", native_link: "not-applicable", wasm_registry: "not-applicable" },
+    owner: "fixture", review: { status: "reviewed", evidence: ["fixture review"] },
+  };
   const migrationFindings = { schema_version: 1, kind: "runmat-builtin-migration-finding-dispositions", rows: inventory.migration_findings.map((finding) => ({ finding_digest: evidenceDigest(finding), ...finding, disposition: "bundle-work", bundle_id: bundleId, reason: "Fixture migration work", evidence: ["fixture review"] })), review: { status: "reviewed", evidence: ["fixture review"] } };
   const exceptionManifest = { entries: [], review: { status: "reviewed", evidence: ["fixture review"] } };
   const hostProfiles = { "fixture-host": {
@@ -118,10 +148,46 @@ export function controlledFixture(options = {}) {
   const reviewedControl = validateControlReviewChain(candidate, attestation, candidate);
   const controlValue = reviewedControl.controlValue;
   const control = parseControlManifest(controlValue, { inventory, reviewedTopology: topology, reviewedControl });
-  const leaseRequest = { schema_version: 1, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", issued_at: "2026-01-01T00:00:00.000Z", expires_at: "2027-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
-  const leaseValue = issueLease(leaseRequest, control);
-  const lease = parseLease(leaseValue, control);
-  return { repository, inventory, compiledInventory, controlValue, control, topology, draft, scaffold, reviewSet, controlReviewSetPath, candidate, attestation, reviewedControl, leaseValue, lease, id, bundleId };
+  const queueState = validateQueueState(emptyQueueState(control), control, () => null);
+  const queueCheckpointValue = initialQueueCheckpointValue(control, queueState);
+  const queueCheckpoint = validateQueueCheckpoint(
+    queueCheckpointValue, queueCheckpointValue.digest, queueState, control,
+  );
+  const accepted = acceptedSealSet(queueState, control);
+  const barriers = barrierSealSet(queueState, control, bundleId);
+  const leaseRequest = { schema_version: 4, kind: "runmat-builtin-migration-lease-request", authority: "reviewed-development-request", control_manifest_digest: control.digest, bundle_id: bundleId, lease_id: "lease-foo", owner: "fixture", base_revision: revision, lease_base_inventory: leaseBaseInventoryBinding(inventory), queue_checkpoint_digest: queueCheckpoint.digest, accepted_seals: accepted.value.seals, accepted_seal_set_digest: accepted.value.digest, barrier_seals: barriers.value.seals, barrier_seal_set_digest: barriers.value.digest, issued_at: "2020-01-01T00:00:00.000Z", expires_at: "2099-01-01T00:00:00.000Z", review: { status: "reviewed", evidence: ["fixture review"] } };
+  const leaseValue = issueLease(
+    leaseRequest, control, repository, inventory, queueState, queueCheckpoint,
+  );
+  const lease = parseLease(leaseValue, control, repository);
+  return { repository, inventory, compiledInventory, controlValue, control, topology, draft, scaffold, reviewSet, controlReviewSetPath, candidate, attestation, reviewedControl, queueState, queueCheckpointValue, queueCheckpoint, leaseRequest, leaseValue, lease, id, bundleId };
+}
+
+export function initialQueueCheckpointValue(control, queueState) {
+  const accepted = acceptedSealSet(queueState, control);
+  const payload = {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-queue-checkpoint",
+    authority: "reviewer-authored-current-queue-checkpoint",
+    control_manifest_digest: control.digest,
+    queue_state_digest: queueState.stateDigest,
+    predecessor_checkpoint_digest: null,
+    head_seal: null,
+    source_revision: control.baseline.revision,
+    source_digest: control.baseline.source_digest,
+    accepted_seal_set_digest: accepted.value.digest,
+    review: { status: "reviewed", evidence: ["fixture current queue checkpoint review"] },
+  };
+  return { ...payload, digest: evidenceDigest(payload) };
+}
+
+export function leaseBaseInventoryBinding(inventory) {
+  return {
+    source_revision: inventory.source.revision,
+    source_digest: inventory.source.digest,
+    inventory_digest: inventory.digest,
+    compiled_inventory_digest: inventory.compiled_inventory.digest,
+  };
 }
 
 function fixtureControlReviewSet(repository, inventory, topology, scaffold, bundleId, bundleControl, id, identityControl, migrationFindings, exceptionManifest, storagePolicy) {
@@ -136,7 +202,7 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     review: { status: "reviewed", evidence: ["fixture executable review"] },
   }]));
   const globalPayload = {
-    schema_version: 1,
+    schema_version: 2,
     kind: "runmat-builtin-migration-global-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -146,12 +212,13 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
       migration_finding_rows_digest: evidenceDigest(scaffold.migration_finding_rows),
     },
     program_profiles: programProfiles,
+    integration_products: fixtureIntegrationProducts(inventory),
     migration_findings: migrationFindings,
     exception_manifest: exceptionManifest,
-    execution_targets: [...new Map(Object.values(storagePolicy.host_profiles).map((profile) => [
+    target_policy: fixtureTargetPolicy([...new Map(Object.values(storagePolicy.host_profiles).map((profile) => [
       `${profile.operating_system}\0${profile.architecture}`,
       { operating_system: profile.operating_system, architecture: profile.architecture },
-    ])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, target]) => target),
+    ])).entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, target]) => target)),
     storage_policy: storagePolicy,
     review: { status: "reviewed", evidence: ["fixture global review"] },
   };
@@ -172,7 +239,7 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
     })),
   };
   const bundlePayload = {
-    schema_version: 1,
+    schema_version: 3,
     kind: "runmat-builtin-migration-bundle-control-review",
     authority: "reviewer-authored-development-input",
     program: "RM-1064/C00-C07",
@@ -186,6 +253,8 @@ function fixtureControlReviewSet(repository, inventory, topology, scaffold, bund
         identity: id,
         scaffold_identity_row_digest: evidenceDigest(scaffoldIdentity),
         topology_identity_digest: evidenceDigest(topology.identities.get(id)),
+        authority_proposal_digest: scaffold.authority_proposals.identity_rows
+          .find((entry) => entry.identity === id).proposal_digest,
       }],
     },
     bundle_control: bundleReviewControl,
@@ -285,14 +354,21 @@ export function topologyFixture(inventory, bundleId, id, options = {}) {
 
 export function compiledInventoryFixture(id = "foo", options = {}) {
   const catalog = catalogEntryFixture(id);
+  const manifestEntries = [{ kind: "builtin", declaration: id, variant: "default", builtin_path: `builtins::${id}` }, ...(options.legacyGroup ? [{ kind: "gpu_spec", declaration: "FIXTURE_GPU_SPEC", variant: null, builtin_path: `builtins::${id}` }] : [])].sort((left, right) => `${left.kind}\0${left.declaration}`.localeCompare(`${right.kind}\0${right.declaration}`, "en", { sensitivity: "variant" }));
+  const registrationManifest = {
+    schema_version: 1,
+    digest: contentDigest(Buffer.from(JSON.stringify(manifestEntries))).slice("sha256:".length),
+    counts: { builtin: 1, constant: 0, gpu_spec: options.legacyGroup ? 1 : 0, fusion_spec: 0 },
+    entries: manifestEntries,
+  };
   const snapshot = {
     build: { architecture: "aarch64", operating_system: "macos", family: "unix", pointer_width: 64, endianness: "little", crate_feature_inventory: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native", "occt-wasm-host", "plot-core", "plot-web", "test-classes", "wgpu"], enabled_features: [] } },
     declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 5, catalog_fingerprint: "a".repeat(64), catalog_entries: [catalog], catalog_provenance: [{ identity: { builtin: { name: id }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`, module_path: `catalog::${id}` } }], constants: [], legacy_functions: [], legacy_documentation: [] },
-    observed: { runtime_constants: [], runtime_bindings: [{ name: id, variant: "default", native_symbol: nativeSymbol(id, "default") }], implementation_provenance: [{ name: id, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, module_path: `builtins::${id}`, function: `${id}_builtin`, builtin_path: `builtins::${id}`, authority: "canonical_binding" }], gpu_specs: options.legacyGroup ? [gpuGroupFixture()] : [], fusion_specs: [] },
+    observed: { registration_manifest: registrationManifest, runtime_constants: [], runtime_bindings: [{ name: id, variant: "default", native_symbol: nativeSymbol(id, "default") }], implementation_provenance: [{ name: id, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, module_path: `builtins::${id}`, function: `${id}_builtin`, builtin_path: `builtins::${id}`, authority: "canonical_binding" }], gpu_specs: options.legacyGroup ? [gpuGroupFixture(id)] : [], fusion_specs: [] },
     validation: { status: "valid", errors: [], migration_readiness: options.finding ? { status: "incomplete", findings: [options.finding] } : { status: "ready", findings: [] } },
   };
   const value = contentDigest(Buffer.from(JSON.stringify(snapshot))).slice("sha256:".length);
-  return { schema_version: 1, kind: "runmat-compiled-builtin-migration-inventory", authority: "derived-read-only-evidence", digest: { algorithm: "sha256", value }, snapshot };
+  return { schema_version: 2, kind: "runmat-compiled-builtin-migration-inventory", authority: "derived-read-only-evidence", digest: { algorithm: "sha256", value }, snapshot };
 }
 
 function catalogEntryFixture(id) {
@@ -309,11 +385,11 @@ function catalogEntryFixture(id) {
 
 function nativeSymbol(name, variant) { return `runmat_builtin_binding_v1_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`; }
 
-function gpuGroupFixture() {
-  return { key: "data.*", owner: { kind: "legacy_group", raw: "data.*" }, operation: "custom:data", supported_precisions: [], broadcast: "none", provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs", nan_mode: "include", two_pass_threshold: null, workgroup_size: null, accepts_nan_mode: false, notes: "fixture" };
+function gpuGroupFixture(id) {
+  return { key: "data.*", declaration: "FIXTURE_GPU_SPEC", builtin_path: `builtins::${id}`, source_file: `crates/runmat-runtime/src/builtins/math/basic/${id}.rs`, module_path: `builtins::${id}`, owner: { kind: "legacy_group", raw: "data.*", affected_identities: [{ name: id }] }, operation: "custom:data", supported_precisions: [], broadcast: "none", provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs", nan_mode: "include", two_pass_threshold: null, workgroup_size: null, accepts_nan_mode: false, notes: "fixture" };
 }
 
-function fixtureGatePlans(inventory, additionalTargets = []) {
+export function fixtureGatePlans(inventory, additionalTargets = []) {
   const source = (sourcePath) => inventory.source.files.find((entry) => entry.path === sourcePath).content_digest;
   const targets = [inventory.compiled_inventory.build, ...additionalTargets]
     .map(({ operating_system, architecture }) => ({ operating_system, architecture }))
@@ -327,15 +403,19 @@ function fixtureGatePlans(inventory, additionalTargets = []) {
     }),
   }));
   const script = { kind: "repository_script", path: "scripts/development/check-architecture-boundaries.mjs", content_digest: source("scripts/development/check-architecture-boundaries.mjs"), approved_toolchains: approvedToolchains(["git", "node"]) };
+  const documentation = { kind: "repository_script", path: "scripts/development/builtin-migration/documentation-export-cli.mjs", content_digest: source("scripts/development/builtin-migration/documentation-export-cli.mjs"), approved_toolchains: approvedToolchains(["cargo", "git", "node", "rustc"]) };
   const generated = { kind: "repository_script", path: "scripts/development/verify-builtin-generated-products.mjs", content_digest: source("scripts/development/verify-builtin-generated-products.mjs"), approved_toolchains: approvedToolchains(["cargo", "node", "rustc"]) };
   const cargo = { kind: "cargo_binary", package: "runmat-runtime", binary: "export_builtin_migration_inventory", manifest_path: "Cargo.toml", manifest_digest: source("Cargo.toml"), approved_toolchains: approvedToolchains(["cargo", "rustc"]) };
   return [
     { gate: "architecture", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "catalog-contract", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
     { gate: "deterministic-products", program: generated, arguments: ["--product", "wasm-registry"], working_directory: "repository", parser: "generated_products", expected_artifact_roles: ["generated-products"] },
-    { gate: "documentation-cutover", program: script, arguments: [], working_directory: "repository", parser: "documentation_cutover", expected_artifact_roles: ["documentation-reconciliation"] },
+    { gate: "documentation-cutover", program: documentation, arguments: [], working_directory: "repository", parser: "documentation_cutover", expected_artifact_roles: ["documentation-reconciliation"] },
+    { gate: "focused-tests", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
+    { gate: "format-diff", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
     { gate: "inventory-delta", program: script, arguments: [], working_directory: "repository", parser: "inventory_delta", expected_artifact_roles: ["inventory-delta"] },
     { gate: "runtime-binding", program: cargo, arguments: [], working_directory: "repository", parser: "compiled_inventory", expected_artifact_roles: ["compiled-inventory"] },
+    { gate: "strict-clippy", program: script, arguments: [], working_directory: "repository", parser: "exit_status", expected_artifact_roles: [] },
   ];
 }
 
@@ -371,20 +451,45 @@ export function gate(fixture, name, artifactId = `gate-${name}`, subject = fixtu
   };
   const invocation = { executable, arguments: reviewed.arguments, cwd: repository, environment, tools, tool_environment: toolEnvironment };
   const processEvidence = { exit_code: 0, signal: null, stdout_digest: `sha256:${"c".repeat(64)}`, stderr_digest: `sha256:${"d".repeat(64)}` };
+  let documentationArtifact = null;
+  if (name === "documentation-cutover") {
+    const catalogExport = { schema_version: 1, inventory: { documents: 0, catalog_identities: 0, legacy_sidecars: 0, missing_catalog_documentation: [] }, builtins: [] };
+    documentationArtifact = buildDocumentationCutoverArtifact({
+      catalog_export: catalogExport,
+      catalog_export_bytes: JSON.stringify(catalogExport),
+      source_dispositions: [],
+      expected_sources: { [fixture.id]: [] },
+      provenance: {
+        source_revision: subject.source.revision,
+        source_digest: subject.source.digest,
+        compiled_inventory_digest: subject.compiled_inventory.digest,
+        control_manifest_digest: fixture.control.digest,
+        bundle_id: fixture.bundleId,
+        identities: [fixture.id],
+      },
+    });
+    processEvidence.stdout_digest = documentationArtifact.catalog_export.evidence_digest;
+  }
   const artifacts = plan.expected_artifact_roles.map((role) => {
     const artifactPath = path.join(repository, "..", `${artifactId}-${role}.json`);
-    const bytes = Buffer.from(`{\"role\":\"${role}\"}\n`);
+    const bytes = Buffer.from(documentationArtifact && role === "documentation-reconciliation"
+      ? `${JSON.stringify(documentationArtifact)}\n`
+      : `{\"role\":\"${role}\"}\n`);
     fs.writeFileSync(artifactPath, bytes);
     return { role, path: artifactPath, byte_length: bytes.length, content_digest: contentDigest(bytes) };
   });
   return {
-    schema_version: 5, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
+    schema_version: 7, kind: "runmat-builtin-migration-gate-result", authority: "machine-verification-only",
     producer: namedProducer, producer_evidence: { schema_version: 3, kind: `${namedProducer}-evidence`, contract: { reviewed_source_revision: fixture.inventory.source.revision, primary_tool: reviewed.primary_tool, tools: reviewed.tools, producer_source_digest: sourceDigest }, invocation, process: processEvidence, captured_process_digest: evidenceDigest(processEvidence) }, artifact_id: artifactId, produced_at: "2026-09-11T00:00:30.000Z",
     execution_target: { operating_system: subject.compiled_inventory.build.operating_system, architecture: subject.compiled_inventory.build.architecture },
     source_revision: subject.source.revision,
-    source_digest: subject.source.digest, baseline_inventory_digest: fixture.inventory.digest, subject_inventory_digest: subject.digest,
-    control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId, identities: [fixture.id],
-    gate: name, result: "pass", checks: [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
+    source_digest: subject.source.digest, control_baseline_inventory_digest: fixture.inventory.digest,
+    lease_base_inventory_digest: fixture.lease.value.lease_base_inventory.inventory_digest,
+    subject_inventory_digest: subject.digest,
+    control_manifest_digest: fixture.control.digest, bundle_id: fixture.bundleId,
+    lease_id: fixture.lease.value.lease_id, lease_digest: fixture.lease.value.digest,
+    identities: [fixture.id],
+    gate: name, result: "pass", checks: documentationArtifact ? documentationCutoverChecks(documentationArtifact) : [{ id: `${name}:${fixture.id}`, result: "pass", evidence_digest: `sha256:${"a".repeat(64)}` }], artifacts,
     storage_admission: { profile_id: "fixture-host", execution_host: os.hostname(), observed_at: "2026-09-11T00:00:00.000Z", path_bindings: {
       repository: { role: "repository", path: repository, filesystem_id: "posix-dev:1" },
       cargo_target: { role: "cargo-target", path: environment.CARGO_TARGET_DIR, filesystem_id: "posix-dev:2" },
@@ -410,5 +515,52 @@ function executableOnPath(name) {
 
 export function digestReference(pathname, artifactId, value) { return { path: pathname, artifact_id: artifactId, digest: evidenceDigest(value) }; }
 
-function producer(gate) { return ({ "catalog-contract": "runmat-builtins-catalog-validator", "runtime-binding": "runmat-runtime-binding-validator", "documentation-cutover": "builtin-documentation-cutover-audit", architecture: "runmat-architecture-boundary-validator", "deterministic-products": "runmat-generated-product-validator", "inventory-delta": "builtin-inventory-delta-validator" })[gate]; }
+export function fixtureTargetPolicy(migrationExecutionTargets) {
+  return {
+    schema_version: 1,
+    kind: "runmat-builtin-migration-target-policy",
+    migration_execution_targets: migrationExecutionTargets,
+    terminal_qualification: {
+      phase: "R31",
+      lanes: R31_REQUIRED_LANES.map((lane) => ({
+        product_id: lane.product_id,
+        gate_id: lane.gate_id,
+        purpose: lane.purpose,
+        targets: [
+          qualificationTarget("linux", "aarch64", 1),
+          qualificationTarget("linux", "x86_64", 1),
+          qualificationTarget("macos", "aarch64", 1),
+          qualificationTarget("macos", "x86_64", 1),
+          qualificationTarget("windows", "x86_64", 2),
+        ],
+      })),
+    },
+  };
+}
+
+export function fixtureIntegrationProducts(inventory) {
+  const source = new Map(
+    inventory.source.files.map((entry) => [entry.path, entry.content_digest]),
+  );
+  return {
+    "wasm-registry": {
+      path: "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+      producer: "integration",
+      generator: {
+        path: "scripts/regenerate-wasm-registry.mjs",
+        baseline_digest: source.get("scripts/regenerate-wasm-registry.mjs"),
+      },
+      baseline_digest: source.get(
+        "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+      ),
+      verification: { kind: "native_wasm_registration_manifest" },
+    },
+  };
+}
+
+function qualificationTarget(operatingSystem, architecture, executionOrder) {
+  return { operating_system: operatingSystem, architecture, applicability: "required", execution_order: executionOrder, reason: null, evidence: [] };
+}
+
+function producer(gate) { return ({ "catalog-contract": "runmat-builtins-catalog-validator", "runtime-binding": "runmat-runtime-binding-validator", "documentation-cutover": "builtin-documentation-cutover-audit", architecture: "runmat-architecture-boundary-validator", "focused-tests": "runmat-test-result-adapter", "strict-clippy": "runmat-clippy-result-adapter", "format-diff": "runmat-format-diff-validator", "deterministic-products": "runmat-generated-product-validator", "inventory-delta": "builtin-inventory-delta-validator" })[gate]; }
 function write(root, relative, contents) { const target = path.join(root, relative); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, contents); }

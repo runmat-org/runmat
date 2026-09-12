@@ -6,7 +6,7 @@ use runmat_builtins::{
 use runmat_types::{CapabilityRequirement, ExecutionStackRequirement};
 use serde::Serialize;
 
-pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 1;
+pub const MIGRATION_INVENTORY_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
 pub struct MigrationInventory<'a> {
@@ -122,6 +122,7 @@ pub struct LegacyDocumentationRecord {
 
 #[derive(Debug, Serialize)]
 pub struct ObservedInventory {
+    pub registration_manifest: RegistrationManifest,
     pub runtime_constants: Vec<RuntimeConstantRecord>,
     pub runtime_bindings: Vec<RuntimeBindingRecord>,
     pub implementation_provenance: Vec<ImplementationProvenanceRecord>,
@@ -130,8 +131,44 @@ pub struct ObservedInventory {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RegistrationManifest {
+    pub schema_version: u32,
+    pub digest: String,
+    pub counts: RegistrationManifestCounts,
+    pub entries: Vec<RegistrationManifestRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegistrationManifestCounts {
+    pub builtin: usize,
+    pub constant: usize,
+    pub gpu_spec: usize,
+    pub fusion_spec: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct RegistrationManifestRecord {
+    pub kind: RegistrationKindRecord,
+    pub declaration: &'static str,
+    pub variant: Option<&'static str>,
+    pub builtin_path: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistrationKindRecord {
+    Builtin,
+    Constant,
+    FusionSpec,
+    GpuSpec,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RuntimeConstantRecord {
     pub name: &'static str,
+    pub source_file: String,
+    pub module_path: &'static str,
+    pub builtin_path: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -145,7 +182,7 @@ pub struct RuntimeBindingRecord {
 pub struct ImplementationProvenanceRecord {
     pub name: &'static str,
     pub binding_variant: Option<&'static str>,
-    pub source_file: &'static str,
+    pub source_file: String,
     pub module_path: &'static str,
     pub function: &'static str,
     pub builtin_path: &'static str,
@@ -155,6 +192,10 @@ pub struct ImplementationProvenanceRecord {
 #[derive(Debug, Serialize)]
 pub struct GpuSpecRecord {
     pub key: &'static str,
+    pub declaration: &'static str,
+    pub builtin_path: &'static str,
+    pub source_file: String,
+    pub module_path: &'static str,
     pub owner: SpecOwnerRecord,
     pub operation: String,
     pub supported_precisions: Vec<&'static str>,
@@ -179,6 +220,10 @@ pub struct ProviderHookRecord {
 #[derive(Debug, Serialize)]
 pub struct FusionSpecRecord {
     pub key: &'static str,
+    pub declaration: &'static str,
+    pub builtin_path: &'static str,
+    pub source_file: String,
+    pub module_path: &'static str,
     pub owner: SpecOwnerRecord,
     pub shape: FusionShapeRecord,
     pub constant_strategy: &'static str,
@@ -188,11 +233,16 @@ pub struct FusionSpecRecord {
     pub notes: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SpecOwnerRecord {
-    ExactBuiltin { identity: BuiltinCatalogIdentity },
-    LegacyGroup { raw: &'static str },
+    ExactBuiltin {
+        identity: BuiltinCatalogIdentity,
+    },
+    LegacyGroup {
+        raw: &'static str,
+        affected_identities: Vec<BuiltinCatalogIdentity>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -233,8 +283,23 @@ pub struct MigrationReadiness {
 pub struct MigrationFinding {
     pub code: MigrationFindingCode,
     pub source: &'static str,
-    pub identity: String,
+    pub affected: MigrationFindingAffected,
     pub message: String,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MigrationFindingAffected {
+    Identity {
+        identity: BuiltinCatalogIdentity,
+    },
+    Binding {
+        identity: BuiltinCatalogIdentity,
+        variant: &'static str,
+    },
+    Owner {
+        owner: SpecOwnerRecord,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

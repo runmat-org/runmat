@@ -55,6 +55,17 @@ fn compiled_inventory_preserves_runtime_registration_provenance() {
         binding.native_symbol,
         runmat_builtins::native_binding_symbol(name, "default")
     );
+
+    let constant = inventory
+        .snapshot
+        .observed
+        .runtime_constants
+        .iter()
+        .find(|constant| constant.name == "pi")
+        .expect("missing pi constant registration");
+    assert!(constant.source_file.ends_with("builtins/constants/mod.rs"));
+    assert!(constant.module_path.ends_with("builtins::constants"));
+    assert_eq!(constant.builtin_path, "crate::builtins::constants");
     let readiness = &inventory.snapshot.validation.migration_readiness;
     assert_eq!(
         readiness.status,
@@ -192,16 +203,91 @@ fn legacy_semantic_authority_matches_resolution_precedence() {
 
 #[test]
 fn provider_spec_ownership_distinguishes_exact_identities_from_legacy_keys() {
-    let classifier =
-        super::projection::SpecOwnershipClassifier::from_exact_builtin_names(["exact_builtin"]);
+    let classifier = super::projection::SpecOwnershipClassifier::from_exact_builtin_names([
+        "exact_builtin",
+        "data.create",
+        "data.open",
+    ])
+    .with_builtin_ownership("builtins::io::data", ["data.create", "data.open"]);
     assert!(matches!(
-        classifier.owner("exact_builtin"),
+        classifier.owner("exact_builtin", "crate::builtins::fixture"),
         super::SpecOwnerRecord::ExactBuiltin { identity } if identity.name == "exact_builtin"
     ));
     assert!(matches!(
-        classifier.owner("reviewed_group_key"),
-        super::SpecOwnerRecord::LegacyGroup { raw } if raw == "reviewed_group_key"
+        classifier.owner("data.*", "crate::builtins::io::data"),
+        super::SpecOwnerRecord::LegacyGroup { raw, affected_identities }
+            if raw == "data.*"
+                && affected_identities.iter().map(|identity| identity.name).collect::<Vec<_>>()
+                    == ["data.create", "data.open"]
     ));
+}
+
+#[test]
+fn legacy_provider_owner_records_exact_compiled_identity_membership() {
+    let inventory = migration_inventory();
+    let callables = runmat_builtins::builtin_catalog_entries()
+        .iter()
+        .map(|entry| entry.identity.name)
+        .chain(
+            runmat_builtins::builtin_functions()
+                .into_iter()
+                .map(|function| function.name),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    let owner_key = |source: &'static str, owner: &super::SpecOwnerRecord| match owner {
+        super::SpecOwnerRecord::LegacyGroup {
+            raw,
+            affected_identities,
+        } => {
+            assert!(!affected_identities.is_empty(), "{source}:{raw}");
+            assert!(affected_identities
+                .iter()
+                .all(|identity| callables.contains(identity.name)));
+            assert!(affected_identities
+                .windows(2)
+                .all(|pair| pair[0].name < pair[1].name));
+            Some((
+                source,
+                *raw,
+                affected_identities
+                    .iter()
+                    .map(|identity| identity.name)
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        super::SpecOwnerRecord::ExactBuiltin { .. } => None,
+    };
+    let mut expected = inventory
+        .snapshot
+        .observed
+        .gpu_specs
+        .iter()
+        .filter_map(|spec| owner_key("gpu_spec_registry", &spec.owner))
+        .chain(
+            inventory
+                .snapshot
+                .observed
+                .fusion_specs
+                .iter()
+                .filter_map(|spec| owner_key("fusion_spec_registry", &spec.owner)),
+        )
+        .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert!(!expected.is_empty());
+
+    let mut observed = inventory
+        .snapshot
+        .validation
+        .migration_readiness
+        .findings
+        .iter()
+        .filter_map(|finding| match &finding.affected {
+            super::MigrationFindingAffected::Owner { owner } => owner_key(finding.source, owner),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    observed.sort_unstable();
+    assert_eq!(observed, expected);
 }
 
 fn hex(bytes: &[u8]) -> String {

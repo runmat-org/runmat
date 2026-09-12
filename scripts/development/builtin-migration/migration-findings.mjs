@@ -25,9 +25,9 @@ export function parseFindingDispositions(value, bundles, currentFindings = null)
 }
 
 function parseRow(value, bundles) {
-  exact(value, ["finding_digest", "code", "source", "identity", "message", "disposition", "bundle_id", "reason", "evidence"], "migration finding disposition");
+  exact(value, ["finding_digest", "code", "source", "affected", "message", "disposition", "bundle_id", "reason", "evidence"], "migration finding disposition");
   digest(value.finding_digest, "migration finding digest");
-  migrationFinding({ code: value.code, source: value.source, identity: value.identity, message: value.message });
+  migrationFinding({ code: value.code, source: value.source, affected: value.affected, message: value.message });
   enumValue(value.disposition, ["bundle-work", "prerequisite-work", "reviewed-no-action"], "migration finding disposition");
   if (value.disposition === "reviewed-no-action") {
     if (value.bundle_id !== null) throw new Error("reviewed-no-action finding cannot name a bundle");
@@ -41,5 +41,5 @@ function parseRow(value, bundles) {
 }
 
 function findingIdentity(value) {
-  return { finding_digest: value.finding_digest, code: value.code, source: value.source, identity: value.identity, message: value.message };
+  return { finding_digest: value.finding_digest, code: value.code, source: value.source, affected: value.affected, message: value.message };
 }

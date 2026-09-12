@@ -38,8 +38,15 @@ export function buildDocumentationCutoverArtifact(input) {
   rows.sort((left, right) => compareCodePoint(`${left.identity}\0${left.source_path}\0${left.pointer}`, `${right.identity}\0${right.source_path}\0${right.pointer}`));
   const artifactProvenance = { ...provenance, source_dispositions_digest: evidenceDigest(input.source_dispositions) };
   const payload = {
-    schema_version: 1, kind: "runmat-builtin-documentation-cutover-evidence", authority: "derived-machine-evidence-only",
-    provenance: artifactProvenance, catalog_export: { schema_version: input.catalog_export.schema_version, content_digest: exportDigest },
+    schema_version: 2, kind: "runmat-builtin-documentation-cutover-evidence", authority: "derived-machine-evidence-only",
+    provenance: artifactProvenance,
+    catalog_export: {
+      schema_version: input.catalog_export.schema_version,
+      content_digest: exportDigest,
+      evidence_digest: evidenceDigest(input.catalog_export_bytes),
+      bytes: input.catalog_export_bytes,
+      value: input.catalog_export,
+    },
     rows, summary: { identities: observedIdentities.size, leaves: rows.length, passed: rows.filter((entry) => entry.result === "pass").length },
     result: rows.every((entry) => entry.result === "pass") ? "pass" : "fail",
   };
@@ -47,13 +54,24 @@ export function buildDocumentationCutoverArtifact(input) {
 }
 
 export function parseDocumentationCutoverArtifact(value, expected = null) {
-  kind(value, 1, "runmat-builtin-documentation-cutover-evidence", "documentation cutover evidence");
+  kind(value, 2, "runmat-builtin-documentation-cutover-evidence", "documentation cutover evidence");
   exact(value, ["schema_version", "kind", "authority", "provenance", "catalog_export", "rows", "summary", "result", "digest"], "documentation cutover evidence");
   if (value.authority !== "derived-machine-evidence-only") throw new Error("documentation cutover evidence has invalid authority");
   const provenance = parseProvenance(value.provenance, true);
-  exact(value.catalog_export, ["schema_version", "content_digest"], "catalog export evidence");
+  exact(value.catalog_export, ["schema_version", "content_digest", "evidence_digest", "bytes", "value"], "catalog export evidence");
   if (![1, 2].includes(value.catalog_export.schema_version)) throw new Error("unsupported catalog export schema");
+  if (value.catalog_export.schema_version !== value.catalog_export.value?.schema_version) {
+    throw new Error("catalog export envelope and value schema versions differ");
+  }
   digest(value.catalog_export.content_digest, "catalog export content digest");
+  digest(value.catalog_export.evidence_digest, "catalog export evidence digest");
+  if (typeof value.catalog_export.bytes !== "string") throw new Error("catalog export bytes must be a string");
+  let catalogExport;
+  try { catalogExport = JSON.parse(value.catalog_export.bytes); } catch (error) { throw new Error(`catalog export bytes are not valid JSON: ${error.message}`); }
+  if (JSON.stringify(catalogExport) !== JSON.stringify(value.catalog_export.value)) throw new Error("catalog export bytes and value differ");
+  if (contentDigest(Buffer.from(value.catalog_export.bytes)) !== value.catalog_export.content_digest
+    || evidenceDigest(value.catalog_export.bytes) !== value.catalog_export.evidence_digest) throw new Error("catalog export byte identity is inconsistent");
+  parseCatalogExport(catalogExport);
   const rows = array(value.rows, "documentation cutover rows", { empty: true }).map(parseRow);
   const keys = rows.map((entry) => `${entry.identity}\0${entry.source_path}\0${entry.pointer}`);
   if (new Set(keys).size !== keys.length) throw new Error("documentation cutover rows must be unique");
@@ -63,6 +81,7 @@ export function parseDocumentationCutoverArtifact(value, expected = null) {
   const observedIdentities = new Set(rows.map((entry) => entry.identity));
   if (value.summary.identities !== observedIdentities.size || value.summary.leaves !== rows.length || value.summary.passed !== rows.filter((entry) => entry.result === "pass").length) throw new Error("documentation cutover summary is inconsistent");
   const result = rows.every((entry) => entry.result === "pass") ? "pass" : "fail";
+  validateObservedDestinations(rows, catalogExport);
   if (value.result !== result) throw new Error("documentation cutover result is inconsistent");
   digest(value.digest, "documentation cutover digest"); const { digest: _ignored, ...payload } = value;
   if (evidenceDigest(payload) !== value.digest) throw new Error("documentation cutover artifact digest mismatch");
@@ -74,6 +93,18 @@ export function parseDocumentationCutoverArtifact(value, expected = null) {
     validateExpectedRows(rows, expected.source_dispositions);
   }
   return { ...value, provenance, rows };
+}
+
+function validateObservedDestinations(rows, catalogExport) {
+  const documents = new Map(catalogExport.builtins.map((entry) => [String(entry.key).toLowerCase(), entry]));
+  for (const row of rows) {
+    if (!row.destination) continue;
+    const observed = resolvePointer(documents.get(row.identity.toLowerCase()), row.destination.pointer);
+    const observedDigest = observed.found ? evidenceDigest(observed.value) : null;
+    if (row.destination.observed_value_digest !== observedDigest) {
+      throw new Error(`${row.identity}${row.pointer}: documented destination observation differs from the captured catalog export`);
+    }
+  }
 }
 
 export function documentationCutoverChecks(artifact) {

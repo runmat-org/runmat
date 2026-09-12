@@ -13,15 +13,15 @@ export const BUNDLE_CONTROL_REVIEW_KIND = "runmat-builtin-migration-bundle-contr
 const PROGRAM = "RM-1064/C00-C07";
 const VALIDATED_BUNDLE_REVIEWS = new WeakSet();
 
-export function parseBundleControlReview(value, scaffoldValue, topology) {
+export function parseBundleControlReview(value, scaffoldValue, topology, inventory) {
   const scaffold = assertValidatedControlOverlayScaffold(scaffoldValue);
   assertValidatedTopologyView(topology);
   assertScaffoldTopologyBinding(scaffold, topology);
-  kind(value, 1, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
+  kind(value, 3, BUNDLE_CONTROL_REVIEW_KIND, "bundle control review");
   exact(value, ["schema_version", "kind", "authority", "program", "bindings", "bundle_control", "identity_controls", "review", "digest"], "bundle control review");
   if (value.authority !== "reviewer-authored-development-input" || value.program !== PROGRAM) throw new Error("bundle control review has invalid authority or program");
   const bundle = parseBindings(value.bindings, scaffold, topology);
-  parseBundleControlPolicy(value.bundle_control, bundle.id);
+  parseBundleControlPolicy(value.bundle_control, bundle.id, bundle.identities, inventory);
   const identityControls = parseIdentityControls(value.identity_controls, bundle, scaffold, topology);
   parseReviewedEvidence(value.review, `${bundle.id} bundle review artifact`);
   assertEvidenceDigest(value, "bundle control review");
@@ -55,15 +55,21 @@ function parseBindings(value, scaffold, topology) {
     const topologyRow = topology.identities.get(row.identity.toLowerCase());
     if (!scaffoldRow || row.scaffold_identity_row_digest !== evidenceDigest(scaffoldRow)) throw new Error(`${row.identity}: scaffold identity row digest mismatch`);
     if (!topologyRow || row.topology_identity_digest !== evidenceDigest(topologyRow)) throw new Error(`${row.identity}: topology identity row digest mismatch`);
+    const proposal = scaffold.authority_proposals.identity_rows
+      .find((entry) => entry.identity.toLowerCase() === row.identity.toLowerCase());
+    if (!proposal || row.authority_proposal_digest !== proposal.proposal_digest) {
+      throw new Error(`${row.identity}: authority proposal digest mismatch`);
+    }
   }
   return bundle;
 }
 
 function parseIdentityBinding(value, bundleId) {
-  exact(value, ["identity", "scaffold_identity_row_digest", "topology_identity_digest"], `${bundleId} identity binding`);
+  exact(value, ["identity", "scaffold_identity_row_digest", "topology_identity_digest", "authority_proposal_digest"], `${bundleId} identity binding`);
   identity(value.identity, `${bundleId} bound identity`);
   digest(value.scaffold_identity_row_digest, `${value.identity} scaffold identity row digest`);
   digest(value.topology_identity_digest, `${value.identity} topology identity row digest`);
+  digest(value.authority_proposal_digest, "identity authority proposal digest");
   return value;
 }
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -19,10 +18,11 @@ import { freezeReviewedTopology, parseReviewedTopology, reviewedTopologyView } f
 import { dispositionInputFromControl } from "./builtin-migration/dispositions.mjs";
 import { compileDispositionReview } from "./builtin-migration/disposition-review.mjs";
 import { buildDispositionSeed, buildInventory, emptyDispositionInput, parseInventoryEvidence } from "./builtin-migration/inventory.mjs";
-import { issueLease, parseLease } from "./builtin-migration/lease.mjs";
+import { assertLeaseBaseInventory, issueLease, parseLease } from "./builtin-migration/lease.mjs";
 import { runGateProducer } from "./builtin-migration/gate-adapter.mjs";
 import { prepareIdentity } from "./builtin-migration/prepare.mjs";
-import { buildQueue, emptyQueueState } from "./builtin-migration/queue.mjs";
+import { buildQueue, emptyQueueState, validateQueueState } from "./builtin-migration/queue.mjs";
+import { validateQueueCheckpoint } from "./builtin-migration/queue-checkpoint.mjs";
 import { sealBundle, parseSealManifest } from "./builtin-migration/seal.mjs";
 import { exact, kind } from "./builtin-migration/schema.mjs";
 import { parseVerificationManifest } from "./builtin-migration/verify-schema.mjs";
@@ -119,7 +119,13 @@ function run(options) {
   if (options.command === "issue-lease") {
     const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
     const control = parseControlFromOptions(options, baseline);
-    emit(issueLease(readJson(options.request), control), options.output);
+    const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
+    const queue = loadQueueAuthority(
+      options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
+    );
+    emit(issueLease(
+      readJson(options.request), control, repository, leaseBase, queue.state, queue.checkpoint,
+    ), options.output);
     return;
   }
   if (options.command === "validate-control") {
@@ -128,12 +134,15 @@ function run(options) {
     return;
   }
   if (options.command === "produce-gate") {
-    const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
-    const control = parseControlFromOptions(options, baseline);
+    const controlBaseline = parseInventoryEvidence(readJson(options.baselineInventory));
+    const control = parseControlFromOptions(options, controlBaseline);
+    const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
+    const lease = parseLease(readJson(options.lease), control, repository);
+    assertLeaseBaseInventory(lease, control, leaseBase);
     const subject = buildInventory(repository, dispositionInputFromControl(control), {
       compiledInventory: readJson(options.compiledInventory),
     });
-    emit(runGateProducer({ control, baseline_inventory: baseline, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
+    emit(runGateProducer({ control, lease, control_baseline_inventory: controlBaseline, lease_base_inventory: leaseBase, subject_inventory: subject, bundle_id: options.bundle, gate: options.gate, artifact_id: options.artifact, inputs: options.inputs ? readJson(options.inputs) : null }), options.output);
     return;
   }
   if (options.command === "verify") { runVerify(options); return; }
@@ -146,30 +155,96 @@ function run(options) {
   else {
     const baselineInventory = parseInventoryEvidence(readJson(options.baselineInventory));
     const control = parseControlFromOptions(options, baselineInventory);
-    if (["queue", "prepare"].includes(options.command) && inventory.digest !== baselineInventory.digest) throw new Error(`${options.command} requires the current inventory to equal the reviewed baseline inventory`);
-    if (options.command === "queue") emit(buildQueue(inventory, control, options.state ? readJson(options.state) : emptyQueueState()), options.output);
+    if (options.command === "queue" && inventory.digest !== baselineInventory.digest) throw new Error("queue requires the current inventory to equal the reviewed baseline inventory");
+    if (options.command === "queue") {
+      const queueState = options.state
+        ? loadQueueAuthority(
+          options.state, options.queueCheckpoint, options.trustedQueueCheckpointDigest, control,
+        ).state
+        : validateQueueState(emptyQueueState(control), control, () => null);
+      emit(buildQueue(inventory, control, queueState), options.output);
+    }
     else {
-      const lease = parseLease(readJson(options.lease), control);
-      if (options.command === "prepare") emit(prepareIdentity(repository, inventory, control, lease, options.identity, options.workspace), options.output);
-      else runAudit(options, baselineInventory, inventory, control, lease);
+      const lease = parseLease(readJson(options.lease), control, repository);
+      const leaseBase = parseInventoryEvidence(readJson(options.leaseBaseInventory));
+      assertLeaseBaseInventory(lease, control, leaseBase);
+      if (options.command === "prepare") {
+        if (inventory.digest !== leaseBase.digest) throw new Error("prepare requires the current inventory to equal the lease base inventory");
+        emit(prepareIdentity(repository, inventory, control, lease, options.identity, options.workspace), options.output);
+      } else runAudit(options, baselineInventory, leaseBase, inventory, control, lease);
     }
   }
   if (inventory.diagnostics.some((entry) => entry.severity === "error")) process.exitCode = 1;
 }
 
-function runAudit(options, baseline, subject, control, lease) {
+function runAudit(options, controlBaseline, leaseBase, subject, control, lease) {
   const batch = readJson(options.batch);
   parseBatch(batch);
   const evidencePath = path.resolve(options.evidence);
   const evidence = readJson(evidencePath);
-  kind(evidence, 1, "runmat-builtin-migration-audit-evidence-manifest", "audit evidence manifest");
-  exact(evidence, ["schema_version", "kind", "artifact_id", "prepare_results", "source_dispositions", "gate_results"], "audit evidence manifest");
+  kind(evidence, 2, "runmat-builtin-migration-audit-evidence-manifest", "audit evidence manifest");
+  exact(evidence, ["schema_version", "kind", "artifact_id", "authored_revision", "prepare_results", "source_dispositions", "gate_results"], "audit evidence manifest");
   const base = path.dirname(evidencePath);
   const load = (paths) => paths.map((entry) => readJson(path.resolve(base, entry)));
-  const changedPaths = gitChangedPaths(lease.value.base_revision);
-  const output = auditMigration(repository, baseline, subject, control, lease, batch, { artifact_id: evidence.artifact_id, changed_paths: changedPaths, prepare_results: load(evidence.prepare_results), source_dispositions: load(evidence.source_dispositions), gate_results: load(evidence.gate_results) });
+  const output = auditMigration(repository, controlBaseline, leaseBase, subject, control, lease, batch, { artifact_id: evidence.artifact_id, authored_revision: evidence.authored_revision, prepare_results: load(evidence.prepare_results), source_dispositions: load(evidence.source_dispositions), gate_results: load(evidence.gate_results) });
   emit(output, options.output);
   if (output.result !== "pass") process.exitCode = 1;
+}
+
+function loadQueueAuthority(statePath, checkpointPath, trustedCheckpointDigest, control) {
+  const resolvedState = fs.realpathSync(path.resolve(statePath));
+  const base = fs.realpathSync(path.dirname(resolvedState));
+  const states = new Map();
+  const activeStates = new Set();
+  const loadWithinBase = (relativePath, label) => {
+    const resolved = fs.realpathSync(path.resolve(base, relativePath));
+    const relative = path.relative(base, resolved);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error(`${label} escapes the queue authority directory: ${relativePath}`);
+    }
+    return resolved;
+  };
+  const loadState = (resolved) => {
+    if (activeStates.has(resolved)) throw new Error("queue state predecessor chain contains a cycle");
+    const raw = readJson(resolved);
+    if (states.has(raw.digest)) return states.get(raw.digest);
+    activeStates.add(resolved);
+    try {
+      const state = validateQueueState(
+        raw, control,
+        (reference) => readJson(loadWithinBase(reference.path, "queue seal reference")),
+        (predecessor) => loadState(loadWithinBase(
+          predecessor.state_path, "queue predecessor state reference",
+        )),
+      );
+      states.set(state.stateDigest, state);
+      return state;
+    } finally { activeStates.delete(resolved); }
+  };
+  const state = loadState(resolvedState);
+  const checkpoints = new Map();
+  const activeCheckpoints = new Set();
+  const loadCheckpoint = (resolved, expectedDigest, checkpointState) => {
+    if (activeCheckpoints.has(resolved)) throw new Error("queue checkpoint predecessor chain contains a cycle");
+    if (checkpoints.has(expectedDigest)) return checkpoints.get(expectedDigest);
+    activeCheckpoints.add(resolved);
+    try {
+      const checkpoint = validateQueueCheckpoint(
+        readJson(resolved), expectedDigest, checkpointState, control,
+        (predecessor) => loadCheckpoint(
+          loadWithinBase(predecessor.checkpoint_path, "queue predecessor checkpoint reference"),
+          predecessor.checkpoint_digest,
+          checkpointState.predecessorState,
+        ).value,
+      );
+      checkpoints.set(expectedDigest, checkpoint);
+      return checkpoint;
+    } finally { activeCheckpoints.delete(resolved); }
+  };
+  const checkpoint = loadCheckpoint(
+    loadWithinBase(checkpointPath, "queue checkpoint"), trustedCheckpointDigest, state,
+  );
+  return { state, checkpoint };
 }
 
 function runVerify(options) {
@@ -187,16 +262,16 @@ function runSeal(options) {
   const manifest = parseSealManifest(readJson(manifestPath));
   const baseline = parseInventoryEvidence(readJson(options.baselineInventory));
   const control = parseControlFromOptions(options, baseline);
+  const lease = parseLease(readJson(options.lease), control, repository);
   const base = path.dirname(manifestPath);
   const load = (reference) => ({ reference, value: readJson(path.resolve(base, reference.path)) });
   const verification = load(manifest.verification).value;
-  const output = sealBundle(manifest, verification, manifest.integration_gates.map(load), manifest.prerequisite_seals.map(load), control, repository);
+  const output = sealBundle(
+    manifest, verification, manifest.integration_gates.map(load),
+    manifest.accepted_seals.map(load), control, repository, lease,
+  );
   emit(output, options.output);
   if (output.result !== "pass") process.exitCode = 1;
-}
-
-function gitChangedPaths(baseRevision) {
-  return execFileSync("git", ["diff", "--name-only", baseRevision.slice("git:".length), "--"], { cwd: repository, encoding: "utf8" }).split("\n").filter(Boolean);
 }
 
 function parse(arguments_) {
@@ -206,11 +281,11 @@ function parse(arguments_) {
   const controlCommands = ["queue", "prepare", "audit", "freeze-control", "validate-control", "issue-lease", "produce-gate", "seal"];
   const controlAuthoringCommands = ["scaffold-control", "init-control-reviews", "index-control-reviews", "compose-control", "scaffold-control-attestation", "seal-control-attestation"];
   if (!commands.includes(command)) throw new Error(`expected ${commands.join(", ")}; use --help`);
-  const options = { command, output: null, compiledInventory: null, baselineInventory: null, dispositions: null, control: null, draft: null, review: null, request: null, lease: null, state: null, batch: null, evidence: null, identity: null, workspace: null, manifest: null, bundle: null, gate: null, artifact: null, inputs: null, componentGraph: null, c01C03Review: null, c04C05Review: null, c06C07Review: null, reconciliation: null, stabilityCorrections: null, candidate: null, attestation: null, topology: null, controlScaffold: null, controlReviewSet: null, controlCandidate: null, controlAttestation: null, reviewDirectory: null, reviewSetDirectory: null, attestationReview: null, help: false };
+  const options = { command, output: null, compiledInventory: null, baselineInventory: null, leaseBaseInventory: null, dispositions: null, control: null, draft: null, review: null, request: null, lease: null, state: null, queueCheckpoint: null, trustedQueueCheckpointDigest: null, batch: null, evidence: null, identity: null, workspace: null, manifest: null, bundle: null, gate: null, artifact: null, inputs: null, componentGraph: null, c01C03Review: null, c04C05Review: null, c06C07Review: null, reconciliation: null, stabilityCorrections: null, candidate: null, attestation: null, topology: null, controlScaffold: null, controlReviewSet: null, controlCandidate: null, controlAttestation: null, reviewDirectory: null, reviewSetDirectory: null, attestationReview: null, help: false };
   if (command === "prepare") options.identity = requireValue(arguments_, "prepare identity");
   while (arguments_.length) {
     const option = arguments_.shift();
-    const fields = { "--output": "output", "--compiled-inventory": "compiledInventory", "--baseline-inventory": "baselineInventory", "--dispositions": "dispositions", "--control": "control", "--draft": "draft", "--review": "review", "--request": "request", "--lease": "lease", "--state": "state", "--batch": "batch", "--evidence": "evidence", "--workspace": "workspace", "--manifest": "manifest", "--bundle": "bundle", "--gate": "gate", "--artifact": "artifact", "--inputs": "inputs", "--component-graph": "componentGraph", "--c01-c03-review": "c01C03Review", "--c04-c05-review": "c04C05Review", "--c06-c07-review": "c06C07Review", "--reconciliation": "reconciliation", "--stability-corrections": "stabilityCorrections", "--candidate": "candidate", "--attestation": "attestation", "--topology": "topology", "--control-scaffold": "controlScaffold", "--control-review-set": "controlReviewSet", "--control-candidate": "controlCandidate", "--control-attestation": "controlAttestation", "--review-directory": "reviewDirectory", "--review-set-directory": "reviewSetDirectory", "--attestation-review": "attestationReview" };
+    const fields = { "--output": "output", "--compiled-inventory": "compiledInventory", "--baseline-inventory": "baselineInventory", "--lease-base-inventory": "leaseBaseInventory", "--dispositions": "dispositions", "--control": "control", "--draft": "draft", "--review": "review", "--request": "request", "--lease": "lease", "--state": "state", "--queue-checkpoint": "queueCheckpoint", "--trusted-queue-checkpoint-digest": "trustedQueueCheckpointDigest", "--batch": "batch", "--evidence": "evidence", "--workspace": "workspace", "--manifest": "manifest", "--bundle": "bundle", "--gate": "gate", "--artifact": "artifact", "--inputs": "inputs", "--component-graph": "componentGraph", "--c01-c03-review": "c01C03Review", "--c04-c05-review": "c04C05Review", "--c06-c07-review": "c06C07Review", "--reconciliation": "reconciliation", "--stability-corrections": "stabilityCorrections", "--candidate": "candidate", "--attestation": "attestation", "--topology": "topology", "--control-scaffold": "controlScaffold", "--control-review-set": "controlReviewSet", "--control-candidate": "controlCandidate", "--control-attestation": "controlAttestation", "--review-directory": "reviewDirectory", "--review-set-directory": "reviewSetDirectory", "--attestation-review": "attestationReview" };
     if (!fields[option]) throw new Error(`unknown option ${option}`);
     options[fields[option]] = requireValue(arguments_, option);
   }
@@ -231,13 +306,21 @@ function parse(arguments_) {
   if (["init-control-reviews", "index-control-reviews"].includes(command) && !options.reviewDirectory) throw new Error(`${command} requires --review-directory`);
   if (command === "index-control-reviews" && !options.reviewSetDirectory) throw new Error("index-control-reviews requires --review-set-directory");
   if (command === "seal-control-attestation" && !options.attestationReview) throw new Error("seal-control-attestation requires --attestation-review");
-  if (command === "issue-lease" && (!options.control || !options.request)) throw new Error("issue-lease requires --control and --request");
+  if (command === "issue-lease" && (!options.control || !options.request || !options.leaseBaseInventory || !options.state || !options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) throw new Error("issue-lease requires --control, --request, --lease-base-inventory, --state, --queue-checkpoint, and --trusted-queue-checkpoint-digest");
+  if (command === "queue" && options.state
+    && (!options.queueCheckpoint || !options.trustedQueueCheckpointDigest)) {
+    throw new Error("queue with --state requires --queue-checkpoint and --trusted-queue-checkpoint-digest");
+  }
   if (command === "produce-gate" && (!options.bundle || !options.gate || !options.artifact)) throw new Error("produce-gate requires --bundle, --gate, and --artifact");
   if (["prepare", "audit"].includes(command) && !options.lease) throw new Error(`${command} requires --lease`);
+  if (["prepare", "audit", "produce-gate"].includes(command) && !options.leaseBaseInventory) throw new Error(`${command} requires --lease-base-inventory`);
+  if (command === "produce-gate" && !options.lease) throw new Error("produce-gate requires --lease");
   if (command === "prepare" && !options.workspace) throw new Error("prepare requires --workspace outside the repository");
   if (command === "audit" && (!options.batch || !options.evidence)) throw new Error("audit requires --batch and --evidence");
   if (["verify", "seal"].includes(command) && !options.manifest) throw new Error(`${command} requires --manifest`);
-  if (command === "seal" && !options.control) throw new Error("seal requires --control");
+  if (command === "seal" && (!options.control || !options.lease)) {
+    throw new Error("seal requires --control and --lease");
+  }
   return options;
 }
 
@@ -263,13 +346,13 @@ function help() {
     `  builtin-migration-factory.mjs seal-control-attestation --baseline-inventory PATH ${topology} --control-scaffold PATH --control-review-set PATH --control-candidate PATH --attestation-review PATH [--output PATH]\n` +
     `  builtin-migration-factory.mjs freeze-control --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
     `  builtin-migration-factory.mjs validate-control --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n` +
-    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH] [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
-    `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs issue-lease --request PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256 ${topology} ${controlReview} [--output PATH]\n` +
+    `  builtin-migration-factory.mjs produce-gate --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH --lease PATH ${topology} ${controlReview} --bundle ID --gate NAME --artifact ID [--inputs PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs queue --compiled-inventory PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--state PATH --queue-checkpoint PATH --trusted-queue-checkpoint-digest SHA256] [--dispositions PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs prepare NAME --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --workspace PATH [--dispositions PATH] [--output PATH]\n` +
+    `  builtin-migration-factory.mjs audit --compiled-inventory PATH --control PATH --baseline-inventory PATH --lease-base-inventory PATH ${topology} ${controlReview} --lease PATH --batch PATH --evidence PATH [--dispositions PATH] [--output PATH]\n` +
     `  builtin-migration-factory.mjs verify --manifest PATH [--output PATH]\n` +
-    `  builtin-migration-factory.mjs seal --manifest PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
+    `  builtin-migration-factory.mjs seal --manifest PATH --lease PATH --control PATH --baseline-inventory PATH ${topology} ${controlReview} [--output PATH]\n\n` +
     `Generated files are content-addressed development evidence, never production authority.\n`;
 }
 
