@@ -527,6 +527,107 @@ fn bounded_history_retains_latest_samples_with_independent_identities() {
 }
 
 #[test]
+fn history_checkpoint_restart_preserves_exact_lineage_without_gaps_or_duplicates() {
+    let projection = projection(ElementOrder::Tet4);
+    let definition = scalar_definition();
+    let mut history = spec("temperature_restart", ObservationTarget::WholeModel);
+    history.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0, 2.0]);
+    history.storage.retention = RetentionPolicy::LatestSamples { count: 2 };
+    let mut step = ProcedureStep::thermal_transient("thermal-restart");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 2.0,
+    };
+    step.observations = vec![ObservationRequest::History(history)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("temperature_restart".into());
+    let result_at = |time: f64| {
+        let sample = RecoveredFieldSample::TimeSeconds(time);
+        let fields = catalog_at_sample(
+            &projection,
+            &definition,
+            sample,
+            vec![4],
+            vec![time + 1.0; 4],
+        );
+        evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample).unwrap()
+    };
+
+    let mut uninterrupted = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    for time in [0.0, 1.0, 2.0] {
+        uninterrupted
+            .push(RecoveredFieldSample::TimeSeconds(time), result_at(time))
+            .unwrap();
+    }
+    let uninterrupted = uninterrupted.finish().unwrap();
+
+    let mut first_attempt = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    assert!(first_attempt.checkpoint(None).is_err());
+    first_attempt
+        .push(RecoveredFieldSample::TimeSeconds(0.0), result_at(0.0))
+        .unwrap();
+    let first_checkpoint = first_attempt.checkpoint(None).unwrap();
+    let first_checkpoint = ObservationHistoryCheckpoint::from_canonical_bytes(
+        &first_checkpoint.canonical_bytes().unwrap(),
+    )
+    .unwrap();
+    let first_identity = first_checkpoint.manifest().identity;
+
+    let mut second_attempt =
+        BoundedObservationHistory::resume(&plan, &observation_id, first_checkpoint).unwrap();
+    assert!(second_attempt
+        .push(RecoveredFieldSample::TimeSeconds(0.0), result_at(0.0))
+        .is_err());
+    assert!(second_attempt
+        .push(RecoveredFieldSample::TimeSeconds(2.0), result_at(2.0))
+        .is_err());
+    second_attempt
+        .push(RecoveredFieldSample::TimeSeconds(1.0), result_at(1.0))
+        .unwrap();
+    let second_checkpoint = second_attempt.checkpoint(Some(first_identity)).unwrap();
+    assert_eq!(
+        second_checkpoint.manifest().predecessor,
+        Some(first_identity)
+    );
+    let second_identity = second_checkpoint.manifest().identity;
+
+    let mut final_attempt =
+        BoundedObservationHistory::resume(&plan, &observation_id, second_checkpoint).unwrap();
+    final_attempt
+        .push(RecoveredFieldSample::TimeSeconds(2.0), result_at(2.0))
+        .unwrap();
+    let final_checkpoint = final_attempt
+        .checkpoint(Some(second_identity))
+        .expect("latest retention remains checkpointable after eviction");
+    assert_eq!(
+        final_checkpoint.manifest().predecessor,
+        Some(second_identity)
+    );
+    assert_eq!(final_checkpoint.samples().len(), 2);
+    let mut invalid_manifest = serde_json::to_value(final_checkpoint.manifest()).unwrap();
+    invalid_manifest["retained_prefix_digest"] =
+        serde_json::to_value(Digest::sha256("substituted-retained-prefix")).unwrap();
+    assert!(
+        serde_json::from_value::<ObservationHistoryCheckpointManifest>(invalid_manifest).is_err()
+    );
+    let restarted = final_attempt.finish().unwrap();
+    assert_eq!(restarted, uninterrupted);
+
+    let mut stale_plan = plan.clone();
+    stale_plan.identity = ResolvedObservationPlanIdentity(Digest::sha256("stale-plan"));
+    assert!(
+        BoundedObservationHistory::resume(&stale_plan, &observation_id, final_checkpoint).is_err()
+    );
+}
+
+#[test]
 fn series_statistics_make_nonuniform_weighting_explicit() {
     let times = [0.0, 1.0, 3.0];
     let values = [0.0, 2.0, 2.0];

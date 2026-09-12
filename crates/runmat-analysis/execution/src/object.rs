@@ -108,6 +108,21 @@ impl PreparedAnalysisObjects {
             .collect()
     }
 
+    /// Returns the content-addressed transport inventory for a result closure.
+    ///
+    /// A numerical manifest may refer to the same immutable chunk at multiple semantic ordinals.
+    /// The result protocol carries that content object once, while the manifest retains every
+    /// occurrence.
+    pub fn unique_references(
+        &self,
+        access: &ArtifactAccess,
+        kind: ValueRefKind,
+    ) -> AnalysisBridgeResult<Vec<ValueRef>> {
+        let mut references = self.references(access, kind)?;
+        retain_unique_references(&mut references);
+        Ok(references)
+    }
+
     pub fn root_reference(
         &self,
         access: &ArtifactAccess,
@@ -318,6 +333,7 @@ pub fn analysis_object_references(
             resident_fence: None,
         });
     }
+    retain_unique_references(&mut references);
     for reference in &references {
         access.validate_reference(
             reference,
@@ -335,6 +351,11 @@ pub fn analysis_object_references(
         )?;
     }
     Ok(references)
+}
+
+pub(crate) fn retain_unique_references(references: &mut Vec<ValueRef>) {
+    let mut identities = std::collections::BTreeSet::new();
+    references.retain(|reference| identities.insert(reference.id));
 }
 
 pub fn prepare_analysis_objects(

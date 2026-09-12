@@ -278,6 +278,54 @@ pub(crate) fn exact_scheduled_coordinates(
     Ok(Some(coordinates))
 }
 
+pub(super) fn exact_scheduled_coordinate_at(
+    sampling: &SamplingPolicy,
+    ordinal: usize,
+) -> Result<Option<RecoveredFieldSample>, ObservationError> {
+    let Some(sample_count) = exact_scheduled_sample_count(sampling)? else {
+        return Ok(None);
+    };
+    if ordinal >= sample_count {
+        return Err(ObservationError::Limit("history produced sample count"));
+    }
+    let coordinate = match sampling {
+        SamplingPolicy::TimeSeconds(values) => {
+            RecoveredFieldSample::TimeSeconds(normalize_zero(values[ordinal]))
+        }
+        SamplingPolicy::FrequencyHertz(values) => {
+            RecoveredFieldSample::FrequencyHertz(normalize_zero(values[ordinal]))
+        }
+        SamplingPolicy::LoadFactors(values) => {
+            RecoveredFieldSample::LoadFactor(normalize_zero(values[ordinal]))
+        }
+        SamplingPolicy::StudyParameterValues(values) => {
+            RecoveredFieldSample::StudyParameterValue(normalize_zero(values[ordinal]))
+        }
+        SamplingPolicy::ModeIndices(values) => RecoveredFieldSample::ModeIndex(values[ordinal]),
+        SamplingPolicy::TimeIntervalSeconds {
+            start, interval, ..
+        } => RecoveredFieldSample::TimeSeconds(normalize_zero(*start + ordinal as f64 * *interval)),
+        SamplingPolicy::FrequencyIntervalHertz {
+            start, interval, ..
+        } => RecoveredFieldSample::FrequencyHertz(normalize_zero(
+            *start + ordinal as f64 * *interval,
+        )),
+        SamplingPolicy::LoadFactorInterval {
+            start, interval, ..
+        } => RecoveredFieldSample::LoadFactor(normalize_zero(*start + ordinal as f64 * *interval)),
+        SamplingPolicy::Final
+        | SamplingPolicy::EveryAcceptedIncrement
+        | SamplingPolicy::Event(_)
+        | SamplingPolicy::Adaptive { .. } => {
+            return Err(ObservationError::Invalid(
+                "history schedule classification is inconsistent".into(),
+            ));
+        }
+    };
+    validate_coordinate(coordinate)?;
+    Ok(Some(coordinate))
+}
+
 fn interval_coordinates(
     start: f64,
     interval: f64,

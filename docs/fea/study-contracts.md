@@ -367,6 +367,18 @@ sample-sized object and byte bound. Unrelated samples need not be present in the
 are never gathered as a side effect. The declared `fea.ObservationCost` feeds resource admission;
 it is not a measured result.
 
+Long-running histories publish immutable checkpoints instead of sending an unbounded stream of
+driver messages. A checkpoint binds the resolved observation stream, the exact number of accepted
+samples, a rolling digest of every observed sample, the bounded retained suffix, and its predecessor
+checkpoint. Exact schedules advance by canonical ordinal, so a retry cannot omit a time or
+frequency point, repeat one, or substitute another valid point from the same schedule. Retained
+sample chunks are content-addressed and reused across checkpoints; only a new checkpoint manifest
+and genuinely new sample chunks cross the artifact-cache boundary. After a durable or remote
+restart, the imported object inventory seeds the same deduplication state. Final publication reuses
+the checkpointed sample chunks and produces the ordinary canonical history, so uninterrupted and
+restarted attempts have the same scientific identity and result while preserving distinct execution
+lineage.
+
 ## Diagnostics and Monitors
 
 Diagnostics use `fea.Observation.diagnostic(id, kind, sampling, retention)`. Typed kinds cover

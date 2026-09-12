@@ -419,10 +419,12 @@ pub fn import_structural_linear_completion(
         limits,
     )?;
     let mut expected =
-        imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+        imported.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
     expected.extend(
-        receipt_objects.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+        receipt_objects
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
     );
+    crate::object::retain_unique_references(&mut expected);
     expected.push(output_set.root);
     if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(

@@ -1,5 +1,6 @@
 mod attribution;
 mod builder;
+mod checkpoint;
 mod contract;
 mod schedule;
 mod series_contract;
@@ -10,6 +11,11 @@ pub use attribution::{
     SolverEventAttribution, SolverEventSource,
 };
 pub use builder::BoundedObservationHistory;
+pub use checkpoint::{
+    ObservationHistoryCheckpoint, ObservationHistoryCheckpointIdentity,
+    ObservationHistoryCheckpointManifest, ObservationHistoryStream,
+    ObservationHistoryStreamIdentity,
+};
 pub use contract::{
     ObservationHistory, ObservationHistoryEntry, ObservationHistoryIdentity,
     ObservationHistoryManifest, ObservationHistorySample, ObservationHistorySampleIdentity,

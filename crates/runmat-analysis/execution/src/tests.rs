@@ -18,6 +18,9 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutio
 
 use super::*;
 
+#[path = "tests/history_checkpoint.rs"]
+mod history_checkpoint_tests;
+
 fn digest(label: &str) -> Digest {
     Digest::sha256(label)
 }

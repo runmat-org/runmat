@@ -188,7 +188,8 @@ where
                 limits,
             )?
         };
-        let references = prepared.references(&host.artifact_access, ValueRefKind::ResultObject)?;
+        let references =
+            prepared.unique_references(&host.artifact_access, ValueRefKind::ResultObject)?;
         let root = references
             .first()
             .cloned()
@@ -211,6 +212,7 @@ where
     )?;
     let (output_set, output_set_root) =
         publish_analysis_output_set(store, &host, identity, &outputs, &roots)?;
+    crate::object::retain_unique_references(&mut result_objects);
     result_objects.push(output_set_root.clone());
     Ok(CompletedAnalysisWorkload {
         identity,

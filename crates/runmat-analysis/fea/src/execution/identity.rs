@@ -64,6 +64,7 @@ identity_type!(AccuracyEvaluationRequestIdentity);
 identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
 identity_type!(PublicationRequestIdentity);
+identity_type!(HistoryCheckpointRequestIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,6 +75,7 @@ pub enum AnalysisWorkKind {
     Solve,
     RecoverField,
     PublishState,
+    CheckpointHistory,
     EvaluateObservationPartition,
     ReduceObservationPartitions,
     AssembleObservations,

@@ -6,6 +6,7 @@
 mod accuracy;
 mod error;
 mod field;
+mod history;
 mod identity;
 mod object;
 mod observation;
@@ -20,12 +21,13 @@ mod sweep;
 pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::FieldRecoveryRequest;
+pub use history::HistoryCheckpointRequest;
 pub use identity::{
     AccuracyEvaluationRequestIdentity, AccuracyIdentity, AnalysisAttemptIdentity,
     AnalysisResultIdentity, AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-    FieldRecoveryRequestIdentity, GeneratorIdentity, NumericalPlanIdentity,
-    NumericalReceiptIdentity, ObservationAssemblyRequestIdentity,
+    FieldRecoveryRequestIdentity, GeneratorIdentity, HistoryCheckpointRequestIdentity,
+    NumericalPlanIdentity, NumericalReceiptIdentity, ObservationAssemblyRequestIdentity,
     ObservationEvaluationRequestIdentity, ObservationIdentity,
     ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
     OperatorIdentity, ProblemIdentity, PublicationIdentity, PublicationRequestIdentity,

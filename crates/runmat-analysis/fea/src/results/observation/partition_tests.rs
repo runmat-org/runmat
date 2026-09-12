@@ -23,9 +23,9 @@ use super::{
     distributed::{combine_observation_partitions, evaluate_partitioned_observation},
     evaluate_solid_observation_partition, prepare_solid_observation_field_partition,
     topology::StructuralObservationTopology,
-    ObservationEventAttribution, ObservationExecutionPolicy, ObservationLimits,
-    ObservationPartitionContribution, ObservationPartitionPlan, SolverEventAttribution,
-    SolverEventSource,
+    BoundedObservationHistory, ObservationEventAttribution, ObservationExecutionPolicy,
+    ObservationLimits, ObservationPartitionContribution, ObservationPartitionPlan,
+    SolverEventAttribution, SolverEventSource,
 };
 
 fn definition() -> RecoveredFieldDefinition {
@@ -394,6 +394,93 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     {
         assert!((single - split).abs() <= 1.0e-14);
     }
+}
+
+#[test]
+fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
+    let projection =
+        AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+            .unwrap();
+    let definition = definition();
+    let mut history_spec = spec("partitioned_history", ObservationTarget::WholeModel);
+    history_spec.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
+    let mut step = ProcedureStep::thermal_transient("partitioned-history");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 0.0,
+        start: 0.0,
+        end: 1.0,
+    };
+    step.observations = vec![ObservationRequest::History(history_spec)];
+    let plan = super::resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation_id = ObservationId("partitioned_history".into());
+    let topology = StructuralObservationTopology::from_projection(&projection);
+    let result_at = |time: f64, policy: ObservationExecutionPolicy| {
+        let coordinate = RecoveredFieldSample::TimeSeconds(time);
+        let values = projection
+            .nodes
+            .iter()
+            .map(|node| node.coordinates_m.iter().sum::<f64>() + time)
+            .collect::<Vec<_>>();
+        let field = RecoveredField::new(
+            definition.clone(),
+            coordinate,
+            AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+        )
+        .unwrap();
+        evaluate_partitioned_observation(
+            &plan,
+            &plan.observations[0],
+            &field,
+            &topology,
+            policy,
+            None,
+        )
+        .unwrap()
+    };
+    let split_policy = ObservationExecutionPolicy::canonical(
+        std::num::NonZeroU32::new(3).expect("nonzero partition count"),
+    );
+    let mut partitioned = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    let first = result_at(0.0, split_policy);
+    assert!(first.partition_evidence.contributions.len() > 1);
+    partitioned
+        .push(RecoveredFieldSample::TimeSeconds(0.0), first)
+        .unwrap();
+    let checkpoint = partitioned.checkpoint(None).unwrap();
+    let checkpoint_identity = checkpoint.manifest().identity;
+    let mut partitioned =
+        BoundedObservationHistory::resume(&plan, &observation_id, checkpoint).unwrap();
+    partitioned
+        .push(
+            RecoveredFieldSample::TimeSeconds(1.0),
+            result_at(1.0, split_policy),
+        )
+        .unwrap();
+    let continued = partitioned.checkpoint(Some(checkpoint_identity)).unwrap();
+    assert_eq!(continued.manifest().predecessor, Some(checkpoint_identity));
+    let partitioned = partitioned.finish().unwrap();
+
+    let mut serial = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+    for time in [0.0, 1.0] {
+        serial
+            .push(
+                RecoveredFieldSample::TimeSeconds(time),
+                result_at(time, ObservationExecutionPolicy::serial()),
+            )
+            .unwrap();
+    }
+    let serial = serial.finish().unwrap();
+    assert_eq!(partitioned.manifest().identity, serial.manifest().identity);
+    assert_eq!(
+        partitioned.manifest().observed_prefix_digest,
+        serial.manifest().observed_prefix_digest
+    );
 }
 
 #[test]

@@ -34,6 +34,7 @@ pub enum AnalysisNumericalObjectKind {
     AccuracyEvaluationRequest,
     PublicationRequest,
     StatePublicationRequest,
+    HistoryCheckpointRequest,
     Field,
     FieldSelection,
     FieldPartition,

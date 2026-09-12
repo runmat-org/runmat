@@ -6,6 +6,8 @@ mod error;
 mod field_recovery;
 mod graph;
 mod history_access;
+mod history_checkpoint;
+mod history_task;
 mod host;
 mod materialized_signal;
 mod object;
@@ -45,9 +47,20 @@ pub use graph::{
     PreparedAnalysisStepTask,
 };
 pub use history_access::{
-    import_observation_history, import_observation_history_sample,
-    prepare_observation_history_objects, ImportedObservationHistory,
-    ImportedObservationHistoryStorage, ObservationHistoryImport,
+    decode_prepared_observation_history_checkpoint, import_observation_history,
+    import_observation_history_checkpoint, import_observation_history_sample,
+    prepare_observation_history_checkpoint_objects, prepare_observation_history_objects,
+    ImportedObservationHistory, ImportedObservationHistoryCheckpoint,
+    ImportedObservationHistoryStorage, ObservationHistoryCheckpointImport,
+    ObservationHistoryImport,
+};
+pub use history_checkpoint::{
+    ObservationHistoryCheckpointPublisher, PublishedObservationHistory,
+    PublishedObservationHistoryCheckpoint,
+};
+pub use history_task::{
+    import_history_checkpoint_task, prepare_history_checkpoint_task, HistoryCheckpointPreparation,
+    ImportedHistoryCheckpointTask, PreparedHistoryCheckpointTask,
 };
 pub use host::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, AnalysisHostWorkload,

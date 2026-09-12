@@ -1,14 +1,14 @@
 use runmat_analysis_core::{AccuracyTarget, ErrorContributionKind, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisKernel, AnalysisKernelInvocation,
-    AnalysisKernelOutput, AnalysisKernelOutputPartition,
+    decode_prepared_observation_history_checkpoint, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput, AnalysisKernelOutputPartition,
 };
 use runmat_analysis_fea::constraints::{
     CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult,
 };
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind,
-    CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest,
+    CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, HistoryCheckpointRequest,
     ObservationAssemblyRequest, ObservationEvaluationRequest,
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
     ResultPublicationRequest, SemanticStatePublicationRequest,
@@ -33,7 +33,7 @@ use runmat_analysis_fea::results::field::{
 use runmat_analysis_fea::results::observation::{
     evaluate_structural_observation_partition, reduce_observation_partitions, ObservationArtifact,
     ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
-    ObservationPartitionContribution, ObservationPartitionPlan,
+    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_analysis_fea::{
@@ -62,11 +62,73 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::EvaluateAccuracy => execute_accuracy_evaluation(invocation),
             AnalysisWorkKind::PublishResult => execute_result_publication(invocation),
             AnalysisWorkKind::PublishState => execute_state_publication(invocation),
+            AnalysisWorkKind::CheckpointHistory => execute_history_checkpoint(invocation),
             _ => Err(AnalysisBridgeError::Invalid(
                 "native analysis kernel does not yet implement this work kind".into(),
             )),
         }
     }
+}
+
+fn execute_history_checkpoint(
+    invocation: AnalysisKernelInvocation<'_>,
+) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    let request = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::HistoryCheckpointRequest,
+    )?;
+    let sample = unique_input(&invocation, AnalysisNumericalObjectKind::ObservationResult)?;
+    let previous = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Checkpoint)?;
+    if invocation.inputs.len() != 2 + usize::from(previous.is_some())
+        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::Checkpoint]
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "history checkpoint inputs or output differ from the workload contract".into(),
+        ));
+    }
+    let request_identity = request.manifest.logical_identity;
+    let sample_identity = sample.manifest.logical_identity;
+    let request = HistoryCheckpointRequest::from_canonical_bytes(&request.payload())?;
+    let sample = ObservationResult::from_canonical_bytes(&sample.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if request.identity.digest() != request_identity
+        || sample.logical_identity.digest() != sample_identity
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "history checkpoint request or sample differs from its object identity",
+        ));
+    }
+    let previous = previous
+        .map(decode_prepared_observation_history_checkpoint)
+        .transpose()?;
+    let checkpoint = request.advance(previous, sample)?;
+    let mut partitions = Vec::with_capacity(checkpoint.samples().len() + 1);
+    partitions.push(AnalysisKernelOutputPartition {
+        logical_identity: checkpoint.manifest().identity.digest(),
+        payload: checkpoint
+            .manifest()
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+    });
+    partitions.extend(
+        checkpoint
+            .samples()
+            .iter()
+            .map(|sample| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: sample.identity.digest(),
+                    payload: sample
+                        .canonical_bytes()
+                        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()?,
+    );
+    Ok(vec![AnalysisKernelOutput::partitioned(
+        AnalysisNumericalObjectKind::Checkpoint,
+        checkpoint.manifest().identity.digest(),
+        partitions,
+    )])
 }
 
 fn execute_result_publication(
@@ -875,6 +937,10 @@ fn optional_unique_input<'a>(
     }
     Ok(input)
 }
+
+#[cfg(test)]
+#[path = "analysis_kernel/history_tests.rs"]
+mod history_tests;
 
 #[cfg(test)]
 mod tests {

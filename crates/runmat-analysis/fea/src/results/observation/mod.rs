@@ -38,9 +38,11 @@ pub use evaluate::{
 pub(crate) use history::{exact_scheduled_coordinates, sample_matches_policy};
 pub use history::{
     reduce_observation_history, AccuracyEventAttribution, BoundedObservationHistory,
-    ObservationEventAttribution, ObservationHistory, ObservationHistoryEntry,
-    ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
-    ObservationHistorySampleIdentity, SeriesEventAttribution, SeriesExtremumLocation,
+    ObservationEventAttribution, ObservationHistory, ObservationHistoryCheckpoint,
+    ObservationHistoryCheckpointIdentity, ObservationHistoryCheckpointManifest,
+    ObservationHistoryEntry, ObservationHistoryIdentity, ObservationHistoryManifest,
+    ObservationHistorySample, ObservationHistorySampleIdentity, ObservationHistoryStream,
+    ObservationHistoryStreamIdentity, SeriesEventAttribution, SeriesExtremumLocation,
     SeriesReductionContribution, SeriesReductionContributionIdentity, SeriesReductionEvidence,
     SeriesReductionPayload, SeriesReductionResult, SeriesReductionResultIdentity,
     SeriesReductionSource, SolverEventAttribution, SolverEventSource,

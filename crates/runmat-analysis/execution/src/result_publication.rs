@@ -218,7 +218,7 @@ pub fn import_published_result(
         limits,
     )?;
     let mut expected =
-        imported.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+        imported.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
     expected.push(output_set.root);
     if output_set.result_objects != expected {
         return Err(AnalysisBridgeError::Identity(

@@ -13,6 +13,9 @@ use super::super::contract::{
     ResolvedObservationPlanIdentity, OBSERVATION_LIMITS, OBSERVATION_PREFIX,
 };
 use super::attribution::ObservationEventAttribution;
+use super::checkpoint::{
+    validate_observed_prefix, ObservationHistoryStream, ObservationHistoryStreamIdentity,
+};
 use super::schedule::{
     coordinate_follows, exact_scheduled_sample_count, resolve_history_sample_bounds,
     sample_matches_domain, sample_matches_history_policy, validate_coordinate,
@@ -169,6 +172,7 @@ pub struct ObservationHistoryEntry {
 pub struct ObservationHistoryManifest {
     pub schema_version: u16,
     pub identity: ObservationHistoryIdentity,
+    pub stream_identity: ObservationHistoryStreamIdentity,
     pub plan_identity: ResolvedObservationPlanIdentity,
     pub topology_digest: Digest,
     pub independent_domain: IndependentDomain,
@@ -181,6 +185,8 @@ pub struct ObservationHistoryManifest {
     pub retention: RetentionPolicy,
     pub partial_access: PartialAccessPolicy,
     pub observed_sample_count: u64,
+    pub retained_prefix_digest: Digest,
+    pub observed_prefix_digest: Digest,
     pub maximum_produced_samples: usize,
     pub maximum_retained_samples: usize,
     pub samples: Vec<ObservationHistoryEntry>,
@@ -191,6 +197,7 @@ pub struct ObservationHistoryManifest {
 struct ObservationHistoryManifestWire {
     schema_version: u16,
     identity: ObservationHistoryIdentity,
+    stream_identity: ObservationHistoryStreamIdentity,
     plan_identity: ResolvedObservationPlanIdentity,
     topology_digest: Digest,
     independent_domain: IndependentDomain,
@@ -203,6 +210,8 @@ struct ObservationHistoryManifestWire {
     retention: RetentionPolicy,
     partial_access: PartialAccessPolicy,
     observed_sample_count: u64,
+    retained_prefix_digest: Digest,
+    observed_prefix_digest: Digest,
     maximum_produced_samples: usize,
     maximum_retained_samples: usize,
     samples: Vec<ObservationHistoryEntry>,
@@ -215,6 +224,7 @@ impl TryFrom<ObservationHistoryManifestWire> for ObservationHistoryManifest {
         let manifest = Self {
             schema_version: wire.schema_version,
             identity: wire.identity,
+            stream_identity: wire.stream_identity,
             plan_identity: wire.plan_identity,
             topology_digest: wire.topology_digest,
             independent_domain: wire.independent_domain,
@@ -227,6 +237,8 @@ impl TryFrom<ObservationHistoryManifestWire> for ObservationHistoryManifest {
             retention: wire.retention,
             partial_access: wire.partial_access,
             observed_sample_count: wire.observed_sample_count,
+            retained_prefix_digest: wire.retained_prefix_digest,
+            observed_prefix_digest: wire.observed_prefix_digest,
             maximum_produced_samples: wire.maximum_produced_samples,
             maximum_retained_samples: wire.maximum_retained_samples,
             samples: wire.samples,
@@ -292,6 +304,14 @@ impl ObservationHistoryManifest {
             ));
         }
         validate_entry_order(&self.samples)?;
+        let stream = ObservationHistoryStream::from_history_manifest(self)?;
+        validate_observed_prefix(
+            &stream,
+            self.observed_sample_count,
+            self.retained_prefix_digest,
+            self.observed_prefix_digest,
+            &self.samples,
+        )?;
         if self.identity != derive_history_identity(self)? {
             return Err(ObservationError::Identity(
                 "history manifest identity does not converge",
@@ -410,7 +430,9 @@ fn validate_manifest_samples(
     Ok(())
 }
 
-fn validate_entry_order(entries: &[ObservationHistoryEntry]) -> Result<(), ObservationError> {
+pub(super) fn validate_entry_order(
+    entries: &[ObservationHistoryEntry],
+) -> Result<(), ObservationError> {
     for entry in entries {
         validate_coordinate(entry.coordinate)?;
         if let Some(attribution) = entry.event_attribution {
@@ -472,7 +494,7 @@ fn validate_sample_against_manifest(
     Ok(())
 }
 
-fn derive_sample_identity(
+pub(super) fn derive_sample_identity(
     coordinate: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
     result: ObservationResultIdentity,
@@ -510,22 +532,29 @@ pub(super) fn derive_history_identity(
         OBSERVATION_PREFIX,
         "observation-history-identity",
         &(
-            manifest.schema_version,
-            manifest.plan_identity,
-            manifest.topology_digest,
-            &manifest.independent_domain,
-            &manifest.observation_id,
-            manifest.quantity,
-            manifest.location,
-            &manifest.value_shape,
-            manifest.complex_representation,
-            &manifest.sampling,
-            &manifest.retention,
-            manifest.partial_access,
-            manifest.observed_sample_count,
-            manifest.maximum_produced_samples,
-            manifest.maximum_retained_samples,
-            &manifest.samples,
+            (
+                manifest.schema_version,
+                manifest.stream_identity,
+                manifest.plan_identity,
+                manifest.topology_digest,
+                &manifest.independent_domain,
+                &manifest.observation_id,
+                manifest.quantity,
+                manifest.location,
+                &manifest.value_shape,
+                manifest.complex_representation,
+                &manifest.sampling,
+                &manifest.retention,
+                manifest.partial_access,
+            ),
+            (
+                manifest.observed_sample_count,
+                manifest.retained_prefix_digest,
+                manifest.observed_prefix_digest,
+                manifest.maximum_produced_samples,
+                manifest.maximum_retained_samples,
+                &manifest.samples,
+            ),
         ),
         OBSERVATION_LIMITS,
     )?;

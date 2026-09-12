@@ -9,13 +9,17 @@ use super::super::contract::{
     ObservationError, ObservationResult, ResolvedObservation, ResolvedObservationPlan,
     ResolvedObservationPlanIdentity,
 };
+use super::checkpoint::{
+    extend_observed_prefix_digest, initial_observed_prefix_digest, ObservationHistoryCheckpoint,
+    ObservationHistoryCheckpointIdentity, ObservationHistoryStream,
+};
 use super::contract::{
     derive_history_identity, history_position_follows, ObservationHistory, ObservationHistoryEntry,
     ObservationHistoryIdentity, ObservationHistoryManifest, ObservationHistorySample,
 };
 use super::schedule::{
-    exact_scheduled_sample_count, sample_matches_domain, sample_matches_history_policy,
-    validate_history_policy,
+    exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_domain,
+    sample_matches_history_policy, validate_history_policy,
 };
 
 pub struct BoundedObservationHistory {
@@ -26,6 +30,9 @@ pub struct BoundedObservationHistory {
     maximum_produced_samples: usize,
     maximum_retained_samples: usize,
     observed_sample_count: u64,
+    stream: ObservationHistoryStream,
+    retained_prefix_digest: Digest,
+    observed_prefix_digest: Digest,
     samples: VecDeque<ObservationHistorySample>,
 }
 
@@ -51,6 +58,15 @@ impl BoundedObservationHistory {
         )?;
         let maximum_produced_samples = observation.sample_bounds.maximum_produced_samples;
         let maximum_retained_samples = observation.sample_bounds.maximum_retained_samples;
+        let stream = ObservationHistoryStream::new(
+            plan.identity,
+            plan.topology_digest,
+            plan.independent_domain.clone(),
+            &observation,
+            maximum_produced_samples,
+            maximum_retained_samples,
+        )?;
+        let initial_prefix = initial_observed_prefix_digest(stream.identity)?;
         Ok(Self {
             plan_identity: plan.identity,
             topology_digest: plan.topology_digest,
@@ -59,8 +75,49 @@ impl BoundedObservationHistory {
             maximum_produced_samples,
             maximum_retained_samples,
             observed_sample_count: 0,
+            stream,
+            retained_prefix_digest: initial_prefix,
+            observed_prefix_digest: initial_prefix,
             samples: VecDeque::with_capacity(maximum_retained_samples),
         })
+    }
+
+    pub fn resume(
+        plan: &ResolvedObservationPlan,
+        observation_id: &ObservationId,
+        checkpoint: ObservationHistoryCheckpoint,
+    ) -> Result<Self, ObservationError> {
+        checkpoint.validate()?;
+        let mut history = Self::new(plan, observation_id)?;
+        if checkpoint.manifest().stream != history.stream {
+            return Err(ObservationError::Identity(
+                "history checkpoint differs from the requested resolved observation",
+            ));
+        }
+        history.observed_sample_count = checkpoint.manifest().observed_sample_count;
+        history.retained_prefix_digest = checkpoint.manifest().retained_prefix_digest;
+        history.observed_prefix_digest = checkpoint.manifest().observed_prefix_digest;
+        history.samples = checkpoint.samples().iter().cloned().collect();
+        Ok(history)
+    }
+
+    pub fn checkpoint(
+        &self,
+        predecessor: Option<ObservationHistoryCheckpointIdentity>,
+    ) -> Result<ObservationHistoryCheckpoint, ObservationError> {
+        if self.observed_sample_count == 0 {
+            return Err(ObservationError::Invalid(
+                "history checkpoint requires at least one observed sample".into(),
+            ));
+        }
+        ObservationHistoryCheckpoint::new(
+            self.stream.clone(),
+            predecessor,
+            self.observed_sample_count,
+            self.retained_prefix_digest,
+            self.observed_prefix_digest,
+            self.samples.iter().cloned().collect(),
+        )
     }
 
     pub fn push(
@@ -88,6 +145,15 @@ impl BoundedObservationHistory {
             >= u64::try_from(self.maximum_produced_samples).unwrap_or(u64::MAX)
         {
             return Err(ObservationError::Limit("history produced sample count"));
+        }
+        let ordinal = usize::try_from(self.observed_sample_count)
+            .map_err(|_| ObservationError::Limit("history observed sample count"))?;
+        if exact_scheduled_coordinate_at(&self.observation.spec.sampling, ordinal)?
+            .is_some_and(|expected| expected != coordinate)
+        {
+            return Err(ObservationError::Invalid(
+                "history sample is not the next exact scheduled coordinate".into(),
+            ));
         }
         let policy_matches = sample_matches_history_policy(
             &self.observation.spec.sampling,
@@ -122,20 +188,28 @@ impl BoundedObservationHistory {
             self.topology_digest,
             &self.observation,
         )?;
-        self.observed_sample_count = self
-            .observed_sample_count
-            .checked_add(1)
-            .ok_or(ObservationError::Limit("history observed sample count"))?;
         if self.samples.len() == self.maximum_retained_samples {
             if matches!(
                 self.observation.spec.storage.retention,
                 RetentionPolicy::LatestSamples { .. }
             ) {
-                self.samples.pop_front();
+                let evicted = self.samples.pop_front().ok_or_else(|| {
+                    ObservationError::Invalid(
+                        "history retention accounting lost its oldest sample".into(),
+                    )
+                })?;
+                self.retained_prefix_digest =
+                    extend_observed_prefix_digest(self.retained_prefix_digest, evicted.identity)?;
             } else {
                 return Err(ObservationError::Limit("history retained sample count"));
             }
         }
+        self.observed_prefix_digest =
+            extend_observed_prefix_digest(self.observed_prefix_digest, sample.identity)?;
+        self.observed_sample_count = self
+            .observed_sample_count
+            .checked_add(1)
+            .ok_or(ObservationError::Limit("history observed sample count"))?;
         self.samples.push_back(sample);
         Ok(())
     }
@@ -166,6 +240,7 @@ impl BoundedObservationHistory {
         let mut manifest = ObservationHistoryManifest {
             schema_version: 1,
             identity: ObservationHistoryIdentity(Digest::sha256([])),
+            stream_identity: self.stream.identity,
             plan_identity: self.plan_identity,
             topology_digest: self.topology_digest,
             independent_domain: self.independent_domain,
@@ -178,6 +253,8 @@ impl BoundedObservationHistory {
             retention: self.observation.spec.storage.retention,
             partial_access: self.observation.spec.storage.partial_access,
             observed_sample_count: self.observed_sample_count,
+            retained_prefix_digest: self.retained_prefix_digest,
+            observed_prefix_digest: self.observed_prefix_digest,
             maximum_produced_samples: self.maximum_produced_samples,
             maximum_retained_samples: self.maximum_retained_samples,
             samples: samples
