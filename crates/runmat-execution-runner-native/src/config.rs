@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
-use runmat_execution::{resource::Capability, ExecutionScopeId};
+use runmat_execution::{
+    resource::{AcceleratorRequest, Capability, ResourceRequest},
+    ExecutionScopeId,
+};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
@@ -16,6 +19,7 @@ pub struct NativeExecutionConfig {
     pub max_stderr_bytes: usize,
     pub store_root: PathBuf,
     pub worker_capabilities: BTreeSet<Capability>,
+    pub worker_accelerators: Vec<AcceleratorRequest>,
 }
 
 impl NativeExecutionConfig {
@@ -36,6 +40,7 @@ impl NativeExecutionConfig {
             max_stderr_bytes: 1024 * 1024,
             store_root,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            worker_accelerators: Vec::new(),
         })
     }
 
@@ -72,6 +77,38 @@ impl NativeExecutionConfig {
                 .contains(&Capability::ProcessIsolation)
         {
             return Err("native execution configuration contains an empty bound".into());
+        }
+        ResourceRequest {
+            cpu_millicores: 1,
+            memory_bytes: 1,
+            scratch_bytes: 0,
+            max_wall_millis: 1,
+            max_artifact_bytes: 0,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: self.worker_accelerators.clone(),
+            required_capabilities: BTreeSet::new(),
+        }
+        .validate()
+        .map_err(|error| error.to_string())?;
+        let accelerator_classes = self
+            .worker_accelerators
+            .iter()
+            .map(|accelerator| &accelerator.class)
+            .collect::<BTreeSet<_>>();
+        let capability_classes = self
+            .worker_capabilities
+            .iter()
+            .filter_map(|capability| match capability {
+                Capability::Accelerator(class) => Some(class),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        if accelerator_classes != capability_classes {
+            return Err(
+                "native worker accelerator inventory and capabilities name different classes"
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -115,9 +152,10 @@ pub(crate) fn fresh_scope_id(domain: &[u8], nonce: u64) -> ExecutionScopeId {
 
 #[cfg(test)]
 mod tests {
+    use runmat_execution::resource::{AcceleratorRequest, Capability};
     use std::path::PathBuf;
 
-    use super::{fresh_scope_id, session_store_root};
+    use super::{fresh_scope_id, session_store_root, NativeExecutionConfig};
 
     #[test]
     fn default_session_store_is_scoped_to_the_current_user() {
@@ -146,5 +184,27 @@ mod tests {
         let first = fresh_scope_id(b"test-native-session", 1);
         let second = fresh_scope_id(b"test-native-session", 1);
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn native_configuration_binds_accelerator_inventory_to_capabilities() {
+        let mut config = NativeExecutionConfig::for_current_executable().unwrap();
+        let request = AcceleratorRequest {
+            class: "metal".into(),
+            count: 1,
+            memory_bytes_each: 1024,
+        };
+        config.worker_accelerators.push(request.clone());
+        assert!(config.validate().is_err());
+
+        config
+            .worker_capabilities
+            .insert(Capability::Accelerator(request.class.clone()));
+        assert!(config.validate().is_ok());
+
+        config
+            .worker_capabilities
+            .insert(Capability::Accelerator("substituted".into()));
+        assert!(config.validate().is_err());
     }
 }

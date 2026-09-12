@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
+runmat-accelerate-api = { workspace = true }
 runmat-value = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-canonical-codec = { workspace = true }

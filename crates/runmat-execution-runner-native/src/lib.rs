@@ -1,5 +1,6 @@
 //! Native process composition for the portable RunMat execution driver.
 
+mod accelerator_placement;
 mod analysis_host;
 mod analysis_kernel;
 mod analysis_placement;
@@ -37,7 +38,9 @@ pub use analysis_sequence::{
     StructuralSequenceExecutionPolicy,
 };
 pub use config::NativeExecutionConfig;
-pub use driver::NATIVE_OBJECT_STORE_ROOT_ENV;
+pub use driver::{
+    NATIVE_ACCELERATOR_REQUESTS_ENV, NATIVE_ACCELERATOR_REQUIRED_ENV, NATIVE_OBJECT_STORE_ROOT_ENV,
+};
 pub use error::{NativeExecutionError, NativeExecutionResult};
 pub use exact_geometry_admission::{
     admit_prepared_exact_geometry, prepare_exact_geometry_admission, ExactGeometryAdmissionError,

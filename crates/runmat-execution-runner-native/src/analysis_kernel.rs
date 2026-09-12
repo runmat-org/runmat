@@ -819,9 +819,15 @@ fn execute_structural_linear(
             ObservationLimits::default(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_resource_plan =
-        build_structural_resource_plan(mesh.as_ref(), &constraint_plan, &observations, &solve)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let accelerator_requests = resource_plan.request.accelerators.clone();
+    let expected_resource_plan = build_structural_resource_plan(
+        mesh.as_ref(),
+        &constraint_plan,
+        &observations,
+        &solve,
+        &accelerator_requests,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {
         return Err(AnalysisBridgeError::Identity(
             "resource plan does not converge from authoritative structural inputs",
@@ -1176,6 +1182,7 @@ mod tests {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .unwrap();
         let host = prepared.host;
@@ -1882,6 +1889,7 @@ mod tests {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .unwrap();
         let warm_host = warm_prepared.host;
@@ -1949,6 +1957,7 @@ mod tests {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .unwrap();
         assert_eq!(prepared.inputs.len(), 3);
@@ -2173,6 +2182,7 @@ mod tests {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .unwrap();
         let outputs = NativeAnalysisKernel

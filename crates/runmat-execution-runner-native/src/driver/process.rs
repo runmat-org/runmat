@@ -67,6 +67,17 @@ async fn run_process(
         NATIVE_OBJECT_STORE_ROOT_ENV.into(),
         driver.objects.root().to_string_lossy().into_owned(),
     );
+    if !driver.config.worker_accelerators.is_empty() {
+        command.environment.insert(
+            crate::driver::NATIVE_ACCELERATOR_REQUIRED_ENV.into(),
+            "1".into(),
+        );
+        command.environment.insert(
+            crate::driver::NATIVE_ACCELERATOR_REQUESTS_ENV.into(),
+            serde_json::to_string(&driver.config.worker_accelerators)
+                .map_err(|error| error.to_string())?,
+        );
+    }
     command.max_stderr_bytes = driver.config.max_stderr_bytes;
     let mut child = command.spawn().await.map_err(|error| error.to_string())?;
     let stderr = child.captured_stderr();

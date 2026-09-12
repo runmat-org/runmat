@@ -5,6 +5,7 @@ use runmat_analysis_core::{
     ValidatedAnalysisSequence,
 };
 use runmat_analysis_fea::execution::{CanonicalSemanticState, StructuralLinearWorkload};
+use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -44,6 +45,7 @@ pub struct StructuralSequencePreparation {
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+    pub accelerator_requests: Vec<AcceleratorRequest>,
 }
 
 pub struct PreparedStructuralSolveTask {
@@ -220,6 +222,7 @@ impl StructuralSequenceCoordinator {
         let model = validated_structural_sequence_model(&preparation.workloads)?;
         let sequence = validate_model_sequence(&model)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        validate_accelerator_requests(&preparation)?;
         if let Some(mesh) = &preparation.mesh {
             mesh.validate()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -321,6 +324,7 @@ impl StructuralSequenceCoordinator {
                 chunk_bytes: self.preparation.chunk_bytes,
                 inventory_limits: self.preparation.inventory_limits,
                 required_capabilities: self.preparation.required_capabilities.clone(),
+                accelerator_requests: self.preparation.accelerator_requests.clone(),
             })?;
             tasks.push(PreparedStructuralSolveTask {
                 node: StructuralSequenceNode::Solve(step_id.clone()),
@@ -643,6 +647,30 @@ impl StructuralSequenceCoordinator {
                 }
             })
             .collect()
+    }
+}
+
+fn validate_accelerator_requests(
+    preparation: &StructuralSequencePreparation,
+) -> AnalysisBridgeResult<()> {
+    let requires_accelerator = preparation
+        .workloads
+        .values()
+        .any(|workload| workload.backend == runmat_analysis_fea::ComputeBackend::Gpu);
+    match (
+        requires_accelerator,
+        preparation.accelerator_requests.as_slice(),
+    ) {
+        (false, []) => Ok(()),
+        (false, _) => Err(AnalysisBridgeError::Invalid(
+            "CPU-only structural sequences cannot publish an accelerator allocation".into(),
+        )),
+        (true, [request]) => request
+            .validate()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string())),
+        (true, _) => Err(AnalysisBridgeError::Invalid(
+            "GPU structural sequences require exactly one accelerator allocation".into(),
+        )),
     }
 }
 

@@ -8,13 +8,20 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 pub(super) fn inventory(
     resources: &AllocationResources,
 ) -> NativeExecutionResult<ResourceInventory> {
+    let accelerators = accelerators(resources)?;
+    let mut capabilities = native_worker_capabilities()?;
+    capabilities.extend(
+        accelerators
+            .iter()
+            .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
+    );
     Ok(ResourceInventory {
         cpu_millicores: u32::try_from(resources.cpu_millicores)
             .map_err(|_| protocol("worker CPU request overflows scheduler units"))?,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes,
-        accelerators: accelerators(resources)?,
-        capabilities: native_worker_capabilities()?,
+        accelerators,
+        capabilities,
     })
 }
 
@@ -125,8 +132,21 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 mod tests {
     use runmat_execution::resource::Capability;
+    use runmat_execution_transport_native::control::ResourceRequest;
 
-    use super::native_worker_capabilities;
+    use super::{inventory, native_worker_capabilities, task_resources};
+
+    fn allocated_gpu() -> ResourceRequest {
+        ResourceRequest {
+            cpu_millicores: 2_000,
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            scratch_bytes: 1024,
+            accelerator_count: 1,
+            accelerator_class: Some("nvidia-l4".into()),
+            accelerator_memory_bytes: 24 * 1024 * 1024 * 1024,
+            maximum_wall_millis: 60_000,
+        }
+    }
 
     #[test]
     fn native_inventory_always_advertises_analysis_and_process_isolation() {
@@ -196,5 +216,23 @@ mod tests {
         let inventory = native_worker_capabilities().expect("native worker inventory");
 
         assert!(required.is_subset(&inventory));
+    }
+
+    #[test]
+    fn remote_allocation_uses_one_accelerator_contract_for_inventory_and_tasks() {
+        let allocation = allocated_gpu();
+        let inventory = inventory(&allocation).unwrap();
+        let resources = task_resources(&allocation).unwrap();
+
+        assert_eq!(inventory.accelerators, resources.accelerators);
+        assert_eq!(inventory.accelerators[0].class, "nvidia-l4");
+        assert_eq!(inventory.accelerators[0].count, 1);
+        assert_eq!(
+            inventory.accelerators[0].memory_bytes_each,
+            24 * 1024 * 1024 * 1024
+        );
+        assert!(inventory
+            .capabilities
+            .contains(&Capability::Accelerator("nvidia-l4".into())));
     }
 }

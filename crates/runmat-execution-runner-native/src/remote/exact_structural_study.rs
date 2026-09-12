@@ -150,6 +150,8 @@ pub(super) async fn execute_with_completed_meshing(
     }
     let completed_signals = completed_signals
         .ok_or_else(|| protocol("remote structural sequence contains no workload"))?;
+    let task_resources = super::pool_resources::task_resources(resources)?;
+    let analysis_accelerator_requests = task_resources.accelerators.clone();
     let sequence = match crate::execute_structural_sequence_remotely(
         Arc::clone(&pool),
         StructuralSequencePreparation {
@@ -162,9 +164,10 @@ pub(super) async fn execute_with_completed_meshing(
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: Default::default(),
+            accelerator_requests: task_resources.accelerators.clone(),
         },
         crate::StructuralSequenceExecutionPolicy {
-            resources: super::pool_resources::task_resources(resources)?,
+            resources: task_resources,
             retry: RetryPolicy::ExplicitlyIdempotent {
                 max_attempts: runmat_analysis_execution::DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
             },
@@ -185,9 +188,12 @@ pub(super) async fn execute_with_completed_meshing(
             &decoded,
             &completed.result,
             &boundary_objects,
-            &completed_signals,
-            &sequence,
-            unresolved_workloads_digest,
+            crate::exact_structural_study_root::ExactStructuralAnalysisPublication {
+                signals: &completed_signals,
+                sequence: &sequence,
+                unresolved_workloads_digest,
+                accelerator_requests: &analysis_accelerator_requests,
+            },
         )?;
     for object in objects {
         pool.register_execution_object(object.reference, object.bytes)?;

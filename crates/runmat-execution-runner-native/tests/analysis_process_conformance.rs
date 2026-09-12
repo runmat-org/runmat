@@ -939,6 +939,7 @@ fn fixture_for_study(
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     (
@@ -989,6 +990,7 @@ fn explicit_fixture(
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     assert!(prepared
@@ -1104,6 +1106,7 @@ fn mixed_fixture(
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     let constraint_plan =
@@ -1259,6 +1262,7 @@ fn sequence_preparation(
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     }
 }
 

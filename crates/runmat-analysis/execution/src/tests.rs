@@ -1237,6 +1237,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     assert_eq!(prepared.inputs.len(), 4);
@@ -2080,6 +2081,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     assert_eq!(branch.inputs.len(), 5);
@@ -2128,6 +2130,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .is_err()
     );
@@ -2165,6 +2168,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     assert_eq!(prepared.host.workload, access_variant.host.workload);
@@ -2183,6 +2187,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let mut backend_variant = solve.clone();
     backend_variant.backend = ComputeBackend::Gpu;
+    backend_variant.algebra_backend =
+        runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::Accelerator;
     let backend_variant = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("authored-study"),
         frozen_project_digest: None,
@@ -2194,8 +2200,20 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
+            class: "test-gpu".into(),
+            count: 1,
+            memory_bytes_each: 1024 * 1024 * 1024,
+        }],
     })
     .unwrap();
+    assert!(backend_variant
+        .host
+        .workload
+        .required_capabilities
+        .contains(&AnalysisCapabilityRequirement::Accelerator {
+            class: "test-gpu".into(),
+        }));
     assert_ne!(
         prepared.host.workload.execution_plan,
         backend_variant.host.workload.execution_plan
@@ -2427,6 +2445,26 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
+        })
+        .is_err()
+    );
+    assert!(
+        StructuralSequenceCoordinator::new(StructuralSequencePreparation {
+            authored_study_digest: digest("substituted-accelerator-study"),
+            frozen_project_digest: Some(digest("branch-project")),
+            program_revision: revision(),
+            artifact_access: access(),
+            workloads: workloads.clone(),
+            mesh: Some(mesh.clone()),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+            required_capabilities: BTreeSet::new(),
+            accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
+                class: "substituted-gpu".into(),
+                count: 1,
+                memory_bytes_each: 1024,
+            }],
         })
         .is_err()
     );
@@ -2447,6 +2485,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         })
         .is_err()
     );
@@ -2460,6 +2499,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
     })
     .unwrap();
     assert_eq!(coordinator.sequence().parallel_levels().len(), 2);
@@ -2665,6 +2705,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         },
         closures.clone(),
     )
@@ -2685,6 +2726,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: Vec::new(),
         },
         incomplete,
     )

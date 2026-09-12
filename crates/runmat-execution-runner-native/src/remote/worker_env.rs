@@ -66,7 +66,11 @@ pub async fn run_remote_worker_from_env() -> NativeExecutionResult<()> {
         }],
         _ => return Err(invalid("worker accelerator class is missing")),
     };
-    let capabilities = super::pool_resources::native_worker_capabilities()?;
+    crate::accelerator_placement::validate_active_provider_for(&accelerators)?;
+    let mut capabilities = super::pool_resources::native_worker_capabilities()?;
+    capabilities.extend(accelerators.iter().map(|accelerator| {
+        runmat_execution::resource::Capability::Accelerator(accelerator.class.clone())
+    }));
     let worker = WorkerSpec {
         id: WorkerId::derive(&[run_id.as_bytes(), allocation_id.as_bytes()]),
         pool_id: PoolId::derive(&[run_id.as_bytes(), b"remote-pool"]),

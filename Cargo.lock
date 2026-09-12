@@ -6552,6 +6552,7 @@ dependencies = [
  "futures",
  "rand 0.8.6",
  "rcgen",
+ "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-analysis-execution",
  "runmat-analysis-fea",

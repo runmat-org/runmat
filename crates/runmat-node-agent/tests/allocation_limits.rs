@@ -74,7 +74,7 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
     let executable = directory.path().join("worker-env.sh");
     std::fs::write(
         &executable,
-        "#!/bin/sh\nprintf '%s|%s|%s' \"$RUNMAT_EXECUTION_WORKER_RELAY_TICKET\" \"$RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN\" \"${RUNMAT_NODE_CREDENTIAL-unset}\"\n",
+        "#!/bin/sh\nprintf '%s|%s|%s|%s' \"$RUNMAT_EXECUTION_WORKER_RELAY_TICKET\" \"$RUNMAT_EXECUTION_DRIVER_FENCING_TOKEN\" \"${RUNMAT_NODE_CREDENTIAL-unset}\" \"${RUNMAT_EXECUTION_ACCELERATOR_REQUIRED-unset}\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -93,9 +93,9 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
             cpu_millicores: 1,
             memory_bytes: 64 * 1024 * 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerator_count: 1,
+            accelerator_class: Some("nvidia-l4".into()),
+            accelerator_memory_bytes: 24 * 1024 * 1024 * 1024,
             maximum_wall_millis: 60_000,
         },
         role: AllocationRole::Worker,
@@ -140,6 +140,6 @@ async fn worker_launch_uses_only_scoped_bootstrap_material() {
     .expect("worker helper did not finish");
     assert_eq!(
         std::fs::read_to_string(&sandbox.stdout).unwrap(),
-        "scoped-ticket|9|unset"
+        "scoped-ticket|9|unset|1"
     );
 }

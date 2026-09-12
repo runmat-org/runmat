@@ -269,14 +269,20 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         initial_guess_transition: None,
     };
 
-    let plan = build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload)
-        .unwrap();
+    let plan =
+        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
+            .unwrap();
     let mut serial_workload = workload.clone();
     serial_workload.observation_execution =
         crate::results::observation::ObservationExecutionPolicy::serial();
-    let serial_plan =
-        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &serial_workload)
-            .unwrap();
+    let serial_plan = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &serial_workload,
+        &[],
+    )
+    .unwrap();
 
     assert_eq!(
         plan.input.topology_digest,
@@ -319,6 +325,37 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         ByteCount(expected_admission.resident_bytes_upper_bound())
     );
     plan.validate_identity().unwrap();
+
+    let mut gpu_workload = workload;
+    gpu_workload.backend = crate::contracts::ComputeBackend::Gpu;
+    gpu_workload.algebra_backend =
+        crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator;
+    assert!(build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &gpu_workload,
+        &[],
+    )
+    .is_err());
+    let accelerator = AcceleratorRequest {
+        class: "test-gpu".into(),
+        count: 1,
+        memory_bytes_each: 1024 * 1024 * 1024,
+    };
+    let accelerated = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &gpu_workload,
+        std::slice::from_ref(&accelerator),
+    )
+    .unwrap();
+    assert_eq!(accelerated.request.accelerators, vec![accelerator]);
+    assert!(accelerated
+        .request
+        .required_capabilities
+        .contains(&Capability::Accelerator("test-gpu".into())));
 }
 
 #[test]
@@ -344,8 +381,9 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         require_solver_mesh_for_solid: true,
         initial_guess_transition: None,
     };
-    let plan = build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload)
-        .unwrap();
+    let plan =
+        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
+            .unwrap();
 
     assert_eq!(plan.input.topology.nodes, Count(5));
     assert_eq!(plan.input.topology.elements, Count(2));
@@ -356,7 +394,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
     );
     assert_eq!(
         plan.identity,
-        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload,)
+        build_structural_resource_plan(Some(&mesh), &constraints, &observations, &workload, &[])
             .unwrap()
             .identity
     );
@@ -410,7 +448,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         initial_guess_transition: None,
     };
     let plan =
-        build_structural_resource_plan(None, &constraints, &observations, &workload).unwrap();
+        build_structural_resource_plan(None, &constraints, &observations, &workload, &[]).unwrap();
     let structural = model.structural.as_ref().unwrap();
 
     assert_eq!(
@@ -432,7 +470,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
     );
     assert_eq!(
         plan.identity,
-        build_structural_resource_plan(None, &constraints, &observations, &workload)
+        build_structural_resource_plan(None, &constraints, &observations, &workload, &[])
             .unwrap()
             .identity
     );

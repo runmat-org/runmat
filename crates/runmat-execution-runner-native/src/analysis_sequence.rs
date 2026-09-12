@@ -48,6 +48,14 @@ pub async fn execute_structural_sequence_locally(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralSequence> {
     policy.validate()?;
+    config.worker_accelerators = policy.resources.accelerators.clone();
+    config.worker_capabilities.extend(
+        policy
+            .resources
+            .accelerators
+            .iter()
+            .map(|accelerator| Capability::Accelerator(accelerator.class.clone())),
+    );
     config
         .worker_capabilities
         .extend(policy.resources.required_capabilities.iter().cloned());
@@ -86,6 +94,10 @@ async fn execute_with_pool(
     preparation: StructuralSequencePreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralSequence> {
+    validate_accelerator_allocation(
+        &preparation.accelerator_requests,
+        &policy.resources.accelerators,
+    )?;
     let mut coordinator = StructuralSequenceCoordinator::new(preparation).map_err(protocol)?;
     let mut completed_nodes = BTreeMap::new();
     while !coordinator.is_complete() {
@@ -107,6 +119,19 @@ async fn execute_with_pool(
             .map_err(protocol)?;
     }
     coordinator.finish().map_err(protocol)
+}
+
+fn validate_accelerator_allocation(
+    prepared: &[runmat_execution::resource::AcceleratorRequest],
+    allocated: &[runmat_execution::resource::AcceleratorRequest],
+) -> NativeExecutionResult<()> {
+    if prepared != allocated {
+        return Err(NativeExecutionError::Protocol(
+            "structural preparation and execution policy name different accelerator requests"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 async fn execute_solve_wave(
@@ -536,4 +561,36 @@ fn success_response(success: AttemptSuccess) -> ProgramExecutionResponse {
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_execution::resource::AcceleratorRequest;
+
+    use super::validate_accelerator_allocation;
+
+    fn accelerator(class: &str, memory_bytes_each: u64) -> AcceleratorRequest {
+        AcceleratorRequest {
+            class: class.into(),
+            count: 1,
+            memory_bytes_each,
+        }
+    }
+
+    #[test]
+    fn structural_sequence_requires_the_exact_prepared_accelerator_allocation() {
+        let prepared = [accelerator("cuda", 8 * 1024 * 1024 * 1024)];
+        assert!(validate_accelerator_allocation(&prepared, &prepared).is_ok());
+        assert!(validate_accelerator_allocation(&prepared, &[]).is_err());
+        assert!(validate_accelerator_allocation(
+            &prepared,
+            &[accelerator("cuda", 4 * 1024 * 1024 * 1024)]
+        )
+        .is_err());
+        assert!(validate_accelerator_allocation(
+            &prepared,
+            &[accelerator("metal", 8 * 1024 * 1024 * 1024)]
+        )
+        .is_err());
+    }
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use futures::stream::{FuturesUnordered, StreamExt};
 use runmat_analysis_execution::StructuralSequencePreparation;
 use runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES;
-use runmat_execution::resource::{Capability, ResourceRequest};
+use runmat_execution::resource::{AcceleratorRequest, Capability, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -109,6 +109,7 @@ async fn execute_one(
     )
     .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let workloads = prepared.workloads();
+    let accelerator_requests = local_accelerator_requests(&workloads)?;
     let maximum_wall_millis = workloads
         .values()
         .map(|workload| {
@@ -141,6 +142,7 @@ async fn execute_one(
             chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: accelerator_requests.clone(),
         },
         StructuralSequenceExecutionPolicy {
             resources: ResourceRequest {
@@ -151,7 +153,7 @@ async fn execute_one(
                 max_artifact_bytes: ObjectInventoryLimits::default().max_total_bytes,
                 max_egress_bytes: 0,
                 max_relay_bytes: 0,
-                accelerators: Vec::new(),
+                accelerators: accelerator_requests,
                 required_capabilities,
             },
             retry: RetryPolicy::IdempotentInfrastructure,
@@ -177,6 +179,23 @@ async fn execute_one(
             .map(|state| state.state)
             .collect(),
     })
+}
+
+fn local_accelerator_requests(
+    workloads: &std::collections::BTreeMap<
+        runmat_analysis_core::ProcedureStepId,
+        runmat_analysis_fea::execution::StructuralLinearWorkload,
+    >,
+) -> crate::NativeExecutionResult<Vec<AcceleratorRequest>> {
+    if workloads
+        .values()
+        .all(|workload| workload.backend != runmat_analysis_fea::ComputeBackend::Gpu)
+    {
+        return Ok(Vec::new());
+    }
+    Ok(vec![
+        crate::accelerator_placement::active_provider_resource()?,
+    ])
 }
 
 fn artifact_access(study_digest: Digest) -> ArtifactAccess {

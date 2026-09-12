@@ -18,7 +18,13 @@ async fn main() -> ExitCode {
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
             let _otel = runmat::observability::init_from_env();
-            let result = if std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some() {
+            let remote = std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some();
+            if std::env::var_os(runmat_execution_runner_native::NATIVE_ACCELERATOR_REQUIRED_ENV)
+                .is_some()
+            {
+                runmat_accelerate::initialize_acceleration_provider();
+            }
+            let result = if remote {
                 runmat_execution_runner_native::run_remote_worker_from_env().await
             } else {
                 runmat_execution_runner_native::run_worker_stdio().await

@@ -232,6 +232,7 @@ mod tests {
             max_stderr_bytes: 1024,
             store_root: directory.path().to_path_buf(),
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+            worker_accelerators: Vec::new(),
         })
         .unwrap();
         (directory, session)

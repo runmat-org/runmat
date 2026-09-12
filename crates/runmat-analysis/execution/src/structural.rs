@@ -16,6 +16,7 @@ use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationLimits,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
+use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -45,6 +46,7 @@ pub struct StructuralLinearProgramPreparation {
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
+    pub accelerator_requests: Vec<AcceleratorRequest>,
 }
 
 pub struct PreparedStructuralLinearProgram {
@@ -221,6 +223,7 @@ pub fn prepare_structural_linear_program(
         &constraint_plan,
         &observation_plan,
         &preparation.workload,
+        &preparation.accelerator_requests,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_bytes = resource_plan
@@ -349,6 +352,11 @@ pub fn prepare_structural_linear_program(
         .map(|(input, _)| input)
         .collect::<Vec<_>>();
     let mut required_capabilities = preparation.required_capabilities;
+    for accelerator in &resource_plan.request.accelerators {
+        required_capabilities.insert(AnalysisCapabilityRequirement::Accelerator {
+            class: accelerator.class.clone(),
+        });
+    }
     required_capabilities.insert(AnalysisCapabilityRequirement::Host {
         abi: ANALYSIS_HOST_ABI.into(),
     });

@@ -26,6 +26,8 @@ use crate::{
 };
 
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
+pub const NATIVE_ACCELERATOR_REQUIRED_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED";
+pub const NATIVE_ACCELERATOR_REQUESTS_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUESTS";
 const MAX_BUFFERED_PROGRESS: usize = 256;
 
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
@@ -104,7 +106,7 @@ impl LocalDriver {
             cpu_millicores: cpu,
             memory_bytes: memory,
             scratch_bytes: memory,
-            accelerators: Vec::new(),
+            accelerators: config.worker_accelerators.clone(),
             capabilities: config.worker_capabilities.clone(),
         };
         let mut driver = Driver::new(DriverConfig::default(), 1)?;
@@ -133,7 +135,7 @@ impl LocalDriver {
                     cpu_millicores: 1000,
                     memory_bytes: 1024 * 1024 * 1024,
                     scratch_bytes: 1024 * 1024 * 1024,
-                    accelerators: Vec::new(),
+                    accelerators: config.worker_accelerators.clone(),
                     capabilities: config.worker_capabilities.clone(),
                 },
             }))?;

@@ -11,6 +11,7 @@ use crate::{
     solve::preconditioner::SpdPreconditionerKind,
     topology::AnalysisProjection,
 };
+use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
@@ -38,6 +39,7 @@ pub fn build_structural_resource_plan(
     constraints: &CanonicalStructuralConstraintPlan,
     observations: &ResolvedObservationPlan,
     workload: &StructuralLinearWorkload,
+    accelerator_requests: &[AcceleratorRequest],
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -199,6 +201,13 @@ pub fn build_structural_resource_plan(
             ResourcePlanningError::Invalid("solid resource planning lost its projection".into())
         })?)?
     };
+    let accelerators = structural_accelerator_requirements(workload, accelerator_requests)?;
+    let required_capabilities = accelerators
+        .iter()
+        .map(|accelerator| {
+            runmat_execution::resource::Capability::Accelerator(accelerator.class.clone())
+        })
+        .collect();
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         topology_digest,
@@ -232,8 +241,8 @@ pub fn build_structural_resource_plan(
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_MEMORY_BYTES),
             fixed_scratch_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES),
-            required_capabilities: Default::default(),
-            accelerators: Vec::new(),
+            required_capabilities,
+            accelerators,
         },
         // The current structural kernel is monolithic. A recommendation would be dishonest until
         // the operator-domain execution path can consume it.
@@ -245,6 +254,31 @@ pub fn build_structural_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
+}
+
+fn structural_accelerator_requirements(
+    workload: &StructuralLinearWorkload,
+    requests: &[AcceleratorRequest],
+) -> Result<Vec<super::AcceleratorRequirement>, ResourcePlanningError> {
+    if workload.backend != crate::ComputeBackend::Gpu {
+        return Ok(Vec::new());
+    }
+    let [request] = requests else {
+        return Err(ResourcePlanningError::Invalid(
+            "GPU structural execution requires exactly one accelerator request".into(),
+        ));
+    };
+    if request.count != 1 || request.memory_bytes_each == 0 {
+        return Err(ResourcePlanningError::Invalid(
+            "the single-device structural envelope requires one accelerator with bounded memory"
+                .into(),
+        ));
+    }
+    Ok(vec![super::AcceleratorRequirement {
+        class: request.class.clone(),
+        count: request.count,
+        memory_bytes_each: ByteCount(request.memory_bytes_each),
+    }])
 }
 
 fn resolve_constraint_matrix(

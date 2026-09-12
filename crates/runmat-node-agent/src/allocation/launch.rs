@@ -51,6 +51,12 @@ impl AllocationProcesses {
             "RUNMAT_EXECUTION_WORKER_REMOTE".to_string(),
             "1".to_string(),
         );
+        if allocation.resources.accelerator_count > 0 {
+            command.environment.insert(
+                "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED".to_string(),
+                "1".to_string(),
+            );
+        }
         for (name, value) in [
             ("RUNMAT_EXECUTION_SERVER_URL", server_url.to_string()),
             ("RUNMAT_EXECUTION_RUN_ID", bootstrap.run_id.clone()),

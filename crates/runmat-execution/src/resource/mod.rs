@@ -21,6 +21,23 @@ pub struct AcceleratorRequest {
     pub memory_bytes_each: u64,
 }
 
+impl AcceleratorRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.class.is_empty()
+            || self.class.len() > 96
+            || !self.class.is_ascii()
+            || self.class.chars().any(char::is_control)
+            || self.count == 0
+        {
+            return Err(ContractError::invalid(
+                "accelerator request",
+                "class must be 1..=96 printable ASCII bytes and count must be non-zero",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ResourceRequest {
     pub cpu_millicores: u32,
@@ -55,15 +72,7 @@ impl ResourceRequest {
             });
         }
         for accelerator in &self.accelerators {
-            if accelerator.class.is_empty()
-                || accelerator.class.len() > 96
-                || accelerator.count == 0
-            {
-                return Err(ContractError::invalid(
-                    "accelerator request",
-                    "class must be 1..=96 bytes and count must be non-zero",
-                ));
-            }
+            accelerator.validate()?;
         }
         Ok(())
     }
@@ -351,6 +360,15 @@ mod tests {
         let mut substituted = accounting;
         substituted.usage.cpu_core_millis += 1;
         assert!(substituted.validate().is_err());
+    }
+
+    #[test]
+    fn accelerator_classes_are_portable_printable_identifiers() {
+        for class in ["", "gpu\nclass", "gpu-é"] {
+            let mut invalid = request();
+            invalid.accelerators[0].class = class.into();
+            assert!(invalid.validate().is_err());
+        }
     }
 
     #[test]

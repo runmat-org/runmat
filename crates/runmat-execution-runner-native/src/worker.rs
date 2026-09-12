@@ -4,6 +4,20 @@ use crate::protocol::{WorkerRequest, WorkerResponse};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
+    if std::env::var_os(crate::NATIVE_ACCELERATOR_REQUIRED_ENV).is_some() {
+        let encoded = std::env::var(crate::NATIVE_ACCELERATOR_REQUESTS_ENV).map_err(|_| {
+            NativeExecutionError::Configuration(
+                "local accelerator request environment is missing".into(),
+            )
+        })?;
+        let requests: Vec<runmat_execution::resource::AcceleratorRequest> =
+            serde_json::from_str(&encoded).map_err(|error| {
+                NativeExecutionError::Configuration(format!(
+                    "local accelerator request environment is invalid: {error}"
+                ))
+            })?;
+        crate::accelerator_placement::validate_local_provider_for(&requests)?;
+    }
     let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint()?;
     let limits = FrameLimits {
         max_message_bytes: 64 * 1024 * 1024,

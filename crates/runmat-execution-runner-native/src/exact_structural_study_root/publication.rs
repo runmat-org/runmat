@@ -7,6 +7,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, StructuralLinearWorkload, StudyIdentity,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract};
+use runmat_execution::resource::{AcceleratorRequest, ResourceRequest};
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -43,6 +44,7 @@ struct ExactStructuralStudyPublication {
     signal_objects: Vec<ValueRef>,
     analysis_closures: Vec<StructuralSequenceResultClosure>,
     analysis_objects: Vec<ValueRef>,
+    analysis_accelerator_requests: Vec<AcceleratorRequest>,
 }
 
 impl ExactStructuralStudyPublication {
@@ -137,6 +139,19 @@ impl ExactStructuralStudyPublication {
         }
         reference_inventory(&self.signal_objects)?;
         reference_inventory(&self.analysis_objects)?;
+        ResourceRequest {
+            cpu_millicores: 1,
+            memory_bytes: 1,
+            scratch_bytes: 0,
+            max_wall_millis: 1,
+            max_artifact_bytes: 0,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: self.analysis_accelerator_requests.clone(),
+            required_capabilities: BTreeSet::new(),
+        }
+        .validate()
+        .map_err(protocol)?;
         Ok(())
     }
 
@@ -172,6 +187,14 @@ pub struct ExactStructuralStudyResult {
     pub resolved_workloads:
         BTreeMap<runmat_analysis_core::ProcedureStepId, StructuralLinearWorkload>,
     pub sequence: CompletedStructuralSequence,
+}
+
+pub(crate) struct ExactStructuralAnalysisPublication<'a> {
+    pub signals:
+        &'a [crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
+    pub sequence: &'a CompletedStructuralSequence,
+    pub unresolved_workloads_digest: Digest,
+    pub accelerator_requests: &'a [AcceleratorRequest],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -241,9 +264,7 @@ pub(crate) fn package_exact_structural_study_result(
     decoded: &DecodedExactStructuralStudyRoot,
     meshing: &ExactMeshingDagRunResult,
     boundary: &runmat_analysis_execution::PreparedAnalysisObjects,
-    signals: &[crate::remote::signal_materialization::CompletedRemoteSignalMaterialization],
-    sequence: &CompletedStructuralSequence,
-    unresolved_workloads_digest: Digest,
+    analysis: ExactStructuralAnalysisPublication<'_>,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
     let boundary_objects = boundary
         .references(&decoded.artifact_access, ValueRefKind::ResultObject)
@@ -252,7 +273,8 @@ pub(crate) fn package_exact_structural_study_result(
         .first()
         .ok_or_else(|| protocol("boundary resolution closure is empty"))?
         .clone();
-    let signal_closures = signals
+    let signal_closures = analysis
+        .signals
         .iter()
         .map(|signal| {
             signal
@@ -271,7 +293,7 @@ pub(crate) fn package_exact_structural_study_result(
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
     let signal_objects = unique_references(signal_closures.into_iter().flatten())?;
-    let analysis_closures = sequence.result_closures().map_err(protocol)?;
+    let analysis_closures = analysis.sequence.result_closures().map_err(protocol)?;
     let analysis_objects =
         unique_references(
             analysis_closures
@@ -287,7 +309,7 @@ pub(crate) fn package_exact_structural_study_result(
         schema_version: 1,
         program_revision: request.recipe.program_revision.clone(),
         authored_study_digest: decoded.authored_study_digest,
-        unresolved_workloads_digest,
+        unresolved_workloads_digest: analysis.unresolved_workloads_digest,
         meshing_request_digest: Digest::from_bytes(
             *decoded
                 .meshing_request
@@ -303,6 +325,7 @@ pub(crate) fn package_exact_structural_study_result(
         signal_objects: signal_objects.clone(),
         analysis_closures,
         analysis_objects: analysis_objects.clone(),
+        analysis_accelerator_requests: analysis.accelerator_requests.to_vec(),
     };
     let mut new_objects = boundary
         .objects
@@ -585,6 +608,7 @@ pub fn import_exact_structural_study_result(
             chunk_bytes: runmat_analysis_fea::execution::DEFAULT_ANALYSIS_CHUNK_BYTES,
             inventory_limits: limits,
             required_capabilities: BTreeSet::new(),
+            accelerator_requests: publication.analysis_accelerator_requests,
         },
         publication.analysis_closures,
     )
