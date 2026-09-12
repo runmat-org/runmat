@@ -5,15 +5,15 @@ mod callable;
 mod error;
 mod field_recovery;
 mod graph;
-mod history_access;
-mod history_checkpoint;
-mod history_task;
 mod host;
 mod materialized_signal;
 mod object;
 mod observation_assembly;
 mod observation_evaluation;
 mod observation_field_partitions;
+mod observation_history_access;
+mod observation_history_checkpoint;
+mod observation_history_task;
 mod observation_partition;
 mod resource_usage;
 mod response;
@@ -26,6 +26,7 @@ mod state_publication;
 mod structural;
 mod structural_sequence;
 mod task;
+mod transient_object_access;
 mod transport;
 mod workload;
 
@@ -45,22 +46,6 @@ pub use field_recovery::{
 pub use graph::{
     compile_analysis_sequence_graph, AnalysisSequenceExecutionGraph, AnalysisSequenceTask,
     PreparedAnalysisStepTask,
-};
-pub use history_access::{
-    decode_prepared_observation_history_checkpoint, import_observation_history,
-    import_observation_history_checkpoint, import_observation_history_sample,
-    prepare_observation_history_checkpoint_objects, prepare_observation_history_objects,
-    ImportedObservationHistory, ImportedObservationHistoryCheckpoint,
-    ImportedObservationHistoryStorage, ObservationHistoryCheckpointImport,
-    ObservationHistoryImport,
-};
-pub use history_checkpoint::{
-    ObservationHistoryCheckpointPublisher, PublishedObservationHistory,
-    PublishedObservationHistoryCheckpoint,
-};
-pub use history_task::{
-    import_history_checkpoint_task, prepare_history_checkpoint_task, HistoryCheckpointPreparation,
-    ImportedHistoryCheckpointTask, PreparedHistoryCheckpointTask,
 };
 pub use host::{
     prepare_analysis_host_program, AnalysisHostProgramArtifact, AnalysisHostWorkload,
@@ -82,6 +67,23 @@ pub use observation_assembly::{
 };
 pub use observation_evaluation::{
     import_observation_result, ImportedObservations, StructuralObservationPreparation,
+};
+pub use observation_history_access::{
+    decode_prepared_observation_history_checkpoint, import_observation_history,
+    import_observation_history_checkpoint, import_observation_history_sample,
+    prepare_observation_history_checkpoint_objects, prepare_observation_history_objects,
+    ImportedObservationHistory, ImportedObservationHistoryCheckpoint,
+    ImportedObservationHistoryStorage, ObservationHistoryCheckpointImport,
+    ObservationHistoryImport,
+};
+pub use observation_history_checkpoint::{
+    ObservationHistoryCheckpointPublisher, PublishedObservationHistory,
+    PublishedObservationHistoryCheckpoint,
+};
+pub use observation_history_task::{
+    import_observation_history_checkpoint_task, prepare_observation_history_checkpoint_task,
+    ImportedObservationHistoryCheckpointTask, ObservationHistoryCheckpointPreparation,
+    PreparedObservationHistoryCheckpointTask,
 };
 pub use observation_partition::{
     import_observation_partition_contribution, import_reduced_observation,
@@ -140,6 +142,13 @@ pub use structural_sequence::{
 pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
     DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+};
+pub use transient_object_access::{
+    decode_prepared_structural_transient_block_request,
+    decode_prepared_structural_transient_checkpoint, decode_prepared_structural_transient_segment,
+    import_structural_transient_segment_sample, prepare_structural_transient_block_request_objects,
+    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_segment_objects,
+    ImportedStructuralTransientSegmentSample, StructuralTransientSegmentSampleImport,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

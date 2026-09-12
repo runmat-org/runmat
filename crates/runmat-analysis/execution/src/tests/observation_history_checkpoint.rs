@@ -212,17 +212,18 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         artifact_access.clone(),
     )
     .unwrap();
-    let scheduled = prepare_history_checkpoint_task(HistoryCheckpointPreparation {
-        source_host,
-        plan: plan.clone(),
-        observation_id: observation_id.clone(),
-        sample: next_result_objects,
-        previous: Some(midpoint.objects.clone()),
-        program_revision: revision(),
-        chunk_bytes: 256,
-        inventory_limits: limits,
-    })
-    .unwrap();
+    let scheduled =
+        prepare_observation_history_checkpoint_task(ObservationHistoryCheckpointPreparation {
+            source_host,
+            plan: plan.clone(),
+            observation_id: observation_id.clone(),
+            sample: next_result_objects,
+            previous: Some(midpoint.objects.clone()),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+        })
+        .unwrap();
     scheduled.program.write_to(&mut store).unwrap();
     let scheduled_completion = execute_serial_analysis(
         &scheduled.program.request,
@@ -237,7 +238,8 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
             .unwrap()
             .program_response();
     let scheduled_import =
-        import_history_checkpoint_task(&store, scheduled_response, &scheduled, limits).unwrap();
+        import_observation_history_checkpoint_task(&store, scheduled_response, &scheduled, limits)
+            .unwrap();
     assert_eq!(
         scheduled_import.checkpoint.manifest().predecessor,
         Some(midpoint_identity)
@@ -404,7 +406,10 @@ impl AnalysisKernel for HistoryCheckpointKernel {
         &self,
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
-        assert_eq!(invocation.kind, AnalysisWorkKind::CheckpointHistory);
+        assert_eq!(
+            invocation.kind,
+            AnalysisWorkKind::CheckpointObservationHistory
+        );
         let mut partitions = Vec::with_capacity(self.0.samples().len() + 1);
         partitions.push(AnalysisKernelOutputPartition {
             logical_identity: self.0.manifest().identity.digest(),
@@ -429,7 +434,7 @@ impl AnalysisKernel for HistoryCheckpointKernel {
                 .collect::<AnalysisBridgeResult<Vec<_>>>()?,
         );
         Ok(vec![AnalysisKernelOutput::partitioned(
-            AnalysisNumericalObjectKind::Checkpoint,
+            AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
             self.0.manifest().identity.digest(),
             partitions,
         )])

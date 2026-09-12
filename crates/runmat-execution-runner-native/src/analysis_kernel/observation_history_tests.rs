@@ -7,8 +7,8 @@ use runmat_analysis_execution::{
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, ConstraintPlanIdentity, DiscretizationIdentity,
-    ExecutionPlanIdentity, HistoryCheckpointRequest, NumericalPlanIdentity, OperatorIdentity,
-    ProblemIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
+    ExecutionPlanIdentity, NumericalPlanIdentity, ObservationHistoryCheckpointRequest,
+    OperatorIdentity, ProblemIdentity, SequenceIdentity, StepIdentity, StudyIdentity,
 };
 use runmat_analysis_fea::results::field::{
     RecoveredField, RecoveredFieldCatalog, RecoveredFieldDefinition, RecoveredFieldEntityDomain,
@@ -62,7 +62,7 @@ fn checkpoint_host(inputs: &[PreparedAnalysisObjects]) -> AnalysisHostWorkload {
             manifest_digest: input.root.digest,
             manifest_encoded_length: input.root.encoded_length,
             reference_kind: if input.manifest.kind
-                == AnalysisNumericalObjectKind::HistoryCheckpointRequest
+                == AnalysisNumericalObjectKind::ObservationHistoryCheckpointRequest
             {
                 ValueRefKind::DriverObject
             } else {
@@ -75,9 +75,9 @@ fn checkpoint_host(inputs: &[PreparedAnalysisObjects]) -> AnalysisHostWorkload {
             study,
             step,
             execution,
-            AnalysisWorkKind::CheckpointHistory,
+            AnalysisWorkKind::CheckpointObservationHistory,
             workload_inputs,
-            vec![AnalysisNumericalObjectKind::Checkpoint],
+            vec![AnalysisNumericalObjectKind::ObservationHistoryCheckpoint],
             BTreeSet::from([AnalysisCapabilityRequirement::Host {
                 abi: runmat_analysis_execution::ANALYSIS_HOST_ABI.into(),
             }]),
@@ -190,9 +190,9 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         evaluate_observation_sample(&plan, &observation_id, &projection, &fields, sample).unwrap()
     };
     let limits = ObjectInventoryLimits::default();
-    let prepare_request = |request: &HistoryCheckpointRequest| {
+    let prepare_request = |request: &ObservationHistoryCheckpointRequest| {
         prepare_analysis_objects(
-            AnalysisNumericalObjectKind::HistoryCheckpointRequest,
+            AnalysisNumericalObjectKind::ObservationHistoryCheckpointRequest,
             request.identity.digest(),
             &request.canonical_bytes().unwrap(),
             256,
@@ -214,7 +214,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     };
 
     let first_sample = result_at(0.0);
-    let first_request = HistoryCheckpointRequest::new(
+    let first_request = ObservationHistoryCheckpointRequest::new(
         plan.clone(),
         observation_id.clone(),
         None,
@@ -228,7 +228,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let first_host = checkpoint_host(&first_inputs);
     let first_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
-            kind: AnalysisWorkKind::CheckpointHistory,
+            kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &first_host,
             inputs: &first_inputs,
         })
@@ -239,7 +239,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     assert_eq!(first_checkpoint.manifest().observed_sample_count, 1);
 
     let second_sample = result_at(1.0);
-    let second_request = HistoryCheckpointRequest::new(
+    let second_request = ObservationHistoryCheckpointRequest::new(
         plan,
         observation_id,
         Some(first_checkpoint.manifest().identity),
@@ -254,7 +254,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let second_host = checkpoint_host(&second_inputs);
     let second_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
-            kind: AnalysisWorkKind::CheckpointHistory,
+            kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &second_host,
             inputs: &second_inputs,
         })
@@ -273,7 +273,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     substituted_inputs[1] = prepare_sample(&first_sample);
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
-            kind: AnalysisWorkKind::CheckpointHistory,
+            kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &second_host,
             inputs: &substituted_inputs,
         })

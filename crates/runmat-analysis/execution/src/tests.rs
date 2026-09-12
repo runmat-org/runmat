@@ -19,8 +19,8 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutio
 
 use super::*;
 
-#[path = "tests/history_checkpoint.rs"]
-mod history_checkpoint_tests;
+#[path = "tests/observation_history_checkpoint.rs"]
+mod observation_history_checkpoint_tests;
 
 fn digest(label: &str) -> Digest {
     Digest::sha256(label)
@@ -2821,4 +2821,262 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         incomplete,
     )
     .is_err());
+}
+
+#[test]
+fn structural_transient_objects_round_trip_and_one_segment_sample_imports_independently() {
+    use runmat_analysis_fea::contracts::StructuralDynamicBalanceSnapshot;
+    use runmat_analysis_fea::execution::{
+        AnalysisWorkloadIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
+        SolverExcitationIdentity, StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
+        StructuralExcitationSetIdentity, StructuralFormulationIdentity,
+        StructuralKinematicsIdentity, StructuralMassOperatorIdentity,
+        StructuralStiffnessOperatorIdentity, StructuralTransientBalanceAccumulator,
+        StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+        StructuralTransientCheckpointInput, StructuralTransientCheckpointScope,
+        StructuralTransientContinuationApproach, StructuralTransientContinuationPoint,
+        StructuralTransientContinuationState, StructuralTransientIntegrator,
+        StructuralTransientPrecision, StructuralTransientSchedule,
+        StructuralTransientScheduleArrival, StructuralTransientSchedulePoint,
+        StructuralTransientSegment, StructuralTransientSegmentSample,
+        StructuralTransientSegmentSampleInput, StructuralTransientSolverCounters,
+        StructuralTransientSolverOptionsIdentity,
+    };
+
+    let study =
+        StudyIdentity::from_authored_digest(digest("transient-study"), Some(digest("project")))
+            .unwrap();
+    let sequence = SequenceIdentity::new(digest("transient-sequence")).unwrap();
+    let step = StepIdentity::new(sequence, digest("transient-step")).unwrap();
+    let constraints =
+        ConstraintPlanIdentity::new(step, digest("mesh"), digest("constraints")).unwrap();
+    let materialization =
+        SignalMaterializationIdentity::new(digest("signal"), None, digest("policy")).unwrap();
+    let realization =
+        SignalRealizationIdentity::new(materialization, digest("signal-content")).unwrap();
+    let excitation =
+        SolverExcitationIdentity::new(step, realization, digest("target"), digest("projection"))
+            .unwrap();
+    let excitations = StructuralExcitationSetIdentity::new(vec![excitation]).unwrap();
+    let problem =
+        ProblemIdentity::new(step, digest("model"), None, constraints, vec![excitation]).unwrap();
+    let discretization =
+        DiscretizationIdentity::new(problem, digest("mesh"), digest("formulation")).unwrap();
+    let stiffness = OperatorIdentity::new(discretization, digest("stiffness")).unwrap();
+    let mass = OperatorIdentity::new(discretization, digest("mass")).unwrap();
+    let damping = OperatorIdentity::new(discretization, digest("damping")).unwrap();
+    let numerical = NumericalPlanIdentity::new(stiffness, digest("solver")).unwrap();
+    let execution = ExecutionPlanIdentity::new(numerical, digest("execution")).unwrap();
+    let source_workload = AnalysisWorkloadIdentity::new(
+        study,
+        step,
+        execution,
+        AnalysisWorkKind::SolveStructuralTransientBlock,
+        digest("root-transient"),
+        Vec::new(),
+    )
+    .unwrap();
+    let schedule = StructuralTransientSchedule::new(vec![
+        StructuralTransientSchedulePoint {
+            time_s: 0.0,
+            arrival: StructuralTransientScheduleArrival::Initial,
+            continuation: StructuralTransientContinuationApproach::At,
+        },
+        StructuralTransientSchedulePoint {
+            time_s: 0.5,
+            arrival: StructuralTransientScheduleArrival::LeftLimit,
+            continuation: StructuralTransientContinuationApproach::RightLimit,
+        },
+        StructuralTransientSchedulePoint {
+            time_s: 1.0,
+            arrival: StructuralTransientScheduleArrival::Continuous,
+            continuation: StructuralTransientContinuationApproach::At,
+        },
+    ])
+    .unwrap();
+    let scope = StructuralTransientCheckpointScope {
+        study,
+        step,
+        execution_plan: execution,
+        source_workload,
+        numerical_plan: numerical,
+        discretization,
+        constraint_plan: constraints,
+        stiffness_operator: StructuralStiffnessOperatorIdentity::new(stiffness).unwrap(),
+        mass_operator: StructuralMassOperatorIdentity::new(mass).unwrap(),
+        damping_operator: StructuralDampingOperatorIdentity::new(damping).unwrap(),
+        excitations,
+        dof_layout: StructuralDofLayoutIdentity::new(discretization, digest("layout")).unwrap(),
+        formulation: StructuralFormulationIdentity::new(discretization, digest("recovery"))
+            .unwrap(),
+        kinematics: StructuralKinematicsIdentity::new(
+            constraints,
+            excitations,
+            digest("kinematics"),
+        )
+        .unwrap(),
+        dof_count: 2,
+        integrator: StructuralTransientIntegrator::NewmarkAverageAcceleration,
+        precision: StructuralTransientPrecision::Real64,
+        solver_options: StructuralTransientSolverOptionsIdentity::new(digest("options")).unwrap(),
+        schedule,
+    };
+    let request = StructuralTransientBlockRequest::new(scope.clone(), None, 2).unwrap();
+    let checkpoint = StructuralTransientCheckpoint::new(
+        StructuralTransientCheckpointInput {
+            scope,
+            block_ordinal: 0,
+            continuation: StructuralTransientContinuationPoint {
+                schedule_ordinal: 2,
+                time_s: 1.0,
+                approach: StructuralTransientContinuationApproach::At,
+            },
+            state: StructuralTransientContinuationState {
+                displacement: vec![2.0, 0.0],
+                velocity: vec![0.5, 0.0],
+                acceleration: vec![1.0, 0.0],
+            },
+            balance: StructuralTransientBalanceAccumulator {
+                initial_mechanical_energy_j: 1.0,
+                applied_load_work_j: 2.0,
+                support_work_j: -0.5,
+                damping_dissipation_j: 0.2,
+            },
+            counters: StructuralTransientSolverCounters {
+                host_sync_count: 2,
+                device_apply_k_count: 2,
+                device_apply_k_attempt_count: 2,
+            },
+            observation_cursors: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let sample = |ordinal, acceleration| {
+        StructuralTransientSegmentSample::new(
+            &request,
+            StructuralTransientSegmentSampleInput {
+                schedule_ordinal: ordinal,
+                time_s: ordinal as f64 * 0.5,
+                accepted_time_step_s: 0.5,
+                state: StructuralTransientContinuationState {
+                    displacement: vec![ordinal as f64, 0.0],
+                    velocity: vec![0.5, 0.0],
+                    acceleration: vec![acceleration, 0.0],
+                },
+                projected_residual_norm: 1.0e-12,
+                reaction: vec![2.0, 0.0],
+                strain_energy_j: 0.6,
+                kinetic_energy_j: 0.4,
+                applied_load_work_j: ordinal as f64,
+                support_work_j: -0.25 * ordinal as f64,
+                damping_dissipation_j: 0.1 * ordinal as f64,
+                energy_balance_residual_j: 0.0,
+                relative_energy_balance_error: 0.0,
+                dynamic_balance: StructuralDynamicBalanceSnapshot {
+                    applied_load: vec![1.0, 0.0],
+                    inertia_force: vec![0.25, 0.0],
+                    damping_force: vec![0.25, 0.0],
+                    elastic_force: vec![0.5, 0.0],
+                    equilibrium_residual: vec![0.0, 0.0],
+                },
+            },
+        )
+        .unwrap()
+    };
+    let segment = StructuralTransientSegment::new(
+        request.clone(),
+        checkpoint.clone(),
+        vec![sample(1, 7.0), sample(2, 1.0)],
+    )
+    .unwrap();
+    let limits = ObjectInventoryLimits::default();
+    let request_objects = prepare_structural_transient_block_request_objects(
+        &request,
+        64,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_block_request(&request_objects).unwrap(),
+        request
+    );
+    let checkpoint_objects = prepare_structural_transient_checkpoint_objects(
+        &checkpoint,
+        64,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_checkpoint(&checkpoint_objects).unwrap(),
+        checkpoint
+    );
+    let prepared = prepare_structural_transient_segment_objects(
+        &segment,
+        64,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    assert_eq!(
+        decode_prepared_structural_transient_segment(&prepared).unwrap(),
+        segment
+    );
+
+    let root = prepared
+        .root_reference(&access(), ValueRefKind::ResultObject)
+        .unwrap();
+    let mut store = MemoryObjects::default();
+    for object in &prepared.objects {
+        store
+            .0
+            .insert(object.descriptor.digest, object.bytes.clone());
+    }
+    let selected_identity = segment.samples()[0].identity;
+    let unrelated = prepared
+        .manifest
+        .partitions
+        .iter()
+        .find(|partition| partition.logical_identity == segment.samples()[1].identity.digest())
+        .unwrap();
+    let unrelated_start = unrelated.first_chunk_ordinal as usize + 1;
+    let unrelated_end = unrelated_start + unrelated.chunk_count as usize;
+    let protected_chunk_digests = prepared
+        .manifest
+        .partitions
+        .iter()
+        .filter(|partition| {
+            partition.logical_identity == segment.manifest().identity.digest()
+                || partition.logical_identity == selected_identity.digest()
+        })
+        .flat_map(|partition| {
+            let start = partition.first_chunk_ordinal as usize;
+            let end = start + partition.chunk_count as usize;
+            prepared.manifest.chunks[start..end]
+                .iter()
+                .map(|chunk| chunk.digest)
+        })
+        .collect::<BTreeSet<_>>();
+    for object in &prepared.objects[unrelated_start..unrelated_end] {
+        if !protected_chunk_digests.contains(&object.descriptor.digest) {
+            store.0.remove(&object.descriptor.digest);
+        }
+    }
+    let imported = import_structural_transient_segment_sample(
+        &store,
+        StructuralTransientSegmentSampleImport {
+            root: &root,
+            expected_segment: segment.manifest().identity.digest(),
+            expected_payload_digest: prepared.manifest.payload_digest,
+            sample: selected_identity,
+            access: &access(),
+            limits,
+        },
+    )
+    .unwrap();
+    assert_eq!(imported.sample, segment.samples()[0]);
+    assert_eq!(imported.manifest, *segment.manifest());
+    assert!(decode_prepared_structural_transient_segment(&prepared).is_ok());
 }

@@ -8,17 +8,22 @@ use crate::results::observation::{
     ResolvedObservationPlanIdentity,
 };
 
-use super::{AnalysisExecutionError, AnalysisExecutionResult, HistoryCheckpointRequestIdentity};
+use super::{
+    AnalysisExecutionError, AnalysisExecutionResult, ObservationHistoryCheckpointRequestIdentity,
+};
 
 const HISTORY_EXECUTION_PREFIX: &[u8] = b"runmat-analysis-history-execution/v1\0";
 const HISTORY_EXECUTION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, try_from = "HistoryCheckpointRequestWire")]
-pub struct HistoryCheckpointRequest {
+#[serde(
+    deny_unknown_fields,
+    try_from = "ObservationHistoryCheckpointRequestWire"
+)]
+pub struct ObservationHistoryCheckpointRequest {
     pub schema_version: u16,
-    pub identity: HistoryCheckpointRequestIdentity,
+    pub identity: ObservationHistoryCheckpointRequestIdentity,
     pub plan: ResolvedObservationPlan,
     pub observation_id: ObservationId,
     pub predecessor: Option<ObservationHistoryCheckpointIdentity>,
@@ -27,19 +32,19 @@ pub struct HistoryCheckpointRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HistoryCheckpointRequestWire {
+struct ObservationHistoryCheckpointRequestWire {
     schema_version: u16,
-    identity: HistoryCheckpointRequestIdentity,
+    identity: ObservationHistoryCheckpointRequestIdentity,
     plan: ResolvedObservationPlan,
     observation_id: ObservationId,
     predecessor: Option<ObservationHistoryCheckpointIdentity>,
     sample: ObservationResultIdentity,
 }
 
-impl TryFrom<HistoryCheckpointRequestWire> for HistoryCheckpointRequest {
+impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryCheckpointRequest {
     type Error = AnalysisExecutionError;
 
-    fn try_from(wire: HistoryCheckpointRequestWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: ObservationHistoryCheckpointRequestWire) -> Result<Self, Self::Error> {
         let request = Self {
             schema_version: wire.schema_version,
             identity: wire.identity,
@@ -53,7 +58,7 @@ impl TryFrom<HistoryCheckpointRequestWire> for HistoryCheckpointRequest {
     }
 }
 
-impl HistoryCheckpointRequest {
+impl ObservationHistoryCheckpointRequest {
     pub fn new(
         plan: ResolvedObservationPlan,
         observation_id: ObservationId,
@@ -167,8 +172,8 @@ fn derive_request_identity(
     observation_id: &ObservationId,
     predecessor: Option<ObservationHistoryCheckpointIdentity>,
     sample: ObservationResultIdentity,
-) -> AnalysisExecutionResult<HistoryCheckpointRequestIdentity> {
-    HistoryCheckpointRequestIdentity::derive(
+) -> AnalysisExecutionResult<ObservationHistoryCheckpointRequestIdentity> {
+    ObservationHistoryCheckpointRequestIdentity::derive(
         "history-checkpoint-request",
         &(plan, observation_id, predecessor, sample),
     )

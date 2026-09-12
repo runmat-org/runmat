@@ -84,7 +84,7 @@ pub fn prepare_observation_history_checkpoint_objects(
             }),
     );
     prepare_partitioned_analysis_objects(
-        AnalysisNumericalObjectKind::Checkpoint,
+        AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
         checkpoint.manifest().identity.digest(),
         &partitions,
         chunk_bytes,
@@ -96,7 +96,7 @@ pub fn prepare_observation_history_checkpoint_objects(
 pub fn decode_prepared_observation_history_checkpoint(
     prepared: &PreparedAnalysisObjects,
 ) -> AnalysisBridgeResult<ObservationHistoryCheckpoint> {
-    if prepared.manifest.kind != AnalysisNumericalObjectKind::Checkpoint
+    if prepared.manifest.kind != AnalysisNumericalObjectKind::ObservationHistoryCheckpoint
         || prepared.manifest.logical_identity
             != prepared
                 .manifest
@@ -164,7 +164,7 @@ pub fn import_observation_history_checkpoint(
         source,
         AnalysisPartitionImport {
             root: import.root,
-            expected_kind: AnalysisNumericalObjectKind::Checkpoint,
+            expected_kind: AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
             expected_logical_identity: expected_identity,
             expected_payload_digest: import.expected_payload_digest,
             partition_identity: expected_identity,
@@ -214,7 +214,7 @@ pub fn import_observation_history_checkpoint(
             source,
             AnalysisPartitionImport {
                 root: import.root,
-                expected_kind: AnalysisNumericalObjectKind::Checkpoint,
+                expected_kind: AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
                 expected_logical_identity: expected_identity,
                 expected_payload_digest: import.expected_payload_digest,
                 partition_identity: entry.sample.digest(),

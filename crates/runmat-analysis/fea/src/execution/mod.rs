@@ -6,34 +6,44 @@
 mod accuracy;
 mod error;
 mod field;
-mod history;
 mod identity;
 mod object;
 mod observation;
 mod observation_assembly;
+mod observation_history_checkpoint;
 mod observation_partition;
 mod publication;
 mod signal;
 mod solve;
 mod state;
 mod sweep;
+mod transient_block;
+mod transient_checkpoint;
+mod transient_schedule;
+mod transient_segment;
 
 pub use accuracy::AccuracyEvaluationRequest;
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::FieldRecoveryRequest;
-pub use history::HistoryCheckpointRequest;
 pub use identity::{
     AccuracyEvaluationRequestIdentity, AccuracyIdentity, AnalysisAttemptIdentity,
     AnalysisResultIdentity, AnalysisTaskIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
     ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
-    FieldRecoveryRequestIdentity, GeneratorIdentity, HistoryCheckpointRequestIdentity,
-    NumericalPlanIdentity, NumericalReceiptIdentity, ObservationAssemblyRequestIdentity,
-    ObservationEvaluationRequestIdentity, ObservationIdentity,
-    ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
-    OperatorIdentity, ProblemIdentity, PublicationIdentity, PublicationRequestIdentity,
-    SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
-    SolverExcitationIdentity, SolverResultIdentity, StateIdentity, StateTransitionIdentity,
-    StepIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
+    FieldRecoveryRequestIdentity, GeneratorIdentity, NumericalPlanIdentity,
+    NumericalReceiptIdentity, ObservationAssemblyRequestIdentity,
+    ObservationEvaluationRequestIdentity, ObservationHistoryCheckpointRequestIdentity,
+    ObservationIdentity, ObservationPartitionEvaluationRequestIdentity,
+    ObservationPartitionReductionRequestIdentity, OperatorIdentity, ProblemIdentity,
+    PublicationIdentity, PublicationRequestIdentity, SequenceIdentity,
+    SignalMaterializationIdentity, SignalRealizationIdentity, SolverExcitationIdentity,
+    SolverResultIdentity, StateIdentity, StateTransitionIdentity, StepIdentity,
+    StructuralDampingOperatorIdentity, StructuralDofLayoutIdentity,
+    StructuralExcitationSetIdentity, StructuralFormulationIdentity, StructuralKinematicsIdentity,
+    StructuralMassOperatorIdentity, StructuralStiffnessOperatorIdentity,
+    StructuralTransientBlockRequestIdentity, StructuralTransientCheckpointIdentity,
+    StructuralTransientScheduleIdentity, StructuralTransientSegmentIdentity,
+    StructuralTransientSegmentSampleIdentity, StructuralTransientSolverOptionsIdentity,
+    StudyIdentity, SweepIdentity, SweepResultIdentity,
 };
 pub use object::{
     chunk_numerical_payload, chunk_partitioned_numerical_payload, AnalysisChunkDescriptor,
@@ -44,6 +54,7 @@ pub use object::{
 };
 pub use observation::ObservationEvaluationRequest;
 pub use observation_assembly::ObservationAssemblyRequest;
+pub use observation_history_checkpoint::ObservationHistoryCheckpointRequest;
 pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionExecutionTarget,
     ObservationPartitionReductionRequest,
@@ -64,6 +75,23 @@ pub use state::{
 pub use sweep::{
     ComposedSweepResult, SweepCompositionPolicy, SweepDefinition, SweepEntryDisposition,
     SweepEntryOutcome,
+};
+pub use transient_block::StructuralTransientBlockRequest;
+pub use transient_checkpoint::{
+    StructuralTransientBalanceAccumulator, StructuralTransientCheckpoint,
+    StructuralTransientCheckpointInput, StructuralTransientCheckpointScope,
+    StructuralTransientContinuationPoint, StructuralTransientContinuationState,
+    StructuralTransientObservationCursor, StructuralTransientSolverCounters,
+};
+pub use transient_schedule::{
+    StructuralTransientContinuationApproach, StructuralTransientIntegrator,
+    StructuralTransientPrecision, StructuralTransientSchedule, StructuralTransientScheduleArrival,
+    StructuralTransientSchedulePoint,
+};
+pub use transient_segment::{
+    StructuralTransientSegment, StructuralTransientSegmentEntry,
+    StructuralTransientSegmentManifest, StructuralTransientSegmentSample,
+    StructuralTransientSegmentSampleInput,
 };
 
 #[cfg(test)]

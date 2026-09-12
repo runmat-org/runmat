@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::ObservationId;
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkKind, HistoryCheckpointRequest,
+    AnalysisNumericalObjectKind, AnalysisWorkKind, ObservationHistoryCheckpointRequest,
 };
 use runmat_analysis_fea::results::observation::{
     ObservationHistoryCheckpoint, ObservationResult, ResolvedObservationPlan,
@@ -21,7 +21,7 @@ use crate::{
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
-pub struct HistoryCheckpointPreparation {
+pub struct ObservationHistoryCheckpointPreparation {
     pub source_host: AnalysisHostWorkload,
     pub plan: ResolvedObservationPlan,
     pub observation_id: ObservationId,
@@ -32,8 +32,8 @@ pub struct HistoryCheckpointPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub struct PreparedHistoryCheckpointTask {
-    pub request: HistoryCheckpointRequest,
+pub struct PreparedObservationHistoryCheckpointTask {
+    pub request: ObservationHistoryCheckpointRequest,
     pub expected: ObservationHistoryCheckpoint,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
@@ -41,19 +41,19 @@ pub struct PreparedHistoryCheckpointTask {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ImportedHistoryCheckpointTask {
+pub struct ImportedObservationHistoryCheckpointTask {
     pub checkpoint: ObservationHistoryCheckpoint,
     pub objects: PreparedAnalysisObjects,
 }
 
-pub fn prepare_history_checkpoint_task(
-    preparation: HistoryCheckpointPreparation,
-) -> AnalysisBridgeResult<PreparedHistoryCheckpointTask> {
+pub fn prepare_observation_history_checkpoint_task(
+    preparation: ObservationHistoryCheckpointPreparation,
+) -> AnalysisBridgeResult<PreparedObservationHistoryCheckpointTask> {
     preparation.source_host.validate()?;
     if preparation.chunk_bytes == 0
         || preparation.sample.manifest.kind != AnalysisNumericalObjectKind::ObservationResult
         || preparation.previous.as_ref().is_some_and(|previous| {
-            previous.manifest.kind != AnalysisNumericalObjectKind::Checkpoint
+            previous.manifest.kind != AnalysisNumericalObjectKind::ObservationHistoryCheckpoint
         })
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -71,7 +71,7 @@ pub fn prepare_history_checkpoint_task(
     let predecessor = previous
         .as_ref()
         .map(|checkpoint| checkpoint.manifest().identity);
-    let request = HistoryCheckpointRequest::new(
+    let request = ObservationHistoryCheckpointRequest::new(
         preparation.plan,
         preparation.observation_id,
         predecessor,
@@ -80,7 +80,7 @@ pub fn prepare_history_checkpoint_task(
     let expected = request.advance(previous, sample)?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::HistoryCheckpointRequest,
+        AnalysisNumericalObjectKind::ObservationHistoryCheckpointRequest,
         request.identity.digest(),
         &request_bytes,
         preparation.chunk_bytes,
@@ -111,16 +111,16 @@ pub fn prepare_history_checkpoint_task(
         preparation.source_host.workload.study,
         preparation.source_host.workload.step,
         preparation.source_host.workload.execution_plan,
-        AnalysisWorkKind::CheckpointHistory,
+        AnalysisWorkKind::CheckpointObservationHistory,
         workload_inputs,
-        vec![AnalysisNumericalObjectKind::Checkpoint],
+        vec![AnalysisNumericalObjectKind::ObservationHistoryCheckpoint],
         BTreeSet::from([AnalysisCapabilityRequirement::Host {
             abi: ANALYSIS_HOST_ABI.into(),
         }]),
     )?;
     let host = AnalysisHostWorkload::new(workload, preparation.source_host.artifact_access)?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
-    Ok(PreparedHistoryCheckpointTask {
+    Ok(PreparedObservationHistoryCheckpointTask {
         request,
         expected,
         host,
@@ -129,12 +129,12 @@ pub fn prepare_history_checkpoint_task(
     })
 }
 
-pub fn import_history_checkpoint_task(
+pub fn import_observation_history_checkpoint_task(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    prepared: &PreparedHistoryCheckpointTask,
+    prepared: &PreparedObservationHistoryCheckpointTask,
     limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<ImportedHistoryCheckpointTask> {
+) -> AnalysisBridgeResult<ImportedObservationHistoryCheckpointTask> {
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
     let [output] = output_set.manifest.outputs.as_slice() else {
@@ -145,7 +145,7 @@ pub fn import_history_checkpoint_task(
     let objects = import_analysis_objects(
         source,
         &output.root,
-        AnalysisNumericalObjectKind::Checkpoint,
+        AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
         prepared.expected.manifest().identity.digest(),
         output.payload_digest,
         &prepared.host.artifact_access,
@@ -165,7 +165,7 @@ pub fn import_history_checkpoint_task(
             "history checkpoint result inventory differs from its canonical closure",
         ));
     }
-    Ok(ImportedHistoryCheckpointTask {
+    Ok(ImportedObservationHistoryCheckpointTask {
         checkpoint,
         objects,
     })

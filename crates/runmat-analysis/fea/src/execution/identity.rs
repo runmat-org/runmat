@@ -64,7 +64,20 @@ identity_type!(AccuracyEvaluationRequestIdentity);
 identity_type!(SweepResultIdentity);
 identity_type!(PublicationIdentity);
 identity_type!(PublicationRequestIdentity);
-identity_type!(HistoryCheckpointRequestIdentity);
+identity_type!(ObservationHistoryCheckpointRequestIdentity);
+identity_type!(StructuralTransientScheduleIdentity);
+identity_type!(StructuralDofLayoutIdentity);
+identity_type!(StructuralFormulationIdentity);
+identity_type!(StructuralStiffnessOperatorIdentity);
+identity_type!(StructuralMassOperatorIdentity);
+identity_type!(StructuralDampingOperatorIdentity);
+identity_type!(StructuralExcitationSetIdentity);
+identity_type!(StructuralKinematicsIdentity);
+identity_type!(StructuralTransientSolverOptionsIdentity);
+identity_type!(StructuralTransientCheckpointIdentity);
+identity_type!(StructuralTransientBlockRequestIdentity);
+identity_type!(StructuralTransientSegmentIdentity);
+identity_type!(StructuralTransientSegmentSampleIdentity);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -75,7 +88,9 @@ pub enum AnalysisWorkKind {
     Solve,
     RecoverField,
     PublishState,
-    CheckpointHistory,
+    CheckpointObservationHistory,
+    SolveStructuralTransientBlock,
+    AssembleStructuralTransientResult,
     EvaluateObservationPartition,
     ReduceObservationPartitions,
     AssembleObservations,
@@ -295,6 +310,78 @@ impl DiscretizationIdentity {
             "discretization",
             &(problem, mesh_digest, formulation_digest),
         )
+    }
+}
+
+impl StructuralDofLayoutIdentity {
+    pub fn new(
+        discretization: DiscretizationIdentity,
+        layout_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-dof-layout", &(discretization, layout_digest))
+    }
+}
+
+impl StructuralFormulationIdentity {
+    pub fn new(
+        discretization: DiscretizationIdentity,
+        realization_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "structural-formulation-realization",
+            &(discretization, realization_digest),
+        )
+    }
+}
+
+impl StructuralStiffnessOperatorIdentity {
+    pub fn new(operator: OperatorIdentity) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-stiffness-operator", &operator)
+    }
+}
+
+impl StructuralMassOperatorIdentity {
+    pub fn new(operator: OperatorIdentity) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-mass-operator", &operator)
+    }
+}
+
+impl StructuralDampingOperatorIdentity {
+    pub fn new(operator: OperatorIdentity) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-damping-operator", &operator)
+    }
+}
+
+impl StructuralExcitationSetIdentity {
+    pub fn new(mut excitations: Vec<SolverExcitationIdentity>) -> AnalysisExecutionResult<Self> {
+        excitations.sort_unstable();
+        let original_count = excitations.len();
+        excitations.dedup();
+        if excitations.len() != original_count {
+            return Err(AnalysisExecutionError::Invalid(
+                "structural excitation set contains duplicate identities".into(),
+            ));
+        }
+        Self::derive("structural-excitation-set", &excitations)
+    }
+}
+
+impl StructuralKinematicsIdentity {
+    pub fn new(
+        constraint_plan: ConstraintPlanIdentity,
+        excitations: StructuralExcitationSetIdentity,
+        kinematics_digest: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive(
+            "structural-kinematics",
+            &(constraint_plan, excitations, kinematics_digest),
+        )
+    }
+}
+
+impl StructuralTransientSolverOptionsIdentity {
+    pub fn new(options_digest: Digest) -> AnalysisExecutionResult<Self> {
+        Self::derive("structural-transient-solver-options", &options_digest)
     }
 }
 
