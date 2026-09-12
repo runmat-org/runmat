@@ -87,8 +87,9 @@ fn catalog_provenance_is_not_part_of_the_semantic_fingerprint() {
         "different::module",
     );
     assert_eq!(
-        runmat_builtins::canonical_catalog_fingerprint(&[&entry]).expect("original fingerprint"),
-        runmat_builtins::canonical_catalog_fingerprint(&[&relocated])
+        runmat_builtins::canonical_catalog_fingerprint(&[&entry], &[])
+            .expect("original fingerprint"),
+        runmat_builtins::canonical_catalog_fingerprint(&[&relocated], &[])
             .expect("relocated fingerprint")
     );
     let encoded = serde_json::to_value(entry).expect("catalog entry serialization");

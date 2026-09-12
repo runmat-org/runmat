@@ -1,8 +1,9 @@
 use runmat_builtins::{
-    builtin_catalog_entries, builtin_constant_catalog_entries, builtin_docs, builtin_functions,
-    builtin_implementation_provenance, canonical_catalog_fingerprint, constant_registrations,
-    native_binding_symbol, registration_manifest_entries, AccelTag, BuiltinImplementationAuthority,
-    RegistrationKind, TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
+    builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
+    builtin_docs, builtin_functions, builtin_implementation_provenance,
+    canonical_catalog_fingerprint, constant_registrations, native_binding_symbol,
+    registration_manifest_entries, AccelTag, BuiltinImplementationAuthority, RegistrationKind,
+    TypeResolverKind, BUILTIN_CATALOG_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -23,8 +24,14 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
         entries.sort_unstable_by_key(|entry| entry.identity);
         entries
     };
-    let catalog_fingerprint = canonical_catalog_fingerprint(builtin_catalog_entries())
-        .expect("the validated builtin catalog must serialize");
+    let catalog_aliases = {
+        let mut aliases = builtin_catalog_aliases().to_vec();
+        aliases.sort_unstable_by_key(|alias| alias.alias);
+        aliases
+    };
+    let catalog_fingerprint =
+        canonical_catalog_fingerprint(builtin_catalog_entries(), &catalog_aliases)
+            .expect("the validated builtin catalog must serialize");
     let mut catalog_provenance = catalog_entries
         .iter()
         .flat_map(|entry| {
@@ -235,6 +242,7 @@ pub fn migration_inventory() -> MigrationInventory<'static> {
             catalog_schema_version: BUILTIN_CATALOG_SCHEMA_VERSION,
             catalog_fingerprint: hex(&catalog_fingerprint),
             catalog_entries,
+            catalog_aliases,
             catalog_provenance,
             constants: declared_constants,
             legacy_functions,

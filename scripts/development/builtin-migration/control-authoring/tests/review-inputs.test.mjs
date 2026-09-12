@@ -327,7 +327,11 @@ function reviewFixture() {
   const topology = topologyFixture(inventory, bundleId, id, { controlDraftDigest: draft.digest });
   const scaffold = buildControlOverlayScaffold(inventory, draft, topology);
   const gatePolicy = reviewedGatePolicy(inventory);
-  const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, gate === "identity"
+  const requiredMaturity = new Set([
+    "identity", "disposition", "catalog-contract", "runtime-binding",
+    "link-reachability", "documentation",
+  ]);
+  const maturity = Object.fromEntries(MATURITY_GATES.map((gate) => [gate, requiredMaturity.has(gate)
     ? { applicability: "required", reason: null, evidence: [] }
     : { applicability: "not-applicable", reason: "Outside the review-input fixture", evidence: ["fixture review"] }]));
   const bundleControl = {
@@ -360,10 +364,12 @@ function reviewFixture() {
     maturity,
     expected_authorities: {
       catalog_package: `crates/runmat-builtins/src/catalog/entries/math/basic/${id}/mod.rs`,
+      catalog_alias_package: null,
+      catalog_constant_package: null,
       catalog_entry_count: 1,
       catalog_constant_count: 0,
       documentation: "catalog",
-      native_link: "not-applicable", wasm_registry: "not-applicable",
+      native_link: "required", wasm_registry: "not-applicable",
     },
     owner: "fixture",
     review: { status: "reviewed", evidence: ["fixture review"] },

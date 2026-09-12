@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 
 import { parseGatePlans } from "../gate-plan.mjs";
 import { validateGateCheckIds } from "../gate-result.mjs";
-import { exampleMaturityGate } from "../producer-adapters/example.mjs";
+import {
+  exampleMaturityGate, exampleProofSatisfiesMaturity,
+} from "../producer-adapters/example.mjs";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 const REPOSITORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -59,6 +61,29 @@ test("native and browser example gates select their distinct reviewed maturity o
   assert.equal(exampleMaturityGate("native-examples"), "native-example");
   assert.equal(exampleMaturityGate("browser-examples"), "browser-example");
   assert.throws(() => exampleMaturityGate("focused-tests"), /not an example gate/);
+});
+
+test("one browser proof enforces example and runtime obligations independently", () => {
+  const row = { status: "absent" };
+  const controlled = { maturity: {
+    "browser-example": { applicability: "not-applicable" },
+    "browser-runtime": { applicability: "required" },
+  } };
+  assert.equal(exampleProofSatisfiesMaturity(
+    { products: ["browser-wasm"] }, row, controlled, "browser-examples",
+  ), true);
+  assert.equal(exampleProofSatisfiesMaturity(
+    { products: ["native-cli"] }, row, controlled, "browser-examples",
+  ), false);
+
+  controlled.maturity["browser-example"] = { applicability: "required" };
+  controlled.maturity["browser-runtime"] = { applicability: "not-applicable" };
+  assert.equal(exampleProofSatisfiesMaturity(
+    { products: ["native-cli"] }, { status: "passed" }, controlled, "browser-examples",
+  ), true);
+  assert.equal(exampleProofSatisfiesMaturity(
+    { products: ["browser-wasm"] }, row, controlled, "browser-examples",
+  ), false);
 });
 
 test("gate check ids are an exact canonical identity projection", () => {

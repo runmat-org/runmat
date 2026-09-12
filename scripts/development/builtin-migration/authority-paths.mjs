@@ -84,12 +84,17 @@ export function subjectAuthorityPathFailures(control, inventory, bundleIds) {
       requireExistingPath(dependency.path, sourcePaths, failures, identity, "shared dependency");
     }
     const expectedCatalog = expected.expected_authorities.catalog_package;
-    const observedCatalog = [...new Set((row.semantic_authority.catalog_provenance ?? [])
-      .map((entry) => entry.provenance?.source_file)
-      .filter(Boolean))].sort(compareCodePoint);
-    const requiredCatalog = expectedCatalog === null ? [] : [expectedCatalog];
-    if (expected.expected_authorities.catalog_entry_count > 0
-      && JSON.stringify(observedCatalog) !== JSON.stringify(requiredCatalog)) {
+    const observedCatalog = [...new Set([
+      ...(row.semantic_authority.catalog_provenance ?? []),
+      ...(row.semantic_authority.catalog_aliases ?? []),
+      ...(row.semantic_authority.constants ?? []),
+    ].map((entry) => entry.provenance?.source_file).filter(Boolean))].sort(compareCodePoint);
+    const requiredCatalog = [
+      expectedCatalog,
+      expected.expected_authorities.catalog_alias_package,
+      expected.expected_authorities.catalog_constant_package,
+    ].filter(Boolean).sort(compareCodePoint);
+    if (JSON.stringify(observedCatalog) !== JSON.stringify(requiredCatalog)) {
       failures.push(`${identity}: catalog provenance does not resolve to its reviewed package`);
     }
     const observedBindings = (row.semantic_authority.implementation_provenance ?? [])

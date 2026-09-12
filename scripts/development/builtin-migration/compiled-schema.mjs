@@ -1,5 +1,8 @@
 import { compareCodePoint } from "./constants.mjs";
-import { array, boolean, enumValue, exact, identity, integer, nonempty, object, repositoryPath, uniqueStrings } from "./schema.mjs";
+import {
+  array, boolean, enumValue, exact, identity, integer, nonempty, object,
+  repositoryPath, rustModulePath, uniqueStrings,
+} from "./schema.mjs";
 import { validateBuiltinExampleFixture, validateBuiltinExampleRequirements } from "../../metadata/BuiltinExampleFixtureSchema.mjs";
 
 const NUMERIC_CLASSES = ["Double", "Single", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"];
@@ -20,10 +23,29 @@ export function catalogProvenance(value) {
   exact(value, ["identity", "provenance"], "compiled catalog provenance");
   exact(value.identity, ["builtin", "variant"], "compiled binding identity");
   exact(value.identity.builtin, ["name"], "compiled provenance builtin"); identity(value.identity.builtin.name, "compiled provenance name"); nonempty(value.identity.variant, "compiled provenance variant");
-  exact(value.provenance, ["source_file", "module_path"], "compiled catalog source provenance"); repositoryPath(value.provenance.source_file, "catalog provenance source file"); nonempty(value.provenance.module_path, "catalog provenance module path");
+  exact(value.provenance, ["source_file", "module_path"], "compiled catalog source provenance"); repositoryPath(value.provenance.source_file, "catalog provenance source file"); rustModulePath(value.provenance.module_path, "catalog provenance module path");
 }
 
-export function constant(value) { exact(value, ["name", "kind"], "compiled constant"); identity(value.name, "constant name"); enumValue(value.kind, ["real_double", "complex_double", "logical"], "constant kind"); }
+export function catalogAlias(value) {
+  exact(value, ["alias", "canonical", "provenance"], "compiled catalog alias");
+  exact(value.alias, ["name"], "catalog alias identity");
+  exact(value.canonical, ["name"], "catalog alias target");
+  const alias = identity(value.alias.name, "catalog alias name").toLowerCase();
+  const canonical = identity(value.canonical.name, "catalog alias canonical name").toLowerCase();
+  if (alias === canonical) throw new Error("catalog alias cannot target itself");
+  exact(value.provenance, ["source_file", "module_path"], "catalog alias provenance");
+  repositoryPath(value.provenance.source_file, "catalog alias source file");
+  rustModulePath(value.provenance.module_path, "catalog alias module path");
+}
+
+export function constant(value) {
+  exact(value, ["name", "kind", "provenance"], "compiled constant");
+  identity(value.name, "constant name");
+  enumValue(value.kind, ["real_double", "complex_double", "logical"], "constant kind");
+  exact(value.provenance, ["source_file", "module_path"], "constant catalog provenance");
+  repositoryPath(value.provenance.source_file, "constant catalog source file");
+  rustModulePath(value.provenance.module_path, "constant catalog module path");
+}
 
 export function legacyFunction(value) {
   exact(value, ["name", "description", "category", "parameter_types", "return_type", "resolver", "semantic_authority", "semantics", "accelerator_tags", "is_sink", "suppress_auto_output", "execution_stack", "required_capabilities", "descriptor", "extensions", "integer_capabilities", "integer_audit"], "compiled legacy function");

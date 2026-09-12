@@ -1346,6 +1346,7 @@ fn find_symbol_range(
 
 fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+    let mut builtin_names = std::collections::BTreeSet::new();
     for var in semantic.globals.values() {
         items.push(variable_completion(var, semantic, offset));
     }
@@ -1359,12 +1360,29 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
         if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal {
             continue;
         }
+        builtin_names.insert(entry.identity.name.to_ascii_lowercase());
         items.push(catalog_completion(entry));
+    }
+    for alias in runmat_builtins::builtin_catalog_aliases() {
+        let Some(entry) =
+            runmat_builtins::builtin_catalog_primary_entry_by_name(alias.canonical.name)
+        else {
+            continue;
+        };
+        if entry.descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
+            || !builtin_names.insert(alias.alias.name.to_ascii_lowercase())
+        {
+            continue;
+        }
+        items.push(catalog_alias_completion(alias.alias.name, entry));
     }
     for func in runmat_builtins::builtin_functions() {
         if func.descriptor.is_some_and(|descriptor| {
             descriptor.completion_policy == BuiltinCompletionPolicy::HiddenInternal
         }) {
+            continue;
+        }
+        if !builtin_names.insert(func.name.to_ascii_lowercase()) {
             continue;
         }
         items.push(builtin_completion(func));
@@ -1373,6 +1391,18 @@ fn completion_from_semantic(semantic: &AnalysisModel, offset: usize) -> Vec<Comp
         items.push(constant_completion(constant));
     }
     items
+}
+
+fn catalog_alias_completion(
+    alias: &str,
+    entry: &runmat_builtins::BuiltinCatalogEntry,
+) -> CompletionItem {
+    let mut completion = catalog_completion(entry);
+    completion.label = alias.to_string();
+    completion.detail = completion
+        .detail
+        .map(|detail| format!("{detail} (alias of {})", entry.identity.name));
+    completion
 }
 
 fn catalog_completion(entry: &runmat_builtins::BuiltinCatalogEntry) -> CompletionItem {

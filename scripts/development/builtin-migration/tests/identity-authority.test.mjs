@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  parseIdentityForms, parseImplementationAuthority, parsePublicIdentity,
+  observedIdentityForms, parseIdentityForms, parseImplementationAuthority, parsePublicIdentity,
   validateIdentityAuthorityGraph,
 } from "../identity-authority.mjs";
 
@@ -74,6 +74,16 @@ test("identity authority graph derives aliases from their sole edge authority", 
   assert.throws(() => validateIdentityAuthorityGraph(new Map([
     ["foo", primary], ["foalias", aliasOwner],
   ])), /cannot own an independent implementation/);
+});
+
+test("compiled alias edges remain callable independently of migration history", () => {
+  assert.deepEqual(observedIdentityForms({ semantic_authority: {
+    catalog_aliases: [{ alias: { name: "foalias" }, canonical: { name: "foo" } }],
+  } }), {
+    kind: "callable",
+    callable_spellings: ["foalias"],
+    constant_spellings: [],
+  });
 });
 
 test("callable and constant forms own independent typed implementations", () => {

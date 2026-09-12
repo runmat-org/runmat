@@ -101,6 +101,7 @@ export function parseIdentityControlPolicy(value, id) {
   parseComplexity(value.complexity, `${id} complexity`);
   parseMaturity(value.maturity, id);
   parseAuthorities(value.expected_authorities, id);
+  validateAuthorityCoherence(value, id);
   nonempty(value.owner, `${id} owner`);
   parseReviewedEvidence(value.review, `${id} identity control review`);
   return value;
@@ -233,15 +234,81 @@ function parseMaturity(value, id) {
 
 function parseAuthorities(value, id) {
   exact(value, [
-    "catalog_package", "catalog_entry_count", "catalog_constant_count", "documentation",
+    "catalog_package", "catalog_alias_package", "catalog_constant_package",
+    "catalog_entry_count", "catalog_constant_count", "documentation",
     "native_link", "wasm_registry",
   ], `${id} expected authorities`);
   if (value.catalog_package !== null) repositoryPath(value.catalog_package, `${id} catalog package`);
+  if (value.catalog_alias_package !== null) repositoryPath(value.catalog_alias_package, `${id} catalog alias package`);
+  if (value.catalog_constant_package !== null) repositoryPath(value.catalog_constant_package, `${id} catalog constant package`);
   integer(value.catalog_entry_count, `${id} catalog entry count`);
   integer(value.catalog_constant_count, `${id} catalog constant count`);
   enumValue(value.documentation, ["catalog", "alias", "none"], `${id} documentation authority`);
   enumValue(value.native_link, ["required", "not-applicable"], `${id} native link`);
   enumValue(value.wasm_registry, ["required", "not-applicable"], `${id} wasm registry`);
+}
+
+function validateAuthorityCoherence(value, id) {
+  const authorities = value.expected_authorities;
+  const callable = value.forms.callable_spellings.length > 0;
+  const constant = value.forms.constant_spellings.length > 0;
+  const required = (maturity) => value.maturity[maturity].applicability === "required";
+  const hasCatalogEntry = authorities.catalog_entry_count > 0;
+  const hasCatalogConstant = authorities.catalog_constant_count > 0;
+  if ((authorities.catalog_package !== null) !== hasCatalogEntry) {
+    throw new Error(`${id}: catalog package and entry count must agree`);
+  }
+  if ((authorities.catalog_constant_package !== null) !== hasCatalogConstant) {
+    throw new Error(`${id}: constant catalog package and count must agree`);
+  }
+  if (value.public_identity.kind === "alias") {
+    if (!callable || constant || hasCatalogEntry || hasCatalogConstant
+      || authorities.catalog_package !== null || authorities.catalog_alias_package === null
+      || authorities.catalog_constant_package !== null || authorities.documentation !== "alias"
+      || authorities.native_link !== "not-applicable"
+      || authorities.wasm_registry !== "not-applicable") {
+      throw new Error(`${id}: alias authorities must contain only one callable alias declaration`);
+    }
+  } else {
+    if (authorities.catalog_alias_package !== null) {
+      throw new Error(`${id}: non-alias identity cannot own an alias declaration package`);
+    }
+    if (hasCatalogConstant !== constant) {
+      throw new Error(`${id}: constant forms and catalog constant authority must agree`);
+    }
+    if (value.public_identity.kind === "primary") {
+      if (hasCatalogEntry !== callable) {
+        throw new Error(`${id}: primary callable forms require one catalog entry`);
+      }
+      if (authorities.documentation !== (hasCatalogEntry ? "catalog" : "none")) {
+        throw new Error(`${id}: primary documentation authority differs from its catalog entry`);
+      }
+    } else {
+      if (hasCatalogConstant || constant || authorities.documentation !== "none") {
+        throw new Error(`${id}: internal identity cannot own public constant or documentation authority`);
+      }
+      if (hasCatalogEntry !== callable) {
+        throw new Error(`${id}: internal callable forms require one hidden catalog entry`);
+      }
+    }
+    if (callable !== (authorities.native_link === "required")) {
+      throw new Error(`${id}: callable implementation and native-link authority must agree`);
+    }
+  }
+  const hasCatalogContract = hasCatalogEntry || hasCatalogConstant
+    || authorities.catalog_alias_package !== null;
+  if (required("catalog-contract") !== hasCatalogContract) {
+    throw new Error(`${id}: catalog-contract maturity differs from expected catalog authority`);
+  }
+  if (required("documentation") !== (authorities.documentation !== "none")) {
+    throw new Error(`${id}: documentation maturity differs from expected documentation authority`);
+  }
+  if (required("link-reachability") !== (authorities.native_link === "required")) {
+    throw new Error(`${id}: link maturity differs from expected native-link authority`);
+  }
+  if (required("wasm-registry") !== (authorities.wasm_registry === "required")) {
+    throw new Error(`${id}: WASM maturity differs from expected registry authority`);
+  }
 }
 
 function parseVolumePolicy(value, role) {

@@ -56,8 +56,6 @@ function parseFormImplementationAuthority(value, id, form) {
         if (symbol !== nativeSymbol(id, entry.variant)) {
           throw new Error(`${id}: implementation native symbol does not encode its exact binding identity`);
         }
-      } else if (form === "callable" && entry?.kind === "legacy_function") {
-        exact(entry, ["kind", "function", "builtin_path"], `${id} legacy implementation binding`);
       } else if (form === "constant" && entry?.kind === "constant_registration") {
         exact(entry, ["kind", "constant", "builtin_path"], `${id} constant implementation binding`);
         const constant = identity(entry.constant, `${id} implementation constant`).toLowerCase();
@@ -128,6 +126,7 @@ export function implementationOwners(value) {
 export function observedIdentityForms(sourceRow) {
   const callableSpellings = canonicalValues([
     ...(sourceRow.semantic_authority?.catalog_entries ?? []).map((entry) => entry.identity?.name),
+    ...(sourceRow.semantic_authority?.catalog_aliases ?? []).map((entry) => entry.alias?.name),
     ...(sourceRow.semantic_authority?.legacy_functions ?? []).map((entry) => entry.name),
     ...(sourceRow.semantic_authority?.runtime_bindings ?? []).map((entry) => entry.name),
     ...(sourceRow.semantic_authority?.implementation_provenance ?? []).map((entry) => entry.name),
@@ -210,15 +209,11 @@ export function implementationBindingKey(entry) {
   if (entry.kind === "canonical_binding") {
     return `function\0${entry.function}\0${entry.variant}\0${entry.builtin_path}\0${entry.native_symbol}`;
   }
-  if (entry.kind === "legacy_function") {
-    return `legacy\0${entry.function}\0${entry.builtin_path}`;
-  }
   return `constant\0${entry.constant}\0${entry.builtin_path}`;
 }
 
 function implementationRegistrationKey(entry) {
   if (entry.kind === "canonical_binding") return `canonical\0${entry.variant}`;
-  if (entry.kind === "legacy_function") return "legacy";
   return `constant\0${entry.constant}`;
 }
 
